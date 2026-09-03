@@ -15,6 +15,7 @@ const en = {
     create: "Create",
     edit: "Edit",
     clickToEdit: "Click to edit",
+    balanceHidden: "Balance hidden — tap to reveal",
   },
   Sidebar: {
     selfHosted: "Self-hosted",
@@ -307,7 +308,8 @@ const en = {
     language: "Language",
     currency: "Currency",
     hideBalances: "Hide balances",
-    hideBalancesHint: "Blur amounts and quantities. Tap a value to reveal; auto-hides when you leave.",
+    hideBalancesHint:
+      "Blur amounts and quantities. Tap a value to reveal; auto-hides when you leave.",
     hideBalancesError: "Couldn't save that. Try again.",
     providerKeys: "Provider API keys",
     configured: "Configured",
@@ -440,6 +442,7 @@ const zh: Messages = {
     create: "创建",
     edit: "编辑",
     clickToEdit: "点击可编辑",
+    balanceHidden: "余额已隐藏 —— 点一下显示",
   },
   Sidebar: {
     selfHosted: "自托管",

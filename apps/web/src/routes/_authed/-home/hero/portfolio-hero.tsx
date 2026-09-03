@@ -2,6 +2,7 @@ import { cn, Skeleton } from "@folio/ui";
 import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { AmountTicker } from "@/components/amount-ticker";
+import { Sensitive } from "@/components/sensitive";
 import { signedUsd } from "@/lib/core/format-number";
 import { downsampleSeries, type HistoryPoint } from "@/lib/core/history";
 import type { Gain } from "@/lib/core/portfolio";
@@ -156,13 +157,16 @@ export function PortfolioHero({
               // 首次同步中:大数字位摆骨架,别把「还不知道」画成 $0(见 index.tsx 的 pending 判据)。
               <Skeleton className="h-11 w-52 rounded-lg sm:h-14 sm:w-64" />
             ) : (
-              <AmountTicker
-                value={shownUsd}
-                scrubbing={scrub.point != null}
-                compact={showCompact}
-                className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
-                fractionClassName="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl"
-              />
+              // 隐私开着时把净值模糊掉,点一下临时显示(ADR 0052)。Sensitive 吞掉点击,不触发缩写切换。
+              <Sensitive>
+                <AmountTicker
+                  value={shownUsd}
+                  scrubbing={scrub.point != null}
+                  compact={showCompact}
+                  className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
+                  fractionClassName="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl"
+                />
+              </Sensitive>
             )}
           </button>
           {/* 划动时不显 24h 药丸:那是「今天涨跌」,摆在一个历史时刻的数值旁边是两件事对不上。 */}
