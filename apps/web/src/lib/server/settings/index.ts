@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleGetDataStats } from "./data-stats";
+import { handleUpdatePrivacySettings, PrivacyInput } from "./privacy";
 import { handleGetProviderKeyStatus } from "./provider-keys";
 import {
   handleGetValuationSettings,
@@ -27,3 +28,9 @@ export const updateValuationSettings = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(ValuationInput)
   .handler(runEffect(handleUpdateValuationSettings));
+
+// 隐私开关(FOL-75)。读复用 `getValuationSettings`(同一行);只有写单独一支,理由见 privacy.ts。
+export const updatePrivacySettings = createServerFn({ method: "POST" })
+  .middleware([requireAuth])
+  .validator(PrivacyInput)
+  .handler(runEffect(handleUpdatePrivacySettings));

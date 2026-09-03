@@ -17,6 +17,7 @@ import { CurrencyProvider } from "@/lib/hooks/use-prefer-currency";
 import { RETRY, withRetry } from "@/lib/queries/constants";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
+import { valuationSettingsQuery } from "@/lib/queries/settings";
 import { prefetchSyncStatusAtoms, useSyncStatus } from "@/lib/queries/sync";
 import { getSession } from "@/lib/server/session";
 
@@ -73,6 +74,10 @@ export const Route = createFileRoute("/_authed")({
   // 那份摘要」——切组合那条路径上,页头的摘要由 `ShellWithSync` 自己的 `useSuspenseQuery` 取,
   // 不需要 loader 再跑一次。
   loader: async ({ context, location, cause }) => {
+    // 隐私开关(FOL-75/ADR 0052)跟展示币种一样是**整树都要读**的偏好 —— 隐私 Provider 挂在这一层,
+    // 底下每处金额都靠它。这里**发出即返回、不 await**:fail-closed 已经兜住「还没读到」那一段,
+    // 不值得让它挡首屏。
+    context.queryClient.ensureQueryData(valuationSettingsQuery());
     // **同步摘要要先知道是哪个 Portfolio**(ADR 0033),所以这两个不能并发:先拿到 Portfolio 列表
     // 才认得出地址里那个 id(以及默认那个)。
     const [, portfolios] = await Promise.all([
