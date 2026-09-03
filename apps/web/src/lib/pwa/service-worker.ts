@@ -54,10 +54,15 @@ function setAvailable(version: string | null): void {
   for (const notify of availableListeners) notify();
 }
 
-/** 拉一次线上 sw.js(不吃 HTTP 缓存),取出它戳进去的构建版本(`@sw-build`);拿不到返回 null。 */
+/**
+ * 拉一次线上 sw.js,取出它戳进去的构建版本(`@sw-build`);拿不到返回 null。
+ * **唯一 query 参数破缓存**:`cache:"no-store"` 只绕浏览器缓存,绕不过 Cloudflare 边缘缓存,而 `/sw.js`
+ * 是非哈希静态资源、边缘会缓存它 —— 不破缓存的话发新版后这里仍读到旧版本号,更新永远探不到(点刷新
+ * 判「已是最新」,只有整页导航才更新)。边缘按完整 URL 做 cache key,加时间戳 → 必回源拿最新。
+ */
 async function fetchDeployedVersion(): Promise<string | null> {
   try {
-    const res = await fetch("/sw.js", { cache: "no-store" });
+    const res = await fetch(`/sw.js?_=${Date.now()}`, { cache: "no-store" });
     if (!res.ok) return null;
     return parseSwBuild(await res.text());
   } catch {
