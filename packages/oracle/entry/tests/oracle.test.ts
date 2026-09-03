@@ -177,7 +177,15 @@ describe("全局维护任务不挂 per-user 门面", () => {
         expect(yield* svc.refreshedAt()).toEqual(Option.none());
 
         const summary = yield* svc.warm();
-        expect(summary).toEqual({ rows: 2, unmatchedPlatforms: [], skipped: 7 });
+        // 差量写(#FOL-68):空库首刷 → 两行都是新增,改/删各 0。计数从 store 一路传到 cron 日志。
+        expect(summary).toEqual({
+          rows: 2,
+          unmatchedPlatforms: [],
+          skipped: 7,
+          updated: 0,
+          inserted: 2,
+          deleted: 0,
+        });
         expect(h.globalRefIndex.writes).toBe(1); // 一次整份写
         // 时刻取自 `Clock`(不再由调用方传一个 `now` 进来)。
         expect(yield* svc.refreshedAt()).toEqual(Option.some(now0));

@@ -30,7 +30,14 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
       return {
         // 拉 → 转换(在 adapter 里)→ 一次整份灌。返回这轮的账,供调用方记日志。
         warm: (): Effect.Effect<
-          { rows: number; unmatchedPlatforms: readonly string[]; skipped: number },
+          {
+            rows: number;
+            unmatchedPlatforms: readonly string[];
+            skipped: number;
+            updated: number;
+            inserted: number;
+            deleted: number;
+          },
           UpstreamError
         > =>
           Effect.gen(function* () {
@@ -49,11 +56,16 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
                 }),
               );
             }
-            yield* refIndex.putAll(result.rows, yield* Clock.currentTimeMillis);
+            // 差量写(#FOL-68):只有真变了的行才落库,返回这轮 改/增/删 的计数供 cron 记日志
+            // —— 稳态下三者都接近 0,一眼就能看出「这轮其实没写什么」。
+            const counts = yield* refIndex.putAll(result.rows, yield* Clock.currentTimeMillis);
             return {
               rows: result.rows.length,
               unmatchedPlatforms: result.unmatchedPlatforms,
               skipped: result.skipped,
+              updated: counts.updated,
+              inserted: counts.inserted,
+              deleted: counts.deleted,
             };
           }),
 

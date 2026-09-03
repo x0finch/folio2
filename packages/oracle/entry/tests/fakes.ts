@@ -314,14 +314,23 @@ export function fakeGlobalRefIndexStore(
     putAll: (rows: readonly TokenRefIndexRow[], updatedAt) =>
       Effect.sync(() => {
         store.writes += 1;
+        // 差量计数(#FOL-68):真 store 返回 改/增/删,契约如此,fake 也算一份 —— insert = 之前没有这条键,
+        // update = 有但叫法变了。del 在真表按 upstream 差量,fake 是「按 chainRef 覆盖写」的简化模型,不模拟下架 → 0。
+        let updated = 0;
+        let inserted = 0;
         for (const r of rows) {
           // upstream 由整条 upstreamRef 解出(与真 store 拆列同理)。
           const parts = parseTokenRef(r.upstreamRef);
           if (parts.kind === "unknown") continue;
-          map.set(idxKey(parts.namer, r.chainRef), r.upstreamRef);
+          const key = idxKey(parts.namer, r.chainRef);
+          const prev = map.get(key);
+          if (prev === undefined) inserted += 1;
+          else if (prev !== r.upstreamRef) updated += 1;
+          map.set(key, r.upstreamRef);
           refreshedAt.set(parts.namer, updatedAt);
         }
         if (rows.length === 0) refreshedAt.set(upstream, updatedAt);
+        return { updated, inserted, deleted: 0 };
       }),
 
     refreshedAt: (u) => Effect.sync(() => Option.fromNullable(refreshedAt.get(u))),
