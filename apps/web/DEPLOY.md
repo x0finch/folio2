@@ -93,7 +93,9 @@ touches production on its own — you tag a release when you want to ship.
 
 **What a tag does:** re-runs the four gates (safety net), then **applies remote D1 migrations,
 then deploys** — in that order, fail-stop. If the migration fails the deploy is skipped, so you
-never end up with new code against an un-migrated schema.
+never end up with new code against an un-migrated schema. After a successful deploy it also
+**creates a GitHub Release** for the tag with auto-generated notes (skipped if one already
+exists), so the Releases page keeps up on its own.
 
 ```sh
 git tag v1.2.0 && git push origin v1.2.0   # → CI migrates remote D1, then deploys

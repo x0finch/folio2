@@ -72,6 +72,8 @@ jobs:
     # 部署历史留痕。要加人工审批闸,就在 repo Settings → Environments → production 配 required
     # reviewers —— workflow 无需改动,届时这里会自动等待 approve。
     environment: production
+    permissions:
+      contents: write # 建 GitHub Release 要写权限(见末尾 Create GitHub Release 步)
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
@@ -95,3 +97,17 @@ jobs:
       # 而不是跑 package.json 的 deploy script。
       - name: Build & deploy
         run: pnpm --filter @folio/web run deploy
+
+      # 部署成功后,给这个版本建一个 GitHub Release(自动从 commit 生成更新日志)——
+      # 这样 Releases 页跟着发版走,不必手工补。tag 早已存在(tag job 或 push 触发),这里只挂 Release。
+      # 版本号两条路都取:手动触发用输入,tag 触发用 ref_name。已存在则跳过(重跑不报错)。
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在,跳过。"
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag
+          fi
