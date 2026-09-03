@@ -69,7 +69,7 @@ font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 :root.dark #app-splash{background:${THEME_COLOR_DARK};color:${THEME_COLOR_LIGHT}}
 #folio-splash-logo{width:${SPLASH_LOGO_SIZE}px;height:${SPLASH_LOGO_SIZE}px;color:currentColor;
 transform-origin:center;will-change:transform,opacity;animation:folio-breathe 1.8s ease-in-out infinite}
-#folio-splash-msg{position:absolute;left:0;right:0;bottom:7rem;margin:0;padding:0 1.5rem;max-width:min(30rem,90vw);
+#folio-splash-msg{position:absolute;left:0;right:0;bottom:7rem;margin:0;padding:0 1.5rem;
 text-align:center;font-size:.875rem;font-weight:500;line-height:1.4;color:${SPLASH_MUTED}}
 #app-splash[data-exit="true"]{pointer-events:none;animation:folio-splash-out ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
 #app-splash[data-exit="true"] #folio-splash-logo{animation:folio-splash-burst ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
