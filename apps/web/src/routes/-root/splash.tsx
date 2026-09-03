@@ -76,10 +76,8 @@ export function SplashScreen() {
     // data-exit 只在初始退场时给;换版态(updating)不放大扩散,只呼吸 + 「更新中」直到 reload。
     <div id="app-splash" data-exit={exiting && !updating ? "true" : undefined} aria-hidden="true">
       <Logo id="folio-splash-logo" />
-      {/* key 变即重挂 → 重放 folio-splash-msg-in 的 crossfade(reduced-motion 下为瞬切)。 */}
-      <p id="folio-splash-msg" key={msg}>
-        {t(msg)}
-      </p>
+      {/* 无入场/切换动画(避免冷启动那下的屏闪):原地换字,不用 key 重挂。 */}
+      <p id="folio-splash-msg">{t(msg)}</p>
     </div>
   );
 }

@@ -54,8 +54,9 @@ export const THEME_COLORS: { media: string; content: string }[] = [
 // 缓动值即 lib/ease 的 EASE_OUT_CSS(cubic-bezier(0.16,1,0.3,1))—— 内联关键样式导不了 JS token,
 // 故照抄其值(与全站一致)。**logo 用 grid 钉在真屏幕中心**(不是「logo+文案整组居中」),这样它的
 // 位置与 iOS 启动图里精确居中的 logo 一致 —— 静态→呼吸无缝交接(ADR 0051 的核心目标);文案**绝对
-// 定位挂在靠底部**(离底 14vh + 安全区,不贴边),不影响 logo 的居中。文案切换是 key 重挂后的淡入+上移(非重叠 crossfade,
-// 一行短提示不值得为重叠多铺一层)。
+// 定位挂在靠底部**(离底 14vh + 安全区,不贴边),不影响 logo 的居中。
+// **进场不做任何动画**:文案直接显示、切换阶段也是原地换字(不淡入、不重挂)—— 入场动画在冷启动那一下
+// 看着像屏闪,不值当。动画只留呼吸(持续)+ 放行的放大扩散(退场)。
 export const SPLASH_STYLE = `
 #app-splash{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;
 background:${THEME_COLOR_LIGHT};color:${THEME_COLOR_DARK};
@@ -65,17 +66,14 @@ font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 transform-origin:center;will-change:transform,opacity;
 animation:folio-breathe 1.8s ease-in-out infinite}
 #folio-splash-msg{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 14vh);margin:0;padding:0 1.5rem;
-text-align:center;font-size:.875rem;font-weight:500;line-height:1.4;color:${SPLASH_MUTED};
-animation:folio-splash-msg-in .3s cubic-bezier(0.16,1,0.3,1)}
+text-align:center;font-size:.875rem;font-weight:500;line-height:1.4;color:${SPLASH_MUTED}}
 #app-splash[data-exit="true"]{pointer-events:none;animation:folio-splash-out ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
 #app-splash[data-exit="true"] #folio-splash-logo{animation:folio-splash-burst ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
 @keyframes folio-breathe{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.06);opacity:.72}}
 @keyframes folio-splash-burst{from{transform:scale(1);opacity:1}to{transform:scale(8);opacity:0}}
 @keyframes folio-splash-out{to{opacity:0}}
-@keyframes folio-splash-msg-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 @media (prefers-reduced-motion:reduce){
 #folio-splash-logo,#app-splash[data-exit="true"] #folio-splash-logo{animation:none}
-#folio-splash-msg{animation:none}
 #app-splash[data-exit="true"]{animation:folio-splash-out 160ms linear forwards}}
 `;
 
