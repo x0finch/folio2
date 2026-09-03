@@ -155,19 +155,19 @@ function ShellWithSync({ userName, children }: { userName: string; children: Rea
 // **enter-only(不做退场)**:TanStack 的 `<Outlet/>` 永远渲染当前路由,想做真交叉溶解得冻结旧 match、
 // 得不偿失;新页淡入上抬已够顺,且不和「_authed 整树 ssr:false + 每页 Suspense」打架(无双挂载)。
 // 动画结束**清掉 inline transform** — 否则 `translateY(0)` 也会成为 fixed 后代的包含块,困住页面里的
-// fixed 弹层(MorphingModal `fixed inset-0` 等)。`prefers-reduced-motion` 直接原样渲染、不动。
+// fixed 弹层(MorphingModal `fixed inset-0` 等)。`prefers-reduced-motion` 时**只淡入、不位移**(纯 opacity
+// 不触发前庭不适,仍给一个转场提示),而不是完全不动 —— 否则开了「减弱动态」的人根本看不出切了页。
 function PageTransition({ children }: { children: ReactNode }) {
   const tab = useRouterState({ select: (s) => s.location.pathname.split("/")[1] ?? "" });
   const reduce = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
-  if (reduce) return <>{children}</>;
   return (
     <motion.div
       key={tab}
       ref={ref}
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: reduce ? 0 : 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.22, ease: EASE_OUT }}
+      transition={{ duration: reduce ? 0.15 : 0.3, ease: EASE_OUT }}
       onAnimationComplete={() => {
         if (ref.current) ref.current.style.transform = "none";
       }}
