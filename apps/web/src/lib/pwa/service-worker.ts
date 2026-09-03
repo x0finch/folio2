@@ -1,7 +1,7 @@
 import { toast } from "@folio/ui";
 import { useEffect, useSyncExternalStore } from "react";
 import { useTranslations } from "use-intl";
-import { isNewerVersion, parseSwBuild, RUNNING_VERSION } from "./version";
+import { isNewerVersion, parseSwBuild, RUNNING_VERSION, stripBuildHash } from "./version";
 
 // 运行中定时探更新的节奏(ADR 0051):30 分钟一次 + 页面重新可见时各一次。浏览器默认不主动重查,
 // 不探的话长会话里发不了新版。
@@ -162,6 +162,8 @@ export function showUpdateToast(labels: { available: string; update: string }): 
   toast.message(labels.available, {
     id: UPDATE_TOAST_ID,
     duration: 0, // 常驻(toast-store 约定:0 = 不自动消失,可手动划走)
+    // 描述行显示要更新到的版本(去掉 -g<hash> 后缀);探不到具体版本时省略。
+    description: availableVersion ? stripBuildHash(availableVersion) : undefined,
     action: { label: labels.update, onClick: () => applyUpdate() },
   });
 }
