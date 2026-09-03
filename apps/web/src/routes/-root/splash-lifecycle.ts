@@ -1,7 +1,6 @@
 // 冷启动闪屏的生命周期判定(纯函数,测试缝 —— 照 sw-route 的做法)。
 // React 组件只负责喂输入(hydrated / 路由是否 settle / 计时器)和渲染,时序决策全在这里,可穷举单测。
-
-import splashConfig from "./splash-config.json";
+// 也是闪屏几个**共享常量**的家:被 splash.tsx 与 pwa-head.ts(内联 SPLASH_STYLE)同用。
 
 export type SplashPhase = "preparing" | "loading" | "updating" | "exit";
 
@@ -34,12 +33,14 @@ export function splashPhase(i: SplashInput): SplashPhase {
   return "loading";
 }
 
-/**
- * splash 静止 logo 的边长(px)。**单一来源在 splash-config.json**:iOS 启动图生成脚本
- * (gen-splash.mjs,纯 node 读不了 TS)与覆盖层样式(SPLASH_STYLE)同读它,让静态启动图里的 logo
- * 与随后呼吸 logo 的静止态(scale 1)大小一致 —— 静态→呼吸无缝交接。
- */
-export const SPLASH_LOGO_SIZE: number = splashConfig.logoSize;
+/** splash 呼吸 logo 的边长(px)。 */
+export const SPLASH_LOGO_SIZE = 88;
+
+// 品牌明暗底色(beUI 的 `--background`:亮 lab(98.84%)≈#fcfcfc、暗 #151515)。**单一来源在这**:
+// SPLASH_STYLE 的覆盖层 + html 底色、theme-color meta(见 pwa-head)同用。曾放 splash-config.json 是为了
+// 让纯 node 的启动图生成脚本同读;那套已删,收回 TS 常量。
+export const SPLASH_COLOR_DARK = "#151515";
+export const SPLASH_COLOR_LIGHT = "#fcfcfc";
 
 /** 每条阶段文案的最小可见时长(ms);放行至少等它。 */
 export const SPLASH_MIN_MS = 700;

@@ -1,14 +1,17 @@
 // PWA 的 head 元素:manifest 链接、apple-touch 图标、明暗两套 theme-color、apple-mobile-web-app-*。
 // 抽成常量供 __root 注入 + 单测断言(测试缝③:守住 issue 点名「当前缺 manifest link」那处)。
 // 颜色取 design token 的 --background(beUI 官方值):亮 lab(98.84%)≈#fcfcfc、暗 #151515
-import splashConfig from "./splash-config.json";
-import { SPLASH_EXIT_MS, SPLASH_LOGO_SIZE } from "./splash-lifecycle";
+import {
+  SPLASH_COLOR_DARK,
+  SPLASH_COLOR_LIGHT,
+  SPLASH_EXIT_MS,
+  SPLASH_LOGO_SIZE,
+} from "./splash-lifecycle";
 
-// 品牌明暗底色的**单一来源在 splash-config.json**:theme-color meta、闪屏覆盖层、iOS 启动图生成
-// 脚本(gen-splash.mjs,读同一份 JSON)全都用它 —— 免得散在多处、改一处漏一处(曾让 iOS 启动图
-// 的 logo 与覆盖层差一档灰)。offline.html 仍是独立无 JS 文件、单独镜像(见其头注)。
-const THEME_COLOR_LIGHT = splashConfig.colorLight;
-const THEME_COLOR_DARK = splashConfig.colorDark;
+// 品牌明暗底色的**单一来源在 splash-lifecycle.ts**:theme-color meta、闪屏覆盖层 + html 底色全都用它
+// —— 免得散在多处、改一处漏一处。offline.html 仍是独立无 JS 文件、单独镜像(见其头注)。
+const THEME_COLOR_LIGHT = SPLASH_COLOR_LIGHT;
+const THEME_COLOR_DARK = SPLASH_COLOR_DARK;
 // muted-foreground 的镜像(offline.html 同款):阶段小字用它,明暗都够读。
 const SPLASH_MUTED = "#868686";
 
