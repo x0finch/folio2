@@ -75,26 +75,6 @@ input:-webkit-autofill:focus {
   }
 }
 
-/* Tab 切换的转场:浏览器原生 View Transitions 的交叉淡入(触发在外壳里那四个 tab 链接的
-   `viewTransition` 上,见 app-shell.tsx)。用**默认的整页 root 交叉淡入** —— VT 最基础、各引擎
-   (含 iOS Safari 18+)都稳的用法。**不再给 <main> 单独 `view-transition-name` 成组**:命名组在
-   WebKit 上未按预期生效过,一旦它不成组、而 root 动画又被关掉,整屏就是「完全没有动画」(实机遇到)。
-   整页一起淡,外壳各 tab 相同、几乎无感。为什么用原生而非 motion:TanStack 的 <Outlet/> 恒渲染当前路由,
-   加上这版 Router 的 Outlet 从实时 store 取子匹配,motion 留不住旧页、只能「新页淡入」而必有一帧空内容区
-   (真机上就是「闪一下」);View Transitions 给旧 DOM 拍快照再交叉淡入,没有空帧。不支持的浏览器自动
-   降级为瞬切,无动画、不报错。曲线用动效 token(伪元素树取不到自定义属性时回退同值)。 */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 200ms;
-  animation-timing-function: var(--motion-ease-out, cubic-bezier(0.16, 1, 0.3, 1));
-}
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(root),
-  ::view-transition-new(root) {
-    animation: none;
-  }
-}
-
 * {
   box-sizing: border-box;
 }

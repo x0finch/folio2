@@ -105,9 +105,6 @@ export function AppShell({
               <Link
                 key={key}
                 to={to}
-                // Tab 切换用浏览器原生 View Transitions 交叉淡入内容区(样式见 styles.css)。
-                // 只挂在这四个 tab 链接上 —— tab 内深层导航、`?portfolio=` 变化不该转场。
-                viewTransition
                 aria-current={isActive(to) ? "page" : undefined}
                 className={cn(
                   "block rounded-lg px-3 py-2 font-medium text-sm transition-colors",
@@ -147,8 +144,10 @@ export function AppShell({
           <Brand />
         </header>
 
-        {/* relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。 */}
-        <main className={SHELL_MAIN}>
+        {/* relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。
+            data-shell-main:切 tab 时 <TabTransition/> 拿它 cloneNode 做盖板;只标真外壳这一份,
+            骨架壳(AppShellSkeleton)的 <main> 不标 —— 拍到骨架就白盖了。 */}
+        <main className={SHELL_MAIN} data-shell-main>
           {/* Portfolio 选择器 = 标题上方的小 badge(eyebrow);Settings 页不显示。 */}
           <PageHeader
             title={pageTitle}
@@ -167,8 +166,6 @@ export function AppShell({
               <Link
                 to={to}
                 aria-label={t(key)}
-                // Tab 切换的交叉淡入(与侧栏同款,见 styles.css)。
-                viewTransition
                 // iOS Safari 只在元素(或祖先)挂了触摸监听时才给 `:active` —— 这个空监听就是那把钥匙,
                 // 是这条路子公认的代价。**别删**:删了 iOS 上按下就完全没反应(桌面照旧有)。
                 onTouchStart={NOOP}

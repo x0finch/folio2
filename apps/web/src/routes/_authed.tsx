@@ -12,6 +12,7 @@ import { z } from "zod";
 import { AppShell, AppShellSkeleton } from "@/components/app-shell";
 import { LockScreen } from "@/components/lock-screen";
 import { PortfolioSelector } from "@/components/portfolio-selector";
+import { TabTransition } from "@/components/tab-transition";
 import { PortfolioProvider, pickSelectedPortfolio, usePortfolio } from "@/lib/hooks/use-portfolio";
 import { CurrencyProvider } from "@/lib/hooks/use-prefer-currency";
 import { RETRY, withRetry } from "@/lib/queries/constants";
@@ -156,13 +157,11 @@ function AuthedLayout() {
       <PortfolioProvider portfolios={portfolios.portfolios} defaultId={portfolios.defaultId}>
         {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
         <LockScreen>
+          {/* 四个 tab 之间的交叉淡入(motion):切走前把内容区拷一份盖住,新页渲进 DOM 后再淡出盖板。
+              为什么不包 AnimatePresence、也不用浏览器 View Transitions,见 components/tab-transition。
+              这里只挂一个不渲染任何东西的监听者;<Outlet/> 本身原样不动。 */}
+          <TabTransition />
           <ShellWithSync userName={user.name || user.email || ""}>
-            {/* Tab 切换的转场交给浏览器原生 View Transitions(交叉淡入):触发在导航侧 ——
-                外壳里那四个 tab 链接带 `viewTransition`;淡入的样式与范围在 styles.css 的
-                `::view-transition-*(page-main)`。为什么不在这里用 motion 包一层:TanStack 的
-                `<Outlet/>` 永远渲染当前路由,motion 留不住旧页那一份,只能做「新页淡入」——
-                而那必有一帧内容区是空的(旧页已卸载、新页还透明),真机上就是「闪一下」。
-                View Transitions 由浏览器给旧 DOM 拍快照再交叉淡入,没有空帧。 */}
             <Outlet />
           </ShellWithSync>
         </LockScreen>
