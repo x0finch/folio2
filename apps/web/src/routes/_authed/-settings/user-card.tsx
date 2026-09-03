@@ -17,19 +17,15 @@ import { IconButton } from "@/components/icon-button";
 import { signOut } from "@/lib/core/auth-client";
 import { clearIdleLockState } from "@/lib/hooks/use-idle-lock";
 import { checkForUpdate, showUpdateToast, UPDATE_TOAST_ID } from "@/lib/pwa/service-worker";
+import { RUNNING_VERSION, stripBuildHash } from "@/lib/pwa/version";
 import { SettingRow } from "./setting-row";
 
 // 刷新图标最短旋转时长(ms):让它转一圈,别检查太快时一闪而过。
 const MIN_SPIN_MS = 700;
 
-// 展示版本(构建期 git describe 注入,见 vite.config)。去掉 `-g<hash>` 后缀,只留 `v0.14.0-21`
-// 这样的形状;CI 浅克隆无 tag 时它就是短 hash,原样显示。
-// `typeof` 守卫:vitest 不套 vite 的 define,`__APP_VERSION__` 在测试里未定义(本文件的 userIdentity
-// 被 user-identity.test 引),裸引会 ReferenceError —— 退到 "dev"。
-const APP_VERSION = (typeof __APP_VERSION__ === "undefined" ? "dev" : __APP_VERSION__).replace(
-  /-g[0-9a-f]+$/i,
-  "",
-);
+// 展示版本:实际在跑的构建版本(见 @/lib/pwa/version 的 RUNNING_VERSION,含 vitest 无 define 的守卫)
+// 去掉 `-g<hash>` 后缀,只留 `v0.14.0-21` 这样的形状;CI 浅克隆无 tag 时是短 hash,原样显示。
+const APP_VERSION = stripBuildHash(RUNNING_VERSION);
 
 export function UserCard({ user }: { user: { name?: string | null; email?: string | null } }) {
   const t = useTranslations("Settings");

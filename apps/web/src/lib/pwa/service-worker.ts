@@ -1,7 +1,7 @@
 import { toast } from "@folio/ui";
 import { useEffect, useSyncExternalStore } from "react";
 import { useTranslations } from "use-intl";
-import { isNewerVersion, parseSwBuild } from "./version";
+import { isNewerVersion, parseSwBuild, RUNNING_VERSION } from "./version";
 
 // 运行中定时探更新的节奏(ADR 0051):30 分钟一次 + 页面重新可见时各一次。浏览器默认不主动重查,
 // 不探的话长会话里发不了新版。
@@ -10,10 +10,6 @@ const UPDATE_POLL_MS = 30 * 60 * 1000;
 export const UPDATE_TOAST_ID = "sw-update";
 // 点「更新」后先把 splash「更新中」显示这么久,再切/reload —— 否则 skipWaiting 太快,文案一闪看不到。
 const UPDATING_MIN_MS = 600;
-
-// 当前**实际在跑**的构建版本(打包期注入,与 sw.js 里 `@sw-build` 同源 —— 都是 git describe)。
-// typeof 守卫:vitest 不套 vite 的 define,本模块经 user-card 被 user-identity.test 传入,裸引会 ReferenceError。
-const RUNNING_VERSION = typeof __APP_VERSION__ === "undefined" ? "dev" : __APP_VERSION__;
 
 // Service Worker 注册 + 版本更新流(ADR 0051,「诚实的·联网总是最新」模型,取代 0027 全程静默)。
 //

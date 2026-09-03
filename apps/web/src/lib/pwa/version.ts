@@ -21,3 +21,13 @@ export function isNewerVersion(deployed: string | null, running: string): boolea
   if (!running || running === "dev") return false;
   return deployed !== running;
 }
+
+// 本次加载**实际在跑**的构建版本(打包期 vite 的 define 注入的全局,与 sw.js 的 `@sw-build` 同源)。
+// typeof 守卫:vitest 不套 define,本模块经 service-worker / user-card 被测试传入,裸引 `__APP_VERSION__`
+// 会 ReferenceError → 退到 "dev"(`isNewerVersion` 也把 "dev" 当「无新版」,不会误报)。
+export const RUNNING_VERSION = typeof __APP_VERSION__ === "undefined" ? "dev" : __APP_VERSION__;
+
+/** 展示用:去掉 git describe 的 `-g<hash>` 后缀,留 `v0.14.0-27` 这样的形状(无 tag 的短 hash 原样返回)。 */
+export function stripBuildHash(version: string): string {
+  return version.replace(/-g[0-9a-f]+$/i, "");
+}

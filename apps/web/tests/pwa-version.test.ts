@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isNewerVersion, parseSwBuild } from "../src/lib/pwa/version";
+import { isNewerVersion, parseSwBuild } from "@/lib/pwa/version";
 
 // 更新检测的纯判定(ADR 0051 的「诚实·联网总是最新」模型)。取代旧的 update-action 测:更新流不再靠
 // SW 的 waiting 竞态,而是「线上 sw.js 的 @sw-build ↔ 本次加载的 __APP_VERSION__」直比版本号。
