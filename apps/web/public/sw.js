@@ -4,8 +4,16 @@
 //     离线显示旧余额比诚实报离线更危险)。
 //   · hashed 静态(script/style/font,Vite 产物不可变)→ cache-first(秒开、可离线启动外壳)。
 //   · 其余(/api、server fn、图片、跨源、非 GET)→ network-only、永不进缓存。
-// 更新:静默 skipWaiting + clients.claim(单用户,不弹「有新版本」)。
+// 更新(ADR 0051,取代 0027):新版装好后**停在 waiting**,不再自动 skipWaiting —— 换版时机交给页面:
+//   闪屏阶段自动静默换、运行中弹提示。页面同意时 postMessage `{type:"SKIP_WAITING"}`,这里才接管,
+//   随后 controllerchange 触发页面 reload(客户端逻辑见 src/lib/pwa/service-worker.ts)。
 // 纯路由决策 swRoute 导出供单测;vitest(node)里 self 无 skipWaiting → 只导出、不挂事件。
+
+// **构建版本戳**:占位 `__SW_BUILD__` 由 vite 插件(见 vite.config 的 stampSwVersion)在打包时换成
+// git describe 版本号。作用是让**每次发版 sw.js 的内容都不同** —— 浏览器逐字节比对 sw.js 才认得出
+// 「有新版」,而 app 改代码只换 /assets 的 hash、不动 sw.js;没有这行,更新检测(waiting worker)对
+// 普通发版永远不触发。纯注释、不影响行为。dev 下保持占位原文(不构建、不注册 SW)。
+// @sw-build __SW_BUILD__
 
 // v2:v1 里存过没哈希的 URL(见 swRoute 里那条注释),换桶名让 activate 顺手清掉。
 const CACHE = "folio-shell-v2";
@@ -45,8 +53,14 @@ export function swRoute(req) {
 //(node 单测 self 未定义,短路;只导出 swRoute)。
 if (typeof self !== "undefined" && typeof self.skipWaiting === "function") {
   self.addEventListener("install", (event) => {
-    self.skipWaiting(); // 静默更新:新版直接进 active
+    // **不再 skipWaiting**:新版装好后停在 waiting,换版时机交给页面(ADR 0051)。首次安装(无旧
+    // controller)时页面不会催换,新版随 activate 自然接手 —— 见 service-worker.ts 对 controller 的判断。
     event.waitUntil(caches.open(CACHE).then((c) => c.add(OFFLINE_URL)));
+  });
+
+  // 页面同意换版:收到 SKIP_WAITING 才让 waiting 的新版接管(接管后触发 clients 的 controllerchange)。
+  self.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
   });
 
   self.addEventListener("activate", (event) => {

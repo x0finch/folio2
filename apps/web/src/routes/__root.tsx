@@ -1,7 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { createRootRouteWithContext, redirect } from "@tanstack/react-router";
 import { localePreferenceQuery } from "@/lib/queries/preferences";
-import appCss from "@/styles.css?url";
 import { needsLoginRedirect } from "./-root/authed-guard";
 import { PWA_LINKS, PWA_META, VIEWPORT } from "./-root/pwa-head";
 import { RootDocument } from "./-root/root-document";
@@ -22,10 +21,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       ...PWA_META,
     ],
     links: [
-      {
-        rel: "stylesheet",
-        href: appCss,
-      },
+      // app 样式表**不在这里**(否则渲染阻塞):改由 RootDocument 脚本注入 + <noscript> 兜底,
+      // 让内联的冷启动闪屏样式先画、不白屏(ADR 0051)。
       { rel: "icon", type: "image/svg+xml", href: "/icon.svg" },
       { rel: "icon", type: "image/x-icon", href: "/favicon.ico" },
       ...PWA_LINKS,

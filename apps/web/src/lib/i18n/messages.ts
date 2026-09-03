@@ -37,6 +37,16 @@ const en = {
   Shell: {
     stalled: "Can't reach the server. Retrying…",
   },
+  Splash: {
+    preparing: "Preparing…",
+    loading: "Loading…",
+    updating: "Updating…",
+  },
+  Update: {
+    available: "Update available",
+    upToDate: "This is the latest version",
+    update: "Update",
+  },
   PageHeader: {
     overviewSub: "Live portfolio across {count, plural, one {# source} other {# sources}}",
     accountsSub: "Manage your data sources",
@@ -268,6 +278,8 @@ const en = {
   Settings: {
     title: "Settings",
     user: "User",
+    version: "Version",
+    checkUpdate: "Check for updates",
     signOut: "Sign out",
     signOutConfirmTitle: "Sign out?",
     signOutConfirmBody: "You'll need to sign in again to see your portfolio.",
@@ -446,6 +458,16 @@ const zh: Messages = {
   },
   Shell: {
     stalled: "连不上服务器,正在重试…",
+  },
+  Splash: {
+    preparing: "准备中…",
+    loading: "加载中…",
+    updating: "更新中…",
+  },
+  Update: {
+    available: "有新版本",
+    upToDate: "已是最新",
+    update: "更新",
   },
   PageHeader: {
     overviewSub: "跨 {count} 个来源的实时组合",
@@ -669,6 +691,8 @@ const zh: Messages = {
   Settings: {
     title: "设置",
     user: "用户",
+    version: "版本",
+    checkUpdate: "检查更新",
     signOut: "退出登录",
     signOutConfirmTitle: "退出登录?",
     signOutConfirmBody: "你需要重新登录才能查看你的组合。",

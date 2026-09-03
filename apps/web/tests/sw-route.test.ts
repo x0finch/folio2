@@ -1,7 +1,15 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 // 手搓 SW 的纯路由决策(唯一值钱的自动化缝,见 ADR 0027)。import 的是服务端静态资源 public/sw.js
 // 本体 —— 它把 SW 事件挂载守在 `self.skipWaiting` 探测后,node 里只会执行到 export,不触发副作用。
 import { swRoute } from "../public/sw.js";
+
+// 更新检测靠「每次发版 sw.js 内容不同」,而这由构建期替换 `__SW_BUILD__` 占位实现(vite 的
+// stampSwVersion)。占位一旦被误删,替换就没了着落 → sw.js 恒定 → 更新检测对普通发版永不触发。守住它。
+it("public/sw.js 带 __SW_BUILD__ 版本占位(供构建期戳版本 → 触发更新检测)", () => {
+  const src = readFileSync(new URL("../public/sw.js", import.meta.url), "utf-8");
+  expect(src).toContain("__SW_BUILD__");
+});
 
 const base = {
   method: "GET",

@@ -59,16 +59,18 @@ function renderToast(t: AnimatedToast) {
             {t.description}
           </p>
         ) : null}
-        {t.action ? (
-          <button
-            type="button"
-            onClick={() => t.action?.onClick(t)}
-            className="mt-2 inline-flex h-7 items-center rounded-full bg-primary/[0.06] px-3 text-xs font-medium text-foreground transition-colors hover:bg-primary/[0.1]"
-          >
-            {t.action.label}
-          </button>
-        ) : null}
       </div>
+
+      {/* action 摆在右侧、与内容垂直居中(不再堆在标题下方左侧,那样散);shrink-0 不被文案挤扁。 */}
+      {t.action ? (
+        <button
+          type="button"
+          onClick={() => t.action?.onClick(t)}
+          className="inline-flex h-7 shrink-0 items-center rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+        >
+          {t.action.label}
+        </button>
+      ) : null}
 
       {canDismiss ? (
         <button
