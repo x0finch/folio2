@@ -370,7 +370,7 @@ function AuthPanel() {
 function ReadOnlyLine() {
   const t = useTranslations("Login");
   return (
-    <p className="absolute inset-x-0 bottom-5 z-10 px-6 text-center text-muted-foreground text-xs">
+    <p className="absolute inset-x-0 bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))] z-10 px-6 text-center text-muted-foreground text-xs">
       {t("readOnlyHint")}
     </p>
   );
