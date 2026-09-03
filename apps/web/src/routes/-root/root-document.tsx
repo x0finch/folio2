@@ -10,7 +10,8 @@ import { messages } from "@/lib/i18n/messages";
 import { registerServiceWorker, useUpdateToast } from "@/lib/pwa/service-worker";
 import { localePreferenceQuery } from "@/lib/queries/preferences";
 import appCss from "@/styles.css?url";
-import { appCssLoaderScript, SPLASH_STYLE, STARTUP_IMAGES, THEME_COLORS } from "./pwa-head";
+// STARTUP_IMAGES 暂时注释掉(排查冷启动闪烁,见下方 <head> 里那段):先去掉 iOS 启动图入场看效果。
+import { appCssLoaderScript, SPLASH_STYLE, THEME_COLORS } from "./pwa-head";
 import { SplashScreen } from "./splash";
 
 // 从 __root 的 loader 读 now(getRouteApi 免于反向 import Route 造成环)。
@@ -68,11 +69,12 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
         {THEME_COLORS.map((tc) => (
           <meta key={tc.media} name="theme-color" media={tc.media} content={tc.content} />
         ))}
-        {/* iOS 主屏启动图(ADR 0051):每种 iPhone 竖屏尺寸一条,media 匹配机型。静态直渲(带 media,
-            不走 head() 的 links 以免 TanStack 处理差异)。 */}
+        {/* iOS 主屏启动图(ADR 0051):每种 iPhone 竖屏尺寸一条,media 匹配机型。
+            **暂时注释掉排查冷启动闪烁** —— 怀疑 iOS 从启动图 PNG 交叉淡入网页 splash 那下就是闪烁源。
+            去掉后 iOS 冷启动改走「图标启动 → 网页」,对比是否还闪。确认结论后再决定恢复/删除。
         {STARTUP_IMAGES.map((s) => (
           <link key={s.href} rel="apple-touch-startup-image" media={s.media} href={s.href} />
-        ))}
+        ))} */}
         {/* 深色模式无闪烁:hydration 前就按 localStorage/system 设好 .dark(见 lib/hooks/use-theme)。 */}
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,无用户输入 */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
