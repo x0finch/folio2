@@ -23,17 +23,21 @@ FOL-61 要把冷启动做得像一款手机软件,并让用户能**感知**并**
 - **轮换「有多快走多快」**(不强制走完序列):快设备上常常只见「准备中」就散了,轮换只在真状态耗时(慢网络 / 更新)时显现。启动优先于「让动画每次被看见」。
 - **`prefers-reduced-motion`**:logo 静止、放行纯淡出、文案瞬切。功能全在,只去掉动。
 
-### 二、更新检测判据
+### 二、更新检测判据(2026-09-03 修订:改为**版本号直比**)
 
-**「有新版本」= Service Worker 有 waiting 的新 worker(`updatefound` 到 `installed` 且已有旧版 controller)**,**不是**比对版本号字符串。#558 注入的 `__APP_VERSION__` 等只是「当前跑的是哪份」的展示,不参与检测。
+> **本节与三节的判据在 2026-09-03 反转过一次**,原因见下。**先前**定的是「有新版本 = SW 有 waiting 的新 worker」;**现在**是「有新版本 = 线上 sw.js 的构建版本 ≠ 本次加载的版本」。
 
-### 三、更新流(反转 0027)
+**「有新版本」= 线上 `sw.js` 里戳的构建版本(`@sw-build`)≠ 本次加载运行的 `__APP_VERSION__`**(两者同源,都是 `git describe`)。**不再**用 SW 的 waiting 状态判定。
 
-- **闪屏阶段——静默换版**:冷启动发现 waiting worker → 自动 `postMessage SKIP_WAITING` → 显示「更新中」→ `controllerchange` reload 到新版。**首次安装(无旧 controller)不触发**——那次新版随 `activate` 自然接手。
-- **运行中——弹提示**:`updatefound` 或**定时探**(`registration.update()`,每 30 分钟 + 页面重新可见时各一次)发现 waiting → 弹一个**会自动消失、可忽略**的 toast「有新版本 · 更新」。点「更新」→ 亮回「更新中」splash → `SKIP_WAITING` → reload。之所以不强制打断:运行中静默 reload 会丢正在看的东西。**去重**:同一个 waiting 版本只弹一次(按 waiting worker 身份记住已弹过),后续定时探到同版本不重复弹;等更新的版本装进来(新 `updatefound`)才再弹。toast 溜走没关系——设置页那行是随时能回去更新的固定入口。
-- **设置页——常驻入口**:一行状态。有 waiting 显「有新版本 · 更新」,点即换版;无则显「已是最新」,点触发一次**手动 `registration.update()`**。给用户一个主动查的固定口子,不必被动等 toast。
-- **SW 侧改动**:`install` 里**不再** `skipWaiting`(新版停在 waiting);加 `message` 监听,收 `{type:"SKIP_WAITING"}` 才接管;`activate` 的 `clients.claim` + 清旧桶保留。页面侧监听 `controllerchange` → reload 一次(`reloading` 守卫防重复)。**`swRoute` 缓存决策一字不改。**
-- **`@folio/ui` toast-store**:命令式 `toast` 先前吞掉了 `action`/`duration`/`description`/`dismissible`(底层 `AnimatedToast` 与渲染层都支持,只是 store 没透传)→ 补透传,否则「带按钮的常驻 toast」发不出来。
+**为什么反转**:`swRoute` 的导航是 **network-first 且刻意不缓存 HTML**(0027 定的,带用户余额、离线显示旧余额更危险)。于是联网时每次冷启动 / 硬刷新拿到的 HTML+JS 本来就是最新——「当前在跑的版本」冷启动后即最新。这让 waiting-worker 判据语义崩了:冷启动时那个 waiting 与已加载内容**同版**,毫无可更新之物,却照样触发「静默换版 + 更新中 + reload」,表现为「冷启动没提示、进主页才弹、设置里版本已经是新的、点刷新直接跳 splash」等一连串错位。版本号直比才诚实:只有**会话开着期间上游发了新版**,已加载的 `__APP_VERSION__` 才会落后于线上 `@sw-build`。
+
+### 三、更新流(2026-09-03 修订:诚实的「联网总是最新」)
+
+- **冷启动 / 首次安装——什么都不弹**:内容已是最新(network-first),没有可更新的对象。SW 照常注册;若有 waiting 就静静待着(只关乎离线外壳的 sw.js 版本,与版本无关),不 reload、不 toast、不「更新中」。**这修掉了先前「冷启动强行静默换版」的空转**。
+- **运行中——探到线上新版才弹**:**定时探**(每 30 分钟 + 页面重新可见时各一次)拉一次线上 `/sw.js`,`@sw-build` 与 `__APP_VERSION__` 不同 → 弹一个**常驻**(不自动消失、可手动划走)toast「有新版本 · 更新」。点「更新」→ 亮「更新中」splash(先显示 `UPDATING_MIN_MS≈600ms` 让文案看得见)→ 有 waiting 就 `SKIP_WAITING`(→ `controllerchange` reload),无则直接 reload。**去重按版本号**:同一版本只弹一次,换更新的版本才再弹。toast 划走没关系——设置页那行是随时能回去的固定入口。
+- **设置页——常驻入口**:版本号 + 一颗刷新。点刷新 → `checkForUpdate()` 同款比对(拉 `/sw.js` 比版本):有则弹「有新版本 · 更新」(点它才去 splash 换版),无则「已是最新」。**刷新本身绝不直接跳 splash**——必须经 toast 的「更新」这一步。
+- **SW 侧**:`install` 不 `skipWaiting`、`message` 收 `SKIP_WAITING` 才接管、`activate` 清旧桶 + `clients.claim`——**均一字不改**;`swRoute` 缓存决策也一字不改。变的只有页面侧的检测判据(waiting → 版本比)。
+- **`@folio/ui` toast-store**:命令式 `toast` 需透传 `action`/`duration`(常驻 toast 靠 `duration: Infinity`)/`description`/`dismissible`,否则「带按钮的常驻 toast」发不出来。
 
 ### 四、iOS 原生启动图(`apple-touch-startup-image`)
 
@@ -47,7 +51,7 @@ iOS 不认 manifest 的 `background_color`,加到主屏的 PWA 启动时若无�
 ## Considered Options
 
 - **闪屏也弹「有新版本」让用户点(不静默)** —— 否。冷启动本就是「重新加载」的时机,那一刻静默换版 + 「更新中」小字最顺;再要一次点击是多余打断。运行中才需要提示,因为那时不该丢用户正在看的东西。
-- **靠比对 `__APP_VERSION__` 检测更新** —— 否。版本号是构建期注入的**当前构建**标识,拿不到「服务器上有没有更新的构建」;SW 的 waiting worker 才是浏览器已经下载好新版的确证。版本号只作展示。
+- **靠 SW 的 waiting worker 检测更新** —— **先前选它,2026-09-03 反转**(见二/三节)。理由是「waiting = 浏览器已下好新版的确证」;但在 network-first、不缓存 HTML 的前提下,冷启动的 waiting 与已加载内容同版,判据语义崩了。改回**版本号直比**:拉线上 `sw.js` 的 `@sw-build` 与本次加载的 `__APP_VERSION__` 比——它恰好回答「线上有没有比我现在跑的更新的构建」。原先「版本号拿不到服务器构建」的顾虑不成立:`sw.js` 就在服务器上、`updateViaCache:none` 保证拿到新的。
 - **保证阶段轮换每次走完(各给 floor)** —— 否(选「有多快走多快」)。强制序列会给每次冷启动加约半秒;轮换是真状态的副产品,不值得为「让动画被看见」牺牲启动速度。
 - **iOS 启动图逐机型精细出图 / 一张透明 PNG 配多 media** —— 都否。逐机型是过度投入(内容只是 logo+底色);一张透明图靠不住(尺寸不匹配被忽略 + 透明填黑)。折中:一个源脚本导出精确尺寸、底色烤进图。
 - **保留 0027 的全程静默** —— 否,正是本 ADR 要反转的:用户明确要能感知 + 主动更新。
