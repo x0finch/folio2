@@ -98,12 +98,10 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
           // 缺翻译 → 回退到请求的 key 本身(对 Inputs 而言即英文源串 label;见 ProviderInput.label)。
           getMessageFallback={({ key }) => key}
         >
-          {/* 冷启动闪屏(ADR 0051):住 IntlProvider 内取阶段文案;fixed 覆盖层盖住一切,就绪后自卸载。
-              **必须排在 {children} 之前**:SSR 流式输出 + 浏览器自上而下绘制,先解析到的先画 —— 排在后面
-              会让下面的页面(登录页脚注等)抢先露脸一瞬,再被 splash 盖上,看着像「先闪出内容才出 splash」。
-              放到最前:splash 首帧即绘制盖住;页面在其后绘制、被高 z-index 压在底下,不再抢先。 */}
-          <SplashScreen />
-          {children}
+          {/* 冷启动闪屏(ADR 0051):**包住页面**。未放行前把 children 设 visibility:hidden(照常
+              SSR/hydrate,只是不绘制)—— 没有可露脸的东西,从根上消除「页面抢在 splash 前闪一下」。
+              就绪后覆盖层淡出、露出下面已渲好的页;阶段文案住 IntlProvider 内取。 */}
+          <SplashScreen>{children}</SplashScreen>
           <AppToaster />
           {/* 运行中更新提示:探到新版弹「有新版本 · 更新」toast(住 IntlProvider 内取文案)。 */}
           <UpdateWatcher />
