@@ -21,14 +21,16 @@ export function AuthShell({
 
       {/* 品牌固定左上角(复用侧栏的 Logo + folio 字标)。
           顶部偏移叠 safe-area-inset-top:PWA 独立窗口(viewport-fit=cover + black-translucent
-          状态栏)下,刘海/状态栏不压品牌(与 app-shell 顶栏同法,root 不动)。 */}
-      <div className="absolute top-[calc(1rem_+_env(safe-area-inset-top))] left-4 z-20 flex items-center gap-2.5">
+          状态栏)下,刘海/状态栏不压品牌(与 app-shell 顶栏同法,root 不动)。
+          额外常量取 0.5rem(比 app-shell 顶栏的 0.75rem 更紧):登录页没有顶栏那层毛玻璃底衬,
+          状态栏与品牌之间是透明留白,同样的偏移会显得更空 → 收紧到贴着状态栏下方一点点。 */}
+      <div className="absolute top-[calc(0.5rem_+_env(safe-area-inset-top))] left-4 z-20 flex items-center gap-2.5">
         <Logo className="size-6 shrink-0" />
         <span className="font-semibold text-lg tracking-tight">folio</span>
       </div>
 
-      {/* 语言 / 主题固定右上角(同样叠 safe-area-inset-top,不被状态栏压)。 */}
-      <div className="absolute top-[calc(1rem_+_env(safe-area-inset-top))] right-4 z-20 flex items-center gap-4">
+      {/* 语言 / 主题固定右上角(同样叠 safe-area-inset-top,不被状态栏压;与品牌同一 0.5rem 偏移)。 */}
+      <div className="absolute top-[calc(0.5rem_+_env(safe-area-inset-top))] right-4 z-20 flex items-center gap-4">
         <LocaleSwitcher />
         <ThemeToggle />
       </div>
