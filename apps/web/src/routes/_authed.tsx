@@ -14,6 +14,7 @@ import { LockScreen } from "@/components/lock-screen";
 import { PortfolioSelector } from "@/components/portfolio-selector";
 import { PortfolioProvider, pickSelectedPortfolio, usePortfolio } from "@/lib/hooks/use-portfolio";
 import { CurrencyProvider } from "@/lib/hooks/use-prefer-currency";
+import { BalancePrivacyProvider } from "@/lib/privacy/provider";
 import { RETRY, withRetry } from "@/lib/queries/constants";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
@@ -159,12 +160,15 @@ function AuthedLayout() {
     <CurrencyProvider value={preferCurrency}>
       {/* Portfolio 选中态(ADR 0033):住布局层,三页共享;事实源是 URL 上的 `?portfolio=`(ADR 0046)。 */}
       <PortfolioProvider portfolios={portfolios.portfolios} defaultId={portfolios.defaultId}>
-        {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
-        <LockScreen>
-          <ShellWithSync userName={user.name || user.email || ""}>
-            <Outlet />
-          </ShellWithSync>
-        </LockScreen>
+        {/* 余额隐私(ADR 0052):顶层持有「遮不遮 / 临时显示」,底下每处金额靠 <Sensitive> 读它。 */}
+        <BalancePrivacyProvider>
+          {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
+          <LockScreen>
+            <ShellWithSync userName={user.name || user.email || ""}>
+              <Outlet />
+            </ShellWithSync>
+          </LockScreen>
+        </BalancePrivacyProvider>
       </PortfolioProvider>
     </CurrencyProvider>
   );
