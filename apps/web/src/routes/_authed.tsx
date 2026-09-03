@@ -9,7 +9,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { motion, useReducedMotion } from "motion/react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { z } from "zod";
 import { AppShell, AppShellSkeleton } from "@/components/app-shell";
@@ -154,23 +154,20 @@ function ShellWithSync({ userName, children }: { userName: string; children: Rea
 //
 // **enter-only(不做退场)**:TanStack 的 `<Outlet/>` 永远渲染当前路由,想做真交叉溶解得冻结旧 match、
 // 得不偿失;新页淡入上抬已够顺,且不和「_authed 整树 ssr:false + 每页 Suspense」打架(无双挂载)。
-// 动画结束**清掉 inline transform** — 否则 `translateY(0)` 也会成为 fixed 后代的包含块,困住页面里的
-// fixed 弹层(MorphingModal `fixed inset-0` 等)。`prefers-reduced-motion` 时**只淡入、不位移**(纯 opacity
-// 不触发前庭不适,仍给一个转场提示),而不是完全不动 —— 否则开了「减弱动态」的人根本看不出切了页。
+// **纯淡入、不做位移**:曾试过「淡入 + 微上抬」,但位移要靠 `transform`,而带 transform 的元素会成为其
+// absolute/fixed 后代的**包含块** —— 页面里的同步入口 `<HeaderSync/>` 是 absolute 定位到外壳的,转场那下
+// 它的定位基准被换、位置偏移,动画结束又换回去 → 「同步栏跳动」(Chromium 实测跳 24px)。opacity 不产生
+// transform,没有这个副作用,同步栏稳稳不动。`prefers-reduced-motion` 也一样只淡入(opacity 不触前庭),
+// 只是更快一点。
 function PageTransition({ children }: { children: ReactNode }) {
   const tab = useRouterState({ select: (s) => s.location.pathname.split("/")[1] ?? "" });
   const reduce = useReducedMotion();
-  const ref = useRef<HTMLDivElement>(null);
   return (
     <motion.div
       key={tab}
-      ref={ref}
-      initial={{ opacity: 0, y: reduce ? 0 : 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: reduce ? 0.15 : 0.3, ease: EASE_OUT }}
-      onAnimationComplete={() => {
-        if (ref.current) ref.current.style.transform = "none";
-      }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: reduce ? 0.15 : 0.28, ease: EASE_OUT }}
     >
       {children}
     </motion.div>
