@@ -471,6 +471,7 @@ describe("user settings", () => {
   it("读带缺省:无行 → self-first", async () => {
     expect(await settings(USER_A).get()).toEqual({
       valuationMode: "self-first",
+      hideBalances: false,
     });
   });
 
@@ -478,6 +479,7 @@ describe("user settings", () => {
     await settings(USER_A).update({ valuationMode: "source-first" });
     expect(await settings(USER_A).get()).toEqual({
       valuationMode: "source-first",
+      hideBalances: false,
     });
   });
 

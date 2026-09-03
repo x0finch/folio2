@@ -378,6 +378,9 @@ export const userSettings = sqliteTable("user_settings", {
     .$type<"self-first" | "source-first">()
     .notNull()
     .default("self-first"),
+  // 隐私:开了则把屏幕上的金额/数量逐个模糊(FOL-75,ADR 0052)。账户级、默认关。
+  // 默认 0(fail-closed 由客户端在「设置尚未读到」的空窗期负责,这里只是持久值的缺省)。
+  hideBalances: integer("hide_balances", { mode: "boolean" }).notNull().default(false),
   updatedAt: integer("updated_at").notNull(), // epoch ms
 });
 
