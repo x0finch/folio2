@@ -39,6 +39,11 @@ const refreshGlobalRefIndex = (cron: string): Effect.Effect<void, Error> =>
         rows: result.rows,
         skipped: result.skipped,
         unmatchedPlatforms: result.unmatchedPlatforms.length,
+        // 差量写(#FOL-68):这轮实际落库的 改/增/删 行数。稳态下应接近 0 —— 若长期偏高,
+        // 说明上游目录在抖或差量失效,是该查的信号。
+        updated: result.updated,
+        inserted: result.inserted,
+        deleted: result.deleted,
       });
     }),
   );

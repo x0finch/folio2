@@ -62,7 +62,7 @@ upstream_local_name  issued:bitcoin           ← 上游 ref 的 localName 规�
 | 操作 | WHERE | 用到左段单独查吗 |
 |---|---|---|
 | `lookup` | `upstream = ? AND chain_ref IN (…)` | 不。整串等值 |
-| `putAll` | 无(整表 upsert,冲突键 `(chain_ref, upstream)`) | 不 |
+| `putAll` | `upstream IN (…)`（差量:keyset 分页扫 + 逐行删/改，见 FOL-68 更新） | 不 |
 | `refreshedAt` | `upstream = ?` | 不。筛的是**上游** |
 
 `unmatchedPlatforms` 也是 `toRefIndexRows` 在内存里从 API 响应算的,压根没查库。按上面那条判据,`chain_ref` 只做整体等值查 → 一整列;拆列是 speculative generality。反过来 `upstream` **必须**独立成列:它被单独查两次(`lookup` 的 WHERE、`refreshedAt`),且 PK `(chain_ref, upstream)` 靠它保证「一个地址在一个上游下最多一行」——合成一列就得 `LIKE 'coingecko/%'`,主键也挡不住同一地址在同一上游下冒两个 id。
@@ -86,10 +86,22 @@ upstream_local_name  issued:bitcoin           ← 上游 ref 的 localName 规�
 - **非 EVM 链要一张显式 slug 对照,且它归 adapter**:EVM 两边都归到 `evm:<chainId>`,靠 `/asset_platforms` 的 `chain_identifier` 对齐、不会歧义;非 EVM 是「连接器说 `solana`」对「上游说什么」,slug 对 slug,**现在三条链恰好一样纯属运气**。「CoinGecko 管 Sui 叫什么」是 CoinGecko 的事 → 对照表连同「两个端点 → 映射行」的纯转换一起住在 `oracle-source-*` 包里,契约层不知道有这回事(ADR 0023)。对不上就是币没价没图还不报错,故转换结果带出失配清单、由 cron 记 warning + 计数(Workers Logs 可查),不做专门 UI —— 没认出来的币在总览里本来就显眼,专门的列表跟改绑那张票一起做更顺。
 - **「namer 是不是链」不靠这张表回答了**:原方案想让兜底单查顺带解决它(翻得出 CoinGecko slug 就是链)。#193 之后平台由 provider 随余额直接报、写快照时从命名者算出并落库,这个判断在展示侧压根不存在;写路径要的「这条 ref 在哪条链上」由调用方给(`AssetRef.chain`)。
 - **首次部署要先手动触发一次刷表**,否则空表状态下全靠单查兜底,退回今天的样子。
-- **不删行**:下架币的旧映射留着无害,`updated_at` 用来看哪些行这轮没被刷到。
+- **差量删下架币**(FOL-68 更新;原为「不删行」):见文末更新一节。
 - **已部分实测**(2026-07-26,`vitest-pool-workers` = 真 workerd,但跑在**本机 Miniflare** 上,不是 CF 边缘):
   响应 **2.63 MB**、**17,841** 个币、`/asset_platforms` 列 **461** 条链、产出 **23,004 行**(跳过 1,530 条残缺条目),链对照**零失配**(显式的非 EVM slug 表是全的)。这三项与在哪跑无关,可信。
   **CPU:`JSON.parse` 27ms + 纯转换 22ms ≈ 50ms** —— 同一个 workerd / V8,只是 CPU 是本机的,故为同量级参考而非精确值。**几 MB JSON 的 parse 不构成 CPU 问题**,当初写下这条待测项时担心的那点不成立。
   据此定批大小:20 行/语句(80 个绑定参数,稳在 D1 的 100 上限内)× 50 语句/批 = 1000 行/批 → **24 批**。
   **仍未测:真 D1 的写入耗时。** 本机那次 636ms 是 Miniflare 的本地 SQLite,而远端 D1 是**每批一次网络往返** —— 24 批在生产上会明显更慢,量级得等首次真 cron 跑完看 Workers Logs。网络那 1,861ms 同理不可外推(本机到 CoinGecko ≠ CF 边缘到 CoinGecko)。
   实测顺带纠了两处:① 原先按「一批 20 行」切,把 100 参数上限当成了**每批**的 —— 它是**每条语句**的,当时每行本来就是自己一条 INSERT(4 个参数),于是批被切小了 50 倍(23,004 行要 1,151 次往返);② 先前用本机 curl 估的行数(14,314)偏低 —— 那次只算了 6 条链,而实现覆盖**所有带 `chain_identifier` 的 EVM 链**。
+
+## Update — 差量写(FOL-68,2026-09-03)
+
+**问题**:`putAll` 原本每轮把上游全集(~3 万行)整表 `upsert`,每行 `updated_at` 都刷新 → SQLite 全表重写、D1 计满 ~3 万 `rows_written`/天。而币目录几乎不变(下架/新增每天个位数),这 3 万写基本全是无效重复写,一次吃掉近 1/3 的每日免费额度(CF 告警)。
+
+**改法**:`putAll` 改为**差量写**——keyset 分页(每页 5000 行、按主键序)扫库,与上游全集在内存比对,只落**真变了的行**:改名 `update` / 新增 `insert` / 下架 `delete`。稳态(目录一字没变)写入为 **0**。纯比对逻辑抽成 `diffRefIndexPage` 纯函数,单测四类边界。
+
+**「不删行」→「差量删下架」**:原方案怕误删才不删,靠 `updated_at` 留痕。但删是安全的——上游 `fetchRefIndex` 是「两个全量端点都成功才返回、任一失败整体上抛」,失败根本走不到 `putAll`,所以「成功即完整全集」,库有而全集无 = 真下架。两条护栏:①**空全集 no-op**,绝不拿可疑的空响应清表;②**删除按 `upstream` 作用域**,刷一个命名源只扫/删它自己的行,不碰别家(换源期间两家并存的前提)。
+
+**`refreshedAt` 语义漂移(可接受)**:`= max(updated_at)`,差量后只有变动行才刷 `updated_at`,于是它漂成「上次**有变更**的时间」。唯一消费方是 cron 的一行日志,无逻辑依赖;日志改为额外打出这轮 改/增/删 各几行(稳态应接近 0,长期偏高即信号)。
+
+**效果**:`global_token_ref_index` 的 `rows_written` 从 ~3 万/天 降到接近 0(仅上游真变动行数),每日总写入落回快照那 ~4k + 突发,稳低于 10 万免费额度。

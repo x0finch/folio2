@@ -37,7 +37,7 @@ export type { AccountRawCreds, CreateAccountInput } from "./domains/accounts";
 // db 里那几份实现推导出来的类型,出包是因为 oracle 的几片把 store 当参数往下传,要个名字。
 export type { CacheEntry, CacheStore, CacheWrite } from "./domains/cache";
 // 全局映射表的契约(从实现推导)。`@folio/oracle` 的 mint 要它 —— 那一片把 store 当参数传。
-export type { GlobalRefIndexStore } from "./domains/global-ref-index";
+export type { GlobalRefIndexStore, RefIndexDiffCounts } from "./domains/global-ref-index";
 export type {
   ManualActivity,
   ManualActivityInput,
