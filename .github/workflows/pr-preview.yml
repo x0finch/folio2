@@ -68,6 +68,12 @@ jobs:
           url="$(grep -oiE 'https://pr-[0-9]+-folio-preview[a-z0-9.-]*\.workers\.dev' /tmp/wrangler.log | head -1)"
           if [ -z "$url" ]; then echo "::error::could not parse preview URL from wrangler output"; exit 1; fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
+          # 完整构建版本(与设置页底部页脚同款:git describe 原样、带 -g<hash>)。评论里没有它时,预览
+          # URL 是固定别名、`commit` 又是临时合并 sha,看着「每次都没变」—— 放个每次 push 都会变的版本号进去。
+          version="$(git describe --tags --always --dirty 2>/dev/null || echo unknown)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # 本次部署更新时间(到秒,UTC)—— 让每次 push 的评论有个一眼可辨的「刚更新过」的戳。
+          echo "deployed_at=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
 
       # 单条「粘性」评论:每次 push 更新同一条,不刷屏。用第一方 github-script,不引第三方 action。
       - name: Upsert preview URL comment
@@ -75,12 +81,17 @@ jobs:
         with:
           script: |
             const url = "${{ steps.deploy.outputs.url }}";
+            const version = "${{ steps.deploy.outputs.version }}";
+            const deployedAt = "${{ steps.deploy.outputs.deployed_at }}";
+            // pull_request 事件里 context.sha 是临时合并 commit,不是 push 的那个 → 用 head sha。
+            const sha = context.payload.pull_request.head.sha.slice(0, 7);
             const marker = "<!-- pr-preview-url -->";
             const body = `${marker}\n🚀 **Preview 已部署**: ${url}\n\n` +
               `- 本 PR 专属预览 URL(\`pr-<N>\` 别名),不覆盖其它 PR,可同时在线。\n` +
               `- 独立 Worker \`folio-preview\`,不影响生产;所有 PR 共用一个 preview 库,数据保留、不每次清。\n` +
               `- 登录用**邮箱/密码**(passkey 换别名域不通);详见 DEPLOY.md「PR preview」。\n` +
-              `- commit \`${context.sha.slice(0, 7)}\``;
+              `- commit \`${sha}\` · 版本 \`${version}\`\n` +
+              `- 更新于 \`${deployedAt}\``;
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;
             const comments = await github.rest.issues.listComments({ owner, repo, issue_number });
