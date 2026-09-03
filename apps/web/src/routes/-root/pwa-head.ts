@@ -58,12 +58,14 @@ export const THEME_COLORS: { media: string; content: string }[] = [
 // **进场不做任何动画**:文案直接显示、切换阶段也是原地换字(不淡入、不重挂)—— 入场动画在冷启动那一下
 // 看着像屏闪,不值当。动画只留呼吸(持续)+ 放行的放大扩散(退场)。
 export const SPLASH_STYLE = `
+html{background:${THEME_COLOR_LIGHT}}
+:root.dark{background:${THEME_COLOR_DARK}}
 #app-splash{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;
 background:${THEME_COLOR_LIGHT};color:${THEME_COLOR_DARK};
 font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 :root.dark #app-splash{background:${THEME_COLOR_DARK};color:${THEME_COLOR_LIGHT}}
 #folio-splash-logo{width:${SPLASH_LOGO_SIZE}px;height:${SPLASH_LOGO_SIZE}px;color:currentColor;
-transform-origin:center;animation:folio-breathe 1.8s ease-in-out infinite}
+transform-origin:center;will-change:transform,opacity;animation:folio-breathe 1.8s ease-in-out infinite}
 #folio-splash-msg{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 14vh);margin:0;padding:0 1.5rem;
 text-align:center;font-size:.875rem;font-weight:500;line-height:1.4;color:${SPLASH_MUTED}}
 #app-splash[data-exit="true"]{pointer-events:none;animation:folio-splash-out ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
