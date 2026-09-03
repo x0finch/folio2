@@ -16,7 +16,7 @@ FOL-61 要把冷启动做得像一款手机软件,并让用户能**感知**并**
 
 ### 一、冷启动闪屏(splash)
 
-- **一张 SSR 覆盖层盖住一切**,首帧即见呼吸 logo + 一行阶段小字,底色跟随明暗(沿用 `THEME_INIT_SCRIPT` 首帧已设好的 `.dark`)。
+- **splash 包住页面,未放行前把页面「不画出来」而非「盖住」**(2026-09-03 修订):`<SplashScreen>{children}</SplashScreen>`,未放行时 children 设 `visibility:hidden` —— 照常 SSR / hydrate / 预热骨架,只是不绘制。**先前是同层覆盖层遮罩**,但只要页面被画进 DOM,就总有一帧可能抢在覆盖层前露脸(SSR 流式绘制时序 / iOS 合成把 fixed 覆盖层背景弄透明 / z-index 竞争都能触发,表现为登录页脚注一闪),`will-change`、DOM 排序等补丁只能收窄不能堵死。改成「不画」后没有可露脸的东西,从根上消除。首帧即见呼吸 logo + 一行阶段小字,底色跟随明暗(沿用 `THEME_INIT_SCRIPT` 首帧已设好的 `.dark`)。
 - **关键样式全部内联进 `<head>`**(内联 SVG logo、底色、居中、呼吸 keyframes),**一个字节都不依赖 appCss**;并把 appCss 那条 stylesheet link 改成**非渲染阻塞**。这样覆盖层不等 appCss 就能画——装成 PWA 用时可保证不白屏。**唯一管不到的**是「取 HTML 文档本身的网络延迟」,那段由深色 OS 启动图(manifest `background_color`=`#151515`)+ iOS 启动图(见四)盖住;纯浏览器首次未缓存访问仍可能有一瞬,属平台限制。
 - **放行时机**:订阅 TanStack Router `status === 'idle'`(首个路由 settle,即「骨架/登录页真在下面了」)+ **700ms floor** + **8s 硬超时**兜底。**不等真实数据**(ADR 0049 的骨架壳本就先于数据)。放行时 logo 快速放大扩散 + 整层淡出,露出下面已渲好的页面(登录 / 锁屏 / 主页,谁在下面露谁——覆盖层不需要知道是哪个)。
 - **三个阶段(均对应真实状态,不编造)**:`准备中`(SSR 首帧,JS 未执行,写死在 HTML)/ `加载中`(hydrated,router pending)/ `更新中`(正在换版,仅更新路径)。文案切换 crossfade + 轻微 y 位移,复用 `EASE_OUT` / `SPRING_SWAP` token。
