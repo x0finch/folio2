@@ -19,20 +19,22 @@ export function AuthShell({
     <div className={cn("relative min-h-screen w-full overflow-hidden", className)}>
       {background}
 
-      {/* 品牌固定左上角(复用侧栏的 Logo + folio 字标)。 */}
-      <div className="absolute top-4 left-4 z-20 flex items-center gap-2.5">
+      {/* 品牌固定左上角(复用侧栏的 Logo + folio 字标)。
+          顶部偏移叠 safe-area-inset-top:PWA 独立窗口(viewport-fit=cover + black-translucent
+          状态栏)下,刘海/状态栏不压品牌(与 app-shell 顶栏同法,root 不动)。 */}
+      <div className="absolute top-[calc(1rem_+_env(safe-area-inset-top))] left-4 z-20 flex items-center gap-2.5">
         <Logo className="size-6 shrink-0" />
         <span className="font-semibold text-lg tracking-tight">folio</span>
       </div>
 
-      {/* 语言 / 主题固定右上角。 */}
-      <div className="absolute top-4 right-4 z-20 flex items-center gap-4">
+      {/* 语言 / 主题固定右上角(同样叠 safe-area-inset-top,不被状态栏压)。 */}
+      <div className="absolute top-[calc(1rem_+_env(safe-area-inset-top))] right-4 z-20 flex items-center gap-4">
         <LocaleSwitcher />
         <ThemeToggle />
       </div>
 
-      {/* 前景内容居中(透明,不套卡片)。 */}
-      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center p-6">
+      {/* 前景内容居中(透明,不套卡片)。上下内边距叠安全区:内容偏高时不钻进状态栏/底部指示条。 */}
+      <div className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 pt-[calc(1.5rem_+_env(safe-area-inset-top))] pb-[calc(1.5rem_+_env(safe-area-inset-bottom))]">
         {children}
       </div>
     </div>
