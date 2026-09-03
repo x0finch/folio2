@@ -1,20 +1,53 @@
 name: Deploy
 
-# 发版部署:打 v* tag(如 v1.2.0)才触发 —— main 平时不动生产,发版时 tag 一下才上。
+# 发版部署,两条路都触发本 workflow:
+#   1) **打 v* tag**(`git tag v1.2.0 && git push origin v1.2.0`）—— 命令行发版。
+#   2) **手机友好**:GitHub 网页 / App → Actions → Deploy → Run workflow,填个版本号点一下
+#      (workflow_dispatch)。这条先由 CI 自己把 tag 打上(github-actions bot 推,需 contents:write),
+#      再照常 verify + 迁移 + 部署 —— 手机上不必敲 git。
+#      ⚠️ 若仓库对 tag 设了保护规则(Settings → Rules),把 github-actions 加进 bypass,否则这条推 tag 会 403。
+#      (GITHUB_TOKEN 推的 tag **不会**再触发上面的 push:tags —— GitHub 防递归 —— 所以不会重复部署。)
 # 需要一个仓库 secret:CLOUDFLARE_API_TOKEN(权限 Workers Scripts:Edit + D1:Edit)。
 # account_id 已在 apps/web/wrangler.jsonc,worker 运行时 secrets(SECRETS_KEY 等)是一次性
 # `wrangler secret put` 设好、存在 Worker 里的,CI 不碰。见 apps/web/DEPLOY.md。
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号,形如 v0.14.1(CI 会打成 tag)"
+        required: true
+        type: string
 
 concurrency:
   group: deploy
   cancel-in-progress: false # 部署进行中不取消,免得半途中断留下不一致状态
 
 jobs:
+  # 仅 workflow_dispatch 用:把输入的版本号打成 tag 推上去,让下面 job 的 git describe / 设置页页脚拿到版本。
+  # tag 触发时本 job 跳过(下面 verify 用 `needs.tag.result` 兼容这两种情形)。
+  tag:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 推 tag 要写权限
+    steps:
+      - name: Validate version
+        run: |
+          echo "${{ inputs.version }}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            || { echo "版本号要形如 v0.14.1(v + 三段数字)"; exit 1; }
+      - uses: actions/checkout@v7
+      - name: Create & push tag
+        run: |
+          git tag "${{ inputs.version }}"
+          git push origin "${{ inputs.version }}"
+
   # 部署前再过一遍四闸(安全网:防 tag 打在没过 CI 的 commit 上)。
   verify:
+    needs: tag
+    # tag 触发时 tag job 跳过 → 这里照跑;dispatch 时等 tag 成功。tag 失败(如版本号非法)则不跑。
+    if: ${{ always() && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

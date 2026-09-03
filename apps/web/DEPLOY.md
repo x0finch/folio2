@@ -99,6 +99,14 @@ never end up with new code against an un-migrated schema.
 git tag v1.2.0 && git push origin v1.2.0   # → CI migrates remote D1, then deploys
 ```
 
+**Phone-friendly path (no git):** GitHub → **Actions → Deploy → Run workflow**, enter a version
+like `v1.2.1`, run. CI creates+pushes that tag itself (github-actions bot), then does the same
+verify → migrate → deploy. Same result as the tag command, just tappable from mobile.
+
+> If the repo has a **tag protection ruleset** for `v*`, add **github-actions** to its bypass list
+> (Settings → Rules), otherwise the workflow's tag push is rejected (403). The command-line path
+> above is unaffected — it pushes as you, not the bot.
+
 > ⚠️ **Remote D1 migrations are irreversible.** Additive migrations (new tables/columns) are
 > safe to auto-apply; a destructive one (dropping a column, etc.) would hit production with no
 > rollback. Review the pending migration before tagging. To gate deploys behind manual approval,
