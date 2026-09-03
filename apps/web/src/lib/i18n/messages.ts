@@ -44,7 +44,7 @@ const en = {
   },
   Update: {
     available: "Update available",
-    upToDate: "Up to date",
+    upToDate: "This is the latest version",
     update: "Update",
   },
   PageHeader: {
