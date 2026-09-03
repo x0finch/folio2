@@ -1,10 +1,22 @@
-import { Card, CardContent, CardHeader, CardTitle, Tabs, TabsList, TabsTrigger } from "@folio/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  Switch,
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  toast,
+} from "@folio/ui";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "@/components/currency-switcher";
 import { type Theme, useMountedTheme } from "@/lib/hooks/use-theme";
 import { invalidateFor } from "@/lib/queries/refresh";
+import { valuationSettingsQuery } from "@/lib/queries/settings";
 import { setLocalePreference } from "@/lib/server/preferences";
+import { updatePrivacySettings } from "@/lib/server/settings";
 import { SettingRow } from "./setting-row";
 
 // 外观卡:主题(三态 segmented)· 语言(中/EN segmented)· 币种(Select)。
@@ -27,6 +39,26 @@ export function AppearanceCard() {
     if (next === locale) return;
     localeMut.mutate(next);
   }
+
+  // 隐藏余额(FOL-75,ADR 0052)。开关来自 user_settings(与估值口径同一份读,见 settings.ts)。
+  const settingsQuery = useQuery(valuationSettingsQuery());
+  const hideBalances = settingsQuery.data?.hideBalances;
+  const hideMut = useMutation({
+    mutationFn: (next: boolean) => updatePrivacySettings({ data: { hideBalances: next } }),
+    // **乐观 + 不 invalidate**:立刻把共享的 user_settings 读缓存翻过来,开关即时响应、隐私 Provider
+    // (读同一份)立刻跟随;privacy 不驱动任何计算,refetch 整份读只会白白触发一次总览重算。
+    onMutate: async (next) => {
+      const key = valuationSettingsQuery().queryKey;
+      await queryClient.cancelQueries({ queryKey: key });
+      const prev = queryClient.getQueryData(key);
+      if (prev) queryClient.setQueryData(key, { ...prev, hideBalances: next });
+      return { prev, key };
+    },
+    onError: (_e, _next, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(ctx.key, ctx.prev);
+      toast.error(t("hideBalancesError"));
+    },
+  });
 
   return (
     // overflow-visible:覆盖 Card 默认的 overflow-hidden,否则币种 Select 的弹层(非 portal,
@@ -57,6 +89,18 @@ export function AppearanceCard() {
         <SettingRow label={t("currency")}>
           <CurrencySwitcher />
         </SettingRow>
+        <div className="flex flex-col gap-1">
+          <SettingRow label={t("hideBalances")}>
+            <Switch
+              // 读到之前先按关渲染(禁用);fail-closed 只关乎「屏幕上遮不遮」,开关本身按缺省画即可。
+              checked={hideBalances ?? false}
+              disabled={hideBalances == null}
+              onCheckedChange={(next) => hideMut.mutate(next)}
+              ariaLabel={t("hideBalances")}
+            />
+          </SettingRow>
+          <p className="text-muted-foreground text-sm">{t("hideBalancesHint")}</p>
+        </div>
       </CardContent>
     </Card>
   );
