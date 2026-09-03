@@ -1,4 +1,5 @@
 import { cn, Skeleton } from "@folio/ui";
+import { Sensitive } from "@/components/sensitive";
 import { signedUsd } from "@/lib/core/format-number";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 
@@ -51,7 +52,9 @@ export function ValueDelta({
     // select-text:金额是内容,长按要能选中复制。行/卡片是按钮,base 层把它们整体设成不可选
     // (长按不冒蓝色高亮),这里把真正该复制的那两行单独放回来 —— 全站还没有任何复制按钮。
     <div className={cn("select-text", align === "right" ? "shrink-0 text-right" : "text-left")}>
-      <div className={cn("font-medium tabular-nums", value < 0 && "text-neg")}>{usd(value)}</div>
+      <div className={cn("font-medium tabular-nums", value < 0 && "text-neg")}>
+        <Sensitive>{usd(value)}</Sensitive>
+      </div>
       {loading ? (
         <div className={cn("mt-1 flex", align === "right" ? "justify-end" : "justify-start")}>
           <GainSkeleton />
@@ -63,7 +66,8 @@ export function ValueDelta({
               NO_VALUE
             ) : (
               <>
-                {signedUsd(usd, delta)}
+                {/* 遮增量金额,不遮百分比(ADR 0052:遮金额/数量,留百分比)。 */}
+                <Sensitive>{signedUsd(usd, delta)}</Sensitive>
                 {pct != null && ` ${Math.abs(pct).toFixed(2)}%`}
               </>
             )}

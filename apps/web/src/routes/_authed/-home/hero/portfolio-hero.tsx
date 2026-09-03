@@ -53,7 +53,8 @@ function GainBadge({ gain, compact = false }: { gain: Gain | null; compact?: boo
   if (gain == null) return <span className={cn(GAIN_BADGE, GAIN_TONE.flat)}>{NO_VALUE}</span>;
   return (
     <span className={cn(GAIN_BADGE, gainTone(gain.amount))}>
-      {signedUsd((n) => usd(n, { compact }), gain.amount)}
+      {/* 遮 24h 盈亏金额,留百分比(ADR 0052)。 */}
+      <Sensitive>{signedUsd((n) => usd(n, { compact }), gain.amount)}</Sensitive>
       {gain.pct != null && ` ${Math.abs(gain.pct).toFixed(2)}%`}
     </span>
   );
@@ -157,16 +158,14 @@ export function PortfolioHero({
               // 首次同步中:大数字位摆骨架,别把「还不知道」画成 $0(见 index.tsx 的 pending 判据)。
               <Skeleton className="h-11 w-52 rounded-lg sm:h-14 sm:w-64" />
             ) : (
-              // 隐私开着时把净值模糊掉,点一下临时显示(ADR 0052)。Sensitive 吞掉点击,不触发缩写切换。
-              <Sensitive>
-                <AmountTicker
-                  value={shownUsd}
-                  scrubbing={scrub.point != null}
-                  compact={showCompact}
-                  className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
-                  fractionClassName="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl"
-                />
-              </Sensitive>
+              // 隐私开着时 AmountTicker 自己渲染静态模糊值(ADR 0052),点一下临时显示 —— 这里不必再包。
+              <AmountTicker
+                value={shownUsd}
+                scrubbing={scrub.point != null}
+                compact={showCompact}
+                className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
+                fractionClassName="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl"
+              />
             )}
           </button>
           {/* 划动时不显 24h 药丸:那是「今天涨跌」,摆在一个历史时刻的数值旁边是两件事对不上。 */}
@@ -177,20 +176,30 @@ export function PortfolioHero({
           {/* 「今天赚 / 亏最多的那个仓」—— 按盈亏**金额**取,不按涨跌幅(ADR 0050)。以前只看涨跌幅、
               不看持有多少,于是这两格永远被小仓位的暴涨币占据。金额走 usd() → 跟随展示币种。
               盈亏随总览一起到,没有「还在取」的态 —— best/worst 直接算得出或 `—`。 */}
+          {/* 遮盈亏金额,留 symbol(公开的币名);占比是百分比,整格不遮。 */}
           <Stat
             label={t("bestToday")}
             value={
-              metrics.best
-                ? `${metrics.best.symbol} ${signedUsd(usd, metrics.best.amount)}`
-                : NO_VALUE
+              metrics.best ? (
+                <>
+                  {metrics.best.symbol} <Sensitive>{signedUsd(usd, metrics.best.amount)}</Sensitive>
+                </>
+              ) : (
+                NO_VALUE
+              )
             }
           />
           <Stat
             label={t("worstToday")}
             value={
-              metrics.worst
-                ? `${metrics.worst.symbol} ${signedUsd(usd, metrics.worst.amount)}`
-                : NO_VALUE
+              metrics.worst ? (
+                <>
+                  {metrics.worst.symbol}{" "}
+                  <Sensitive>{signedUsd(usd, metrics.worst.amount)}</Sensitive>
+                </>
+              ) : (
+                NO_VALUE
+              )
             }
           />
           <Stat

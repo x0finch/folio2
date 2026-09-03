@@ -1,5 +1,7 @@
 import { NumberTicker } from "@folio/ui";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
+import { useBalancePrivacy } from "@/lib/privacy/context";
+import { Sensitive } from "./sensitive";
 
 // **一个会滚的大额金额。** 排版由调用方给,这里只管三件调用方不该各写一遍的事:
 //
@@ -30,6 +32,12 @@ export function AmountTicker({
   fractionClassName?: string;
 }) {
   const usd = useDisplayValue();
+  const { hidden } = useBalancePrivacy();
+  // 隐私开着:渲染**静态**模糊值,不挂 NumberTicker —— 否则活动数字每帧滚动、又每帧被 blur 重光栅化,
+  // 白烧性能(ADR 0052 / FOL-78 的性能项)。反正糊着,精确排版无所谓,整串一个模糊 blob 即可。
+  if (hidden) {
+    return <Sensitive className={className}>{usd(value, { compact })}</Sensitive>;
+  }
   if (compact) {
     return (
       <NumberTicker
