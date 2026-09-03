@@ -1,5 +1,7 @@
 import { cn, Popover, PopoverContent, PopoverTrigger, Separator } from "@folio/ui";
+import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
+import { Sensitive } from "@/components/sensitive";
 import type { PerpPositionView } from "@/lib/core/account-view";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
@@ -11,7 +13,7 @@ function DetailRow({
   className,
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   className?: string;
 }) {
   return (
@@ -106,7 +108,11 @@ export function LiqRing({ risk, position }: { risk: LiqRisk; position: PerpPosit
               value={position.leverageType.charAt(0).toUpperCase() + position.leverageType.slice(1)}
             />
           )}
-          <DetailRow label={t("marginUsedAmount")} value={usd(position.marginUsed)} />
+          {/* 已用保证金是你的钱 → 遮;下面开仓/标记/强平都是市场价 → 不遮。 */}
+          <DetailRow
+            label={t("marginUsedAmount")}
+            value={<Sensitive>{usd(position.marginUsed)}</Sensitive>}
+          />
           <Separator className="my-1" />
           <DetailRow
             label={t("safetyMargin")}

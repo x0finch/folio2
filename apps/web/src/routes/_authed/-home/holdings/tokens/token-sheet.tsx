@@ -19,6 +19,7 @@ import { AccountName } from "@/components/account-name";
 import { AmountTicker } from "@/components/amount-ticker";
 import { AvatarStack } from "@/components/avatar-stack";
 import { type Range, RangeTabs, rangeSince } from "@/components/range-tabs";
+import { Sensitive } from "@/components/sensitive";
 import { collapseToSlots } from "@/components/tag-badges";
 import { formatNumber, signedUsd } from "@/lib/core/format-number";
 import type { Holding } from "@/lib/core/portfolio";
@@ -118,7 +119,7 @@ function GroupRow({
       </span>
       <span className="shrink-0 text-right">
         <span className="block text-sm tabular-nums">
-          {formatNumber(group.amount)} {symbol}
+          <Sensitive>{formatNumber(group.amount)}</Sensitive> {symbol}
         </span>
         <span className="block text-muted-foreground text-xs tabular-nums">{share}%</span>
       </span>
@@ -238,7 +239,7 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
               </div>
               {totalAmount != null && (
                 <p className="text-muted-foreground text-sm tabular-nums">
-                  {formatNumber(totalAmount)} {token.symbol}
+                  <Sensitive>{formatNumber(totalAmount)}</Sensitive> {token.symbol}
                 </p>
               )}
             </div>
@@ -262,7 +263,8 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
             ) : (
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayValue))}>
-                {signedUsd(usd, dayValue ?? 0)}
+                {/* 遮盈亏金额,留百分比(ADR 0052)。 */}
+                <Sensitive>{signedUsd(usd, dayValue ?? 0)}</Sensitive>
                 {dayPct != null ? ` ${Math.abs(dayPct).toFixed(2)}%` : ""}
               </div>
             )}
