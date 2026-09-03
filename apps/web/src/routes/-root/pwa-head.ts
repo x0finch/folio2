@@ -55,21 +55,21 @@ export const THEME_COLORS: { media: string; content: string }[] = [
 // 放大扩散 + 淡出。呼吸从 scale(1)/opacity(1) 起步 —— 即 iOS 启动图里 logo 的静止态,静态→呼吸无缝。
 // 时长与 splash-lifecycle 的 SPLASH_EXIT_MS(520ms)对齐。
 // 缓动值即 lib/ease 的 EASE_OUT_CSS(cubic-bezier(0.16,1,0.3,1))—— 内联关键样式导不了 JS token,
-// 故照抄其值(与全站一致)。**logo + 文案是一个居中的 flex 竖列,用固定 `gap` 绑在一起**:整组居中,
-// 视口/安全区在 iOS PWA 启动时安顿也是**整组一起动**,两者不相对漂移(先前 logo 居中 + 文案独立
-// 锚在 14vh,视口一变各自移动 → 抖)。文案跟在 logo 下方一个固定间距,不再贴底。
+// 故照抄其值(与全站一致)。**logo grid 居中在真屏幕中心;文案绝对定位在下方**,离底 `7rem`。
+// **稳定不抖靠的是「固定单位 rem」而非「绑在一起」**:先前用 `env(safe-area-inset-bottom)+14vh`,env 在
+// iOS PWA 启动首帧常是 0、下一帧跳到真实值 → 文案抖;换成固定 rem,启动时视口/安全区怎么安顿都不动。
 // **进场不做任何动画**:文案直接显示、切换阶段也是原地换字(不淡入、不重挂)—— 入场动画在冷启动那一下
 // 看着像屏闪,不值当。动画只留呼吸(持续)+ 放行的放大扩散(退场)。
 export const SPLASH_STYLE = `
 html{background:${THEME_COLOR_LIGHT}}
 :root.dark{background:${THEME_COLOR_DARK}}
-#app-splash{position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.75rem;
+#app-splash{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;
 background:${THEME_COLOR_LIGHT};color:${THEME_COLOR_DARK};
 font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 :root.dark #app-splash{background:${THEME_COLOR_DARK};color:${THEME_COLOR_LIGHT}}
-#folio-splash-logo{width:${SPLASH_LOGO_SIZE}px;height:${SPLASH_LOGO_SIZE}px;color:currentColor;flex:none;
+#folio-splash-logo{width:${SPLASH_LOGO_SIZE}px;height:${SPLASH_LOGO_SIZE}px;color:currentColor;
 transform-origin:center;will-change:transform,opacity;animation:folio-breathe 1.8s ease-in-out infinite}
-#folio-splash-msg{margin:0;padding:0 1.5rem;max-width:min(30rem,90vw);
+#folio-splash-msg{position:absolute;left:0;right:0;bottom:7rem;margin:0;padding:0 1.5rem;max-width:min(30rem,90vw);
 text-align:center;font-size:.875rem;font-weight:500;line-height:1.4;color:${SPLASH_MUTED}}
 #app-splash[data-exit="true"]{pointer-events:none;animation:folio-splash-out ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
 #app-splash[data-exit="true"] #folio-splash-logo{animation:folio-splash-burst ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
