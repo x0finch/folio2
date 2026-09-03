@@ -10,7 +10,6 @@ import { messages } from "@/lib/i18n/messages";
 import { registerServiceWorker, useUpdateToast } from "@/lib/pwa/service-worker";
 import { localePreferenceQuery } from "@/lib/queries/preferences";
 import appCss from "@/styles.css?url";
-// STARTUP_IMAGES 再次注释掉(排查入场抖动:隔离 iOS 启动图,确认抖动来自组件本身而非启动图切换)。
 import { appCssLoaderScript, SPLASH_STYLE, THEME_COLORS } from "./pwa-head";
 import { SplashScreen } from "./splash";
 
@@ -69,11 +68,6 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
         {THEME_COLORS.map((tc) => (
           <meta key={tc.media} name="theme-color" media={tc.media} content={tc.content} />
         ))}
-        {/* iOS 主屏启动图(ADR 0051):**再次注释掉排查入场抖动** —— 隔离启动图,确认 logo/文案的抖动
-            来自 splash 组件本身,而非「iOS 启动图 → 网页」切换那下。确认后再决定恢复。
-        {STARTUP_IMAGES.map((s) => (
-          <link key={s.href} rel="apple-touch-startup-image" media={s.media} href={s.href} />
-        ))} */}
         {/* 深色模式无闪烁:hydration 前就按 localStorage/system 设好 .dark(见 lib/hooks/use-theme)。 */}
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,无用户输入 */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />

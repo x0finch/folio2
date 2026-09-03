@@ -23,7 +23,6 @@
     "deploy:preview": "CLOUDFLARE_ENV=preview pnpm run build && wrangler deploy --env preview",
     "upload:preview": "CLOUDFLARE_ENV=preview pnpm run build && wrangler versions upload --env preview --preview-alias \"$PREVIEW_ALIAS\"",
     "gen:icons": "node scripts/gen-icons.mjs",
-    "gen:splash": "node scripts/gen-splash.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },

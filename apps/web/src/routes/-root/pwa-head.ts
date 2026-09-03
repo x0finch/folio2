@@ -78,17 +78,9 @@ text-align:center;font-size:.875rem;font-weight:500;line-height:1.4;color:${SPLA
 #app-splash[data-exit="true"]{animation:folio-splash-out 160ms linear forwards}}
 `;
 
-// iOS 主屏启动图(ADR 0051)。iOS 不认 manifest 的 background_color,加到主屏的 PWA 启动那一瞬
-// 若无启动图就露空白 —— 这组 `apple-touch-startup-image` 垫一张「logo 居中在 #151515 深色底」。
-// **尺寸清单单一来源在 splash-config.json**(生成脚本 gen-splash.mjs 同读):iOS 靠 media 里的机型
-// 尺寸匹配启动图,尺寸对不上的机型会忽略、自动降级成「纯深色 + logo」(接缝同底色看不出)。
-// 文件名按设备像素(logical × dpr)—— 与 gen-splash.mjs 的产出对齐。
-export const STARTUP_IMAGES: { media: string; href: string }[] = splashConfig.iosDevices.map(
-  ({ w, h, dpr }) => ({
-    media: `(device-width: ${w}px) and (device-height: ${h}px) and (-webkit-device-pixel-ratio: ${dpr}) and (orientation: portrait)`,
-    href: `/splash/apple-splash-${w * dpr}x${h * dpr}.png`,
-  }),
-);
+// iOS 主屏启动图(`apple-touch-startup-image`)已移除(FOL-65 回退):它需要逐机型精确尺寸的 PNG,
+// 而「图标启动 → 网页 splash」本就更自然,也不再需要那套生成脚本/资源。冷启动的深色底改由
+// SPLASH_STYLE 的 `html` 底色 + manifest `background_color` 兜。
 
 // 让 app 样式表**非渲染阻塞**(ADR 0051)。用「脚本注入 link」而非 <link>:脚本注入的样式表
 // 不阻塞解析/首帧,于是内联的 SPLASH_STYLE 能先画、appCss 落地后再套用。无 JS 时走 <noscript>

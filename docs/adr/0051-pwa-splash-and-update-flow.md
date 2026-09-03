@@ -39,14 +39,11 @@ FOL-61 要把冷启动做得像一款手机软件,并让用户能**感知**并**
 - **SW 侧**:`install` 不 `skipWaiting`、`message` 收 `SKIP_WAITING` 才接管、`activate` 清旧桶 + `clients.claim`——**均一字不改**;`swRoute` 缓存决策也一字不改。变的只有页面侧的检测判据(waiting → 版本比)。
 - **`@folio/ui` toast-store**:命令式 `toast` 需透传 `action`/`duration`(常驻 toast 靠 `duration: Infinity`)/`description`/`dismissible`,否则「带按钮的常驻 toast」发不出来。
 
-### 四、iOS 原生启动图(`apple-touch-startup-image`)
+### 四、iOS 原生启动图(`apple-touch-startup-image`)——**已移除(2026-09-03)**
 
-iOS 不认 manifest 的 `background_color`,加到主屏的 PWA 启动时若无启动图就露空白。
+> 曾按逐机型精确尺寸生成 PNG(`scripts/gen-splash.mjs` + `public/splash/*.png` + `splash-config.json` 的 `iosDevices`),用 `apple-touch-startup-image` 让加到主屏的 PWA 启动时垫一张「logo 居中在 `#151515` 底」的图,并让它与网页覆盖层的静止 logo 无缝交接。
 
-- **一个源,脚本 fan-out**:作者只画一次(logo 居中 + `#151515` 底),生成脚本(照 `scripts/gen-icons.mjs` 形状)按 iPhone 竖屏的若干**精确像素尺寸**各导一张 PNG。「多张」的原因**不是美术、是 iOS 的尺寸匹配规则**(尺寸对不上的那条它直接忽略)。
-- **底色烤进图,不用透明**:`apple-touch-startup-image` 的透明区 iOS 填**黑**(非 `#151515`、不跟随明暗),故把底色画进 PNG。
-- **深色一套、仅竖屏**:manifest 已锁 `orientation: portrait` → 免横屏;iPad / 浅色先不做——尺寸对不上的机型自动降级成「纯深色 + logo」,接缝是同底色、看不出。
-- **与覆盖层无缝交接**:启动图里 logo 的**大小与位置** == splash 覆盖层呼吸 logo 的静止态(scale 1)。「splash logo 尺寸」因此是一个共享常量,生成脚本与覆盖层同读。静态 logo → 同一个 logo 开始呼吸,连贯。
+**为什么撤掉**:它带来的复杂度(逐机型尺寸清单、生成脚本、一批二进制资源、随新机型维护)不划算,而「iOS 图标启动 → 网页 splash」本就更自然。冷启动那一瞬的深色底改由**两处便宜的兜底**盖:manifest 的 `background_color` + `SPLASH_STYLE` 里给 `html` 烤的底色(`:root.dark` 深、否则浅)。真正影响观感的是网页覆盖层「包住页面、未放行不绘制」那套(见一),启动图不是关键路径。相关代码/资源/`gen:splash` 脚本一并删除。
 
 ## Considered Options
 
