@@ -165,7 +165,7 @@ export function showUpdateToast(labels: { available: string; update: string }): 
   lastPromptedVersion = availableVersion;
   toast.message(labels.available, {
     id: UPDATE_TOAST_ID,
-    duration: Number.POSITIVE_INFINITY,
+    duration: 0, // 常驻(toast-store 约定:0 = 不自动消失,可手动划走)
     action: { label: labels.update, onClick: () => applyUpdate() },
   });
 }

@@ -28,7 +28,9 @@ function clearTimer(id: string) {
 
 function schedule(id: string, duration: number) {
   clearTimer(id);
-  if (duration > 0 && typeof window !== "undefined") {
+  // `Number.isFinite` 兜底:`duration: Infinity` 若直接进 setTimeout 会被当 0、toast 秒删 —— 非有限
+  // 值一律按「常驻」处理(不排定时器),与 `0 = 常驻` 同义。
+  if (duration > 0 && Number.isFinite(duration) && typeof window !== "undefined") {
     timers.set(
       id,
       setTimeout(() => remove(id), duration),
