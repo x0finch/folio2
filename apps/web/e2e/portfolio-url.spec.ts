@@ -3,8 +3,8 @@ import { dismissPasskeyPrompt, signUpAndLogin } from "./fixtures/app";
 
 // 选中的 Portfolio 住 URL(ADR 0046)。这一条只测**浏览器里才组合得起来**的那几件:
 // 切组合后地址长出参数、页头的同步摘要跟着换、后退键回到上一个组合、刷新后仍在原组合、
-// 逛设置往返参数还在、切组合把属于旧组合的参数丢掉、切回默认参数消失。两条纯规则(读回哪个组合 / 切换后的新查询串)
-// 已由 `tests/portfolio-selection.test.ts` 钉住,这里不重复。
+// 逛设置往返参数还在、页内视角变化不进地址(FOL-80)、切回默认参数消失。两条纯规则(读回哪个组合 /
+// 切换后的新查询串)已由 `tests/portfolio-selection.test.ts` 钉住,这里不重复。
 //
 // **为什么非 e2e 不可**:每一件都要「地址 + 历史栈 + search 中间件 + 路由 loader」四样同时在场才成立,
 // 而挂掉的方式都很静默 —— 忘了跨页保留只是「改个设置回来组合变了」;忘了 push 只是「后退键跳过了刚才
@@ -86,16 +86,19 @@ test.describe("URL 里的组合选中态", () => {
     await page.locator('aside a[href^="/accounts"]').click();
     await expect(page).toHaveURL(watchUrl);
 
-    // —— ⑤ 切组合 = 一份全新的查询串:属于旧组合那一套视角参数不跟着走 ——
-    // 在 Insights 上选一个非默认的分布维度(`?dim=`)。**为什么用它而不是账户抽屉的 `?account=`**:
-    // 抽屉一开,它的遮罩就盖住整个页头 —— 连选择器都点不到,那条组合根本走不出来。
+    // —— ⑤ 页内视角变化不进地址(FOL-80,反转 ADR 0043)——
+    // 分布维度以前是 `?dim=`(于是要验「切组合把它丢掉」);现在住 AllocationCard 内部 state。所以
+    // 「旧组合的视角参数跟着走」这件事结构上不可能发生 —— 地址永远只有 `?portfolio`。改成正面断言:
+    // 切一个非默认维度,饼图 tab 的选中态变了,但地址一个字符都没多。
     await page.locator('aside a[href^="/insights"]').click();
     await expect(page).toHaveURL(/\/insights\?portfolio=/);
-    await page.getByRole("tab", { name: "By chain" }).click();
-    await expect(page).toHaveURL(/dim=chain/);
-    await expect(page).toHaveURL(/portfolio=/);
+    const beforeDim = page.url();
+    const byChain = page.getByRole("tab", { name: "By chain" });
+    await byChain.click();
+    await expect(byChain).toHaveAttribute("aria-selected", "true");
+    await expect(page).toHaveURL(beforeDim);
 
-    // —— ⑥ 切回默认:参数全消失(`dim` 与组合无关也不留 —— 「切组合就是从头开始」)——
+    // —— ⑥ 切回默认:`?portfolio` 消失,地址回到干净的 /insights ——
     await switchTo(page, DEFAULT);
     await expect(page).toHaveURL(/\/insights$/);
   });
