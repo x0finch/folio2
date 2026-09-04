@@ -122,17 +122,23 @@ export function PortfolioHero({
   const showCompact = (compactOverride ?? isNarrow) && shownUsd >= HERO_COMPACT_MIN;
 
   return (
-    <div className="relative min-h-60 overflow-hidden pt-1">
+    // **overflow-hidden 只包趋势图,不包整块**:它本是为了裁掉绝对定位的 TrendPanel(见 trend-panel.tsx
+    // 「调用方套 relative + overflow-hidden」),但套在根上会连带把浮于其上的净值一起裁 —— 隐私开启时
+    // 大号数字的高斯模糊向左溢出根左沿,就被这层 overflow 削掉半边(FOL-75)。把裁剪挪到图自己的
+    // 包裹层,内容层不再受它约束,模糊能完整铺开。
+    <div className="relative min-h-60 pt-1">
       {/* 四态(点数不够 / 还在取数 / 什么都还没有 / 真有数据)全在 TrendPanel 里判。
           hero 的上留白更大(topMargin=92,把折线压到下半区),填充也比抽屉略重 → 覆盖这两个默认值。 */}
-      <TrendPanel
-        series={chartSeries}
-        loading={loading}
-        topMargin={92}
-        fillOpacity={0.16}
-        decorate={nothingYet}
-        onActive={scrub.onActive}
-      />
+      <div className="absolute inset-0 overflow-hidden">
+        <TrendPanel
+          series={chartSeries}
+          loading={loading}
+          topMargin={92}
+          fillOpacity={0.16}
+          decorate={nothingYet}
+          onActive={scrub.onActive}
+        />
+      </div>
 
       {/* 数字层:浮于图上,不吃指针(hover 透传给背景图)。 */}
       <div className={cn("pointer-events-none relative z-10", contentClassName)}>
