@@ -19,7 +19,11 @@ export interface SwitcherPage {
   ready?: () => Promise<unknown>;
 }
 
-const FADE_S = 0.18;
+const FADE_S = 0.4;
+
+/** 等浏览器真画出一帧(两次 rAF:第一次排到当前帧尾,第二次跨到下一帧后)。 */
+const nextPaint = () =>
+  new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
 export function PageSwitcher({ pages, activeKey }: { pages: SwitcherPage[]; activeKey: string }) {
   const reduce = useReducedMotion();
@@ -58,8 +62,16 @@ export function PageSwitcher({ pages, activeKey }: { pages: SwitcherPage[]; acti
         // 新页在旧页**之上**淡入(zIndex 垫高、被 isolation 关在层内),旧页保持不透明留在下面、不交叉淡出:
         // 两层半透明叠白底中点会发灰、像瞬切;新页 0→1 覆上来才是清清楚楚的"入场"。淡完把旧页隐藏保活。
         const inEl = panels.current.get(target);
-        const opts = { duration: reduce ? 0 : FADE_S, ease: EASE_OUT } as const;
-        if (inEl) await animate(inEl, { opacity: 1 }, opts).finished;
+        if (inEl) {
+          // **先让新面板真画出一帧再淡**:`<Activity>` 的揭示是低优先级提交,iOS 上可能偏晚 —— 不等这一下
+          // 就在还没上屏的元素上跑动画,跑完内容才 opacity:1 弹出来 = 看着没动画。等两帧确保它在屏上(opacity 0)。
+          inEl.style.opacity = "0";
+          await nextPaint();
+          if (!alive.current || latest.current !== target) continue;
+          const opts = { duration: reduce ? 0 : FADE_S, ease: EASE_OUT } as const;
+          await animate(inEl, { opacity: [0, 1] }, opts).finished;
+          inEl.style.opacity = "1"; // 钉死终态,避免 React 提交前的一帧缝
+        }
         if (!alive.current) break;
 
         shownRef.current = target;
