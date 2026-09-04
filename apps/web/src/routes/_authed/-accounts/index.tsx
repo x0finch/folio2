@@ -38,7 +38,8 @@ import {
 } from "./list-rows";
 import { accountStackItems } from "./list-stack-items";
 
-const accountsRoute = getRouteApi("/_authed/accounts");
+// 合并路由(FOL-81):账户页现由 `{-$page}` 路由承载,`focus` 一次性命令落在它的 search 上。
+const accountsRoute = getRouteApi("/_authed/{-$page}");
 
 // 名单那一层的重试键。归属不再是独立一份数据(随账户行下发,ADR 0047),所以只剩账户列表这一条。
 const LIST_RESET_KEY = (portfolioId: string) => JSON.stringify(accountKeys.list(portfolioId));

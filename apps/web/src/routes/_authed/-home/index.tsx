@@ -61,7 +61,7 @@ function TabStripSlot() {
     return (
       <p className="text-muted-foreground">
         {tc("noAccountsYet")}{" "}
-        <Link to="/accounts" className="underline">
+        <Link to="/{-$page}" params={{ page: "accounts" }} className="underline">
           {tc("addOne")}
         </Link>
         .
