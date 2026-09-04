@@ -11,7 +11,12 @@ import { useBalancePrivacy } from "@/lib/privacy/context";
 
 // em 相对:金额字号从 xs 到 5xl 不等,固定 px 模糊在小字上糊过头、大字上糊不够 —— 跟着字号缩放。
 const BLUR_RADIUS = "0.4em";
-const BLURRED: CSSProperties = { filter: `blur(${BLUR_RADIUS})` };
+// text-shadow 兜底(ADR 0052):大字号下光靠 blur,字形边缘仍隐约可读;再叠一层 currentColor 的
+// 同色光晕把字缝糊平,读不出数字。用 currentColor 而非写死颜色 —— 不违反「只引用 token」。
+const BLURRED: CSSProperties = {
+  filter: `blur(${BLUR_RADIUS})`,
+  textShadow: `0 0 ${BLUR_RADIUS} currentColor`,
+};
 
 export function Sensitive({ children, className }: { children: ReactNode; className?: string }) {
   const t = useTranslations("Common");

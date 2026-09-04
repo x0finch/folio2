@@ -10,7 +10,14 @@ import { isHidden, privacyReducer, REVEAL_IDLE_MS, resolveInitialEnabled } from 
 // 空闲计时。**只在浏览器**(认证区 ssr:false)。Context + hook 在 ./context(与本文件拆开,理由见那)。
 
 // 空闲计时用的活动事件:任一发生就重置「距上次活动多久」。同 idle-lock 的那组。
-const ACTIVITY_EVENTS = ["mousemove", "keydown", "pointerdown", "touchstart", "scroll"] as const;
+const ACTIVITY_EVENTS = [
+  "mousemove",
+  "keydown",
+  "pointerdown",
+  "touchstart",
+  "scroll",
+  "wheel",
+] as const;
 
 export function BalancePrivacyProvider({ children }: { children: ReactNode }) {
   // 冷启动**同步**读缓存当初值(lazy init 只跑一次):缓存 OFF 直接不遮、不闪;没缓存 fail-closed
