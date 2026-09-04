@@ -16,25 +16,13 @@ const DEFS = [
   { key: "settings", label: "设置", bg: "#fae8ff", fg: "#a21caf" },
 ] as const;
 
-// 模拟"这一页 chunk + 数据要异步加载":按 key 缓存 → 首次 ~400ms、再进秒回(= 真实的 lazy import + 预取缓存)。
-const readyCache = new Map<string, Promise<void>>();
-function ready(key: string): Promise<void> {
-  let p = readyCache.get(key);
-  if (!p) {
-    p = new Promise((res) => setTimeout(res, 400));
-    readyCache.set(key, p);
-  }
-  return p;
-}
-
 const PAGES: SwitcherPage[] = DEFS.map((d) => ({
   key: d.key,
-  ready: () => ready(d.key),
-  // React.lazy + 定时器模拟 chunk 加载;首次慢,之后 React 自己缓存组件。
+  // React.lazy + 定时器模拟"架子(chunk)加载"首次 ~900ms;这期间由通用骨架顶着,切换本身不等它。之后 React 缓存,秒回。
   Component: lazy(
     () =>
       new Promise<{ default: () => React.JSX.Element }>((res) =>
-        setTimeout(() => res({ default: () => <DummyPage def={d} /> }), 400),
+        setTimeout(() => res({ default: () => <DummyPage def={d} /> }), 900),
       ),
   ),
 }));
@@ -44,7 +32,7 @@ function Spike() {
   return (
     <div style={{ minHeight: "100svh", background: "#fff", fontFamily: "system-ui" }}>
       <div style={{ paddingBottom: 96 }}>
-        <PageSwitcher pages={PAGES} activeKey={active} />
+        <PageSwitcher pages={PAGES} activeKey={active} fallback={<GenericSkeleton />} />
       </div>
 
       {/* 底部导航(模拟 Dock)。 */}
@@ -86,6 +74,24 @@ function Spike() {
 }
 
 const ROW_SLOTS = Array.from({ length: 12 }, (_, i) => `r${i + 1}`);
+
+// 通用骨架:任一页的架子还没到时先顶着(所有页共用同一张),架子到了 Suspense 原地换成真页。
+function GenericSkeleton() {
+  return (
+    <div style={{ minHeight: "100svh", padding: 24, background: "#fafafa" }}>
+      <div style={{ height: 40, width: 140, borderRadius: 10, background: "#ececec" }} />
+      <div
+        style={{ marginTop: 8, height: 16, width: 90, borderRadius: 8, background: "#f0f0f0" }}
+      />
+      {ROW_SLOTS.map((slot) => (
+        <div
+          key={`sk-${slot}`}
+          style={{ marginTop: 12, height: 64, borderRadius: 12, background: "#efefef" }}
+        />
+      ))}
+    </div>
+  );
+}
 
 function DummyPage({ def }: { def: (typeof DEFS)[number] }) {
   return (
