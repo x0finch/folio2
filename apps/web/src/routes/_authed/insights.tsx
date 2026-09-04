@@ -1,15 +1,8 @@
 import { createFileRoute, stripSearchParams } from "@tanstack/react-router";
 import { z } from "zod";
-import { floorToHour } from "@/lib/core/portfolio";
 import { pickSelectedPortfolio } from "@/lib/hooks/use-portfolio";
-import { accountListQuery } from "@/lib/queries/accounts";
-import { connectorCatalogQuery } from "@/lib/queries/connectors";
-import { portfolioHistoryQuery, portfolioListQuery } from "@/lib/queries/portfolio";
-import { fiatRefsQuery } from "@/lib/queries/portfolio-overview-compose";
-import { valuationSettingsQuery } from "@/lib/queries/settings";
-import { accountHoldingsSnapshotQueries } from "@/lib/queries/snapshots";
-import { accountTagLinksQuery } from "@/lib/queries/tags";
-import { tokenEnrichmentQuery } from "@/lib/queries/tokens";
+import { portfolioListQuery } from "@/lib/queries/portfolio";
+import { prefetchInsights } from "@/lib/queries/prefetch-pages";
 import { Insights } from "./-insights";
 import { ALLOC_DIMENSION, DEFAULT_DIM } from "./-insights/allocation";
 
@@ -29,17 +22,7 @@ export const Route = createFileRoute("/_authed/insights")({
   loader: async ({ context: { queryClient }, deps }) => {
     const { portfolios, defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
     const selectedId = pickSelectedPortfolio(deps.portfolio, portfolios, defaultId);
-    const now = floorToHour(Date.now());
-    const snapshotQueries = accountHoldingsSnapshotQueries(selectedId, now);
-    queryClient.ensureQueryData(accountListQuery(selectedId));
-    queryClient.ensureQueryData(accountTagLinksQuery(selectedId));
-    queryClient.ensureQueryData(snapshotQueries.now);
-    queryClient.ensureQueryData(snapshotQueries.prev);
-    queryClient.ensureQueryData(valuationSettingsQuery());
-    queryClient.ensureQueryData(tokenEnrichmentQuery());
-    queryClient.ensureQueryData(connectorCatalogQuery());
-    queryClient.ensureQueryData(fiatRefsQuery(selectedId));
-    queryClient.ensureQueryData(portfolioHistoryQuery(selectedId, "all"));
+    prefetchInsights(queryClient, selectedId);
   },
   component: Insights,
 });

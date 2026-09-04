@@ -1,16 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
 import { pickSelectedPortfolio } from "@/lib/hooks/use-portfolio";
-import { accountListQuery } from "@/lib/queries/accounts";
-import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
-import { valuationSettingsQuery } from "@/lib/queries/settings";
-import {
-  accountHoldingsSnapshotQueries,
-  accountHoldingsSnapshotTimes,
-} from "@/lib/queries/snapshots";
-import { accountTagLinksQuery, tagListQuery } from "@/lib/queries/tags";
-import { tokenEnrichmentQuery } from "@/lib/queries/tokens";
+import { prefetchAccounts } from "@/lib/queries/prefetch-pages";
 import { Accounts } from "./-accounts";
 
 export const Route = createFileRoute("/_authed/accounts")({
@@ -38,19 +30,7 @@ export const Route = createFileRoute("/_authed/accounts")({
   loader: async ({ context: { queryClient }, deps }) => {
     const { portfolios, defaultId } = await queryClient.ensureQueryData(portfolioListQuery());
     const selectedId = pickSelectedPortfolio(deps.portfolio, portfolios, defaultId);
-    // connector 展示名的目录:**本页每一行都有一个徽标**,不预取的话首帧只能显兜底名(#467)。
-    // 部署内静态、缓存一次,所以这一条实际只在整个会话的第一次加载上花一趟(与其余几条并行)。
-    queryClient.ensureQueryData(connectorCatalogQuery());
-    queryClient.ensureQueryData(accountListQuery(selectedId));
-    queryClient.ensureQueryData(tagListQuery(selectedId));
-    queryClient.ensureQueryData(accountTagLinksQuery(selectedId));
-    // 持仓由原子资源在浏览器合并(FOL-55):快照(当下 + 24h 前)、估值口径、代币富化。
-    const { anchor } = accountHoldingsSnapshotTimes();
-    const snapshots = accountHoldingsSnapshotQueries(selectedId, anchor);
-    queryClient.ensureQueryData(snapshots.now);
-    queryClient.ensureQueryData(snapshots.prev);
-    queryClient.ensureQueryData(valuationSettingsQuery());
-    queryClient.ensureQueryData(tokenEnrichmentQuery());
+    prefetchAccounts(queryClient, selectedId);
   },
   component: Accounts,
 });
