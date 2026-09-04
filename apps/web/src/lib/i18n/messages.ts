@@ -308,8 +308,6 @@ const en = {
     language: "Language",
     currency: "Currency",
     hideBalances: "Hide balances",
-    hideBalancesHint:
-      "Blur amounts and quantities. Tap a value to reveal; auto-hides when you leave.",
     hideBalancesError: "Couldn't save that. Try again.",
     providerKeys: "Provider API keys",
     configured: "Configured",
@@ -724,7 +722,6 @@ const zh: Messages = {
     language: "语言",
     currency: "计价币种",
     hideBalances: "隐藏余额",
-    hideBalancesHint: "模糊金额与数量。点一下临时显示,离开时自动重隐。",
     hideBalancesError: "没保存上,再试一次。",
     providerKeys: "Provider API key",
     configured: "已配置",

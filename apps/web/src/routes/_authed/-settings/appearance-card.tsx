@@ -89,18 +89,15 @@ export function AppearanceCard() {
         <SettingRow label={t("currency")}>
           <CurrencySwitcher />
         </SettingRow>
-        <div className="flex flex-col gap-1">
-          <SettingRow label={t("hideBalances")}>
-            <Switch
-              // 读到之前先按关渲染(禁用);fail-closed 只关乎「屏幕上遮不遮」,开关本身按缺省画即可。
-              checked={hideBalances ?? false}
-              disabled={hideBalances == null}
-              onCheckedChange={(next) => hideMut.mutate(next)}
-              ariaLabel={t("hideBalances")}
-            />
-          </SettingRow>
-          <p className="text-muted-foreground text-sm">{t("hideBalancesHint")}</p>
-        </div>
+        <SettingRow label={t("hideBalances")}>
+          <Switch
+            // 读到之前先按关渲染(禁用);fail-closed 只关乎「屏幕上遮不遮」,开关本身按缺省画即可。
+            checked={hideBalances ?? false}
+            disabled={hideBalances == null}
+            onCheckedChange={(next) => hideMut.mutate(next)}
+            ariaLabel={t("hideBalances")}
+          />
+        </SettingRow>
       </CardContent>
     </Card>
   );
