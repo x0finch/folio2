@@ -6,7 +6,7 @@ import {
   privacyReducer,
   resolveInitialEnabled,
   serializeHideBalances,
-} from "@/lib/privacy/state";
+} from "@/lib/hooks/balance-privacy";
 
 // 余额隐私纯状态机(ADR 0052)。测的是外部行为:enabled/revealed 组合下遮不遮、各事件怎么迁移、
 // fail-closed、缓存命中/未命中/校准 —— 不碰 DOM,故是 node 侧 .test.ts。

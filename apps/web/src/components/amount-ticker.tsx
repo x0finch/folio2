@@ -1,6 +1,6 @@
 import { NumberTicker } from "@folio/ui";
+import { useBalancePrivacy } from "@/lib/hooks/use-balance-privacy";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
-import { useBalancePrivacy } from "@/lib/privacy/context";
 import { Sensitive } from "./sensitive";
 
 // **一个会滚的大额金额。** 排版由调用方给,这里只管三件调用方不该各写一遍的事:

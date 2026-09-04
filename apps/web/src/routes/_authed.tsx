@@ -1,4 +1,4 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
   isRedirect,
@@ -12,9 +12,9 @@ import { z } from "zod";
 import { AppShell, AppShellSkeleton } from "@/components/app-shell";
 import { LockScreen } from "@/components/lock-screen";
 import { PortfolioSelector } from "@/components/portfolio-selector";
+import { BalancePrivacyProvider } from "@/lib/hooks/use-balance-privacy";
 import { PortfolioProvider, pickSelectedPortfolio, usePortfolio } from "@/lib/hooks/use-portfolio";
 import { CurrencyProvider } from "@/lib/hooks/use-prefer-currency";
-import { BalancePrivacyProvider } from "@/lib/privacy/provider";
 import { RETRY, withRetry } from "@/lib/queries/constants";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
@@ -156,12 +156,15 @@ function AuthedLayout() {
   const { user } = Route.useRouteContext();
   const { data: preferCurrency } = useSuspenseQuery(currencyPreferenceQuery());
   const { data: portfolios } = useSuspenseQuery(portfolioListQuery());
+  // 隐私开关的权威值喂给 Provider(ADR 0052)。**非 suspense**:loader 只 fire-and-forget 预取它,
+  // 没读到时 `undefined` 让 Provider 走 fail-closed,不该为它挂起整个外壳。
+  const { data: settings } = useQuery(valuationSettingsQuery());
   return (
     <CurrencyProvider value={preferCurrency}>
       {/* Portfolio 选中态(ADR 0033):住布局层,三页共享;事实源是 URL 上的 `?portfolio=`(ADR 0046)。 */}
       <PortfolioProvider portfolios={portfolios.portfolios} defaultId={portfolios.defaultId}>
         {/* 余额隐私(ADR 0052):顶层持有「遮不遮 / 临时显示」,底下每处金额靠 <Sensitive> 读它。 */}
-        <BalancePrivacyProvider>
+        <BalancePrivacyProvider hideBalances={settings?.hideBalances}>
           {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
           <LockScreen>
             <ShellWithSync userName={user.name || user.email || ""}>

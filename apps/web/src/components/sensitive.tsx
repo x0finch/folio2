@@ -1,7 +1,7 @@
 import { cn } from "@folio/ui";
 import type { CSSProperties, ReactNode } from "react";
 import { useTranslations } from "use-intl";
-import { useBalancePrivacy } from "@/lib/privacy/context";
+import { useBalancePrivacy } from "@/lib/hooks/use-balance-privacy";
 
 // 敏感值的遮罩(FOL-75,ADR 0052)。开着隐私且没临时显示时,把**真实值**高斯模糊掉;点一下 →
 // 临时显示全部(点一处全显)。不遮时零包装、直接透传 children。
