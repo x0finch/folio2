@@ -12,7 +12,6 @@ import { z } from "zod";
 import { AppShell, AppShellSkeleton } from "@/components/app-shell";
 import { LockScreen } from "@/components/lock-screen";
 import { PortfolioSelector } from "@/components/portfolio-selector";
-import { TabTransition } from "@/components/tab-transition";
 import { PortfolioProvider, pickSelectedPortfolio, usePortfolio } from "@/lib/hooks/use-portfolio";
 import { CurrencyProvider } from "@/lib/hooks/use-prefer-currency";
 import { RETRY, withRetry } from "@/lib/queries/constants";
@@ -157,10 +156,8 @@ function AuthedLayout() {
       <PortfolioProvider portfolios={portfolios.portfolios} defaultId={portfolios.defaultId}>
         {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
         <LockScreen>
-          {/* 四个 tab 之间的交叉淡入(motion):切走前把内容区拷一份盖住,新页渲进 DOM 后再淡出盖板。
-              为什么不包 AnimatePresence、也不用浏览器 View Transitions,见 components/tab-transition。
-              这里只挂一个不渲染任何东西的监听者;<Outlet/> 本身原样不动。 */}
-          <TabTransition />
+          {/* 四个 page 由下面那条 `{-$page}` 路由 + PageSwitcher 承载:切 page 只换可见组件、不换路由,
+              去过的页由 <Activity> 保活(FOL-69)。旧的「克隆盖板交叉淡入」(TabTransition)已删。 */}
           <ShellWithSync userName={user.name || user.email || ""}>
             <Outlet />
           </ShellWithSync>

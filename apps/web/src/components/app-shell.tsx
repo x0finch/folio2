@@ -144,10 +144,8 @@ export function AppShell({
           <Brand />
         </header>
 
-        {/* relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。
-            data-shell-main:切 tab 时 <TabTransition/> 拿它 cloneNode 做盖板;只标真外壳这一份,
-            骨架壳(AppShellSkeleton)的 <main> 不标 —— 拍到骨架就白盖了。 */}
-        <main className={SHELL_MAIN} data-shell-main>
+        {/* relative:作页面级 <HeaderSync/> 的定位上下文 —— 同步入口由各页自行绝对定位落到页头右上角。 */}
+        <main className={SHELL_MAIN}>
           {/* Portfolio 选择器 = 标题上方的小 badge(eyebrow);Settings 页不显示。 */}
           <PageHeader
             title={pageTitle}
