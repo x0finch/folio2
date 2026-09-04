@@ -1,4 +1,3 @@
-import { EASE_OUT } from "@folio/ui/lib/ease";
 import { animate, useReducedMotion } from "motion/react";
 import { Activity, type ComponentType, Suspense, useEffect, useRef, useState } from "react";
 
@@ -19,8 +18,10 @@ export interface SwitcherPage {
   ready?: () => Promise<unknown>;
 }
 
-const FADE_S = 0.4;
-const LIFT_PX = 8; // 入场微上抬:新页从下方 8px 升到位
+const LIFT_PX = 14; // 入场上抬:新页从下方 14px 浮上来
+// 入场弹簧(Motion UI hero reveal 那种手感):不是定时缓动到点急停,而是弹簧自然减速、带一点点回弹。
+// `visualDuration` 是"看起来多久到位",`bounce` 是回弹量(0=不回弹)。
+const ENTER_SPRING = { type: "spring", visualDuration: 0.5, bounce: 0.22 } as const;
 
 /** 等浏览器真画出一帧(两次 rAF:第一次排到当前帧尾,第二次跨到下一帧后)。 */
 const nextPaint = () =>
@@ -72,10 +73,15 @@ export function PageSwitcher({ pages, activeKey }: { pages: SwitcherPage[]; acti
           inEl.style.transform = `translateY(${LIFT_PX}px)`;
           await nextPaint();
           if (!alive.current || latest.current !== target) continue;
-          const opts = { duration: reduce ? 0 : FADE_S, ease: EASE_OUT } as const;
-          await animate(inEl, { opacity: [0, 1], y: [LIFT_PX, 0] }, opts).finished;
-          inEl.style.opacity = "1"; // 钉死终态,避免 React 提交前的一帧缝
-          inEl.style.transform = "translateY(0px)";
+          if (reduce) {
+            inEl.style.opacity = "1";
+            inEl.style.transform = "translateY(0px)";
+          } else {
+            // 弹簧从当前(opacity 0 / y 14)自然浮到位;opacity 用同一条弹簧收尾,不急停 → 不生硬。
+            await animate(inEl, { opacity: 1, y: 0 }, ENTER_SPRING).finished;
+            inEl.style.opacity = "1"; // 钉死终态,避免 React 提交前的一帧缝
+            inEl.style.transform = "translateY(0px)";
+          }
         }
         if (!alive.current) break;
 
