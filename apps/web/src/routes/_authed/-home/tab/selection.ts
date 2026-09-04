@@ -1,4 +1,3 @@
-import { getRouteApi } from "@tanstack/react-router";
 import { useRef } from "react";
 import {
   DEFAULT_TAB,
@@ -6,8 +5,7 @@ import {
   type KindTab,
   pickShownTab,
 } from "@/routes/_authed/-home/home-tabs";
-
-const home = getRouteApi("/_authed/");
+import { useHomeViewState } from "@/routes/_authed/-home/view-state";
 
 const TAB_SCROLL_MARGIN = 16; // 选中 tab 滚进可视区时两侧留的余量(px)
 
@@ -26,32 +24,15 @@ export function revealTab(el: HTMLElement) {
 
 export function useHomeTabSelection(pins: { id: string }[]) {
   // 单一 tab 状态:"tokens" / "perps" / "defi"(视角)或 pin id(自定义 Tab)。默认 tokens。
-  // **住在 URL 里**(ADR 0043):刷新回原 tab、链接可分享,每个 tab 各记自己的滚动位置。
-  const { tab } = home.useSearch();
-  const navigate = home.useNavigate();
-  const active = tab ?? DEFAULT_TAB;
-  // `replace` 而不是 push:iOS/Android 的原生约定都是 tab 切换**不进**后退栈,否则系统返回键
-  // 变成「倒放我刚点过的每一下」。默认 tab 写成 `undefined` → 从 URL 里去掉,不留 `?tab=tokens`。
-  //
-  // 切到自定义 Tab 会挂起(那份数据按 pin 另拉一遍),以前靠 `startTransition` 包着才不闪骨架 ——
-  // 现在不用了:router 的所有导航本来就跑在 React transition 里(`Transitioner` 把
-  // `router.startTransition` 换成了 `React.startTransition`,`Link` 上那个同名 prop 因此被标了废弃)。
-  //
-  // `resetScroll: false` 是**必须的**:router 的 scrollRestoration 把 `?tab=` 变化当成一个新地址,
-  // 新地址没有滚动记录 → 主动 `scrollTo({top:0})`(调用点抓到过)。实测滚到 y=600 点一下 tab,画面
-  // 自己弹回顶部,观感就是「整页刷新了一下」;而 tab 条本身在页面中段,弹到顶等于把刚点的东西顶出视野。
-  //
-  // 换内容那一下**高度还是会塌**、滚动位置被浏览器夹掉,是**另一件事**(main 上就有,与 tab 进不进
-  // URL 无关)。成因是「panel 被卸载 + 所有 tab 共用一个滚动区」,原生 tab 两条都不是这样 —— 治法
-  // (panel 常驻 `<Activity>` + 每个 tab 自己的滚动容器)见 #483,不在这一片里凑合。
+  // **住组件内部 state**(FOL-80,反转 ADR 0043):以前住 URL,现在由 `HomeViewStateProvider` 持有;
+  // 一个路由 + `<Activity>` 保活之后,切走再回来由 Activity 留着,不再靠 `?tab=` 记。
+  const { tab: active, setTab } = useHomeViewState();
+  // 值没变就别写(与原来的 `if (v === active) return` 同义)。切到自定义 Tab 会挂起(那份数据按 pin
+  // 另拉一遍),交给上层 Suspense 边界兜,不必手动 `startTransition`。滚动/后退栈的老问题一并消失:
+  // 不再是一次导航,只是一次 setState —— scrollRestoration 不介入,也不进后退栈。
   const selectTab = (v: string) => {
-    if (v === active) return; // 值没变就别导航
-    // 默认 tab 不必在这里抹成 undefined —— `stripSearchParams` 中间件在建地址时统一剥掉。
-    navigate({
-      search: (prev) => ({ ...prev, tab: v }),
-      replace: true,
-      resetScroll: false,
-    });
+    if (v === active) return;
+    setTab(v);
   };
   // active 可能短暂指向「还没挂上的 pin」—— 建 pin 后即便 await 了 invalidate,它 resolve 的时刻
   // 与新数据在组件里可见之间仍有空窗(实测)。渲染用最后一个仍有效的值,新 tab 挂上自动切过去,

@@ -1,19 +1,11 @@
 import { SharedLayoutBg } from "@folio/ui";
-import { getRouteApi } from "@tanstack/react-router";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { buildStack } from "@/components/avatar-stack";
 import type { Holding } from "@/lib/core/portfolio";
+import { useHomeViewState } from "@/routes/_authed/-home/view-state";
 import { TokenRowContent } from "./token-row";
 import { TokenSheet } from "./token-sheet";
-
-// 抽屉开着哪个币 = 首页的 `?token=`(ADR 0043)。`getRouteApi` 拿的是**那条 route 的**类型化
-// useSearch/useNavigate,不必 `import { Route }`(会与 index.tsx 循环引用),也不必让页面把值
-// 当 props 喂下来 —— 本组件只长在首页,它自己知道该读哪个地址。
-//
-// (全局的 `useSearch({ from })` 在本仓用不了:路由类型会退化成只剩 rootRoute,`from` 的合法
-// 路径集合解析成 never。`getRouteApi` 走的是另一条,实测正常。)
-const home = getRouteApi("/_authed/");
 
 // 按代币聚合的持仓列表(v2:LogoAvatar + 名称/symbol / 数量 · 价格 / 市值 · 24h;点击行 → 详情抽屉)。
 // hover 高亮由 beUI SharedLayoutBg 的移动滑块承载(行间无分隔线),小额(< DUST_THRESHOLD)折叠进 footer。
@@ -67,15 +59,13 @@ export function TokenHoldings({
 }) {
   const t = useTranslations("Overview");
   const [showDust, setShowDust] = useState(false);
-  const { token: selectedKey } = home.useSearch();
-  const navigate = home.useNavigate();
-  // `replace` + `resetScroll: false` 与主 tab 一致:开合抽屉不进后退栈(否则系统返回键变成
-  // 「倒放我刚点过的每一下」),也不该把身后的列表弹回顶部。
-  const select = (key: string | undefined) =>
-    navigate({ search: (prev) => ({ ...prev, token: key }), replace: true, resetScroll: false });
-  // 认不出的值(旧链接指向已清空的币、手写乱码)→ 找不到就是没开。回落**必须在这里**,不在 route 的
-  // `validateSearch` 里:本组件的两个实例各拿一份 holdings(主列表 / 自定义 Tab),同一个 key
-  // 在哪份里认得出是各自的事,route 层看不到这个。
+  // 抽屉开着哪个币住组件内部 state(FOL-80,反转 ADR 0043),由 `HomeViewStateProvider` 持有。
+  // 开合抽屉只是一次 setState —— 不进后退栈、不动滚动位置,原来 `replace`/`resetScroll:false` 要防的
+  // 两件事天然不发生。
+  const { token: selectedKey, setToken } = useHomeViewState();
+  const select = (key: string | undefined) => setToken(key);
+  // 认不出的值(切了组合后旧币不在、手写乱码)→ 找不到就是没开。回落**必须在这里**:本组件的两个
+  // 实例各拿一份 holdings(主列表 / 自定义 Tab),同一个 key 在哪份里认得出是各自的事。
   const selected = holdings.find((h) => h.key === selectedKey) ?? null;
   // 少于 MIN_FOLD_COUNT 个持仓 → 全展开、不折叠;否则小额行按阈值收进 toggle。
   const canFold = holdings.length >= MIN_FOLD_COUNT;

@@ -11,6 +11,7 @@ import { HeroIsland } from "./hero";
 import { HoldingsIsland } from "./holdings";
 import { GainSkeleton } from "./holdings/value-delta";
 import { TabStripIsland } from "./tab";
+import { HomeViewStateProvider } from "./view-state";
 
 export function Overview() {
   const { selectedId } = usePortfolio();
@@ -19,32 +20,35 @@ export function Overview() {
   const snapshotsKey = JSON.stringify(portfolioKeys.snapshots(selectedId, now));
   const tabsKey = JSON.stringify(portfolioKeys.tabPins(selectedId));
   return (
-    <div className="flex flex-col gap-6">
-      <HeaderSync />
-      <QueryBoundary
-        resetKey={`hero:${snapshotsKey}`}
-        pending={<HeroSkeleton />}
-        failed={<IslandFailed />}
-      >
-        <HeroIsland />
-      </QueryBoundary>
-      <div className="flex flex-col gap-4">
+    // 主 tab 与代币抽屉的页内状态住这层 Provider(FOL-80):tab 条与两个 TokenHoldings 实例共读一份。
+    <HomeViewStateProvider>
+      <div className="flex flex-col gap-6">
+        <HeaderSync />
         <QueryBoundary
-          resetKey={`tabs:${tabsKey}`}
-          pending={<TabStripSkeleton />}
+          resetKey={`hero:${snapshotsKey}`}
+          pending={<HeroSkeleton />}
           failed={<IslandFailed />}
         >
-          <TabStripSlot />
+          <HeroIsland />
         </QueryBoundary>
-        <QueryBoundary
-          resetKey={`holdings:${snapshotsKey}`}
-          pending={<HoldingsSkeleton />}
-          failed={<IslandFailed />}
-        >
-          <HoldingsIsland />
-        </QueryBoundary>
+        <div className="flex flex-col gap-4">
+          <QueryBoundary
+            resetKey={`tabs:${tabsKey}`}
+            pending={<TabStripSkeleton />}
+            failed={<IslandFailed />}
+          >
+            <TabStripSlot />
+          </QueryBoundary>
+          <QueryBoundary
+            resetKey={`holdings:${snapshotsKey}`}
+            pending={<HoldingsSkeleton />}
+            failed={<IslandFailed />}
+          >
+            <HoldingsIsland />
+          </QueryBoundary>
+        </div>
       </div>
-    </div>
+    </HomeViewStateProvider>
   );
 }
 
