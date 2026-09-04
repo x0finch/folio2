@@ -189,11 +189,15 @@ function AccountsListBody({
   const archived = rows.filter((r) => r.archivedAt != null);
   const total = activeAccountsTotal(rows);
 
-  const { account: selectedId, focus } = accountsRoute.useSearch();
+  // 详情抽屉选中哪个账户住组件内部 state(FOL-80,反转 ADR 0043):开合抽屉只是 setState,不进后退栈、
+  // 不动滚动。`focus` 不同 —— 它仍是 URL 上的**一次性命令**:同步面板在别的页头点某账户时跨页写它
+  // (`?focus=<id>`),本页到达后读一次(滚动 + 高亮)再立即抹掉,事实源仍是内部 state。跨页传值必须经
+  // 地址,所以 `focus` 留在 URL,`account` 不用。
+  const { focus } = accountsRoute.useSearch();
   const navigate = accountsRoute.useNavigate();
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const selected = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null;
-  const setAccount = (id: string | undefined) =>
-    navigate({ search: (prev) => ({ ...prev, account: id }), replace: true, resetScroll: false });
+  const setAccount = (id: string | undefined) => setSelectedId(id);
   const openRow = (r: AccountRow) => setAccount(r.id);
 
   // 页头同步面板点了某一行 → 把它滚到视野中间,并短暗高亮一下(不改选中态:那看起来像选中了什么)。

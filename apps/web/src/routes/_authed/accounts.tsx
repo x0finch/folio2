@@ -6,18 +6,16 @@ import { prefetchAccounts } from "@/lib/queries/prefetch-pages";
 import { Accounts } from "./-accounts";
 
 export const Route = createFileRoute("/_authed/accounts")({
-  // 详情抽屉进 URL(与首页主 tab 同一套,ADR 0043):刷新还停在这个账户、链接能分享。
-  // **只校验形状,不校验值** —— 账户 id 是运行时数据(还可能指向已删/不在当前 Portfolio 的账户),
-  // 认不出的由组件当作没开,见下面的 `selected`。
+  // 详情抽屉选中(`account`)不再进 URL(FOL-80,反转 ADR 0043):住组件内部 state。
   //
-  // `.catch(undefined)` 不是装饰:schema 一旦抛错,router 就把它当路由错误,整页变成
-  // 「Something went wrong!」外加一坨 zod 报错 JSON。实测(去掉 `.catch` 复现):`?account=`
-  // 空串触发 `too_small`,`?account=a&account=b` 被解析成数组触发 `invalid_type` —— 两个都只是
-  // 地址栏里敲坏了一个参数,不该把页面打没。`.catch` 把它们收成「没带这个参数」。
+  // 只剩 `focus` 一个自有参数,而且是**一次性命令**不是持久状态:页头同步面板点某一行时跨页带上它
+  // (「把这个账户那一行滚出来并高亮」),本页到达后读一次即由列表页 `replace` 抹掉,不留在地址栏里。
+  // 它必须走 URL —— 同步面板在别的页(总览/洞察)的页头里,跨页传值只能经地址。
+  //
+  // `.catch(undefined)` 不是装饰:schema 一旦抛错 router 就当路由错误,整页变「Something went wrong!」。
+  // 实测:`?focus=` 空串触发 `too_small`,`?focus=a&focus=b` 解析成数组触发 `invalid_type` —— 都只是
+  // 地址栏里敲坏了参数,不该把页面打没。`.catch` 把它们收成「没带这个参数」。
   validateSearch: z.object({
-    account: z.string().min(1).optional().catch(undefined),
-    // 页头同步面板点某一行时带上它:「把这个账户的那一行滚出来」。与 `account` 分开 —— 那个是
-    // 「打开详情抽屉」,这个是「在列表里指给我看」;用完即由列表页清掉,不留在地址栏里。
     focus: z.string().min(1).optional().catch(undefined),
   }),
   // 预取的 key 跟着地址里的组合走(ADR 0046 / 0047:这几份数据现在按组合各一份)。
