@@ -20,6 +20,7 @@ export interface SwitcherPage {
 }
 
 const FADE_S = 0.4;
+const LIFT_PX = 8; // 入场微上抬:新页从下方 8px 升到位
 
 /** 等浏览器真画出一帧(两次 rAF:第一次排到当前帧尾,第二次跨到下一帧后)。 */
 const nextPaint = () =>
@@ -63,14 +64,18 @@ export function PageSwitcher({ pages, activeKey }: { pages: SwitcherPage[]; acti
         // 两层半透明叠白底中点会发灰、像瞬切;新页 0→1 覆上来才是清清楚楚的"入场"。淡完把旧页隐藏保活。
         const inEl = panels.current.get(target);
         if (inEl) {
-          // **先让新面板真画出一帧再淡**:`<Activity>` 的揭示是低优先级提交,iOS 上可能偏晚 —— 不等这一下
-          // 就在还没上屏的元素上跑动画,跑完内容才 opacity:1 弹出来 = 看着没动画。等两帧确保它在屏上(opacity 0)。
+          // **先让新面板真画出一帧再动**:`<Activity>` 的揭示是低优先级提交,iOS 上可能偏晚 —— 不等这一下
+          // 就在还没上屏的元素上跑动画,跑完内容才落定弹出来 = 看着没动画。等两帧确保它在屏上(起始态)。
+          // 入场 = 淡入 + 微上抬:新页从 opacity 0 + translateY(8px) 升到 opacity 1 + translateY(0)。
+          // transform 作用在整块面板上,同步条(HeaderSync)在页内、跟着一起升,静止态位置不变、不跳。
           inEl.style.opacity = "0";
+          inEl.style.transform = `translateY(${LIFT_PX}px)`;
           await nextPaint();
           if (!alive.current || latest.current !== target) continue;
           const opts = { duration: reduce ? 0 : FADE_S, ease: EASE_OUT } as const;
-          await animate(inEl, { opacity: [0, 1] }, opts).finished;
+          await animate(inEl, { opacity: [0, 1], y: [LIFT_PX, 0] }, opts).finished;
           inEl.style.opacity = "1"; // 钉死终态,避免 React 提交前的一帧缝
+          inEl.style.transform = "translateY(0px)";
         }
         if (!alive.current) break;
 
