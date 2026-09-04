@@ -15,6 +15,7 @@ const en = {
     create: "Create",
     edit: "Edit",
     clickToEdit: "Click to edit",
+    balanceHidden: "Balance hidden — tap to reveal",
   },
   Sidebar: {
     selfHosted: "Self-hosted",
@@ -306,6 +307,8 @@ const en = {
     themeSystem: "System",
     language: "Language",
     currency: "Currency",
+    hideBalances: "Hide balances",
+    hideBalancesError: "Couldn't save that. Try again.",
     providerKeys: "Provider API keys",
     configured: "Configured",
     notConfigured: "Not configured",
@@ -437,6 +440,7 @@ const zh: Messages = {
     create: "创建",
     edit: "编辑",
     clickToEdit: "点击可编辑",
+    balanceHidden: "余额已隐藏 —— 点一下显示",
   },
   Sidebar: {
     selfHosted: "自托管",
@@ -717,6 +721,8 @@ const zh: Messages = {
     themeSystem: "跟随系统",
     language: "语言",
     currency: "计价币种",
+    hideBalances: "隐藏余额",
+    hideBalancesError: "没保存上,再试一次。",
     providerKeys: "Provider API key",
     configured: "已配置",
     notConfigured: "未配置",

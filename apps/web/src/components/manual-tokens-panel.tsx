@@ -46,6 +46,7 @@ import {
   type SubmitResult,
 } from "./manual-activity-modal";
 import { Portal } from "./portal";
+import { Sensitive } from "./sensitive";
 import { buildOwnedOptions } from "./token-search";
 
 // manual 账户详情抽屉的多 token 面板(A5 F → T4:接服务端)。Tokens|Activity 双 tab(全圆 pill,默认 Tokens)+
@@ -388,7 +389,7 @@ export function ManualTokensPanel({
                   />
                 }
               >
-                {formatNumber(a.amount)} {a.symbol.toUpperCase()}
+                <Sensitive>{formatNumber(a.amount)}</Sensitive> {a.symbol.toUpperCase()}
                 {/* 卖超警示 icon 并入 hover 触发区(尺寸同 CEX 代币行的 NoteIndicator glyph:size-3;色用语义 --warn)。 */}
                 {oversold ? (
                   <AlertTriangle
@@ -588,18 +589,27 @@ function ActivityDetail({
         <span className={kindTone[row.kind]}>{t(row.kind)}</span>
       </DetailRow>
       <DetailRow label={t("amountLabel")}>
-        {formatNumber(row.amount)} {row.symbol.toUpperCase()}
+        {/* 遮数量,留 symbol;单价是市场价 → 不遮,下面的 value/fee 是你的钱 → 遮。 */}
+        <Sensitive>{formatNumber(row.amount)}</Sensitive> {row.symbol.toUpperCase()}
       </DetailRow>
       {row.price != null && <DetailRow label={t("priceLabel")}>{usd(row.price)}</DetailRow>}
       {row.price != null && (
-        <DetailRow label={t("valuePreview")}>{usd(row.amount * row.price)}</DetailRow>
+        <DetailRow label={t("valuePreview")}>
+          <Sensitive>{usd(row.amount * row.price)}</Sensitive>
+        </DetailRow>
       )}
-      {row.fee != null && <DetailRow label={t("feeLabel")}>{usd(row.fee)}</DetailRow>}
+      {row.fee != null && (
+        <DetailRow label={t("feeLabel")}>
+          <Sensitive>{usd(row.fee)}</Sensitive>
+        </DetailRow>
+      )}
       <DetailRow label={t("dateLabel")}>{dateTimeFmt.format(row.occurredAt)}</DetailRow>
 
       {/* 此时账户总额(该活动发生时刻,账户全部 token 现算);卖超时如实提示,不改折叠结果。 */}
       <div className="flex flex-col gap-1.5 border-border border-t pt-2">
-        <DetailRow label={t("accountTotalThen")}>{usd(totalThen)}</DetailRow>
+        <DetailRow label={t("accountTotalThen")}>
+          <Sensitive>{usd(totalThen)}</Sensitive>
+        </DetailRow>
         {oversold ? (
           <p className="text-muted-foreground text-xs leading-relaxed">{t("oversoldNotice")}</p>
         ) : null}

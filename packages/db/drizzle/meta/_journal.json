@@ -57,6 +57,13 @@
       "when": 1787634571097,
       "tag": "0007_cynical_sunset_bain",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1788477012084,
+      "tag": "0008_steep_nighthawk",
+      "breakpoints": true
     }
   ]
 }

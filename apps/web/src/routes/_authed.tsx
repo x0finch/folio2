@@ -1,4 +1,4 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
   isRedirect,
@@ -12,11 +12,13 @@ import { z } from "zod";
 import { AppShell, AppShellSkeleton } from "@/components/app-shell";
 import { LockScreen } from "@/components/lock-screen";
 import { PortfolioSelector } from "@/components/portfolio-selector";
+import { BalancePrivacyProvider } from "@/lib/hooks/use-balance-privacy";
 import { PortfolioProvider, pickSelectedPortfolio, usePortfolio } from "@/lib/hooks/use-portfolio";
 import { CurrencyProvider } from "@/lib/hooks/use-prefer-currency";
 import { RETRY, withRetry } from "@/lib/queries/constants";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
+import { valuationSettingsQuery } from "@/lib/queries/settings";
 import { prefetchSyncStatusAtoms, useSyncStatus } from "@/lib/queries/sync";
 import { getSession } from "@/lib/server/session";
 
@@ -73,6 +75,10 @@ export const Route = createFileRoute("/_authed")({
   // 那份摘要」——切组合那条路径上,页头的摘要由 `ShellWithSync` 自己的 `useSuspenseQuery` 取,
   // 不需要 loader 再跑一次。
   loader: async ({ context, location, cause }) => {
+    // 隐私开关(FOL-75/ADR 0052)跟展示币种一样是**整树都要读**的偏好 —— 隐私 Provider 挂在这一层,
+    // 底下每处金额都靠它。这里**发出即返回、不 await**:fail-closed 已经兜住「还没读到」那一段,
+    // 不值得让它挡首屏。
+    context.queryClient.ensureQueryData(valuationSettingsQuery());
     // **同步摘要要先知道是哪个 Portfolio**(ADR 0033),所以这两个不能并发:先拿到 Portfolio 列表
     // 才认得出地址里那个 id(以及默认那个)。
     const [, portfolios] = await Promise.all([
@@ -150,16 +156,22 @@ function AuthedLayout() {
   const { user } = Route.useRouteContext();
   const { data: preferCurrency } = useSuspenseQuery(currencyPreferenceQuery());
   const { data: portfolios } = useSuspenseQuery(portfolioListQuery());
+  // 隐私开关的权威值喂给 Provider(ADR 0052)。**非 suspense**:loader 只 fire-and-forget 预取它,
+  // 没读到时 `undefined` 让 Provider 走 fail-closed,不该为它挂起整个外壳。
+  const { data: settings } = useQuery(valuationSettingsQuery());
   return (
     <CurrencyProvider value={preferCurrency}>
       {/* Portfolio 选中态(ADR 0033):住布局层,三页共享;事实源是 URL 上的 `?portfolio=`(ADR 0046)。 */}
       <PortfolioProvider portfolios={portfolios.portfolios} defaultId={portfolios.defaultId}>
-        {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
-        <LockScreen>
-          <ShellWithSync userName={user.name || user.email || ""}>
-            <Outlet />
-          </ShellWithSync>
-        </LockScreen>
+        {/* 余额隐私(ADR 0052):顶层持有「遮不遮 / 临时显示」,底下每处金额靠 <Sensitive> 读它。 */}
+        <BalancePrivacyProvider hideBalances={settings?.hideBalances}>
+          {/* 闲置锁屏(ADR 0029)：父包裹整个认证区，锁定时卸载下方 App(DOM 不留内容)、只留锁屏。 */}
+          <LockScreen>
+            <ShellWithSync userName={user.name || user.email || ""}>
+              <Outlet />
+            </ShellWithSync>
+          </LockScreen>
+        </BalancePrivacyProvider>
       </PortfolioProvider>
     </CurrencyProvider>
   );

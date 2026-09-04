@@ -1,6 +1,7 @@
 import { LogoAvatar, Separator, SharedLayoutBg } from "@folio/ui";
 import { useTranslations } from "use-intl";
 import { AccountName } from "@/components/account-name";
+import { Sensitive } from "@/components/sensitive";
 import type { PerpPositionView, PerpView } from "@/lib/core/account-view";
 import { formatNumber, signedUsd } from "@/lib/core/format-number";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
@@ -54,7 +55,8 @@ function PerpRowContent({ p }: { p: PerpPositionView }) {
         </NeutralChip>
         <div className="flex items-center gap-2">
           <span className="font-medium tabular-nums">
-            {formatNumber(Math.abs(p.size))} {p.coin}
+            {/* 遮仓位数量,留 coin(公开的币名);开仓价是市场价、不遮。 */}
+            <Sensitive>{formatNumber(Math.abs(p.size))}</Sensitive> {p.coin}
           </span>
           {risk ? (
             <LiqRing risk={risk} position={p} />
@@ -83,17 +85,24 @@ function PerpAccountBody({ view }: { view: PerpView }) {
     <>
       {equity && (
         <div className="flex flex-wrap gap-x-10 gap-y-2 px-3">
-          <Stat label={t("accountEquity")} value={usd(equity.accountValue)} />
+          {/* 权益 / uPnL / 可提 / 名义都是「你的钱」→ 遮;保证金率、杠杆是比率 → 留。 */}
+          <Stat
+            label={t("accountEquity")}
+            value={<Sensitive>{usd(equity.accountValue)}</Sensitive>}
+          />
           <Stat
             label={t("upnl")}
-            value={signedUsd(usd, totalUpnl)}
+            value={<Sensitive>{signedUsd(usd, totalUpnl)}</Sensitive>}
             className={totalUpnl > 0 ? "text-pos" : totalUpnl < 0 ? "text-neg" : undefined}
           />
           {marginRatio != null && (
             <Stat label={t("marginRatio")} value={`${Math.round(marginRatio * 100)}%`} />
           )}
-          <Stat label={t("withdrawable")} value={usd(equity.withdrawable)} />
-          <Stat label={t("notional")} value={usd(equity.totalNtlPos)} />
+          <Stat
+            label={t("withdrawable")}
+            value={<Sensitive>{usd(equity.withdrawable)}</Sensitive>}
+          />
+          <Stat label={t("notional")} value={<Sensitive>{usd(equity.totalNtlPos)}</Sensitive>} />
           {equity.accountValue > 0 && (
             <Stat
               label={t("accountLeverage")}
