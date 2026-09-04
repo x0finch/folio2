@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { lazy, useState } from "react";
 import { PageSwitcher, type SwitcherPage } from "@/components/page-switcher";
 
-// 一次性 spike(FOL-79):拿 PageSwitcher 套假页,在真机 iOS 上验"保活 + 交叉淡入 + 异步不闪"。
+// 一次性 spike(FOL-79):拿 PageSwitcher 套假页,在真机 iOS 上验"Activity 保活 + 每页自带骨架 + lazy 首次加载"。
 // **公开路由 `/spike`,不碰真 App;验完连同假页一起删(FOL-81)。** PageSwitcher 本身是产品代码,留下。
 export const Route = createFileRoute("/spike")({
   ssr: false,
@@ -15,24 +15,42 @@ const DEFS = [
   { key: "insights", label: "洞察", bg: "#fef9c3", fg: "#a16207" },
   { key: "settings", label: "设置", bg: "#fae8ff", fg: "#a21caf" },
 ] as const;
+type Def = (typeof DEFS)[number];
 
-const PAGES: SwitcherPage[] = DEFS.map((d) => ({
-  key: d.key,
-  // React.lazy + 定时器模拟"架子(chunk)加载"首次 ~900ms;这期间由通用骨架顶着,切换本身不等它。之后 React 缓存,秒回。
-  Component: lazy(
+// once:让 prefetch 的调用和 React.lazy 内部的调用共享同一个 promise。
+// 不加的话两边各调一次 factory → 两个定时器 / 两条 promise,预热就白费了。
+function once<T>(fn: () => Promise<T>) {
+  let p: Promise<T> | undefined;
+  return () => {
+    p ??= fn();
+    return p;
+  };
+}
+
+// 每页:lazy 组件 + 自带骨架 + 一个 prefetch(预热 chunk)。真实里 `load` 就是 `() => import("./pages/xxx")`。
+const PAGES: (SwitcherPage & { def: Def; prefetch: () => void })[] = DEFS.map((d) => {
+  // 模拟"chunk 首次加载 ~900ms"。这期间由该页自己的骨架顶着;到了 Suspense 原地换成真页,之后 React 缓存、秒回。
+  const load = once(
     () =>
       new Promise<{ default: () => React.JSX.Element }>((res) =>
         setTimeout(() => res({ default: () => <DummyPage def={d} /> }), 900),
       ),
-  ),
-}));
+  );
+  return {
+    key: d.key,
+    Component: lazy(load),
+    Skeleton: () => <PageSkeleton def={d} />,
+    prefetch: load,
+    def: d,
+  };
+});
 
 function Spike() {
   const [active, setActive] = useState("overview");
   return (
     <div style={{ minHeight: "100svh", background: "#fff", fontFamily: "system-ui" }}>
       <div style={{ paddingBottom: 96 }}>
-        <PageSwitcher pages={PAGES} activeKey={active} fallback={<GenericSkeleton />} />
+        <PageSwitcher pages={PAGES} activeKey={active} />
       </div>
 
       {/* 底部导航(模拟 Dock)。 */}
@@ -50,22 +68,24 @@ function Spike() {
           zIndex: 40,
         }}
       >
-        {DEFS.map((d) => (
+        {PAGES.map((p) => (
           <button
-            key={d.key}
+            key={p.key}
             type="button"
-            onClick={() => setActive(d.key)}
+            // 按下即预热该页 chunk —— 比 click 抢一拍;第一次点新页时骨架更短甚至不出现。
+            onPointerDown={() => p.prefetch()}
+            onClick={() => setActive(p.key)}
             style={{
               border: "none",
               borderRadius: 999,
               padding: "10px 16px",
               fontSize: 14,
-              color: d.key === active ? "#111" : "#fff",
-              background: d.key === active ? "#fff" : "transparent",
+              color: p.key === active ? "#111" : "#fff",
+              background: p.key === active ? "#fff" : "transparent",
               cursor: "pointer",
             }}
           >
-            {d.label}
+            {p.def.label}
           </button>
         ))}
       </nav>
@@ -75,28 +95,42 @@ function Spike() {
 
 const ROW_SLOTS = Array.from({ length: 12 }, (_, i) => `r${i + 1}`);
 
-// 通用骨架:任一页的架子还没到时先顶着(所有页共用同一张),架子到了 Suspense 原地换成真页。
-function GenericSkeleton() {
+// 每页自己的骨架:用该页的语义色浅浅染一下 + 角标写清是哪个 tab —— 在真机上一眼看出"是这个 tab 自己的骨架"。
+function PageSkeleton({ def }: { def: Def }) {
   return (
-    <div style={{ minHeight: "100svh", padding: 24, background: "#fafafa" }}>
-      <div style={{ height: 40, width: 140, borderRadius: 10, background: "#ececec" }} />
+    <div style={{ position: "relative", minHeight: "100svh", padding: 24, background: def.bg }}>
       <div
-        style={{ marginTop: 8, height: 16, width: 90, borderRadius: 8, background: "#f0f0f0" }}
+        style={{
+          position: "absolute",
+          top: 24,
+          right: 16,
+          padding: "6px 12px",
+          borderRadius: 999,
+          background: `${def.fg}1a`,
+          color: def.fg,
+          fontSize: 13,
+        }}
+      >
+        「{def.label}」骨架
+      </div>
+      <div style={{ height: 40, width: 140, borderRadius: 10, background: `${def.fg}26` }} />
+      <div
+        style={{ marginTop: 8, height: 16, width: 90, borderRadius: 8, background: `${def.fg}1f` }}
       />
       {ROW_SLOTS.map((slot) => (
         <div
-          key={`sk-${slot}`}
-          style={{ marginTop: 12, height: 64, borderRadius: 12, background: "#efefef" }}
+          key={`sk-${def.key}-${slot}`}
+          style={{ marginTop: 12, height: 64, borderRadius: 12, background: `${def.fg}17` }}
         />
       ))}
     </div>
   );
 }
 
-function DummyPage({ def }: { def: (typeof DEFS)[number] }) {
+function DummyPage({ def }: { def: Def }) {
   return (
     <div style={{ position: "relative", background: def.bg, minHeight: "100svh", padding: 24 }}>
-      {/* 假 HeaderSync:absolute 定位到右上,验证交叉淡入时不跳。 */}
+      {/* 假 HeaderSync:absolute 定位到右上,验证切换时不跳。 */}
       <div
         style={{
           position: "absolute",
