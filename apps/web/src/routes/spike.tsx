@@ -16,13 +16,12 @@ const DEFS = [
   { key: "settings", label: "设置", bg: "#fae8ff", fg: "#a21caf" },
 ] as const;
 
-// 模拟"这一页 chunk + 数据要异步加载":按 key 缓存 → 首次故意等 1800ms、再进秒回(= 真实的 lazy import + 预取缓存)。
-// 等久点是为了在真机上把"旧页顶着不空、加载多久都不闪"这件事看清楚。
+// 模拟"这一页 chunk + 数据要异步加载":按 key 缓存 → 首次 ~400ms、再进秒回(= 真实的 lazy import + 预取缓存)。
 const readyCache = new Map<string, Promise<void>>();
 function ready(key: string): Promise<void> {
   let p = readyCache.get(key);
   if (!p) {
-    p = new Promise((res) => setTimeout(res, 1800));
+    p = new Promise((res) => setTimeout(res, 400));
     readyCache.set(key, p);
   }
   return p;
@@ -35,7 +34,7 @@ const PAGES: SwitcherPage[] = DEFS.map((d) => ({
   Component: lazy(
     () =>
       new Promise<{ default: () => React.JSX.Element }>((res) =>
-        setTimeout(() => res({ default: () => <DummyPage def={d} /> }), 1800),
+        setTimeout(() => res({ default: () => <DummyPage def={d} /> }), 400),
       ),
   ),
 }));
@@ -60,6 +59,7 @@ function Spike() {
           padding: 8,
           borderRadius: 999,
           background: "rgba(0,0,0,0.85)",
+          zIndex: 40,
         }}
       >
         {DEFS.map((d) => (
