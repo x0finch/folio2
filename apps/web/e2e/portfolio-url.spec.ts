@@ -52,6 +52,12 @@ test.describe("URL 里的组合选中态", () => {
     await switchTo(page, SECOND);
     await expect(page).toHaveURL(/\/accounts\?portfolio=[^&]+$/);
     const watchUrl = page.url();
+    // 页头药丸上**只能剩新组合的名字**。切到一个没看过的组合时,页头同步摘要的原料还不在缓存里;
+    // 要是 loader 不替外壳等它们,外壳会挂起、被 Suspense 整个隐掉(display:none)换成骨架壳几十毫秒。
+    // 药丸的换字动画正好在这段里起跑 —— 元素隐着量不到尺寸,旧名字退不出去,新旧两个名字就并排卡在
+    // 药丸里,直到下一次切换(生产构建上实测,`toHaveText` 是全文匹配,多一个字都红)。
+    // 节点没被拆、只是被隐了,所以「节点还连着」这种断言抓不到它;要断的是用户看见的那行字。
+    await expect(page.getByRole("button", { name: "Portfolio", exact: true })).toHaveText(SECOND);
     // 新组合里还没有账户。**先按可见性筛,再断言**:这一页在换数据时 DOM 里会同时存在两份名单
     // (React 把旧的那份留着、加 `hidden`,直到新数据就绪 —— 那正是「不闪骨架」的机制)。
     // 只写 `toBeVisible()` 挡不住:strict mode 先算「命中几个」,两个就直接报错,而 `getByText`

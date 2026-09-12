@@ -101,7 +101,9 @@ export const Route = createFileRoute("/_authed")({
     const summaryAtoms = prefetchSyncStatusAtoms(context.queryClient, selectedId);
     // 只有**首次进入**才等。这个 `await` 是替页头那块同步摘要挡首屏挂起的(它没有自己的 suspense
     // 边界),冷加载时不等它会退成整页挂起。站内往返 / invalidate 触发的重跑(`cause === "stay"`)
-    // 不必等:那时旧界面还在,让它自己挂起就好。
+    // 这里不等 —— 但**不是**「旧界面还在、让它自己挂起就好」:外壳挂起会被 Suspense 整个隐掉换成
+    // 骨架壳,页头药丸的换字动画在隐藏中跑坏(新旧名字并排卡住)。切组合那条路上由 `{-$page}` 的
+    // loader 等同一份原料,见那里。
     if (cause === "enter") await summaryAtoms;
   },
   component: AuthedLayout,

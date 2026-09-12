@@ -75,10 +75,16 @@ describe("首页 loader 不再等待慢查询", () => {
 describe("合并路由只等「是哪个组合」", () => {
   // 「其余发出即返回」的另一半:prefetch 函数体里一个 await 都没有,是因为路由压根不等它们。
   // 谁把某一页的预取 await 回去,硬刷新的白屏就回来,而且没有任何运行时报错。
-  it("loader 里唯一的 await 是 portfolioListQuery", () => {
+  //
+  // loader 里允许等的只有两样:「是哪个组合」(预取 key 必须对上)和**外壳同步摘要的两条原料**。
+  // 后者是必须等的:外壳用 `useSuspenseQueries` 读它们、上面没有自己的边界,切到没看过的组合时不等,
+  // 外壳就整个退成骨架壳再重挂(页头药丸 / 弹层重建、动画互撞)。冷加载不因此变慢 —— `_authed`
+  // 的 loader 本来就等同一份(ensureQueryData 同 key 去重)。
+  it("loader 只 await 两样:portfolioListQuery 与外壳的同步摘要原料", () => {
     const route = stripComments(readFileSync(ROUTE, "utf8"));
     const awaits = route.match(/await [^\n]*/g) ?? [];
-    expect(awaits).toHaveLength(1);
+    expect(awaits).toHaveLength(2);
     expect(awaits[0]).toContain("portfolioListQuery()");
+    expect(awaits[1]).toContain("prefetchSyncStatusAtoms(queryClient, selectedId)");
   });
 });
