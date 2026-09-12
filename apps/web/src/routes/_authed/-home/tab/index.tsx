@@ -2,6 +2,7 @@ import { Skeleton, Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
+import { Sensitive } from "@/components/sensitive";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { useHomeTabStrip } from "@/lib/hooks/use-home-tab-strip";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
@@ -157,12 +158,12 @@ function KindTotal({ portfolioId, kind }: { portfolioId: string; kind: KindTab }
       : kind === "defi"
         ? data.defiSubtotal
         : data.holdingsSubtotal;
-  return <>{usd(viewSubtotal)}</>;
+  return <Sensitive>{usd(viewSubtotal)}</Sensitive>;
 }
 
 // 自定义 Tab 的右上角合计。与下方列表**同一个 queryKey**,react-query 只发一次请求。
 function PinTotal({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKey }) {
   const usd = useDisplayValue();
   const data = usePortfolioOverview(portfolioId, pin);
-  return <>{usd(data.totalUsd)}</>;
+  return <Sensitive>{usd(data.totalUsd)}</Sensitive>;
 }

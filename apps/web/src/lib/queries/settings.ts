@@ -12,6 +12,9 @@ export const providerKeyStatusQuery = () =>
     staleTime: STALE_TIME.settings,
   });
 
+// 名字带 `valuation` 是历史(第一个字段);它读的其实是 **user_settings 一整行** ——
+// `valuationMode` + `hideBalances`(FOL-75/ADR 0052)。隐私 Provider 与外观卡的开关都从这份读
+// 取 `hideBalances`,不另开第二份读(一行一份缓存)。
 export const valuationSettingsQuery = () =>
   queryOptions({
     queryKey: settingsKeys.valuation(),

@@ -1,6 +1,7 @@
 import { cn, LogoAvatar, Popover, PopoverContent, PopoverTrigger, SharedLayoutBg } from "@folio/ui";
 import { useEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
+import { Sensitive } from "@/components/sensitive";
 import type { DefiGroup, DefiRow } from "@/lib/core/account-view";
 import { defiMeaningfulLegs, groupLegsByRole } from "@/lib/core/account-view";
 import { formatNumber } from "@/lib/core/format-number";
@@ -213,10 +214,15 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
                     key={r.id}
                     className="flex items-baseline justify-between gap-8 text-xs tabular-nums"
                   >
-                    <span>{legText(r)}</span>
+                    {/* hover 明细里的腿:数量与美元值都遮(ADR 0052)。 */}
+                    <span>
+                      <Sensitive>{legText(r)}</Sensitive>
+                    </span>
                     <span className="text-muted-foreground">
-                      {r.usdValue < 0 ? "−" : ""}
-                      {usd(Math.abs(r.usdValue))}
+                      <Sensitive>
+                        {r.usdValue < 0 ? "−" : ""}
+                        {usd(Math.abs(r.usdValue))}
+                      </Sensitive>
                     </span>
                   </div>
                 ))}

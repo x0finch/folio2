@@ -1,6 +1,7 @@
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@folio/ui";
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
+import { Sensitive } from "@/components/sensitive";
 import { formatMoney } from "@/lib/core/format-number";
 import type { HistoryPoint } from "@/lib/core/history";
 import { usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
@@ -62,7 +63,8 @@ export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
           content={
             <ChartTooltipContent
               labelFormatter={(_, payload) => fullDateTime(Number(payload?.[0]?.payload?.t))}
-              formatter={(value) => fullUsd(Number(value))}
+              // 遮 tooltip 里的净值(ADR 0052 把 tooltip 列进要遮的点);Y 轴刻度是图的尺度、不遮。
+              formatter={(value) => <Sensitive>{fullUsd(Number(value))}</Sensitive>}
             />
           }
         />

@@ -1,0 +1,1 @@
+ALTER TABLE `user_settings` ADD `hide_balances` integer DEFAULT false NOT NULL;

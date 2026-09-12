@@ -1,5 +1,6 @@
 import { Cell, Pie, PieChart } from "recharts";
 import { useLocale, useTranslations } from "use-intl";
+import { Sensitive } from "@/components/sensitive";
 import { formatMoney } from "@/lib/core/format-number";
 import { usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
 import { type AllocSlice, OTHERS_KEY } from "./allocation";
@@ -55,7 +56,10 @@ export function AllocationPie({ slices }: { slices: AllocSlice[] }) {
             <span className="text-muted-foreground text-xs">
               {total > 0 ? Math.round((d.value / total) * 100) : 0}%
             </span>
-            <span className="w-24 text-right font-medium">{usd(d.value)}</span>
+            {/* 遮每格美元值,留占比%(ADR 0052:遮金额,留占比/图表)。 */}
+            <span className="w-24 text-right font-medium">
+              <Sensitive>{usd(d.value)}</Sensitive>
+            </span>
           </li>
         ))}
       </ul>

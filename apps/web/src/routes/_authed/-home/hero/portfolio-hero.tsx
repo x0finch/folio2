@@ -2,6 +2,7 @@ import { cn, Skeleton } from "@folio/ui";
 import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { AmountTicker } from "@/components/amount-ticker";
+import { Sensitive } from "@/components/sensitive";
 import { signedUsd } from "@/lib/core/format-number";
 import { downsampleSeries, type HistoryPoint } from "@/lib/core/history";
 import type { Gain } from "@/lib/core/portfolio";
@@ -52,7 +53,8 @@ function GainBadge({ gain, compact = false }: { gain: Gain | null; compact?: boo
   if (gain == null) return <span className={cn(GAIN_BADGE, GAIN_TONE.flat)}>{NO_VALUE}</span>;
   return (
     <span className={cn(GAIN_BADGE, gainTone(gain.amount))}>
-      {signedUsd((n) => usd(n, { compact }), gain.amount)}
+      {/* 遮 24h 盈亏金额,留百分比(ADR 0052)。 */}
+      <Sensitive>{signedUsd((n) => usd(n, { compact }), gain.amount)}</Sensitive>
       {gain.pct != null && ` ${Math.abs(gain.pct).toFixed(2)}%`}
     </span>
   );
@@ -120,17 +122,23 @@ export function PortfolioHero({
   const showCompact = (compactOverride ?? isNarrow) && shownUsd >= HERO_COMPACT_MIN;
 
   return (
-    <div className="relative min-h-60 overflow-hidden pt-1">
+    // **overflow-hidden 只包趋势图,不包整块**:它本是为了裁掉绝对定位的 TrendPanel(见 trend-panel.tsx
+    // 「调用方套 relative + overflow-hidden」),但套在根上会连带把浮于其上的净值一起裁 —— 隐私开启时
+    // 大号数字的高斯模糊向左溢出根左沿,就被这层 overflow 削掉半边(FOL-75)。把裁剪挪到图自己的
+    // 包裹层,内容层不再受它约束,模糊能完整铺开。
+    <div className="relative min-h-60 pt-1">
       {/* 四态(点数不够 / 还在取数 / 什么都还没有 / 真有数据)全在 TrendPanel 里判。
           hero 的上留白更大(topMargin=92,把折线压到下半区),填充也比抽屉略重 → 覆盖这两个默认值。 */}
-      <TrendPanel
-        series={chartSeries}
-        loading={loading}
-        topMargin={92}
-        fillOpacity={0.16}
-        decorate={nothingYet}
-        onActive={scrub.onActive}
-      />
+      <div className="absolute inset-0 overflow-hidden">
+        <TrendPanel
+          series={chartSeries}
+          loading={loading}
+          topMargin={92}
+          fillOpacity={0.16}
+          decorate={nothingYet}
+          onActive={scrub.onActive}
+        />
+      </div>
 
       {/* 数字层:浮于图上,不吃指针(hover 透传给背景图)。 */}
       <div className={cn("pointer-events-none relative z-10", contentClassName)}>
@@ -156,6 +164,7 @@ export function PortfolioHero({
               // 首次同步中:大数字位摆骨架,别把「还不知道」画成 $0(见 index.tsx 的 pending 判据)。
               <Skeleton className="h-11 w-52 rounded-lg sm:h-14 sm:w-64" />
             ) : (
+              // 隐私开着时 AmountTicker 自己渲染静态模糊值(ADR 0052),点一下临时显示 —— 这里不必再包。
               <AmountTicker
                 value={shownUsd}
                 scrubbing={scrub.point != null}
@@ -173,20 +182,30 @@ export function PortfolioHero({
           {/* 「今天赚 / 亏最多的那个仓」—— 按盈亏**金额**取,不按涨跌幅(ADR 0050)。以前只看涨跌幅、
               不看持有多少,于是这两格永远被小仓位的暴涨币占据。金额走 usd() → 跟随展示币种。
               盈亏随总览一起到,没有「还在取」的态 —— best/worst 直接算得出或 `—`。 */}
+          {/* 遮盈亏金额,留 symbol(公开的币名);占比是百分比,整格不遮。 */}
           <Stat
             label={t("bestToday")}
             value={
-              metrics.best
-                ? `${metrics.best.symbol} ${signedUsd(usd, metrics.best.amount)}`
-                : NO_VALUE
+              metrics.best ? (
+                <>
+                  {metrics.best.symbol} <Sensitive>{signedUsd(usd, metrics.best.amount)}</Sensitive>
+                </>
+              ) : (
+                NO_VALUE
+              )
             }
           />
           <Stat
             label={t("worstToday")}
             value={
-              metrics.worst
-                ? `${metrics.worst.symbol} ${signedUsd(usd, metrics.worst.amount)}`
-                : NO_VALUE
+              metrics.worst ? (
+                <>
+                  {metrics.worst.symbol}{" "}
+                  <Sensitive>{signedUsd(usd, metrics.worst.amount)}</Sensitive>
+                </>
+              ) : (
+                NO_VALUE
+              )
             }
           />
           <Stat

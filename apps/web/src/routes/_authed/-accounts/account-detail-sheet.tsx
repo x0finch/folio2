@@ -34,6 +34,7 @@ import { ManualTokensPanel } from "@/components/manual-tokens-panel";
 import { Portal } from "@/components/portal";
 import { PortfolioPickerModal } from "@/components/portfolio-picker-modal";
 import { type Range, RangeTabs, rangeSince } from "@/components/range-tabs";
+import { Sensitive } from "@/components/sensitive";
 import { TagBadges } from "@/components/tag-badges";
 import { signedUsd } from "@/lib/core/format-number";
 import { buildAccountValueHistory, type HistoryPoint } from "@/lib/core/history";
@@ -563,7 +564,8 @@ function SheetHeaderGain({
   }
   return (
     <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayChange.amount))}>
-      {signedUsd(usd, dayChange.amount)}
+      {/* 遮盈亏金额,留百分比(ADR 0052)。 */}
+      <Sensitive>{signedUsd(usd, dayChange.amount)}</Sensitive>
       {dayChange.pct != null ? ` ${Math.abs(dayChange.pct).toFixed(2)}%` : ""}
     </div>
   );

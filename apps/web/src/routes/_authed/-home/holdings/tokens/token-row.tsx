@@ -1,6 +1,7 @@
 import { LogoAvatar } from "@folio/ui";
 import type { ReactNode } from "react";
 import { AvatarStack } from "@/components/avatar-stack";
+import { Sensitive } from "@/components/sensitive";
 import { formatNumber } from "@/lib/core/format-number";
 import { ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 
@@ -51,7 +52,8 @@ export function TokenRowContent({
         </div>
         {item.amount != null && (
           <span className="text-muted-foreground text-xs tabular-nums">
-            {formatNumber(item.amount)} {item.symbol}
+            {/* 遮持仓数量,留 symbol(公开的币名)。 */}
+            <Sensitive>{formatNumber(item.amount)}</Sensitive> {item.symbol}
           </span>
         )}
       </div>
