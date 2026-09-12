@@ -80,7 +80,9 @@ describe("回访不闪骨架、数字只滚一次", () => {
   });
 
   it("路由没有 pendingComponent,冷启动骨架是岛上那套,不是另一张整页骨架", () => {
-    const home = stripComments(src("routes/_authed/index.tsx"));
+    // FOL-81 后四个 page 共用一条 `{-$page}` 路由(文件名里那对花括号是真的,不是模板占位);
+    // 整页骨架只此一张,住在 `_authed` 那层。
+    const home = stripComments(src("routes/_authed/{-$page}.tsx"));
     expect(home).not.toContain("pendingComponent");
   });
 

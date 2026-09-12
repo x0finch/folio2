@@ -12,9 +12,20 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
+// 只取设置页那一段:四页的预取同住一个文件(FOL-81 把四份 loader 身体搬了进去,
+// 一份两用:路由 loader 与导航 pointerdown 预热共用),不切出来的话「设置页不 await」
+// 会被隔壁那页的行冒充。找不到就抛 —— 切空了的话下面每条 `not.toMatch` 都是空断言。
+function prefetchBody(name: string): string {
+  const all = stripComments(src("lib/queries/prefetch-pages.ts"));
+  const start = all.indexOf(`export function ${name}`);
+  if (start < 0) throw new Error(`prefetch-pages.ts 里没有 ${name}`);
+  const next = all.indexOf("export function", start + 1);
+  return next < 0 ? all.slice(start) : all.slice(start, next);
+}
+
 describe("设置页 loader 不再等待慢查询", () => {
   it("发出三条设置查询,但不 await", () => {
-    const route = stripComments(src("routes/_authed/settings.tsx"));
+    const route = prefetchBody("prefetchSettings");
     expect(route).toContain("providerKeyStatusQuery(");
     expect(route).toContain("valuationSettingsQuery(");
     expect(route).toContain("dataStatsQuery(");

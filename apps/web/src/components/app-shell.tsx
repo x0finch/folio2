@@ -1,12 +1,10 @@
 import { cn, Dock, DockItem, SharedLayoutBg, Skeleton } from "@folio/ui";
-import { useQueryClient } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Home, Settings, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
 import type { SyncStatusSummary } from "@/lib/core/sync-status";
-import { usePortfolio } from "@/lib/hooks/use-portfolio";
-import { type PageKey, prefetchPage } from "@/routes/_authed/-pages";
+import type { PageKey } from "@/routes/_authed/-pages";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
 
@@ -74,6 +72,7 @@ export function AppShell({
   userName,
   syncStatus,
   selector,
+  onNavIntent,
   children,
 }: {
   userName: string;
@@ -81,6 +80,11 @@ export function AppShell({
   // 全局 Portfolio 选择器(ADR 0033):住布局层,主页/账户页/Insights 共享;Settings 页不显示。
   // 组件自身在 <2 个 Portfolio 时不渲染(渐进式显示)。
   selector?: ReactNode;
+  // 意图预热(FOL-81):指针按在某个导航项上时通知一声「大概要去这页了」。外壳只报意图,
+  // **预热怎么做是路由层的事**(`_authed` 的 ShellWithSync 接上 `prefetchPage`)——
+  // 外壳自己引那条链的话,`prefetch-pages` → server 侧那堆 query 会跟着进这个模块,
+  // 而同文件的 `AppShellSkeleton` 必须保持零依赖、零 provider 可渲染(见 tests/app-shell-skeleton)。
+  onNavIntent?: (key: PageKey) => void;
   children: ReactNode;
 }) {
   const t = useTranslations("Nav");
@@ -92,11 +96,6 @@ export function AppShell({
   const activeKey = seg === "" ? "overview" : seg;
   const activeNav = NAVS.find((n) => n.key === activeKey) ?? NAVS[0];
   const pageTitle = t(activeNav.key);
-  // 意图预热(FOL-81):指针按在某个导航项上就先把那页的 chunk + 数据拉起来,点下去更快。严格 lazy
-  // 之下这是唯一的提前量 —— 没按过的页一律不加载。
-  const queryClient = useQueryClient();
-  const { selectedId } = usePortfolio();
-  const warm = (page: PageKey) => prefetchPage(page, queryClient, selectedId);
   const pageSub =
     activeNav.key === "overview"
       ? th("overviewSub", { count: syncStatus.total })
@@ -118,7 +117,7 @@ export function AppShell({
                 key={key}
                 to="/{-$page}"
                 params={{ page }}
-                onPointerDown={() => warm(key)}
+                onPointerDown={() => onNavIntent?.(key)}
                 aria-current={key === activeKey ? "page" : undefined}
                 className={cn(
                   "block rounded-lg px-3 py-2 font-medium text-sm transition-colors",
@@ -182,7 +181,7 @@ export function AppShell({
                 // iOS Safari 只在元素(或祖先)挂了触摸监听时才给 `:active` —— 这个空监听就是那把钥匙,
                 // 是这条路子公认的代价。**别删**:删了 iOS 上按下就完全没反应(桌面照旧有)。
                 onTouchStart={NOOP}
-                onPointerDown={() => warm(key)}
+                onPointerDown={() => onNavIntent?.(key)}
                 className="group flex size-full items-center justify-center"
               >
                 {/* 按下反馈(片3):触摸屏没有 hover,按下这一下是唯一的即时回应。

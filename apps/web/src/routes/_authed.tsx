@@ -1,4 +1,4 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   createFileRoute,
   isRedirect,
@@ -19,6 +19,7 @@ import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
 import { prefetchSyncStatusAtoms, useSyncStatus } from "@/lib/queries/sync";
 import { getSession } from "@/lib/server/session";
+import { type PageKey, prefetchPage } from "./_authed/-pages";
 
 // 受保护布局:无 session 则重定向到 /login(仅 UX;数据安全靠各 authedServerFn)。
 // loader 定展示币种 + 汇率(cookie + FX cache-only),并**预取**全局同步状态
@@ -139,8 +140,18 @@ function StalledShell({ reset }: { reset?: () => void }) {
 function ShellWithSync({ userName, children }: { userName: string; children: ReactNode }) {
   const { selectedId } = usePortfolio();
   const syncStatus = useSyncStatus(selectedId);
+  const queryClient = useQueryClient();
+  // 意图预热(FOL-81):指针按在某个导航项上就先把那页的 chunk + 数据拉起来,点下去更快。严格 lazy
+  // 之下这是唯一的提前量 —— 没按过的页一律不加载。**接在这一层**,因为 `prefetchPage` 牵着
+  // 四个 page 的查询链,而外壳那个文件同时住着必须零依赖的 `AppShellSkeleton`(ADR 0049)。
+  const warm = (page: PageKey) => prefetchPage(page, queryClient, selectedId);
   return (
-    <AppShell userName={userName} syncStatus={syncStatus} selector={<PortfolioSelector />}>
+    <AppShell
+      userName={userName}
+      syncStatus={syncStatus}
+      selector={<PortfolioSelector />}
+      onNavIntent={warm}
+    >
       {children}
     </AppShell>
   );

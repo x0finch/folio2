@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 // #495 票 1:洞察 loader 只等默认组合 id,原子快照和历史发出即返回。
 // FOL-57:总览改原子 query,不再预取 `portfolioOverviewQuery`。
 // 谁把它们重新 await 回去,硬刷新的白屏就回来,而且没有任何运行时报错。
+//
+// FOL-81 后这份 loader 身体搬进了 `lib/queries/prefetch-pages.ts` 的 `prefetchInsights`
+// (四页合成一条 `{-$page}` 路由,预取一份两用:loader 与导航 pointerdown 预热共用),
+// 「没有 pendingComponent」则钉在那条合并路由上。
 
 const ROOT = join(import.meta.dirname, "../src");
 
@@ -16,9 +20,19 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
+// 只取洞察页那一段:四页的预取同住一个文件,不切出来的话「洞察不取 X」会被隔壁那页取 X
+// 的那行冒充成绿的。找不到就抛 —— 切空了的话下面每条 `not.toContain` 都是空断言。
+function prefetchBody(name: string): string {
+  const all = stripComments(src("lib/queries/prefetch-pages.ts"));
+  const start = all.indexOf(`export function ${name}`);
+  if (start < 0) throw new Error(`prefetch-pages.ts 里没有 ${name}`);
+  const next = all.indexOf("export function", start + 1);
+  return next < 0 ? all.slice(start) : all.slice(start, next);
+}
+
 describe("洞察 loader 不再等待慢查询", () => {
   it("发出原子快照和历史,但不 await", () => {
-    const route = stripComments(src("routes/_authed/insights.tsx"));
+    const route = prefetchBody("prefetchInsights");
     expect(route).toContain("accountHoldingsSnapshotQueries(");
     expect(route).toContain("portfolioHistoryQuery(");
     expect(route).not.toMatch(/await Promise\.all\([\s\S]*accountHoldingsSnapshotQueries/);
@@ -28,7 +42,8 @@ describe("洞察 loader 不再等待慢查询", () => {
   });
 
   it("路由没有 pendingComponent", () => {
-    expect(stripComments(src("routes/_authed/insights.tsx"))).not.toContain("pendingComponent");
+    // 文件名里那对花括号是真的(可选路径参数 `{-$page}`),不是模板占位。
+    expect(stripComments(src("routes/_authed/{-$page}.tsx"))).not.toContain("pendingComponent");
   });
 });
 
