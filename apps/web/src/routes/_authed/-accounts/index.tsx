@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AvatarStack } from "@/components/avatar-stack";
 import { ConnectorBadge } from "@/components/connector-badge";
+import { StaggerReveal } from "@/components/page-switcher/stagger-reveal";
 import { QueryBoundary } from "@/components/query-boundary";
 import { TagBadges } from "@/components/tag-badges";
 import { isManual } from "@/lib/core/manual";
@@ -53,8 +54,10 @@ export function Accounts() {
     setCompleteTarget({ accountId: a.id, connectorId: a.connectorId, credsSafe: a.credsSafe });
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* 页头右上角同步入口:账户页额外把「添加账户」融进 + 段(见 SyncStatus.ActionShell),modal 由本页持有。 */}
+    <>
+      {/* 页头右上角同步入口:账户页额外把「添加账户」融进 + 段(见 SyncStatus.ActionShell),modal 由本页持有。
+          两者都留在进场容器**之外**:同步条 absolute 到外壳 `<main>`,被带 transform 的层裹住会顶跳
+          约 24px(见 StaggerReveal);modal 是浮层,不参与页面进场。 */}
       <HeaderSync
         action={{ icon: <Plus />, label: t("addAccount"), onClick: () => setAddOpen(true) }}
       />
@@ -64,14 +67,18 @@ export function Accounts() {
         completeFor={completeTarget}
         onCompleteClose={() => setCompleteTarget(null)}
       />
-      <QueryBoundary
-        resetKey={`list:${LIST_RESET_KEY(selectedId)}`}
-        pending={<ListSkeleton />}
-        failed={<ListFailed />}
-      >
-        <AccountsList onComplete={startComplete} />
-      </QueryBoundary>
-    </div>
+      {/* 名单那几段(标题 / 列表 / 归档)由数据边界一起吐出来,对这层只算**一个**子节点,所以竖排
+          间距挪到错列单元上(`itemClassName`),间距与原来的 `flex flex-col gap-6` 一致。 */}
+      <StaggerReveal className="flex flex-col" itemClassName="flex flex-col gap-6">
+        <QueryBoundary
+          resetKey={`list:${LIST_RESET_KEY(selectedId)}`}
+          pending={<ListSkeleton />}
+          failed={<ListFailed />}
+        >
+          <AccountsList onComplete={startComplete} />
+        </QueryBoundary>
+      </StaggerReveal>
+    </>
   );
 }
 

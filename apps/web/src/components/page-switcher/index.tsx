@@ -1,6 +1,5 @@
-import { EASE_OUT } from "@folio/ui/lib/ease";
-import { motion, useAnimationControls, useReducedMotion } from "motion/react";
 import { Activity, type ComponentType, type ReactNode, Suspense, useEffect, useState } from "react";
+import { RevealContext } from "./stagger-reveal";
 
 // 可复用的 page 切换器(FOL-79)。跟路由无关:吃一份"页注册表" + 外部传入的当前 key。
 //
@@ -8,7 +7,9 @@ import { Activity, type ComponentType, type ReactNode, Suspense, useEffect, useS
 //   (滚动、表单都在)、但清掉 effect(后台不空转);切回来即时、原样。
 // - **首次加载 = lazy**:没进过的页**根本不进树** → 它的 `React.lazy` chunk 永不请求。第一次切过去才挂载(import
 //   触发),这一刻 `Suspense` 用该页自己的 `Skeleton` 顶着;chunk + 数据到了原地换成真页。
-// - **进场渐变**:某页由隐藏转为当前页时,整页 opacity 0→1 淡入(见 `Panel`)。
+// - **进场**:某页成为当前页时,它主体那几段内容依次淡入 + 轻抬。动效本身住 `StaggerReveal`(各页自己裹),
+//   这里只发「该播了」的信号 —— 面板这一层**不做整页淡入**:它裹着页头那个 absolute 的 `<HeaderSync/>`,
+//   而且与逐段进场叠起来是双重淡入。
 
 export interface SwitcherPage {
   key: string;
@@ -18,33 +19,24 @@ export interface SwitcherPage {
   Skeleton?: ComponentType;
 }
 
-// 进场只动 opacity,**不做位移 / 缩放**:页头 `<HeaderSync/>` 是 absolute 定位到 `<main>` 的,任何带
-// transform 的包裹层会变成它的包含块,把同步条顶跳约 24px(老坑,见 tab-transition 的历史);transform
-// 还会钉死持仓页那条 `sticky` 小额条。opacity 不建包含块、不碰布局,整页淡入是安全的那一档。
-const FADE = { duration: 0.26, ease: EASE_OUT } as const;
-
-// 一个保活面板:`<Activity>` 管可见性,`motion.div` 管进场淡入。由隐藏转为可见(成为当前页)时,从
-// opacity 0 淡到 1;转为隐藏时归零,好让下次淡入从 0 起、不闪一帧全不透明。去过的页始终挂着,只是重播淡入。
+// 一个保活面板:`<Activity>` 管可见性,这里只负责「进场该重播了」的信号 —— 一个每次本页成为当前页
+// 就 +1 的计数,页面内的 `StaggerReveal` 读它重播。
+//
+// 为什么是「keyed on active 的 effect」:`<Activity mode="hidden">` 会**清掉**子树的 effect,揭开时
+// 再重新跑一遍 —— 所以「转为隐藏」那一支根本不会执行(别指望它归位),而「揭开」这件事必然伴随
+// effect 重跑,拿它当重播的扳机是稳的。计数只增不减,状态与 DOM 一概不动:重播靠重新起播,
+// **不靠换 key 重挂载**。
 function Panel({ active, children }: { active: boolean; children: ReactNode }) {
-  const controls = useAnimationControls();
-  const reduce = useReducedMotion();
+  const [reveal, setReveal] = useState(0);
   useEffect(() => {
-    if (reduce) {
-      controls.set({ opacity: 1 });
-      return;
-    }
-    if (active) {
-      controls.set({ opacity: 0 });
-      controls.start({ opacity: 1 });
-    } else {
-      controls.set({ opacity: 0 });
-    }
-  }, [active, reduce, controls]);
+    if (!active) return;
+    setReveal((n) => n + 1);
+  }, [active]);
   return (
     <Activity mode={active ? "visible" : "hidden"}>
-      <motion.div initial={{ opacity: 0 }} animate={controls} transition={FADE}>
-        {children}
-      </motion.div>
+      <div>
+        <RevealContext.Provider value={reveal}>{children}</RevealContext.Provider>
+      </div>
     </Activity>
   );
 }

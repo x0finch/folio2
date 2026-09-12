@@ -1,4 +1,5 @@
 import { getRouteApi } from "@tanstack/react-router";
+import { StaggerReveal } from "@/components/page-switcher/stagger-reveal";
 import { AppearanceCard } from "./appearance-card";
 import { DataCard } from "./data-card";
 import { PasskeysCard } from "./passkey";
@@ -13,7 +14,7 @@ const authedApi = getRouteApi("/_authed");
 export function Settings() {
   const { user } = authedApi.useRouteContext();
   return (
-    <div className="flex flex-col gap-6">
+    <StaggerReveal className="flex flex-col gap-6">
       <UserCard user={user} />
       <AppearanceCard />
       {/* 自动锁定在 passkeys 之前:passkey 现在只从这里添加(开关首次打开时注册一个本机凭据)。 */}
@@ -28,6 +29,6 @@ export function Settings() {
         {__APP_VERSION__ !== __COMMIT_HASH__ ? `${__APP_VERSION__} · ` : ""}
         {__COMMIT_HASH__} · {__BUILD_TIME__.slice(0, 10)}
       </p>
-    </div>
+    </StaggerReveal>
   );
 }

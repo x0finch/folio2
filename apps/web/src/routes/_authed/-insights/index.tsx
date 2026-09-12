@@ -11,6 +11,7 @@ import {
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
+import { StaggerReveal } from "@/components/page-switcher/stagger-reveal";
 import { QueryBoundary } from "@/components/query-boundary";
 import { toDailySeries, toPortfolioCurve } from "@/lib/core/history";
 import { floorToHour } from "@/lib/core/portfolio";
@@ -35,11 +36,14 @@ const DIM_LABEL: Record<AllocDimension, string> = {
 
 export function Insights() {
   return (
-    <div className="flex flex-col gap-6">
+    <>
+      {/* 同步条留在进场容器外(absolute 到外壳 `<main>`,被 transform 层裹住会顶跳,见 StaggerReveal)。 */}
       <HeaderSync />
-      <TrendCard />
-      <AllocationCard />
-    </div>
+      <StaggerReveal className="flex flex-col gap-6">
+        <TrendCard />
+        <AllocationCard />
+      </StaggerReveal>
+    </>
   );
 }
 
