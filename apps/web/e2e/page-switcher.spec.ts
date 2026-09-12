@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { dismissPasskeyPrompt, signUpAndLogin } from "./fixtures/app";
 
-// 一个路由 + `<Activity>` 保活的 page 切换器(FOL-81 / ADR 0052)。验的是这套机制**只有在浏览器里
+// 一个路由 + `<Activity>` 保活的 page 切换器(FOL-81 / ADR 0053)。验的是这套机制**只有在浏览器里
 // 才成立**的那几件:切 page 只换可见组件、去过的页保活(页内 state 切走再回来还在)、深链直达、
 // 切换全程不抛错。URL / 后退 / 跨页 / 组合那几件由 `portfolio-url.spec` 管,这里不重复。
 //
