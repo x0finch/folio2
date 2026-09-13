@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, Skeleton } from "@folio/ui";
-import { CHART_FRAME } from "./-insights/chart-frame";
+import { CHART_FRAME } from "@/routes/_authed/-insights/chart-frame";
 
 // 四个 page 各自的首访骨架(FOL-81):切到一个没进过的页、它的 chunk 还在下载时,由这一张顶住内容区
 // (外壳、导航、Dock 已在 AppShell 里渲好)。chunk 一到、组件挂载,页面自己 QueryBoundary 那套
