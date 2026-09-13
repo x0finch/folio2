@@ -7,7 +7,12 @@ import {
   prefetchOverview,
   prefetchSettings,
 } from "@/lib/queries/prefetch-pages";
-import { PageContentSkeleton } from "./-page-content-skeleton";
+import {
+  AccountsSkeleton,
+  InsightsSkeleton,
+  OverviewSkeleton,
+  SettingsSkeleton,
+} from "./-page-skeletons";
 
 // 四个 page 的注册表(FOL-81):懒加载组件 + 各自的骨架,交给 `PageSwitcher`。
 //
@@ -23,10 +28,10 @@ const PAGE_KEYS = ["overview", "accounts", "insights", "settings"] as const;
 export type PageKey = (typeof PAGE_KEYS)[number];
 
 export const PAGES: SwitcherPage[] = [
-  { key: "overview", Component: lazy(loadOverview), Skeleton: PageContentSkeleton },
-  { key: "accounts", Component: lazy(loadAccounts), Skeleton: PageContentSkeleton },
-  { key: "insights", Component: lazy(loadInsights), Skeleton: PageContentSkeleton },
-  { key: "settings", Component: lazy(loadSettings), Skeleton: PageContentSkeleton },
+  { key: "overview", Component: lazy(loadOverview), Skeleton: OverviewSkeleton },
+  { key: "accounts", Component: lazy(loadAccounts), Skeleton: AccountsSkeleton },
+  { key: "insights", Component: lazy(loadInsights), Skeleton: InsightsSkeleton },
+  { key: "settings", Component: lazy(loadSettings), Skeleton: SettingsSkeleton },
 ];
 
 const CHUNK: Record<PageKey, () => Promise<unknown>> = {

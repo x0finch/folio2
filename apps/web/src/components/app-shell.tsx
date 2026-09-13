@@ -4,6 +4,7 @@ import { BarChart3, Home, Settings, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
 import type { SyncStatusSummary } from "@/lib/core/sync-status";
+import { OverviewSkeleton } from "@/routes/_authed/-page-skeletons";
 import type { PageKey } from "@/routes/_authed/-pages";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
@@ -38,10 +39,6 @@ const SHELL_MAIN =
   "relative mx-auto min-h-[calc(100svh_+_4rem)] w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:min-h-0 lg:px-8 lg:pb-10";
 const SHELL_DOCK_WRAP =
   "-translate-x-1/2 fixed bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))] left-1/2 z-40 lg:hidden";
-
-// 骨架里的占位槽:三个小指标 + 六行列表(六行刚好铺满手机首屏)。
-const STAT_SLOTS = ["s1", "s2", "s3"];
-const ROW_SLOTS = ["r1", "r2", "r3", "r4", "r5", "r6"];
 
 // Span twin of the ui Skeleton (registry component is a fixed <div>): h1/p accept
 // only phrasing content, and a div inside them makes the browser restructure the
@@ -264,48 +261,9 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
             title={<SkeletonText className="h-8 w-44" />}
             subtitle={<SkeletonText className="h-4 w-60" />}
           />
-          <div className="flex flex-col gap-6">
-            {/* 净值块:标题 + 大数字 + 三个小指标,高度锁 min-h-60 与真块一致。 */}
-            <div className="min-h-60 pt-1">
-              <Skeleton className="h-4 w-28" />
-              <div className="mt-2 flex h-13 items-start gap-3">
-                <Skeleton className="h-10 w-56" />
-                <Skeleton className="h-9 w-24 rounded-full" />
-              </div>
-              <div className="mt-6 flex flex-wrap gap-8">
-                {STAT_SLOTS.map((k) => (
-                  <div key={k}>
-                    <Skeleton className="h-4 w-16" />
-                    <Skeleton className="mt-0.5 h-5 w-20" />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-4">
-              {/* 分类标签行 + 右侧合计。 */}
-              <div className="flex items-center gap-4">
-                <Skeleton className="h-8 w-56 rounded-full" />
-                <Skeleton className="ml-auto h-4 w-24" />
-              </div>
-              {/* 列表位:h-18 = 72,与真列表逐行对齐(高度含内边距,别写成内容高)。 */}
-              <div className="flex w-full flex-col">
-                {ROW_SLOTS.map((k) => (
-                  <div key={k} className="flex h-18 items-center gap-3 px-3 py-3">
-                    <Skeleton className="size-10 shrink-0 rounded-full" />
-                    <div className="flex flex-1 flex-col gap-1.5">
-                      <Skeleton className="h-4 w-28" />
-                      <Skeleton className="h-3 w-20" />
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1.5">
-                      <Skeleton className="h-4 w-24" />
-                      <Skeleton className="h-3 w-16" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          {/* 内容区 = 总览页自己的首访骨架,**同一个组件**(见 -page-skeletons):冷启动从这张壳
+              换到「真外壳 + 总览骨架」时,内容区逐像素不动。 */}
+          <OverviewSkeleton />
         </main>
       </div>
 

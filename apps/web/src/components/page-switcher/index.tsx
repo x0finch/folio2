@@ -13,10 +13,10 @@ import { RevealContext } from "./stagger-reveal";
 
 export interface SwitcherPage {
   key: string;
-  /** 通常是 `React.lazy(() => import(...))`;首次挂载时由 `Skeleton`(或 `fallback`)顶着。 */
+  /** 通常是 `React.lazy(() => import(...))`;首次挂载时由 `Skeleton` 顶着。 */
   Component: ComponentType;
-  /** 该页首次加载时的骨架;没给就用 PageSwitcher 的通用 `fallback`。 */
-  Skeleton?: ComponentType;
+  /** 该页首次加载(chunk 还在下载)时的骨架 —— 每页自己的形状,不共用一张。 */
+  Skeleton: ComponentType;
 }
 
 // 一个保活面板:`<Activity>` 管可见性,这里只负责「进场该重播了」的信号 —— 一个每次本页成为当前页
@@ -26,7 +26,17 @@ export interface SwitcherPage {
 // 再重新跑一遍 —— 所以「转为隐藏」那一支根本不会执行(别指望它归位),而「揭开」这件事必然伴随
 // effect 重跑,拿它当重播的扳机是稳的。计数只增不减,状态与 DOM 一概不动:重播靠重新起播,
 // **不靠换 key 重挂载**。
-function Panel({ active, children }: { active: boolean; children: ReactNode }) {
+//
+// `data-page` 是给测试量的:哪几页在树上(严格 lazy)、当前可见的是哪页,都从它读,不猜 DOM 形状。
+function Panel({
+  pageKey,
+  active,
+  children,
+}: {
+  pageKey: string;
+  active: boolean;
+  children: ReactNode;
+}) {
   const [reveal, setReveal] = useState(0);
   useEffect(() => {
     if (!active) return;
@@ -34,7 +44,7 @@ function Panel({ active, children }: { active: boolean; children: ReactNode }) {
   }, [active]);
   return (
     <Activity mode={active ? "visible" : "hidden"}>
-      <div>
+      <div data-page={pageKey}>
         <RevealContext.Provider value={reveal}>{children}</RevealContext.Provider>
       </div>
     </Activity>
@@ -44,12 +54,9 @@ function Panel({ active, children }: { active: boolean; children: ReactNode }) {
 export function PageSwitcher({
   pages,
   activeKey,
-  fallback,
 }: {
-  pages: SwitcherPage[];
+  pages: readonly SwitcherPage[];
   activeKey: string;
-  /** 页没自带 `Skeleton` 时的通用兜底骨架。 */
-  fallback?: ReactNode;
 }) {
   // 去过的页(含当前):只增不减。没进过的不进树,保证 lazy —— chunk 只在第一次切过去时才请求。
   const [visited, setVisited] = useState<Set<string>>(() => new Set([activeKey]));
@@ -63,16 +70,20 @@ export function PageSwitcher({
     <div>
       {pages
         .filter((p) => visited.has(p.key))
-        .map((p) => {
-          const Skeleton = p.Skeleton;
-          return (
-            <Panel key={p.key} active={p.key === activeKey}>
-              <Suspense fallback={Skeleton ? <Skeleton /> : (fallback ?? null)}>
-                <p.Component />
-              </Suspense>
-            </Panel>
-          );
-        })}
+        .map((p) => (
+          <Panel key={p.key} pageKey={p.key} active={p.key === activeKey}>
+            {/* 骨架也标上页名:测试凭它断「首访显示的是**这一页**的骨架、回访一次都不出现」。 */}
+            <Suspense
+              fallback={
+                <div data-page-skeleton={p.key}>
+                  <p.Skeleton />
+                </div>
+              }
+            >
+              <p.Component />
+            </Suspense>
+          </Panel>
+        ))}
     </div>
   );
 }

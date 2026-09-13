@@ -22,7 +22,8 @@ import { usePortfolioOverview } from "@/lib/queries/portfolio-overview-compose";
 import { HeaderSync } from "@/routes/_authed/-home/header-sync";
 import { ALLOC_DIMENSIONS, type AllocDimension, buildAllocation, DEFAULT_DIM } from "./allocation";
 import { AllocationPie } from "./allocation-pie";
-import { CHART_FRAME, PortfolioChart } from "./portfolio-chart";
+import { CHART_FRAME } from "./chart-frame";
+import { PortfolioChart } from "./portfolio-chart";
 
 // 失败一直再试:这页不展示失败句,骨架等到成功。只加在这两条上,不改全站默认。
 // 边界的 `failed` 因此基本到不了 —— 留着是因为渲染异常也会落进那个边界(见 query-boundary)。

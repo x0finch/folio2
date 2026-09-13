@@ -5,11 +5,10 @@ import { Sensitive } from "@/components/sensitive";
 import { formatMoney } from "@/lib/core/format-number";
 import type { HistoryPoint } from "@/lib/core/history";
 import { usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
+import { CHART_FRAME } from "./chart-frame";
 
 const DAY_MS = 86_400_000;
 /** 图框高度。骨架必须同值,后到的图才不会把下面顶开。 */
-export const CHART_FRAME = "h-[220px] w-full";
-
 export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
   const t = useTranslations("Overview");
   const format = useFormatter();
