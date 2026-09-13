@@ -11,7 +11,8 @@ export function HeaderSync({ action }: { action?: SyncAction }) {
   const { selectedId } = usePortfolio();
   const syncStatus = useSyncStatus(selectedId);
   return (
-    <div className="absolute top-6 right-4 z-20 lg:right-8">
+    // `data-slot`:e2e 量它在页头的位置(切 page 前后 top 不变),不猜类名。
+    <div data-slot="header-sync" className="absolute top-6 right-4 z-20 lg:right-8">
       <SyncStatus summary={syncStatus} action={action} />
     </div>
   );

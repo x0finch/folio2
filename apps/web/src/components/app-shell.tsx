@@ -4,17 +4,21 @@ import { BarChart3, Home, Settings, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
 import type { SyncStatusSummary } from "@/lib/core/sync-status";
+import { DEFAULT_PAGE, isPageSlug, type PageKey } from "@/routes/_authed/-page-keys";
+import { OverviewSkeleton } from "@/routes/_authed/-page-skeletons";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
 
 // iOS Safari 的 `:active` 需要元素挂着触摸监听才生效。提到模块级:身份稳定,不会每次渲染换一个。
 const NOOP = () => {};
 
+// 四个 page 现由一条 `{-$page}` 路由承载(FOL-81):导航靠可选路径参数 `page`(总览 = 不带参数 →
+// `/`,其余各对应 `/accounts` 等)。网址与从前逐字相同,变的只是「怎么表达要去哪」。
 const NAVS = [
-  { key: "overview", to: "/", icon: Home },
-  { key: "accounts", to: "/accounts", icon: Wallet },
-  { key: "insights", to: "/insights", icon: BarChart3 },
-  { key: "settings", to: "/settings", icon: Settings },
+  { key: "overview", page: undefined, icon: Home },
+  { key: "accounts", page: "accounts", icon: Wallet },
+  { key: "insights", page: "insights", icon: BarChart3 },
+  { key: "settings", page: "settings", icon: Settings },
 ] as const;
 
 // 外壳的骨架(`AppShellSkeleton`)必须和真外壳**同一套盒子**,否则数据到位那一下整页会跳。
@@ -35,10 +39,6 @@ const SHELL_MAIN =
   "relative mx-auto min-h-[calc(100svh_+_4rem)] w-full max-w-5xl flex-1 px-4 pt-6 pb-28 lg:min-h-0 lg:px-8 lg:pb-10";
 const SHELL_DOCK_WRAP =
   "-translate-x-1/2 fixed bottom-[calc(1.25rem_+_env(safe-area-inset-bottom))] left-1/2 z-40 lg:hidden";
-
-// 骨架里的占位槽:三个小指标 + 六行列表(六行刚好铺满手机首屏)。
-const STAT_SLOTS = ["s1", "s2", "s3"];
-const ROW_SLOTS = ["r1", "r2", "r3", "r4", "r5", "r6"];
 
 // Span twin of the ui Skeleton (registry component is a fixed <div>): h1/p accept
 // only phrasing content, and a div inside them makes the browser restructure the
@@ -69,6 +69,7 @@ export function AppShell({
   userName,
   syncStatus,
   selector,
+  onNavIntent,
   children,
 }: {
   userName: string;
@@ -76,17 +77,25 @@ export function AppShell({
   // 全局 Portfolio 选择器(ADR 0033):住布局层,主页/账户页/Insights 共享;Settings 页不显示。
   // 组件自身在 <2 个 Portfolio 时不渲染(渐进式显示)。
   selector?: ReactNode;
+  // 意图预热(FOL-81):指针按在某个导航项上时通知一声「大概要去这页了」。外壳只报意图,
+  // **预热怎么做是路由层的事**(`_authed` 的 ShellWithSync 接上 `prefetchPage`)——
+  // 外壳自己引那条链的话,`prefetch-pages` → server 侧那堆 query 会跟着进这个模块,
+  // 而同文件的 `AppShellSkeleton` 必须保持零依赖、零 provider 可渲染(见 tests/app-shell-skeleton)。
+  onNavIntent?: (key: PageKey) => void;
   children: ReactNode;
 }) {
   const t = useTranslations("Nav");
   const th = useTranslations("PageHeader");
   const ts = useTranslations("Sidebar");
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isActive = (to: string) => (to === "/" ? pathname === "/" : pathname.startsWith(to));
-  const activeNav = NAVS.find((n) => isActive(n.to)) ?? NAVS[0];
+  // 当前是哪个 page = pathname 首段(空段 = 总览)。合并路由后不再按 `to` 前缀判,直接认这个 key。
+  // 认不出的段到不了这里(路由层已 404),回落总览只是给类型一个着落。
+  const seg = pathname.split("/")[1] ?? "";
+  const activeKey: PageKey = isPageSlug(seg) ? seg : DEFAULT_PAGE;
+  const activeNav = NAVS.find((n) => n.key === activeKey) ?? NAVS[0];
   const pageTitle = t(activeNav.key);
   const pageSub =
-    activeNav.key === "overview"
+    activeNav.key === DEFAULT_PAGE
       ? th("overviewSub", { count: syncStatus.total })
       : th(`${activeNav.key}Sub` as "accountsSub" | "insightsSub" | "settingsSub");
   const initial = userName.trim().charAt(0).toUpperCase() || "?";
@@ -101,14 +110,16 @@ export function AppShell({
 
         <nav className="mt-4">
           <SharedLayoutBg className="gap-1" inset={0} pillClassName="rounded-lg bg-muted">
-            {NAVS.map(({ key, to, icon: Icon }) => (
+            {NAVS.map(({ key, page, icon: Icon }) => (
               <Link
                 key={key}
-                to={to}
-                aria-current={isActive(to) ? "page" : undefined}
+                to="/{-$page}"
+                params={{ page }}
+                onPointerDown={() => onNavIntent?.(key)}
+                aria-current={key === activeKey ? "page" : undefined}
                 className={cn(
                   "block rounded-lg px-3 py-2 font-medium text-sm transition-colors",
-                  isActive(to)
+                  key === activeKey
                     ? "bg-muted text-foreground"
                     : "text-muted-foreground hover:text-foreground",
                 )}
@@ -159,14 +170,16 @@ export function AppShell({
       {/* 移动底部悬浮 Dock 导航;底部偏移叠加 safe-area-inset-bottom,不被指示条压(定位/居中不变)。 */}
       <nav className={SHELL_DOCK_WRAP}>
         <Dock>
-          {NAVS.map(({ key, to, icon: Icon }) => (
-            <DockItem key={key} active={isActive(to)}>
+          {NAVS.map(({ key, page, icon: Icon }) => (
+            <DockItem key={key} active={key === activeKey}>
               <Link
-                to={to}
+                to="/{-$page}"
+                params={{ page }}
                 aria-label={t(key)}
                 // iOS Safari 只在元素(或祖先)挂了触摸监听时才给 `:active` —— 这个空监听就是那把钥匙,
                 // 是这条路子公认的代价。**别删**:删了 iOS 上按下就完全没反应(桌面照旧有)。
                 onTouchStart={NOOP}
+                onPointerDown={() => onNavIntent?.(key)}
                 className="group flex size-full items-center justify-center"
               >
                 {/* 按下反馈(片3):触摸屏没有 hover,按下这一下是唯一的即时回应。
@@ -249,48 +262,9 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
             title={<SkeletonText className="h-8 w-44" />}
             subtitle={<SkeletonText className="h-4 w-60" />}
           />
-          <div className="flex flex-col gap-6">
-            {/* 净值块:标题 + 大数字 + 三个小指标,高度锁 min-h-60 与真块一致。 */}
-            <div className="min-h-60 pt-1">
-              <Skeleton className="h-4 w-28" />
-              <div className="mt-2 flex h-13 items-start gap-3">
-                <Skeleton className="h-10 w-56" />
-                <Skeleton className="h-9 w-24 rounded-full" />
-              </div>
-              <div className="mt-6 flex flex-wrap gap-8">
-                {STAT_SLOTS.map((k) => (
-                  <div key={k}>
-                    <Skeleton className="h-4 w-16" />
-                    <Skeleton className="mt-0.5 h-5 w-20" />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-4">
-              {/* 分类标签行 + 右侧合计。 */}
-              <div className="flex items-center gap-4">
-                <Skeleton className="h-8 w-56 rounded-full" />
-                <Skeleton className="ml-auto h-4 w-24" />
-              </div>
-              {/* 列表位:h-18 = 72,与真列表逐行对齐(高度含内边距,别写成内容高)。 */}
-              <div className="flex w-full flex-col">
-                {ROW_SLOTS.map((k) => (
-                  <div key={k} className="flex h-18 items-center gap-3 px-3 py-3">
-                    <Skeleton className="size-10 shrink-0 rounded-full" />
-                    <div className="flex flex-1 flex-col gap-1.5">
-                      <Skeleton className="h-4 w-28" />
-                      <Skeleton className="h-3 w-20" />
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1.5">
-                      <Skeleton className="h-4 w-24" />
-                      <Skeleton className="h-3 w-16" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+          {/* 内容区 = 总览页自己的首访骨架,**同一个组件**(见 -page-skeletons):冷启动从这张壳
+              换到「真外壳 + 总览骨架」时,内容区逐像素不动。 */}
+          <OverviewSkeleton />
         </main>
       </div>
 

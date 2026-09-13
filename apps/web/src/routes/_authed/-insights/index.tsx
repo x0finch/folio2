@@ -9,9 +9,9 @@ import {
   TabsTrigger,
 } from "@folio/ui";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { getRouteApi } from "@tanstack/react-router";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
+import { StaggerReveal } from "@/components/page-switcher/stagger-reveal";
 import { QueryBoundary } from "@/components/query-boundary";
 import { toDailySeries, toPortfolioCurve } from "@/lib/core/history";
 import { floorToHour } from "@/lib/core/portfolio";
@@ -20,11 +20,10 @@ import { portfolioKeys } from "@/lib/queries/keys";
 import { portfolioHistoryQuery } from "@/lib/queries/portfolio";
 import { usePortfolioOverview } from "@/lib/queries/portfolio-overview-compose";
 import { HeaderSync } from "@/routes/_authed/-home/header-sync";
-import { ALLOC_DIMENSIONS, type AllocDimension, buildAllocation } from "./allocation";
+import { ALLOC_DIMENSIONS, type AllocDimension, buildAllocation, DEFAULT_DIM } from "./allocation";
 import { AllocationPie } from "./allocation-pie";
-import { CHART_FRAME, PortfolioChart } from "./portfolio-chart";
-
-const insightsRoute = getRouteApi("/_authed/insights");
+import { CHART_FRAME } from "./chart-frame";
+import { PortfolioChart } from "./portfolio-chart";
 
 // 失败一直再试:这页不展示失败句,骨架等到成功。只加在这两条上,不改全站默认。
 // 边界的 `failed` 因此基本到不了 —— 留着是因为渲染异常也会落进那个边界(见 query-boundary)。
@@ -38,11 +37,14 @@ const DIM_LABEL: Record<AllocDimension, string> = {
 
 export function Insights() {
   return (
-    <div className="flex flex-col gap-6">
+    <>
+      {/* 同步条留在进场容器外(absolute 到外壳 `<main>`,被 transform 层裹住会顶跳,见 StaggerReveal)。 */}
       <HeaderSync />
-      <TrendCard />
-      <AllocationCard />
-    </div>
+      <StaggerReveal className="flex flex-col gap-6">
+        <TrendCard />
+        <AllocationCard />
+      </StaggerReveal>
+    </>
   );
 }
 
@@ -104,17 +106,10 @@ function AllocationCard() {
   const t = useTranslations("Insights");
   const { selectedId } = usePortfolio();
   const now = floorToHour(Date.now());
-  const { dim } = insightsRoute.useSearch();
-  const navigate = insightsRoute.useNavigate();
-
-  const setDim = (v: AllocDimension) => {
-    if (v === dim) return;
-    navigate({
-      search: (prev) => ({ ...prev, dim: v }),
-      replace: true,
-      resetScroll: false,
-    });
-  };
+  // 分布维度住组件内部 state(FOL-80,反转 ADR 0043):只 AllocationCard 一个组件用,`useState` 即可,
+  // 不进 URL、不必 context。切维度只是 setState —— 不进后退栈、不动滚动,原来那套 replace/resetScroll
+  // 要防的事天然不发生。切了组合后维度保留(与组合无关),是想要的。
+  const [dim, setDim] = useState<AllocDimension>(DEFAULT_DIM);
   // 同 TrendCard:挂起 + 自己的边界(理由见那边)。
   const pie = (
     <QueryBoundary

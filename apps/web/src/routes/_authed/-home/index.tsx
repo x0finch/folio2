@@ -1,6 +1,7 @@
 import { Skeleton } from "@folio/ui";
 import { Link } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
+import { StaggerReveal } from "@/components/page-switcher/stagger-reveal";
 import { QueryBoundary } from "@/components/query-boundary";
 import { floorToHour } from "@/lib/core/portfolio";
 import { useHomeTabStrip } from "@/lib/hooks/use-home-tab-strip";
@@ -11,6 +12,7 @@ import { HeroIsland } from "./hero";
 import { HoldingsIsland } from "./holdings";
 import { GainSkeleton } from "./holdings/value-delta";
 import { TabStripIsland } from "./tab";
+import { HomeViewStateProvider } from "./view-state";
 
 export function Overview() {
   const { selectedId } = usePortfolio();
@@ -19,32 +21,37 @@ export function Overview() {
   const snapshotsKey = JSON.stringify(portfolioKeys.snapshots(selectedId, now));
   const tabsKey = JSON.stringify(portfolioKeys.tabPins(selectedId));
   return (
-    <div className="flex flex-col gap-6">
+    // 主 tab 与代币抽屉的页内状态住这层 Provider(FOL-80):tab 条与两个 TokenHoldings 实例共读一份。
+    <HomeViewStateProvider>
+      {/* 同步条留在进场容器**之外**:它 absolute 定位到外壳 `<main>`,被带 transform 的层裹住会顶跳
+          约 24px(见 StaggerReveal)。它每页都一样、是常驻壳件,不跟着进场才是对的。 */}
       <HeaderSync />
-      <QueryBoundary
-        resetKey={`hero:${snapshotsKey}`}
-        pending={<HeroSkeleton />}
-        failed={<IslandFailed />}
-      >
-        <HeroIsland />
-      </QueryBoundary>
-      <div className="flex flex-col gap-4">
+      <StaggerReveal className="flex flex-col gap-6">
         <QueryBoundary
-          resetKey={`tabs:${tabsKey}`}
-          pending={<TabStripSkeleton />}
+          resetKey={`hero:${snapshotsKey}`}
+          pending={<HeroSkeleton />}
           failed={<IslandFailed />}
         >
-          <TabStripSlot />
+          <HeroIsland />
         </QueryBoundary>
-        <QueryBoundary
-          resetKey={`holdings:${snapshotsKey}`}
-          pending={<HoldingsSkeleton />}
-          failed={<IslandFailed />}
-        >
-          <HoldingsIsland />
-        </QueryBoundary>
-      </div>
-    </div>
+        <div className="flex flex-col gap-4">
+          <QueryBoundary
+            resetKey={`tabs:${tabsKey}`}
+            pending={<TabStripSkeleton />}
+            failed={<IslandFailed />}
+          >
+            <TabStripSlot />
+          </QueryBoundary>
+          <QueryBoundary
+            resetKey={`holdings:${snapshotsKey}`}
+            pending={<HoldingsSkeleton />}
+            failed={<IslandFailed />}
+          >
+            <HoldingsIsland />
+          </QueryBoundary>
+        </div>
+      </StaggerReveal>
+    </HomeViewStateProvider>
   );
 }
 
@@ -57,7 +64,7 @@ function TabStripSlot() {
     return (
       <p className="text-muted-foreground">
         {tc("noAccountsYet")}{" "}
-        <Link to="/accounts" className="underline">
+        <Link to="/{-$page}" params={{ page: "accounts" }} className="underline">
           {tc("addOne")}
         </Link>
         .

@@ -390,7 +390,8 @@ export function SyncStatus({
   // 当前 Portfolio 视图里有哪些行);那一行不在视图里时它会退成开详情抽屉。
   const pick = (accountId: string) => {
     setOpen(false);
-    navigate({ to: "/accounts", search: { focus: accountId } });
+    // 合并路由后账户页 = `{-$page}` 带 `page: "accounts"`;`focus` 是它的一次性 search 命令。
+    navigate({ to: "/{-$page}", params: { page: "accounts" }, search: { focus: accountId } });
   };
 
   const needsAttention = hasAttention(summary, round, startError);

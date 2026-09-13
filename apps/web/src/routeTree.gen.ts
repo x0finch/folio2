@@ -11,13 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthedRouteImport } from './routes/_authed'
-import { Route as AuthedIndexRouteImport } from './routes/_authed/index'
 import { Route as ApiSyncRouteImport } from './routes/api/sync'
 import { Route as ApiImportRouteImport } from './routes/api/import'
 import { Route as ApiExportRouteImport } from './routes/api/export'
-import { Route as AuthedSettingsRouteImport } from './routes/_authed/settings'
-import { Route as AuthedInsightsRouteImport } from './routes/_authed/insights'
-import { Route as AuthedAccountsRouteImport } from './routes/_authed/accounts'
+import { Route as AuthedChar123PageChar125RouteImport } from './routes/_authed/{-$page}'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiLogoTokenIdRouteImport } from './routes/api/logo/token/$id'
 import { Route as ApiLogoPlatformKeyRouteImport } from './routes/api/logo/platform/$key'
@@ -31,11 +28,6 @@ const LoginRoute = LoginRouteImport.update({
 const AuthedRoute = AuthedRouteImport.update({
   id: '/_authed',
   getParentRoute: () => rootRouteImport,
-} as any)
-const AuthedIndexRoute = AuthedIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => AuthedRoute,
 } as any)
 const ApiSyncRoute = ApiSyncRouteImport.update({
   id: '/api/sync',
@@ -52,21 +44,12 @@ const ApiExportRoute = ApiExportRouteImport.update({
   path: '/api/export',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AuthedSettingsRoute = AuthedSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AuthedRoute,
-} as any)
-const AuthedInsightsRoute = AuthedInsightsRouteImport.update({
-  id: '/insights',
-  path: '/insights',
-  getParentRoute: () => AuthedRoute,
-} as any)
-const AuthedAccountsRoute = AuthedAccountsRouteImport.update({
-  id: '/accounts',
-  path: '/accounts',
-  getParentRoute: () => AuthedRoute,
-} as any)
+const AuthedChar123PageChar125Route =
+  AuthedChar123PageChar125RouteImport.update({
+    id: '/{-$page}',
+    path: '/{-$page}',
+    getParentRoute: () => AuthedRoute,
+  } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -89,11 +72,9 @@ const ApiLogoDefiProtocolRoute = ApiLogoDefiProtocolRouteImport.update({
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof AuthedIndexRoute
+  '/': typeof AuthedRouteWithChildren
   '/login': typeof LoginRoute
-  '/accounts': typeof AuthedAccountsRoute
-  '/insights': typeof AuthedInsightsRoute
-  '/settings': typeof AuthedSettingsRoute
+  '/{-$page}': typeof AuthedChar123PageChar125Route
   '/api/export': typeof ApiExportRoute
   '/api/import': typeof ApiImportRoute
   '/api/sync': typeof ApiSyncRoute
@@ -103,14 +84,12 @@ export interface FileRoutesByFullPath {
   '/api/logo/token/$id': typeof ApiLogoTokenIdRoute
 }
 export interface FileRoutesByTo {
+  '/': typeof AuthedRouteWithChildren
   '/login': typeof LoginRoute
-  '/accounts': typeof AuthedAccountsRoute
-  '/insights': typeof AuthedInsightsRoute
-  '/settings': typeof AuthedSettingsRoute
+  '/{-$page}': typeof AuthedChar123PageChar125Route
   '/api/export': typeof ApiExportRoute
   '/api/import': typeof ApiImportRoute
   '/api/sync': typeof ApiSyncRoute
-  '/': typeof AuthedIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/logo/defi/$protocol': typeof ApiLogoDefiProtocolRoute
   '/api/logo/platform/$key': typeof ApiLogoPlatformKeyRoute
@@ -120,13 +99,10 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authed': typeof AuthedRouteWithChildren
   '/login': typeof LoginRoute
-  '/_authed/accounts': typeof AuthedAccountsRoute
-  '/_authed/insights': typeof AuthedInsightsRoute
-  '/_authed/settings': typeof AuthedSettingsRoute
+  '/_authed/{-$page}': typeof AuthedChar123PageChar125Route
   '/api/export': typeof ApiExportRoute
   '/api/import': typeof ApiImportRoute
   '/api/sync': typeof ApiSyncRoute
-  '/_authed/': typeof AuthedIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/logo/defi/$protocol': typeof ApiLogoDefiProtocolRoute
   '/api/logo/platform/$key': typeof ApiLogoPlatformKeyRoute
@@ -137,9 +113,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/login'
-    | '/accounts'
-    | '/insights'
-    | '/settings'
+    | '/{-$page}'
     | '/api/export'
     | '/api/import'
     | '/api/sync'
@@ -149,14 +123,12 @@ export interface FileRouteTypes {
     | '/api/logo/token/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/'
     | '/login'
-    | '/accounts'
-    | '/insights'
-    | '/settings'
+    | '/{-$page}'
     | '/api/export'
     | '/api/import'
     | '/api/sync'
-    | '/'
     | '/api/auth/$'
     | '/api/logo/defi/$protocol'
     | '/api/logo/platform/$key'
@@ -165,13 +137,10 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_authed'
     | '/login'
-    | '/_authed/accounts'
-    | '/_authed/insights'
-    | '/_authed/settings'
+    | '/_authed/{-$page}'
     | '/api/export'
     | '/api/import'
     | '/api/sync'
-    | '/_authed/'
     | '/api/auth/$'
     | '/api/logo/defi/$protocol'
     | '/api/logo/platform/$key'
@@ -206,13 +175,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthedRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authed/': {
-      id: '/_authed/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof AuthedIndexRouteImport
-      parentRoute: typeof AuthedRoute
-    }
     '/api/sync': {
       id: '/api/sync'
       path: '/api/sync'
@@ -234,25 +196,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiExportRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_authed/settings': {
-      id: '/_authed/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof AuthedSettingsRouteImport
-      parentRoute: typeof AuthedRoute
-    }
-    '/_authed/insights': {
-      id: '/_authed/insights'
-      path: '/insights'
-      fullPath: '/insights'
-      preLoaderRoute: typeof AuthedInsightsRouteImport
-      parentRoute: typeof AuthedRoute
-    }
-    '/_authed/accounts': {
-      id: '/_authed/accounts'
-      path: '/accounts'
-      fullPath: '/accounts'
-      preLoaderRoute: typeof AuthedAccountsRouteImport
+    '/_authed/{-$page}': {
+      id: '/_authed/{-$page}'
+      path: '/{-$page}'
+      fullPath: '/{-$page}'
+      preLoaderRoute: typeof AuthedChar123PageChar125RouteImport
       parentRoute: typeof AuthedRoute
     }
     '/api/auth/$': {
@@ -287,17 +235,11 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthedRouteChildren {
-  AuthedAccountsRoute: typeof AuthedAccountsRoute
-  AuthedInsightsRoute: typeof AuthedInsightsRoute
-  AuthedSettingsRoute: typeof AuthedSettingsRoute
-  AuthedIndexRoute: typeof AuthedIndexRoute
+  AuthedChar123PageChar125Route: typeof AuthedChar123PageChar125Route
 }
 
 const AuthedRouteChildren: AuthedRouteChildren = {
-  AuthedAccountsRoute: AuthedAccountsRoute,
-  AuthedInsightsRoute: AuthedInsightsRoute,
-  AuthedSettingsRoute: AuthedSettingsRoute,
-  AuthedIndexRoute: AuthedIndexRoute,
+  AuthedChar123PageChar125Route: AuthedChar123PageChar125Route,
 }
 
 const AuthedRouteWithChildren =

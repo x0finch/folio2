@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AvatarStack } from "@/components/avatar-stack";
 import { ConnectorBadge } from "@/components/connector-badge";
+import { StaggerReveal } from "@/components/page-switcher/stagger-reveal";
 import { QueryBoundary } from "@/components/query-boundary";
 import { TagBadges } from "@/components/tag-badges";
 import { isManual } from "@/lib/core/manual";
@@ -38,7 +39,8 @@ import {
 } from "./list-rows";
 import { accountStackItems } from "./list-stack-items";
 
-const accountsRoute = getRouteApi("/_authed/accounts");
+// 合并路由(FOL-81):账户页现由 `{-$page}` 路由承载,`focus` 一次性命令落在它的 search 上。
+const accountsRoute = getRouteApi("/_authed/{-$page}");
 
 // 名单那一层的重试键。归属不再是独立一份数据(随账户行下发,ADR 0047),所以只剩账户列表这一条。
 const LIST_RESET_KEY = (portfolioId: string) => JSON.stringify(accountKeys.list(portfolioId));
@@ -52,8 +54,10 @@ export function Accounts() {
     setCompleteTarget({ accountId: a.id, connectorId: a.connectorId, credsSafe: a.credsSafe });
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* 页头右上角同步入口:账户页额外把「添加账户」融进 + 段(见 SyncStatus.ActionShell),modal 由本页持有。 */}
+    <>
+      {/* 页头右上角同步入口:账户页额外把「添加账户」融进 + 段(见 SyncStatus.ActionShell),modal 由本页持有。
+          两者都留在进场容器**之外**:同步条 absolute 到外壳 `<main>`,被带 transform 的层裹住会顶跳
+          约 24px(见 StaggerReveal);modal 是浮层,不参与页面进场。 */}
       <HeaderSync
         action={{ icon: <Plus />, label: t("addAccount"), onClick: () => setAddOpen(true) }}
       />
@@ -63,14 +67,18 @@ export function Accounts() {
         completeFor={completeTarget}
         onCompleteClose={() => setCompleteTarget(null)}
       />
-      <QueryBoundary
-        resetKey={`list:${LIST_RESET_KEY(selectedId)}`}
-        pending={<ListSkeleton />}
-        failed={<ListFailed />}
-      >
-        <AccountsList onComplete={startComplete} />
-      </QueryBoundary>
-    </div>
+      {/* 名单那几段(标题 / 列表 / 归档)由数据边界一起吐出来,对这层只算**一个**子节点,所以竖排
+          间距挪到错列单元上(`itemClassName`),间距与原来的 `flex flex-col gap-6` 一致。 */}
+      <StaggerReveal className="flex flex-col" itemClassName="flex flex-col gap-6">
+        <QueryBoundary
+          resetKey={`list:${LIST_RESET_KEY(selectedId)}`}
+          pending={<ListSkeleton />}
+          failed={<ListFailed />}
+        >
+          <AccountsList onComplete={startComplete} />
+        </QueryBoundary>
+      </StaggerReveal>
+    </>
   );
 }
 
@@ -189,12 +197,15 @@ function AccountsListBody({
   const archived = rows.filter((r) => r.archivedAt != null);
   const total = activeAccountsTotal(rows);
 
-  const { account: selectedId, focus } = accountsRoute.useSearch();
+  // 详情抽屉选中哪个账户住组件内部 state(FOL-80,反转 ADR 0043):开合抽屉只是 setState,不进后退栈、
+  // 不动滚动。`focus` 不同 —— 它仍是 URL 上的**一次性命令**:同步面板在别的页头点某账户时跨页写它
+  // (`?focus=<id>`),本页到达后读一次(滚动 + 高亮)再立即抹掉,事实源仍是内部 state。跨页传值必须经
+  // 地址,所以 `focus` 留在 URL,`account` 不用。
+  const { focus } = accountsRoute.useSearch();
   const navigate = accountsRoute.useNavigate();
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const selected = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null;
-  const setAccount = (id: string | undefined) =>
-    navigate({ search: (prev) => ({ ...prev, account: id }), replace: true, resetScroll: false });
-  const openRow = (r: AccountRow) => setAccount(r.id);
+  const openRow = (r: AccountRow) => setSelectedId(r.id);
 
   // 页头同步面板点了某一行 → 把它滚到视野中间,并短暗高亮一下(不改选中态:那看起来像选中了什么)。
   //
@@ -274,7 +285,7 @@ function AccountsListBody({
         tagLinks={tagLinks}
         open={selected != null}
         onOpenChange={(o) => {
-          if (!o) setAccount(undefined);
+          if (!o) setSelectedId(undefined);
         }}
         onComplete={onComplete}
       />

@@ -8,8 +8,8 @@ import type { Holding } from "@/lib/core/portfolio";
 //   account —— 各 HoldingSource 的账户
 // 超过 topN 的尾部合并成一条 key="__others__"(UI 渲染为"其他")。纯函数、可测。
 // 维度的合法值**只在这里写一次**,类型由它派生(`z.infer`)—— 不是类型和数组各写一遍再想办法
-// 让两者对上。这也是 Insights 那个 `?dim=` 的校验器本体:route 直接把它交给 `validateSearch`
-// (zod v4 是 Standard Schema,Router 不需要 adapter),`.catch()` 就是「认不出的值回落默认」。
+// 让两者对上。`dim` 现住 AllocationCard 内部 state(FOL-80,反转 ADR 0043),不再当 route 校验器;
+// 这里只提供枚举(`ALLOC_DIMENSIONS`)、类型(`AllocDimension`)与默认值(`DEFAULT_DIM`)。
 export const ALLOC_DIMENSION = z.enum(["token", "chain", "account"]);
 export type AllocDimension = z.infer<typeof ALLOC_DIMENSION>;
 // tab 条按这个顺序渲染。`.options` 直接来自上面那份声明 —— 将来多一个维度,tab 条不可能漏掉它。
