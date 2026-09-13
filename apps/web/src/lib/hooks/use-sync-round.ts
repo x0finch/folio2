@@ -57,12 +57,14 @@ export function useSyncRound(
   const busy = isRoundBusy(round);
 
   const mutation = useMutation({
-    mutationFn: async (): Promise<SyncRoundView> => {
-      // **只递「我在看哪个组合」,不递账户名单**(ADR 0047):跑哪些账户由服务端按这个组合算。
+    // `auto` 区分「进首页自动补」和「手动点同步」(FOL-18 子票 4):自动那轮服务端按新鲜度跳过,
+    // 手动强制全量。默认 false —— `sync()` 走手动。
+    mutationFn: async (vars: { auto: boolean } = { auto: false }): Promise<SyncRoundView> => {
+      // **只递「我在看哪个组合」+「是不是自动」,不递账户名单**(ADR 0047):跑哪些账户由服务端算。
       const response = await fetch("/api/sync", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ portfolioId }),
+        body: JSON.stringify({ portfolioId, auto: vars.auto }),
       });
       if (!response.ok) throw new Error(`sync failed: ${response.status}`);
       return (await response.json()) as SyncRoundView;
@@ -127,7 +129,7 @@ export function useSyncRound(
     if (now - (lastAutoSyncAt.get(portfolioId) ?? 0) < AUTO_SYNC_COOLDOWN_MS) return; // ② 冷却
     autoFired.current = portfolioId;
     lastAutoSyncAt.set(portfolioId, now);
-    mutate();
+    mutate({ auto: true });
   }, [autoSync, busy, pending, roundPending, syncableCount, portfolioId, mutate]);
 
   const disabled = busy || mutation.isPending || syncableCount === 0;
@@ -139,7 +141,7 @@ export function useSyncRound(
     startError: mutation.error ? mutation.error.message : null,
     sync: () => {
       if (disabled) return;
-      mutation.mutate();
+      mutation.mutate({ auto: false });
     },
   };
 }

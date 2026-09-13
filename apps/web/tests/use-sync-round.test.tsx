@@ -155,10 +155,10 @@ describe("进首页自动补同步(FOL-18 子票 2)", () => {
     global.fetch = okFetch();
     mountHook("auto-due", 3, { lastSyncedAt: Date.now() - 2 * HOUR });
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
-    expect(global.fetch).toHaveBeenCalledWith(
-      "/api/sync",
-      expect.objectContaining({ method: "POST" }),
-    );
+    // 自动那一轮 body 带 auto:true —— 服务端据此按新鲜度跳过(FOL-18 子票 4)。
+    const [, init] = (global.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock
+      .calls[0];
+    expect(JSON.parse(String(init.body))).toMatchObject({ auto: true });
   });
 
   it("从没同步过(lastSyncedAt null)→ 也补(新用户第一轮)", async () => {

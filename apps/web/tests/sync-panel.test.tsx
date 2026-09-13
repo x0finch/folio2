@@ -111,6 +111,12 @@ describe("三段式口径", () => {
     expect(text).toContain("2 need keys");
   });
 
+  it("自动轮跳过的账户单独一段「N skipped」(FOL-18 子票 4)", () => {
+    const text = mount({ summary: summary(), round: round({ synced: 5, skipped: 4 }) });
+    expect(text).toContain("9 synced"); // 5 + 4 个不参与同步的
+    expect(text).toContain("4 skipped");
+  });
+
   // 读不到轮 = **还没跑过**,不是「跑过了、成绩是这些」。第一版在这种时候拿手记的条数硬凑了一个
   // 数,于是新账号那一刻面板写着 `This round: 2 synced`、页头写着 across 10 sources —— 读起来
   // 像「10 个来源只同步上 2 个」,比什么都不说还糟。无轮态只说 `Last updated` 与清单。

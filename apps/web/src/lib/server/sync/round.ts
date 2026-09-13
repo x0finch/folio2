@@ -9,6 +9,7 @@ import { type AccountSyncResult, Sweep, type SweepResult, SYNC_CONCURRENCY } fro
 import { getLogger } from "@logtape/logtape";
 import { Cause, Clock, Effect, Option } from "effect";
 import { z } from "zod";
+import { SYNC_DUE_MS } from "@/lib/core/sync-status";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { userLayer } from "@/lib/server/runtime";
 import { syncRoundFor } from "./deps";
@@ -81,6 +82,38 @@ export const openSyncRound = (input: {
 const statusOf = (r: AccountSyncResult): Exclude<SyncRoundAccountStatus, "pending"> =>
   r.ok ? "synced" : r.skipped ? "needs-keys" : "failed";
 
+// 自动轮的「按新鲜度跳过」(FOL-18 子票 4)。把最新快照还在 1 小时内(SYNC_DUE_MS)的账户当
+// `skipped` 直接收掉,返回这一轮**真正要问上游**的名单。手动轮不调它 —— 强制全量。
+//
+// 跑在 driveRound 之前:读一次 latest 快照,逐个 settle('skipped')。被收掉的账户不进 `only`,
+// 于是 Sweep 那条流根本不 emit 它们;它们的 settle 在这里已经写过,total 与 settled 仍对得上。
+// 出任何岔子就退回「全量」(宁可多问一遍上游,也不能因为跳过的优化把一轮搞挂)。
+const planFreshSkips = (round: SyncRoundRecord): Effect.Effect<Set<string>, never, Database> =>
+  Effect.gen(function* () {
+    const db = yield* Database;
+    const now = yield* Clock.currentTimeMillis;
+    const latest = yield* db.snapshots.latest();
+    const takenAtById = new Map(latest.map((s) => [s.snapshot.accountId, s.snapshot.takenAt]));
+    const toRun = new Set<string>();
+    for (const id of Object.keys(round.accounts)) {
+      const takenAt = takenAtById.get(id);
+      // 新鲜 = 有快照、年龄在 0…1 小时内(负数是时钟偏移,当没同步过 → 照常跑,别把未来当新鲜)。
+      const fresh = takenAt != null && now - takenAt >= 0 && now - takenAt <= SYNC_DUE_MS;
+      if (fresh) {
+        yield* db.syncRounds.settle({
+          portfolioId: round.portfolioId,
+          roundId: round.roundId,
+          accountId: id,
+          status: "skipped",
+          ttlMs: ROUND_HEARTBEAT_MS,
+        });
+      } else {
+        toRun.add(id);
+      }
+    }
+    return toRun;
+  });
+
 export interface RunSyncRoundOptions {
   /**
    * 出网的闸 —— cron 一次调用里的多轮共用一把,「每用户最多 6 发上游」才不随组合数翻倍。
@@ -88,6 +121,12 @@ export interface RunSyncRoundOptions {
    * 重叠窗口里最坏 2×,为什么收下写在 `deps.ts` 的 `SyncScope.gate` 上。
    */
   gate?: Effect.Semaphore;
+  /**
+   * 自动轮(进首页补的那种,FOL-18 子票 4):先把数据还新的账户当 `skipped` 收掉,只问其余的上游。
+   * 手动点同步不传 → 强制全量。两个标签页同时进首页仍只打一遍上游那件事由开轮幂等保证,这条管的是
+   * 「一个自动轮内部,刚同步过的账户不再白问一遍」。
+   */
+  skipFresh?: boolean;
   /**
    * 跑完顺手预热代币缓存(供下次总览 cache-only 富化新价)。
    *
@@ -107,16 +146,21 @@ export interface RunSyncRoundOptions {
  * 每个账户跑完写一次(顺带续心跳),整轮结束收一次官。**中途没人在看也照样跑完** ——
  * 这正是把状态搬到服务端换来的:以前「看」断了进度就没了,现在断的只是轮询。
  */
-export const runSyncRound = (
+export const runSyncRound = async (
   userId: string,
   round: SyncRoundRecord,
   opts: RunSyncRoundOptions = {},
 ): Promise<void> => {
   const syncLog = getLogger(["folio", "web", "sync"]);
-  const { results, afterRound, layer } = syncRoundFor(userId, {
-    only: new Set(Object.keys(round.accounts)),
-    gate: opts.gate,
-  });
+  // 自动轮先规划跳过(FOL-18 子票 4):读一次快照、把新鲜的收成 skipped,只剩要问上游的进 `only`。
+  // 出岔子退回全量(`catch`)—— 跳过是优化,不能因它让一轮跑不成。手动轮直接全量,不读这一趟。
+  const allIds = () => new Set(Object.keys(round.accounts));
+  const only = opts.skipFresh
+    ? await Effect.runPromise(planFreshSkips(round).pipe(Effect.provide(userLayer(userId)))).catch(
+        () => allIds(),
+      )
+    : allIds();
+  const { results, afterRound, layer } = syncRoundFor(userId, { only, gate: opts.gate });
   const head = { portfolioId: round.portfolioId, roundId: round.roundId };
   return driveRound(results, {
     layer,
@@ -231,7 +275,7 @@ const syncUserRounds = (userId: string): Effect.Effect<Sweep.Tally> =>
       tally = {
         ok: tally.ok + view.synced,
         failed: tally.failed + view.failed.length,
-        skipped: tally.skipped + view.needsKeys,
+        skipped: tally.skipped + view.needsKeys + view.skipped,
       };
     }
     return tally;

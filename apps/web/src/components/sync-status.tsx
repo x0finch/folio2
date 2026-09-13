@@ -231,6 +231,8 @@ export function SyncPanel({
         syncedCount > 0 ? t("tallySynced", { count: syncedCount }) : null,
         round.failed.length > 0 ? t("tallyFailed", { count: round.failed.length }) : null,
         round.needsKeys > 0 ? t("tallyNeedsKeys", { count: round.needsKeys }) : null,
+        // 自动轮里数据还新而跳过的(FOL-18 子票 4)—— 与前三段并列,为 0 省略。
+        round.skipped > 0 ? t("tallySkipped", { count: round.skipped }) : null,
       ]
         .filter(Boolean)
         .join(" · ")
