@@ -63,7 +63,6 @@ export function TokenHoldings({
   // 开合抽屉只是一次 setState —— 不进后退栈、不动滚动位置,原来 `replace`/`resetScroll:false` 要防的
   // 两件事天然不发生。
   const { token: selectedKey, setToken } = useHomeViewState();
-  const select = (key: string | undefined) => setToken(key);
   // 认不出的值(切了组合后旧币不在、手写乱码)→ 找不到就是没开。回落**必须在这里**:本组件的两个
   // 实例各拿一份 holdings(主列表 / 自定义 Tab),同一个 key 在哪份里认得出是各自的事。
   const selected = holdings.find((h) => h.key === selectedKey) ?? null;
@@ -77,7 +76,7 @@ export function TokenHoldings({
     <>
       <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
         {rows.map((h) => (
-          <button key={h.key} type="button" onClick={() => select(h.key)} className={rowClass}>
+          <button key={h.key} type="button" onClick={() => setToken(h.key)} className={rowClass}>
             <RowContent h={h} gainPending={gainPending} />
           </button>
         ))}
@@ -110,7 +109,7 @@ export function TokenHoldings({
         holding={selected}
         open={selected != null}
         onOpenChange={(o) => {
-          if (!o) select(undefined);
+          if (!o) setToken(undefined);
         }}
       />
     </>

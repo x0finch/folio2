@@ -205,8 +205,7 @@ function AccountsListBody({
   const navigate = accountsRoute.useNavigate();
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const selected = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null;
-  const setAccount = (id: string | undefined) => setSelectedId(id);
-  const openRow = (r: AccountRow) => setAccount(r.id);
+  const openRow = (r: AccountRow) => setSelectedId(r.id);
 
   // 页头同步面板点了某一行 → 把它滚到视野中间,并短暗高亮一下(不改选中态:那看起来像选中了什么)。
   //
@@ -286,7 +285,7 @@ function AccountsListBody({
         tagLinks={tagLinks}
         open={selected != null}
         onOpenChange={(o) => {
-          if (!o) setAccount(undefined);
+          if (!o) setSelectedId(undefined);
         }}
         onComplete={onComplete}
       />
