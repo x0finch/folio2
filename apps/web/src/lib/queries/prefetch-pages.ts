@@ -22,7 +22,10 @@ import { tokenEnrichmentQuery } from "@/lib/queries/tokens";
 // —— loader 从 `portfolioListQuery` 解析出来,切换器从 `usePortfolio()` 拿。这几个函数**不 await**:
 // 全部 `ensureQueryData` 发出即返回,谁先回来谁先画(#488 / #493),等「是哪个组合」是调用方的事。
 
-export function prefetchOverview(queryClient: QueryClient, selectedId: string) {
+// 总览与洞察的共同原料:两页都在浏览器里从同一批原子资源合出「总览」(FOL-57)—— 账户清单与归属、
+// 当下 / 24h 前两张快照、估值口径、代币补充信息、连接器目录、法币参考。`now` 按小时取整,与账户页
+// 的 `accountHoldingsSnapshotTimes()` 锚**不同**,别统一(见 prefetchAccounts)。
+function prefetchOverviewAtoms(queryClient: QueryClient, selectedId: string) {
   const now = floorToHour(Date.now());
   const snapshotQueries = accountHoldingsSnapshotQueries(selectedId, now);
   queryClient.ensureQueryData(accountListQuery(selectedId));
@@ -33,6 +36,11 @@ export function prefetchOverview(queryClient: QueryClient, selectedId: string) {
   queryClient.ensureQueryData(tokenEnrichmentQuery());
   queryClient.ensureQueryData(connectorCatalogQuery());
   queryClient.ensureQueryData(fiatRefsQuery(selectedId));
+}
+
+export function prefetchOverview(queryClient: QueryClient, selectedId: string) {
+  prefetchOverviewAtoms(queryClient, selectedId);
+  // 总览独有:tab 条的 pin、标签清单、30 天走势。
   queryClient.ensureQueryData(portfolioTabPinsQuery(selectedId));
   queryClient.ensureQueryData(tagListQuery(selectedId));
   queryClient.ensureQueryData(portfolioHistoryQuery(selectedId, "30d"));
@@ -55,17 +63,8 @@ export function prefetchAccounts(queryClient: QueryClient, selectedId: string) {
 }
 
 export function prefetchInsights(queryClient: QueryClient, selectedId: string) {
-  const now = floorToHour(Date.now());
-  const snapshotQueries = accountHoldingsSnapshotQueries(selectedId, now);
-  queryClient.ensureQueryData(accountListQuery(selectedId));
-  queryClient.ensureQueryData(accountTagLinksQuery(selectedId));
-  queryClient.ensureQueryData(snapshotQueries.now);
-  queryClient.ensureQueryData(snapshotQueries.prev);
-  queryClient.ensureQueryData(valuationSettingsQuery());
-  queryClient.ensureQueryData(tokenEnrichmentQuery());
-  queryClient.ensureQueryData(connectorCatalogQuery());
-  queryClient.ensureQueryData(fiatRefsQuery(selectedId));
-  // 洞察与总览几乎同,差异:不取 portfolioTabPins / tagList;历史区间是 "all"(总览是 "30d")。
+  prefetchOverviewAtoms(queryClient, selectedId);
+  // 洞察独有:全程走势(总览是 "30d");不取 portfolioTabPins / tagList。
   queryClient.ensureQueryData(portfolioHistoryQuery(selectedId, "all"));
 }
 

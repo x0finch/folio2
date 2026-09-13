@@ -1,6 +1,5 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { prefetchBody, readSrc, stripComments } from "./helpers/prefetch-source";
 
 // #495 票 1:洞察 loader 只等默认组合 id,原子快照和历史发出即返回。
 // FOL-57:总览改原子 query,不再预取 `portfolioOverviewQuery`。
@@ -9,26 +8,6 @@ import { describe, expect, it } from "vitest";
 // FOL-81 后这份 loader 身体搬进了 `lib/queries/prefetch-pages.ts` 的 `prefetchInsights`
 // (四页合成一条 `{-$page}` 路由,预取一份两用:loader 与导航 pointerdown 预热共用),
 // 「没有 pendingComponent」则钉在那条合并路由上。
-
-const ROOT = join(import.meta.dirname, "../src");
-
-function src(rel: string): string {
-  return readFileSync(join(ROOT, rel), "utf8");
-}
-
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-}
-
-// 只取洞察页那一段:四页的预取同住一个文件,不切出来的话「洞察不取 X」会被隔壁那页取 X
-// 的那行冒充成绿的。找不到就抛 —— 切空了的话下面每条 `not.toContain` 都是空断言。
-function prefetchBody(name: string): string {
-  const all = stripComments(src("lib/queries/prefetch-pages.ts"));
-  const start = all.indexOf(`export function ${name}`);
-  if (start < 0) throw new Error(`prefetch-pages.ts 里没有 ${name}`);
-  const next = all.indexOf("export function", start + 1);
-  return next < 0 ? all.slice(start) : all.slice(start, next);
-}
 
 describe("洞察 loader 不再等待慢查询", () => {
   it("发出原子快照和历史,但不 await", () => {
@@ -43,7 +22,7 @@ describe("洞察 loader 不再等待慢查询", () => {
 
   it("路由没有 pendingComponent", () => {
     // 文件名里那对花括号是真的(可选路径参数 `{-$page}`),不是模板占位。
-    expect(stripComments(src("routes/_authed/{-$page}.tsx"))).not.toContain("pendingComponent");
+    expect(stripComments(readSrc("routes/_authed/{-$page}.tsx"))).not.toContain("pendingComponent");
   });
 });
 
@@ -55,7 +34,7 @@ describe("洞察两图各自加载", () => {
   // 一边画图一边画骨架,React 把整棵子树丢掉重渲。挂起让两边挂在同一个点上。
   // **要钉的性质没变**:各自加载、没数据(含失败)都走同高的骨架、这一页不出失败句。
   it("走势和分布各自一个边界,没数据(含失败)走骨架", () => {
-    const page = stripComments(src("routes/_authed/-insights/index.tsx"));
+    const page = stripComments(readSrc("routes/_authed/-insights/index.tsx"));
     expect(page.match(/<QueryBoundary/g)).toHaveLength(2);
     // 两个边界的 pending 与 failed 都是那个骨架:这一页不显示失败句(#495)。
     expect(page.match(/pending=\{<Skeleton className=\{CHART_FRAME\} \/>\}/g)).toHaveLength(2);
@@ -64,19 +43,19 @@ describe("洞察两图各自加载", () => {
   });
 
   it("图框骨架与真图同高", () => {
-    expect(src("routes/_authed/-insights/portfolio-chart.tsx")).toContain("CHART_FRAME");
-    expect(src("routes/_authed/-insights/index.tsx")).toContain("CHART_FRAME");
+    expect(readSrc("routes/_authed/-insights/portfolio-chart.tsx")).toContain("CHART_FRAME");
+    expect(readSrc("routes/_authed/-insights/index.tsx")).toContain("CHART_FRAME");
   });
 
   it("维度 tab 在饼图那个边界之外,没数也能点", () => {
-    const page = stripComments(src("routes/_authed/-insights/index.tsx"));
+    const page = stripComments(readSrc("routes/_authed/-insights/index.tsx"));
     // tab 先渲、饼图那块在后面 —— 挂起点在 `AllocationReady` 里,挂不住 tab。
     expect(page).toMatch(/<Tabs[\s\S]*\{pie\}/);
     expect(page).toMatch(/pie = \([\s\S]*<AllocationReady/);
   });
 
   it("两图从原子总览合并读持仓与曲线末点(FOL-57)", () => {
-    const page = stripComments(src("routes/_authed/-insights/index.tsx"));
+    const page = stripComments(readSrc("routes/_authed/-insights/index.tsx"));
     expect(page).toMatch(/usePortfolioOverview\(/);
     expect(page).not.toContain("portfolioOverviewQuery");
     expect(page).not.toContain("getPortfolioSnapshotData");

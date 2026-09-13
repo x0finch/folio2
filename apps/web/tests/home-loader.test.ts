@@ -1,6 +1,8 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { prefetchBody, readSrc, stripComments } from "./helpers/prefetch-source";
+
+// 文件名里那对花括号是真的(可选路径参数 `{-$page}`),不是模板占位。
+const ROUTE = "routes/_authed/{-$page}.tsx";
 
 // #488 票 3:首页 loader 只等「默认组合 id」(预取 key 必须对上),其余查询发出即返回。
 // FOL-56:总览改原子 query,不再预取 `portfolioOverviewQuery`。
@@ -9,24 +11,6 @@ import { describe, expect, it } from "vitest";
 // `lib/queries/prefetch-pages.ts` 的 `prefetchOverview`(一份两用,路由 loader 与导航项
 // pointerdown 预热共用同一个函数),**等什么**留在合并路由的 loader 里(只等「是哪个组合」)。
 // 要钉的东西一条没变,只是各自钉在新家上。
-
-const PREFETCH = join(import.meta.dirname, "../src/lib/queries/prefetch-pages.ts");
-// 文件名里那对花括号是真的(可选路径参数 `{-$page}`),不是模板占位。
-const ROUTE = join(import.meta.dirname, "../src/routes/_authed/{-$page}.tsx");
-
-function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-}
-
-// 只取某一个 prefetch 函数的身体:四页的预取同住一个文件,不切出来的话「总览不取 X」
-// 会被隔壁那页取 X 的那行冒充成绿的。找不到就抛 —— 切空了的话下面每条 `not.toContain` 都是空断言。
-function prefetchBody(name: string): string {
-  const src = stripComments(readFileSync(PREFETCH, "utf8"));
-  const start = src.indexOf(`export function ${name}`);
-  if (start < 0) throw new Error(`prefetch-pages.ts 里没有 ${name}`);
-  const next = src.indexOf("export function", start + 1);
-  return next < 0 ? src.slice(start) : src.slice(start, next);
-}
 
 describe("首页 loader 不再等待慢查询", () => {
   it("发出原子快照与走势,但不 await 它们", () => {
@@ -52,9 +36,7 @@ describe("首页 loader 不再等待慢查询", () => {
   });
 
   it("首页从总览读 24h 盈亏(FOL-51:随原料两端相减算好)", () => {
-    const hero = stripComments(
-      readFileSync(join(import.meta.dirname, "../src/routes/_authed/-home/hero/index.tsx"), "utf8"),
-    );
+    const hero = stripComments(readSrc("routes/_authed/-home/hero/index.tsx"));
     expect(hero).toMatch(/overview\.gain24h/);
     expect(hero).toMatch(/usePortfolioOverview\(/);
     expect(hero).not.toContain("portfolioGain24hQuery");
@@ -81,7 +63,7 @@ describe("合并路由只等「是哪个组合」", () => {
   // 外壳就整个退成骨架壳再重挂(页头药丸 / 弹层重建、动画互撞)。冷加载不因此变慢 —— `_authed`
   // 的 loader 本来就等同一份(ensureQueryData 同 key 去重)。
   it("loader 只 await 两样:portfolioListQuery 与外壳的同步摘要原料", () => {
-    const route = stripComments(readFileSync(ROUTE, "utf8"));
+    const route = stripComments(readSrc(ROUTE));
     const awaits = route.match(/await [^\n]*/g) ?? [];
     expect(awaits).toHaveLength(2);
     expect(awaits[0]).toContain("portfolioListQuery()");
