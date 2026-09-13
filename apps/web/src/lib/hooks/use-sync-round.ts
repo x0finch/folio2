@@ -1,9 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
+import { isSyncDue } from "@/lib/core/sync-status";
 import { syncKeys } from "@/lib/queries/keys";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { syncRoundQuery } from "@/lib/queries/sync-round";
 import type { SyncRoundView } from "@/lib/server/sync/status";
+
+// 自动补同步的冷却(FOL-18 子票 2):按组合记「上一次自动发起」的时刻,**跨组件重挂生效**。
+// 模块级是有意的 —— 它要活得比组件久:切组合来回、自动那轮失败后重挂,都靠它挡住「每次重挂补一枪」。
+// 一次页面加载内有效,整页重载后自然清零(那时本来就该重新判一次)。
+const AUTO_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
+const lastAutoSyncAt = new Map<string, number>();
 
 // 一轮同步在前端这一侧只剩两件事:**发起它**,和**读它**(ADR 0048)。
 //
@@ -30,9 +37,22 @@ export interface SyncRoundHandle {
   sync: () => void;
 }
 
-export function useSyncRound(portfolioId: string, syncableCount: number): SyncRoundHandle {
+/**
+ * 自动补同步的开关(FOL-18 子票 2)。**只有首页传**;传了才在数据过期时自动补一轮,
+ * 账户页 / 洞察页不传、维持现状。
+ */
+export interface AutoSyncOption {
+  /** 组合最新一次快照(来自摘要)。超过 1 小时(或从未同步)就自动补一轮。 */
+  lastSyncedAt: number | null;
+}
+
+export function useSyncRound(
+  portfolioId: string,
+  syncableCount: number,
+  autoSync?: AutoSyncOption,
+): SyncRoundHandle {
   const queryClient = useQueryClient();
-  const { data } = useQuery(syncRoundQuery(portfolioId));
+  const { data, isPending: roundPending } = useQuery(syncRoundQuery(portfolioId));
   const round = data ?? null;
   const busy = isRoundBusy(round);
 
@@ -85,6 +105,30 @@ export function useSyncRound(portfolioId: string, syncableCount: number): SyncRo
     if (first) return;
     void invalidateFor(queryClient, "sync.round");
   }, [round, queryClient, portfolioId, reset]);
+
+  // 进首页自动补同步(FOL-18 子票 2):数据过期就在后台跑一轮,**静默** —— 这个 hook 从不弹 toast
+  // (那只在账户详情的单账户同步里),所以自动与手动共用同一发,唯一的差别是没人点。药丸照常转圈。
+  //
+  // 防重复三层:
+  //   ① 这个组合这次挂载只发一枪(`autoFired` 记住给谁发过;切组合 → 记录换人 → 允许给新组合补)。
+  //   ② 冷却(`lastAutoSyncAt`,模块级、跨重挂):切组合来回、失败后重挂都不会每次重挂补一枪。
+  //   ③ 正在跑不补(busy / isPending)。
+  const mutate = mutation.mutate;
+  const pending = mutation.isPending;
+  const autoFired = useRef<string | null>(null);
+  useEffect(() => {
+    if (!autoSync) return; // 只有首页传;账户页 / 洞察页不自动补
+    if (roundPending) return; // 轮状态还没读到 → 先别判(否则首帧 busy 恒 false,会抢在一轮在跑之前补)
+    if (busy || pending) return; // ③ 正在跑不补
+    if (syncableCount === 0) return; // 没有可同步的账户(纯手记组合等)
+    if (autoFired.current === portfolioId) return; // ① 本组合本次挂载已发过
+    if (!isSyncDue(autoSync.lastSyncedAt, Date.now())) return; // 数据还新,不补
+    const now = Date.now();
+    if (now - (lastAutoSyncAt.get(portfolioId) ?? 0) < AUTO_SYNC_COOLDOWN_MS) return; // ② 冷却
+    autoFired.current = portfolioId;
+    lastAutoSyncAt.set(portfolioId, now);
+    mutate();
+  }, [autoSync, busy, pending, roundPending, syncableCount, portfolioId, mutate]);
 
   const disabled = busy || mutation.isPending || syncableCount === 0;
 

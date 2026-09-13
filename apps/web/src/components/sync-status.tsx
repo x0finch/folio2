@@ -9,7 +9,7 @@ import { connectorLabelFallback } from "@/lib/core/logo";
 import type { SyncAttentionSource, SyncStatusSummary } from "@/lib/core/sync-status";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
-import { isRoundBusy, useSyncRound } from "@/lib/hooks/use-sync-round";
+import { type AutoSyncOption, isRoundBusy, useSyncRound } from "@/lib/hooks/use-sync-round";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import type { SyncRoundFailure, SyncRoundView } from "@/lib/server/sync/status";
 import { IconButton } from "./icon-button";
@@ -374,9 +374,12 @@ export function hasAttention(
 export function SyncStatus({
   summary,
   action,
+  autoSync,
 }: {
   summary: SyncStatusSummary;
   action?: SyncAction;
+  /** 数据过期时自动补一轮(FOL-18 子票 2);只有首页传下来。 */
+  autoSync?: AutoSyncOption;
 }) {
   const t = useTranslations("Sync");
   // 同步这一轮按**当前组合**跑(ADR 0047)—— 名单在服务端算,这里只把组合传下去。
@@ -385,6 +388,7 @@ export function SyncStatus({
   const { round, busy, disabled, startError, sync } = useSyncRound(
     selectedId,
     summary.accounts.length,
+    autoSync,
   );
   // 打开方式按**指针能力**分,不按视口宽度:触屏上的 hover 是 tap 之后粘住的幽灵态,面板会莫名其妙
   // 留在屏幕上。宽度不是判据 —— 触屏笔记本也该是 tap。
