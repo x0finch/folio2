@@ -115,6 +115,7 @@ describe("summarizeSync", () => {
       total: 0,
       attention: [],
       lastSyncedAt: null,
+      dataStale: false,
     });
   });
 
@@ -172,6 +173,33 @@ describe("summarizeSync", () => {
       const s = summarizeSync([old({ archivedAt: 1, takenAt: now - 10 * STALE_SYNC_MS })], now);
       expect(s.attention).toEqual([]);
       expect(s.total).toBe(0);
+    });
+  });
+
+  // 组合级 dataStale(FOL-18 子票 1):看**最新那次**快照的年龄,不看 attention。
+  // 逐档边界在 data-freshness.test.ts,这里只钉「它接的是 lastSyncedAt」这条接线。
+  describe("dataStale(整体数据太旧)", () => {
+    const WARN = 26 * 60 * 60 * 1000;
+    const now = 1_000_000_000_000;
+
+    it("最新快照超过 26 小时 → dataStale,即便没有账户进 attention", () => {
+      // 42 小时前那次是最新的,42h < 3 天,所以 attention 是空的 —— 正是线上那个绿药丸 bug。
+      const s = summarizeSync([acc({ takenAt: now - 42 * 60 * 60 * 1000 })], now);
+      expect(s.attention).toEqual([]);
+      expect(s.dataStale).toBe(true);
+    });
+
+    it("最新快照在 26 小时内 → 不 stale,哪怕另一个账户很旧", () => {
+      const s = summarizeSync(
+        [acc({ id: "new", takenAt: now - 1000 }), acc({ id: "old", takenAt: now - WARN - 1 })],
+        now,
+      );
+      expect(s.dataStale).toBe(false);
+    });
+
+    it("从没同步过 → 不 stale(交给 never-synced 那条,不重复染黄)", () => {
+      const s = summarizeSync([acc({ takenAt: null })], now);
+      expect(s.dataStale).toBe(false);
     });
   });
 
