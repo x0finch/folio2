@@ -310,6 +310,10 @@ export function SyncPanel({
       {roundRows}
       <PanelRow label={t("lastUpdated")} value={lastUpdated} mono />
 
+      {/* 数据太旧时说一句后果(FOL-18 子票 1):药丸只变色不说话,面板负责讲清楚「黄的是因为
+          24h 盈亏已经没有精确基准了」。绑 summary.dataStale —— 与药丸转黄同一个判据。 */}
+      {summary.dataStale ? <p className="py-1 text-warn text-xs">{t("staleWarning")}</p> : null}
+
       {/* 两份清单合用一个封顶的滚动区:面板现在在手机上也是 popover(锚在页头下方),清单一长
           就会顶到屏幕底下 —— 而这张面板最后一行正是那颗同步按钮,够不着它等于这个入口废了。
           max-h-64 是「大约十行」,再多就滚。 */}
@@ -347,6 +351,10 @@ export function SyncPanel({
  * **整轮没跑起来**根本没到落库那一步;**中断**更是连结果都没有。不把它们算进来的话,
  * 一轮同步炸了三个,徽标照样绿着说「已同步」。
  *
+ * 第五样是 `summary.dataStale`(FOL-18 子票 1):整体最新数据超过 26 小时。它不进 attention 清单
+ * (那是逐账户的),但一样是「有事要看一眼」—— 42 小时没同步、每个账户都没到 3 天时,前四样全空,
+ * 就靠这条把药丸转黄。
+ *
  * 纯函数导出,单测直接喂数据(经 <SyncStatus> 测它要先搭路由 + Portfolio 上下文)。
  */
 export function hasAttention(
@@ -356,6 +364,7 @@ export function hasAttention(
 ): boolean {
   return (
     summary.attention.length > 0 ||
+    summary.dataStale ||
     startError !== null ||
     (round != null &&
       (round.failed.length > 0 || round.error !== null || round.state === "interrupted"))

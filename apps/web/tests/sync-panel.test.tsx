@@ -34,6 +34,7 @@ const summary = (over: Partial<SyncStatusSummary> = {}): SyncStatusSummary => ({
   total: 13,
   attention: [],
   lastSyncedAt: NOW - 2 * MINUTE,
+  dataStale: false,
   ...over,
 });
 
@@ -299,5 +300,9 @@ describe("hasAttention", () => {
 
   it("发起同步就失败了 → true", () => {
     expect(hasAttention(summary(), null, "sync failed: 401")).toBe(true);
+  });
+
+  it("整体数据太旧(dataStale)→ true —— attention 是空的也算,这正是绿药丸 bug 的洞", () => {
+    expect(hasAttention(summary({ dataStale: true }), round())).toBe(true);
   });
 });
