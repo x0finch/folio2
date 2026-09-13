@@ -4,8 +4,8 @@ import { BarChart3, Home, Settings, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
 import type { SyncStatusSummary } from "@/lib/core/sync-status";
+import { DEFAULT_PAGE, isPageSlug, type PageKey } from "@/routes/_authed/-page-keys";
 import { OverviewSkeleton } from "@/routes/_authed/-page-skeletons";
-import type { PageKey } from "@/routes/_authed/-pages";
 import { Logo } from "./logo";
 import { PageHeader } from "./page-header";
 
@@ -89,12 +89,13 @@ export function AppShell({
   const ts = useTranslations("Sidebar");
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   // 当前是哪个 page = pathname 首段(空段 = 总览)。合并路由后不再按 `to` 前缀判,直接认这个 key。
+  // 认不出的段到不了这里(路由层已 404),回落总览只是给类型一个着落。
   const seg = pathname.split("/")[1] ?? "";
-  const activeKey = seg === "" ? "overview" : seg;
+  const activeKey: PageKey = isPageSlug(seg) ? seg : DEFAULT_PAGE;
   const activeNav = NAVS.find((n) => n.key === activeKey) ?? NAVS[0];
   const pageTitle = t(activeNav.key);
   const pageSub =
-    activeNav.key === "overview"
+    activeNav.key === DEFAULT_PAGE
       ? th("overviewSub", { count: syncStatus.total })
       : th(`${activeNav.key}Sub` as "accountsSub" | "insightsSub" | "settingsSub");
   const initial = userName.trim().charAt(0).toUpperCase() || "?";

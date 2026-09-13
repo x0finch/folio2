@@ -21,7 +21,8 @@ import { currencyPreferenceQuery } from "@/lib/queries/preferences";
 import { valuationSettingsQuery } from "@/lib/queries/settings";
 import { prefetchSyncStatusAtoms, useSyncStatus } from "@/lib/queries/sync";
 import { getSession } from "@/lib/server/session";
-import { type PageKey, prefetchPage } from "./_authed/-pages";
+import type { PageKey } from "./_authed/-page-keys";
+import { prefetchPage } from "./_authed/-pages";
 
 // 受保护布局:无 session 则重定向到 /login(仅 UX;数据安全靠各 authedServerFn)。
 // loader 定展示币种 + 汇率(cookie + FX cache-only),并**预取**全局同步状态

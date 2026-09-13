@@ -10,9 +10,12 @@ import { RevealContext } from "./stagger-reveal";
 // - **进场**:某页成为当前页时,它主体那几段内容依次淡入 + 轻抬。动效本身住 `StaggerReveal`(各页自己裹),
 //   这里只发「该播了」的信号 —— 面板这一层**不做整页淡入**:它裹着页头那个 absolute 的 `<HeaderSync/>`,
 //   而且与逐段进场叠起来是双重淡入。
+//
+// key 的类型由调用方的注册表决定(泛型 `K`):传进来的 `activeKey` 只能是注册表里有的那几个值,
+// 「切到一个没注册的页」在编译期就发生不了。
 
-export interface SwitcherPage {
-  key: string;
+export interface SwitcherPage<K extends string> {
+  key: K;
   /** 通常是 `React.lazy(() => import(...))`;首次挂载时由 `Skeleton` 顶着。 */
   Component: ComponentType;
   /** 该页首次加载(chunk 还在下载)时的骨架 —— 每页自己的形状,不共用一张。 */
@@ -51,15 +54,15 @@ function Panel({
   );
 }
 
-export function PageSwitcher({
+export function PageSwitcher<K extends string>({
   pages,
   activeKey,
 }: {
-  pages: readonly SwitcherPage[];
-  activeKey: string;
+  pages: readonly SwitcherPage<K>[];
+  activeKey: K;
 }) {
   // 去过的页(含当前):只增不减。没进过的不进树,保证 lazy —— chunk 只在第一次切过去时才请求。
-  const [visited, setVisited] = useState<Set<string>>(() => new Set([activeKey]));
+  const [visited, setVisited] = useState<Set<K>>(() => new Set([activeKey]));
   // 首次切到某页时在**渲染期**就并入 visited(React 认可的「渲染中调整 state」:立刻重渲染、不提交中间态)。
   // 这样新页在同一次提交里挂载 —— 不留 useEffect 那种「旧页已隐藏、新页还没挂」的空白帧。guard 保证不死循环。
   if (!visited.has(activeKey)) {
