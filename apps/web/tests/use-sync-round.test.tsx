@@ -26,6 +26,7 @@ const view = (over: Partial<SyncRoundView> = {}): SyncRoundView => ({
   synced: 1,
   failed: [],
   needsKeys: 0,
+  skipped: 0,
   current: "Kraken",
   unresolved: 0,
   error: null,
