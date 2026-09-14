@@ -254,8 +254,14 @@ const asDep =
  * 与真跑的条数对不上。不给 = 不收口(抽屉里的单账户同步走的是那一条)。
  */
 export interface SyncScope {
-  /** 这一轮跑哪些账户 —— 开轮那一步定下来的名单。 */
-  only: ReadonlySet<string>;
+  /**
+   * 这一轮跑哪些账户 —— 开轮那一步定下来的名单。
+   *
+   * 给**静态集合**(cron / 手动全量:名单在开轮时就定死),或给一个**在装配内解析的 Effect**
+   *(自动轮的按新鲜度跳过 FOL-18:规划要读快照、settle 掉新鲜账户 —— 让它在同步轮这次装配里
+   * 解析,就跟同步内核共用同一个 DbClient,不必另起一条根 fiber 建第二个连接)。
+   */
+  only: ReadonlySet<string> | Effect.Effect<ReadonlySet<string>, never, Database>;
   /**
    * 出网的闸。**它只盖得住同一次调用里的多轮**(cron 一次 scheduled 里那批):信号量是进程内
    * 的对象,而手动 `POST /api/sync` 与 cron 的 scheduled 跑在**不同的 isolate 里** —— 跨 isolate
@@ -295,7 +301,12 @@ export const makeSyncServicesLayer = (
             const { accounts } = yield* Database;
             // **这一轮跑哪些账户,开轮那一步已经定死了**(ADR 0048):`only` 就是那一轮记录里
             // 的名单,所以面板上的 `x / N` 与这里真跑的条数是同一份名单,不可能对不上。
-            const only = scope?.only ?? null;
+            //
+            // 静态集合直接用;Effect 形态(自动轮的按新鲜度跳过)**在这次装配里解析** —— 于是那趟
+            // 规划(读快照、settle 掉新鲜账户)与同步内核共用同一个 DbClient,不另起第二个连接。
+            const scopeOnly = scope?.only;
+            const only =
+              scopeOnly == null ? null : Effect.isEffect(scopeOnly) ? yield* scopeOnly : scopeOnly;
             return {
               // 归档账户跳过同步(不产生新快照);manual 不是同步源(ADR 0018:当下值由 creds 现造,
               // 不写快照)→ 一并过滤。编排只见活跃的可同步账户(判别走纯 isSyncableAccount)。

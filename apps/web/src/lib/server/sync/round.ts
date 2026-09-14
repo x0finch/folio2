@@ -9,10 +9,10 @@ import { type AccountSyncResult, Sweep, type SweepResult, SYNC_CONCURRENCY } fro
 import { getLogger } from "@logtape/logtape";
 import { Cause, Clock, Effect, Option } from "effect";
 import { z } from "zod";
-import { SYNC_DUE_MS } from "@/lib/core/sync-status";
+import { dataFreshness } from "@/lib/core/sync-status";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { userLayer } from "@/lib/server/runtime";
-import { syncRoundFor } from "./deps";
+import { type SyncScope, syncRoundFor } from "./deps";
 import { driveRound } from "./drive";
 import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 
@@ -82,12 +82,13 @@ export const openSyncRound = (input: {
 const statusOf = (r: AccountSyncResult): Exclude<SyncRoundAccountStatus, "pending"> =>
   r.ok ? "synced" : r.skipped ? "needs-keys" : "failed";
 
-// 自动轮的「按新鲜度跳过」(FOL-18 子票 4)。把最新快照还在 1 小时内(SYNC_DUE_MS)的账户当
-// `skipped` 直接收掉,返回这一轮**真正要问上游**的名单。手动轮不调它 —— 强制全量。
+// 自动轮的「按新鲜度跳过」(FOL-18 子票 4)。把最新快照还**新鲜**(`dataFreshness === "fresh"`)的
+// 账户当 `skipped` 直接收掉,返回这一轮**真正要问上游**的名单。手动轮不调它 —— 强制全量。
 //
-// 跑在 driveRound 之前:读一次 latest 快照,逐个 settle('skipped')。被收掉的账户不进 `only`,
-// 于是 Sweep 那条流根本不 emit 它们;它们的 settle 在这里已经写过,total 与 settled 仍对得上。
-// 出任何岔子就退回「全量」(宁可多问一遍上游,也不能因为跳过的优化把一轮搞挂)。
+// **作为 `only` 的 Effect 形态交给装配层**(见 `SyncScope.only`):在同步轮那**同一次装配**里解析,
+// 与同步内核共用一个 DbClient(红线:一次请求一个 DbClient),不另起一条根 fiber 建第二个连接。
+// 解析时读一次 latest 快照,逐个 settle('skipped');被收掉的账户不进返回的名单,于是 Sweep 那条流
+// 根本不 emit 它们,它们的 settle 这里已经写过,total 与 settled 仍对得上。
 const planFreshSkips = (round: SyncRoundRecord): Effect.Effect<Set<string>, never, Database> =>
   Effect.gen(function* () {
     const db = yield* Database;
@@ -96,10 +97,11 @@ const planFreshSkips = (round: SyncRoundRecord): Effect.Effect<Set<string>, neve
     const takenAtById = new Map(latest.map((s) => [s.snapshot.accountId, s.snapshot.takenAt]));
     const toRun = new Set<string>();
     for (const id of Object.keys(round.accounts)) {
-      const takenAt = takenAtById.get(id);
-      // 新鲜 = 有快照、年龄在 0…1 小时内(负数是时钟偏移,当没同步过 → 照常跑,别把未来当新鲜)。
-      const fresh = takenAt != null && now - takenAt >= 0 && now - takenAt <= SYNC_DUE_MS;
-      if (fresh) {
+      const takenAt = takenAtById.get(id) ?? null;
+      // 「新鲜」用组合级那同一个 `dataFreshness`(药丸转黄、进首页自动补一轮都共用它)—— 三处对
+      // 「什么算新鲜」的判断不分叉:没同步过 / 超过 1 小时都照跑;时钟偏移的未来时间戳按 fresh 处理
+      // (当刚同步过 → 跳过),不把未来当过期白问一遍上游。
+      if (dataFreshness(takenAt, now) === "fresh") {
         yield* db.syncRounds.settle({
           portfolioId: round.portfolioId,
           roundId: round.roundId,
@@ -152,12 +154,19 @@ export const runSyncRound = async (
   opts: RunSyncRoundOptions = {},
 ): Promise<void> => {
   const syncLog = getLogger(["folio", "web", "sync"]);
-  // 自动轮先规划跳过(FOL-18 子票 4):读一次快照、把新鲜的收成 skipped,只剩要问上游的进 `only`。
-  // 出岔子退回全量(`catch`)—— 跳过是优化,不能因它让一轮跑不成。手动轮直接全量,不读这一趟。
+  // 自动轮按新鲜度跳过(FOL-18 子票 4):把 `planFreshSkips` 作为 `only` 的 **Effect 形态**交给装配层,
+  // 在同步轮那**同一次装配**里解析(见 `SyncScope.only`)—— 与同步内核共用一个 DbClient,不再像从前
+  // 那样另起一条 `runPromise` + `provide(userLayer)` 建第二个连接。规划只会以 defect 收场(错误面是
+  // `never`),真炸了记一行、退回全量:跳过是优化,不能因它让一轮跑不成。手动轮直接全量,不走这一趟。
   const allIds = () => new Set(Object.keys(round.accounts));
-  const only = opts.skipFresh
-    ? await Effect.runPromise(planFreshSkips(round).pipe(Effect.provide(userLayer(userId)))).catch(
-        () => allIds(),
+  const only: SyncScope["only"] = opts.skipFresh
+    ? planFreshSkips(round).pipe(
+        Effect.catchAllCause((cause) =>
+          Effect.logWarning(
+            "skip-fresh planning failed; running full round",
+            Cause.pretty(cause),
+          ).pipe(Effect.as<ReadonlySet<string>>(allIds())),
+        ),
       )
     : allIds();
   const { results, afterRound, layer } = syncRoundFor(userId, { only, gate: opts.gate });

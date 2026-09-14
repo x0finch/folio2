@@ -185,6 +185,25 @@ describe("sync/round", () => {
       );
     });
 
+    // 未来时间戳(时钟偏移):按组合级那同一个 `dataFreshness` 当「新鲜」处理 —— 药丸、自动补一轮、
+    // 这里的跳过判断共用它,不把未来当过期白问一遍上游。所以自动轮里它照 fresh 收成 skipped。
+    it("自动轮把未来时间戳的快照当新鲜 → 跳过,不问上游", async () => {
+      const future = await cex("时钟偏移到未来");
+      await db(USER).snapshots.write(future.id, {
+        takenAt: Date.now() + 60 * 60 * 1000, // 一小时后:负龄
+        totalUsd: 100,
+        balances: [],
+      });
+
+      const auto = await open();
+      await runSyncRound(USER, auto.round, { skipFresh: true });
+      const pf = await db(USER).portfolios.ensureDefault();
+      const view = await read(pf.id);
+      expect(view?.state).toBe("done");
+      expect(view?.skipped).toBe(1); // 未来 = 新鲜 → 跳过
+      expect(view?.failed).toEqual([]); // 没被问上游,所以没失败
+    });
+
     // 陈旧的 worker 撞上新一轮:它那几笔写落空成 no-op(条件在 db 那一层),这里钉的是
     // 「整条路真的这么表现」—— 新一轮不会被上一轮的尾巴改花。
     it("上一轮的尾巴写不进新一轮", async () => {
