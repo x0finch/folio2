@@ -443,12 +443,7 @@ export function SyncStatus({
           onClick={hoverCapable ? sync : undefined}
         />
       </PopoverTrigger>
-      {/* 面板自带不透明底色。beUI 面板的底色本来只由 goo 垫底层画(z-[-1] 的 bg-popover 过 SVG 滤镜),
-          内容层自己没有底色。那条 SVG 滤镜(feColorMatrix 锐化 alpha + feComposite atop)在 WebKit 上会
-          渲染成半透明 —— 窄屏里面板压住 hero 时,净值/涨跌就从面板底下透上来(Chromium 上不透、看不出)。
-          给内容层补一层 bg-popover:它被 clipRef 裁成与面板同一个圆角形状、跟着 goo 一起收合,不改液态观感,
-          只保证任何浏览器上面板都是实底。radius 对齐 panelRadius(18)。 */}
-      <PopoverContent className="rounded-[18px] bg-popover">
+      <PopoverContent>
         <SyncPanel
           summary={summary}
           round={round}
