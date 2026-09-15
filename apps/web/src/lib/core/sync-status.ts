@@ -15,6 +15,43 @@ export function isSyncableAccount(a: Pick<AccountSafe, "archivedAt" | "connector
 // 客户端与服务端共用。`lib/server/sync/status.ts` 只保留轮次视图等 server 侧组装。
 export const STALE_SYNC_MS = 3 * 24 * 60 * 60 * 1000;
 
+// 组合级的数据新鲜度阈值(FOL-18)。两档各管各的、故意分开:
+//   · SYNC_DUE_MS(1 小时)—— 进首页超过这个就自动补一轮同步(子票 2)。同步贵(交易所配额、
+//     快照存储),这个阈值要稀。
+//   · SYNC_WARN_MS(26 小时)—— 超过这个同步药丸转黄(子票 1)。24 小时是 24h 盈亏的基准窗口,
+//     +2 小时容差:正好是「盈亏失去精确基准」那个点。绑这个而不是绑同步周期,是因为绑周期会让
+//     任何一个交易所抽风都染黄药丸,狼来了几次就没人看它了。
+// 单账户的 STALE_SYNC_MS(3 天)是另一回事:它管「某一行数旧了」进 attention 清单,不是组合整体。
+export const SYNC_DUE_MS = 60 * 60 * 1000;
+export const SYNC_WARN_MS = 26 * 60 * 60 * 1000;
+
+// 组合最新一次快照相对当下的新鲜度。判据只看**最新那次**(`summarizeSync` 的 lastSyncedAt),
+// 因为「功能有没有退化」看的是整体最新数据的年龄,不是最旧那个账户。
+//   · never   —— 从没同步过(交给 attention 的 never-synced 那条管,药丸不因它单独转黄)
+//   · stale   —— 超过 26 小时(药丸转黄)
+//   · syncDue —— 超过 1 小时但没到 26(该自动补,但还没到撒谎的程度)
+//   · fresh   —— 1 小时内,或时钟偏移导致的未来时间戳(不能把未来当成过期)
+export type DataFreshness = "never" | "stale" | "syncDue" | "fresh";
+
+export function dataFreshness(lastSyncedAt: number | null, now: number): DataFreshness {
+  if (lastSyncedAt == null) return "never";
+  const age = now - lastSyncedAt;
+  if (age < 0) return "fresh"; // 时钟偏移:未来的时间戳不算过期(否则一次校时把好数据判死)
+  if (age > SYNC_WARN_MS) return "stale";
+  if (age > SYNC_DUE_MS) return "syncDue";
+  return "fresh";
+}
+
+// 药丸该不该因「数据太旧」转黄(子票 1):同步过、但最新快照超过 26 小时。「从未同步」不走这条
+// —— 那由 attention 的 never-synced 管,两条并存时药丸本来就是黄的。
+export const isDataStale = (lastSyncedAt: number | null, now: number): boolean =>
+  dataFreshness(lastSyncedAt, now) === "stale";
+
+// 进首页该不该自动补一轮(子票 2):从没同步过、或最新快照超过 1 小时。新用户接完账户回首页
+// (lastSyncedAt = null)也要补第一轮,所以 "never" 也算 due。
+export const isSyncDue = (lastSyncedAt: number | null, now: number): boolean =>
+  dataFreshness(lastSyncedAt, now) !== "fresh";
+
 export type AccountSyncStatus = "needsCreds" | "never" | "stale" | "fresh";
 
 // 顺序即优先级:凭据没配齐是根因,「从未同步」是它的后果,分两句说会让人以为有两件事要修。
@@ -78,6 +115,14 @@ export interface SyncStatusSummary {
   attention: SyncAttentionSource[];
   /** 全部活跃账户里最新的一次快照时间(null = 全部从未同步)。 */
   lastSyncedAt: number | null;
+  /**
+   * 组合整体数据是否旧到该转黄(FOL-18 子票 1):最新快照超过 26 小时。
+   *
+   * 与 `attention` 分开:attention 是逐账户的问题清单,`dataStale` 是「整体最新数据的年龄」这一个
+   * 组合级判据。42 小时没同步但每个账户都 < 3 天时,attention 是空的、药丸却该黄 —— 这个字段补的
+   * 就是那个洞。
+   */
+  dataStale: boolean;
 }
 
 // 严重程度序。同档内按 takenAt 升序(越旧越前),没有 takenAt 的算最旧。
@@ -120,5 +165,6 @@ export function summarizeSync(accounts: SyncAccountInput[], now: number): SyncSt
     total: active.length,
     attention,
     lastSyncedAt,
+    dataStale: isDataStale(lastSyncedAt, now),
   };
 }

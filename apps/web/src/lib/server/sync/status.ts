@@ -43,6 +43,8 @@ export interface SyncRoundView {
   failed: SyncRoundFailure[];
   /** 第三段:凭据还没填完的。既不算成功也不算失败。 */
   needsKeys: number;
+  /** 第四段(FOL-18 子票 4):自动轮里因数据还新而刻意跳过、没重拉的。既不算成功也不算失败。 */
+  skipped: number;
   /** 还没轮到的第一个账户 —— 进行中那句「正在同步谁」。 */
   current: string | null;
   /** 收官时还 pending 的条数(轮中被归档的那些)—— 不进面板,cron 的收官日志念它。 */
@@ -69,6 +71,7 @@ export function syncRoundView(round: SyncRoundRecord, now: number): SyncRoundVie
     synced: 0,
     failed: 0,
     "needs-keys": 0,
+    skipped: 0,
   };
   const failed: SyncRoundFailure[] = [];
   let current: string | null = null;
@@ -98,6 +101,7 @@ export function syncRoundView(round: SyncRoundRecord, now: number): SyncRoundVie
     unresolved,
     failed,
     needsKeys: tally["needs-keys"],
+    skipped: tally.skipped,
     current,
     error: round.error ?? null,
   };

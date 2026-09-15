@@ -148,6 +148,62 @@ describe("sync/round", () => {
       expect(noKeys.id in round.accounts).toBe(true);
     });
 
+    // 自动轮按新鲜度跳过(FOL-18 子票 4):有一张 1 小时内快照的账户被当 skipped 收掉、不问上游;
+    // 没快照的照常跑(出网被掐 → 失败)。手动轮不跳,强制全量。出网全程掐着,所以「被跳过」
+    // 只可能来自新鲜度判断,不是碰巧同步成功。
+    it("自动轮跳过刚同步过的账户;手动轮强制全量", async () => {
+      const fresh = await cex("刚同步过");
+      const stale = await cex("很久没同步");
+      // 只给 fresh 写一张当下快照;stale 一张都没有。
+      await db(USER).snapshots.write(fresh.id, {
+        takenAt: Date.now(),
+        totalUsd: 100,
+        balances: [],
+      });
+
+      const auto = await open();
+      await runSyncRound(USER, auto.round, { skipFresh: true });
+      const pf = await db(USER).portfolios.ensureDefault();
+      const autoView = await read(pf.id);
+      expect(autoView?.state).toBe("done");
+      expect(autoView?.skipped).toBe(1); // fresh 被跳过
+      // fresh 没被问上游(出网掐着也没失败它),stale 被问了 → 失败。
+      expect(autoView?.failed.map((f) => f.accountId)).toEqual([stale.id]);
+
+      // 收官后开手动轮(强制全量):fresh 这次也被问 → 两个都失败,没有 skipped。
+      await db(USER).syncRounds.finish({
+        portfolioId: auto.round.portfolioId,
+        roundId: auto.round.roundId,
+        retentionMs: 1_000,
+      });
+      const manualRound = await open();
+      await runSyncRound(USER, manualRound.round); // 不传 skipFresh
+      const manualView = await read(pf.id);
+      expect(manualView?.skipped).toBe(0);
+      expect(manualView?.failed.map((f) => f.accountId).sort()).toEqual(
+        [fresh.id, stale.id].sort(),
+      );
+    });
+
+    // 未来时间戳(时钟偏移):按组合级那同一个 `dataFreshness` 当「新鲜」处理 —— 药丸、自动补一轮、
+    // 这里的跳过判断共用它,不把未来当过期白问一遍上游。所以自动轮里它照 fresh 收成 skipped。
+    it("自动轮把未来时间戳的快照当新鲜 → 跳过,不问上游", async () => {
+      const future = await cex("时钟偏移到未来");
+      await db(USER).snapshots.write(future.id, {
+        takenAt: Date.now() + 60 * 60 * 1000, // 一小时后:负龄
+        totalUsd: 100,
+        balances: [],
+      });
+
+      const auto = await open();
+      await runSyncRound(USER, auto.round, { skipFresh: true });
+      const pf = await db(USER).portfolios.ensureDefault();
+      const view = await read(pf.id);
+      expect(view?.state).toBe("done");
+      expect(view?.skipped).toBe(1); // 未来 = 新鲜 → 跳过
+      expect(view?.failed).toEqual([]); // 没被问上游,所以没失败
+    });
+
     // 陈旧的 worker 撞上新一轮:它那几笔写落空成 no-op(条件在 db 那一层),这里钉的是
     // 「整条路真的这么表现」—— 新一轮不会被上一轮的尾巴改花。
     it("上一轮的尾巴写不进新一轮", async () => {

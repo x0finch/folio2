@@ -34,6 +34,7 @@ const summary = (over: Partial<SyncStatusSummary> = {}): SyncStatusSummary => ({
   total: 13,
   attention: [],
   lastSyncedAt: NOW - 2 * MINUTE,
+  dataStale: false,
   ...over,
 });
 
@@ -48,6 +49,7 @@ const round = (over: Partial<SyncRoundView> = {}): SyncRoundView => ({
   synced: 9,
   failed: [],
   needsKeys: 0,
+  skipped: 0,
   current: null,
   unresolved: 0,
   error: null,
@@ -107,6 +109,12 @@ describe("三段式口径", () => {
     expect(text).toContain("10 synced"); // 6 + 4 个不参与同步的
     expect(text).toContain("1 failed");
     expect(text).toContain("2 need keys");
+  });
+
+  it("自动轮跳过的账户单独一段「N skipped」(FOL-18 子票 4)", () => {
+    const text = mount({ summary: summary(), round: round({ synced: 5, skipped: 4 }) });
+    expect(text).toContain("9 synced"); // 5 + 4 个不参与同步的
+    expect(text).toContain("4 skipped");
   });
 
   // 读不到轮 = **还没跑过**,不是「跑过了、成绩是这些」。第一版在这种时候拿手记的条数硬凑了一个
@@ -299,5 +307,9 @@ describe("hasAttention", () => {
 
   it("发起同步就失败了 → true", () => {
     expect(hasAttention(summary(), null, "sync failed: 401")).toBe(true);
+  });
+
+  it("整体数据太旧(dataStale)→ true —— attention 是空的也算,这正是绿药丸 bug 的洞", () => {
+    expect(hasAttention(summary({ dataStale: true }), round())).toBe(true);
   });
 });
