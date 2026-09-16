@@ -25,7 +25,8 @@ export function Overview() {
     <HomeViewStateProvider>
       {/* 同步条留在进场容器**之外**:它 absolute 定位到外壳 `<main>`,被带 transform 的层裹住会顶跳
           约 24px(见 StaggerReveal)。它每页都一样、是常驻壳件,不跟着进场才是对的。 */}
-      <HeaderSync />
+      {/* 首页 opt-in 自动补同步(FOL-18 子票 2):进来数据过期就静默补一轮。 */}
+      <HeaderSync autoSyncWhenStale />
       <StaggerReveal className="flex flex-col gap-6">
         <QueryBoundary
           resetKey={`hero:${snapshotsKey}`}

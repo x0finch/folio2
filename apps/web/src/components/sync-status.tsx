@@ -9,7 +9,7 @@ import { connectorLabelFallback } from "@/lib/core/logo";
 import type { SyncAttentionSource, SyncStatusSummary } from "@/lib/core/sync-status";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
-import { isRoundBusy, useSyncRound } from "@/lib/hooks/use-sync-round";
+import { type AutoSyncOption, isRoundBusy, useSyncRound } from "@/lib/hooks/use-sync-round";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import type { SyncRoundFailure, SyncRoundView } from "@/lib/server/sync/status";
 import { IconButton } from "./icon-button";
@@ -231,6 +231,8 @@ export function SyncPanel({
         syncedCount > 0 ? t("tallySynced", { count: syncedCount }) : null,
         round.failed.length > 0 ? t("tallyFailed", { count: round.failed.length }) : null,
         round.needsKeys > 0 ? t("tallyNeedsKeys", { count: round.needsKeys }) : null,
+        // 自动轮里数据还新而跳过的(FOL-18 子票 4)—— 与前三段并列,为 0 省略。
+        round.skipped > 0 ? t("tallySkipped", { count: round.skipped }) : null,
       ]
         .filter(Boolean)
         .join(" · ")
@@ -310,6 +312,10 @@ export function SyncPanel({
       {roundRows}
       <PanelRow label={t("lastUpdated")} value={lastUpdated} mono />
 
+      {/* 数据太旧时说一句后果(FOL-18 子票 1):药丸只变色不说话,面板负责讲清楚「黄的是因为
+          24h 盈亏已经没有精确基准了」。绑 summary.dataStale —— 与药丸转黄同一个判据。 */}
+      {summary.dataStale ? <p className="py-1 text-warn text-xs">{t("staleWarning")}</p> : null}
+
       {/* 两份清单合用一个封顶的滚动区:面板现在在手机上也是 popover(锚在页头下方),清单一长
           就会顶到屏幕底下 —— 而这张面板最后一行正是那颗同步按钮,够不着它等于这个入口废了。
           max-h-64 是「大约十行」,再多就滚。 */}
@@ -347,6 +353,10 @@ export function SyncPanel({
  * **整轮没跑起来**根本没到落库那一步;**中断**更是连结果都没有。不把它们算进来的话,
  * 一轮同步炸了三个,徽标照样绿着说「已同步」。
  *
+ * 第五样是 `summary.dataStale`(FOL-18 子票 1):整体最新数据超过 26 小时。它不进 attention 清单
+ * (那是逐账户的),但一样是「有事要看一眼」—— 42 小时没同步、每个账户都没到 3 天时,前四样全空,
+ * 就靠这条把药丸转黄。
+ *
  * 纯函数导出,单测直接喂数据(经 <SyncStatus> 测它要先搭路由 + Portfolio 上下文)。
  */
 export function hasAttention(
@@ -356,6 +366,7 @@ export function hasAttention(
 ): boolean {
   return (
     summary.attention.length > 0 ||
+    summary.dataStale ||
     startError !== null ||
     (round != null &&
       (round.failed.length > 0 || round.error !== null || round.state === "interrupted"))
@@ -365,9 +376,12 @@ export function hasAttention(
 export function SyncStatus({
   summary,
   action,
+  autoSync,
 }: {
   summary: SyncStatusSummary;
   action?: SyncAction;
+  /** 数据过期时自动补一轮(FOL-18 子票 2);只有首页传下来。 */
+  autoSync?: AutoSyncOption;
 }) {
   const t = useTranslations("Sync");
   // 同步这一轮按**当前组合**跑(ADR 0047)—— 名单在服务端算,这里只把组合传下去。
@@ -376,6 +390,7 @@ export function SyncStatus({
   const { round, busy, disabled, startError, sync } = useSyncRound(
     selectedId,
     summary.accounts.length,
+    autoSync,
   );
   // 打开方式按**指针能力**分,不按视口宽度:触屏上的 hover 是 tap 之后粘住的幽灵态,面板会莫名其妙
   // 留在屏幕上。宽度不是判据 —— 触屏笔记本也该是 tap。

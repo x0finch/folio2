@@ -26,17 +26,22 @@ const view = (over: Partial<SyncRoundView> = {}): SyncRoundView => ({
   synced: 1,
   failed: [],
   needsKeys: 0,
+  skipped: 0,
   current: "Kraken",
   unresolved: 0,
   error: null,
   ...over,
 });
 
-function mountHook(portfolioId = "pf-1", syncableCount = 3) {
+function mountHook(
+  portfolioId = "pf-1",
+  syncableCount = 3,
+  autoSync?: { lastSyncedAt: number | null },
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const api = { current: null as Api | null };
   function Probe({ pf }: { pf: string }) {
-    api.current = useSyncRound(pf, syncableCount);
+    api.current = useSyncRound(pf, syncableCount, autoSync);
     return null;
   }
   const wrapper = (pf: string): ReactNode => (
@@ -134,6 +139,76 @@ describe("useSyncRound", () => {
       });
       await waitFor(() => expect(invalidate).toHaveBeenCalled());
     });
+  });
+});
+
+describe("进首页自动补同步(FOL-18 子票 2)", () => {
+  const HOUR = 60 * 60 * 1000;
+  // 发起走 POST /api/sync;自动补与手动点共用同一发,所以「补没补」= fetch 被没被调。
+  const okFetch = () =>
+    vi.fn(
+      async () => new Response(JSON.stringify(view({ roundId: "auto" })), { status: 200 }),
+    ) as unknown as typeof fetch;
+
+  it("数据过期(最新快照 > 1 小时)→ 自动补一轮", async () => {
+    getSyncRound.mockResolvedValue(null); // 无在跑的轮 → 不 busy
+    global.fetch = okFetch();
+    mountHook("auto-due", 3, { lastSyncedAt: Date.now() - 2 * HOUR });
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    // 自动那一轮 body 带 auto:true —— 服务端据此按新鲜度跳过(FOL-18 子票 4)。
+    const [, init] = (global.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock
+      .calls[0];
+    expect(JSON.parse(String(init.body))).toMatchObject({ auto: true });
+  });
+
+  it("从没同步过(lastSyncedAt null)→ 也补(新用户第一轮)", async () => {
+    getSyncRound.mockResolvedValue(null);
+    global.fetch = okFetch();
+    mountHook("auto-never", 3, { lastSyncedAt: null });
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+  });
+
+  it("数据还新(1 小时内)→ 不补", async () => {
+    getSyncRound.mockResolvedValue(null);
+    global.fetch = okFetch();
+    mountHook("auto-fresh", 3, { lastSyncedAt: Date.now() - 1000 });
+    await Promise.resolve();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("没传 autoSync(账户页 / 洞察页)→ 不补,哪怕数据很旧", async () => {
+    getSyncRound.mockResolvedValue(null);
+    global.fetch = okFetch();
+    mountHook("auto-off", 3); // 不传第三个参数
+    await Promise.resolve();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("正在同步 → 不补(busy 挡住)", async () => {
+    getSyncRound.mockResolvedValue(view({ state: "running" })); // busy
+    global.fetch = okFetch();
+    mountHook("auto-busy", 3, { lastSyncedAt: Date.now() - 2 * HOUR });
+    await Promise.resolve();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("没有可同步的账户 → 不补", async () => {
+    getSyncRound.mockResolvedValue(null);
+    global.fetch = okFetch();
+    mountHook("auto-empty", 0, { lastSyncedAt: Date.now() - 2 * HOUR });
+    await Promise.resolve();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("冷却:同一组合再挂一次(重挂 / 切回来)不重复补", async () => {
+    getSyncRound.mockResolvedValue(null);
+    global.fetch = okFetch();
+    mountHook("auto-cooldown", 3, { lastSyncedAt: Date.now() - 2 * HOUR });
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    // 换个新 client 重挂同一个组合 —— autoFired 是新的,但模块级冷却挡住第二发。
+    mountHook("auto-cooldown", 3, { lastSyncedAt: Date.now() - 2 * HOUR });
+    await Promise.resolve();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 });
 

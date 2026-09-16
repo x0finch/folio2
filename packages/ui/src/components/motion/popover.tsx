@@ -527,6 +527,17 @@ export function PopoverContent({ children, className }: PopoverContentProps) {
             pointerEvents: open ? "auto" : "none",
           }}
         >
+          {/* The panel carries its OWN opaque surface (bg-popover), not just the goo
+              body behind it. The goo body (z-[-1]) is run through the SVG goo filter,
+              and that filter renders semi-transparent on WebKit — so a bg-less content
+              layer let whatever sits behind the popover (e.g. the hero's net-worth
+              number on a narrow viewport) bleed through on Safari, though it looked
+              solid on Chromium. Painting the surface here, clipped by the same morph,
+              keeps the liquid ooze intact while guaranteeing the panel is opaque on
+              every browser. This component is a frozen fork (see the file header), so
+              this fix lives here rather than being re-patched at each of the ~8 call
+              sites. borderRadius tracks panelRadius so the surface is rounded even
+              before the clip-path lands. */}
           <div
             ref={measureRef}
             id={contentId}
@@ -536,10 +547,11 @@ export function PopoverContent({ children, className }: PopoverContentProps) {
               position: "absolute",
               left: geo.panel.x,
               top: geo.panel.y,
+              borderRadius: panelRadius,
               transformOrigin: `${ALIGN_ORIGIN[align]} ${side === "bottom" ? "top" : "bottom"}`,
             }}
             className={cn(
-              "w-max max-w-[min(92vw,20rem)] p-4 text-popover-foreground outline-none",
+              "w-max max-w-[min(92vw,20rem)] bg-popover p-4 text-popover-foreground outline-none",
               className,
             )}
           >

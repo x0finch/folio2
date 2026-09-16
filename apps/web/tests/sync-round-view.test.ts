@@ -72,6 +72,27 @@ describe("三段式口径", () => {
     ]);
   });
 
+  // 第四档:自动轮里数据还新而刻意跳过的(FOL-18 子票 4)。它有结果(算 settled),但既不算
+  // synced 也不算 failed —— 独立一段。
+  it("skipped 单独一段,算进 settled,不掺 synced/failed", () => {
+    const view = syncRoundView(
+      record({
+        finishedAt: NOW,
+        accounts: {
+          "acc-1": account("Binance", { status: "synced" }),
+          "acc-2": account("Kraken", { status: "skipped" }),
+          "acc-3": account("Bybit", { status: "skipped" }),
+        },
+      }),
+      NOW,
+    );
+    expect(view.synced).toBe(1);
+    expect(view.skipped).toBe(2);
+    expect(view.failed).toEqual([]);
+    expect(view.settled).toBe(3); // 三个都有结果
+    expect(view.total).toBe(3);
+  });
+
   it("失败缺原话时仍要有一句可显示的 —— 面板不能出现空白行", () => {
     const view = syncRoundView(
       record({ accounts: { "acc-1": account("Binance", { status: "failed" }) } }),

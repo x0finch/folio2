@@ -9,9 +9,10 @@ import { type AccountSyncResult, Sweep, type SweepResult, SYNC_CONCURRENCY } fro
 import { getLogger } from "@logtape/logtape";
 import { Cause, Clock, Effect, Option } from "effect";
 import { z } from "zod";
+import { dataFreshness } from "@/lib/core/sync-status";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { userLayer } from "@/lib/server/runtime";
-import { syncRoundFor } from "./deps";
+import { type SyncScope, syncRoundFor } from "./deps";
 import { driveRound } from "./drive";
 import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 
@@ -81,6 +82,40 @@ export const openSyncRound = (input: {
 const statusOf = (r: AccountSyncResult): Exclude<SyncRoundAccountStatus, "pending"> =>
   r.ok ? "synced" : r.skipped ? "needs-keys" : "failed";
 
+// 自动轮的「按新鲜度跳过」(FOL-18 子票 4)。把最新快照还**新鲜**(`dataFreshness === "fresh"`)的
+// 账户当 `skipped` 直接收掉,返回这一轮**真正要问上游**的名单。手动轮不调它 —— 强制全量。
+//
+// **作为 `only` 的 Effect 形态交给装配层**(见 `SyncScope.only`):在同步轮那**同一次装配**里解析,
+// 与同步内核共用一个 DbClient(红线:一次请求一个 DbClient),不另起一条根 fiber 建第二个连接。
+// 解析时读一次 latest 快照,逐个 settle('skipped');被收掉的账户不进返回的名单,于是 Sweep 那条流
+// 根本不 emit 它们,它们的 settle 这里已经写过,total 与 settled 仍对得上。
+const planFreshSkips = (round: SyncRoundRecord): Effect.Effect<Set<string>, never, Database> =>
+  Effect.gen(function* () {
+    const db = yield* Database;
+    const now = yield* Clock.currentTimeMillis;
+    const latest = yield* db.snapshots.latest();
+    const takenAtById = new Map(latest.map((s) => [s.snapshot.accountId, s.snapshot.takenAt]));
+    const toRun = new Set<string>();
+    for (const id of Object.keys(round.accounts)) {
+      const takenAt = takenAtById.get(id) ?? null;
+      // 「新鲜」用组合级那同一个 `dataFreshness`(药丸转黄、进首页自动补一轮都共用它)—— 三处对
+      // 「什么算新鲜」的判断不分叉:没同步过 / 超过 1 小时都照跑;时钟偏移的未来时间戳按 fresh 处理
+      // (当刚同步过 → 跳过),不把未来当过期白问一遍上游。
+      if (dataFreshness(takenAt, now) === "fresh") {
+        yield* db.syncRounds.settle({
+          portfolioId: round.portfolioId,
+          roundId: round.roundId,
+          accountId: id,
+          status: "skipped",
+          ttlMs: ROUND_HEARTBEAT_MS,
+        });
+      } else {
+        toRun.add(id);
+      }
+    }
+    return toRun;
+  });
+
 export interface RunSyncRoundOptions {
   /**
    * 出网的闸 —— cron 一次调用里的多轮共用一把,「每用户最多 6 发上游」才不随组合数翻倍。
@@ -88,6 +123,12 @@ export interface RunSyncRoundOptions {
    * 重叠窗口里最坏 2×,为什么收下写在 `deps.ts` 的 `SyncScope.gate` 上。
    */
   gate?: Effect.Semaphore;
+  /**
+   * 自动轮(进首页补的那种,FOL-18 子票 4):先把数据还新的账户当 `skipped` 收掉,只问其余的上游。
+   * 手动点同步不传 → 强制全量。两个标签页同时进首页仍只打一遍上游那件事由开轮幂等保证,这条管的是
+   * 「一个自动轮内部,刚同步过的账户不再白问一遍」。
+   */
+  skipFresh?: boolean;
   /**
    * 跑完顺手预热代币缓存(供下次总览 cache-only 富化新价)。
    *
@@ -107,16 +148,28 @@ export interface RunSyncRoundOptions {
  * 每个账户跑完写一次(顺带续心跳),整轮结束收一次官。**中途没人在看也照样跑完** ——
  * 这正是把状态搬到服务端换来的:以前「看」断了进度就没了,现在断的只是轮询。
  */
-export const runSyncRound = (
+export const runSyncRound = async (
   userId: string,
   round: SyncRoundRecord,
   opts: RunSyncRoundOptions = {},
 ): Promise<void> => {
   const syncLog = getLogger(["folio", "web", "sync"]);
-  const { results, afterRound, layer } = syncRoundFor(userId, {
-    only: new Set(Object.keys(round.accounts)),
-    gate: opts.gate,
-  });
+  // 自动轮按新鲜度跳过(FOL-18 子票 4):把 `planFreshSkips` 作为 `only` 的 **Effect 形态**交给装配层,
+  // 在同步轮那**同一次装配**里解析(见 `SyncScope.only`)—— 与同步内核共用一个 DbClient,不再像从前
+  // 那样另起一条 `runPromise` + `provide(userLayer)` 建第二个连接。规划只会以 defect 收场(错误面是
+  // `never`),真炸了记一行、退回全量:跳过是优化,不能因它让一轮跑不成。手动轮直接全量,不走这一趟。
+  const allIds = () => new Set(Object.keys(round.accounts));
+  const only: SyncScope["only"] = opts.skipFresh
+    ? planFreshSkips(round).pipe(
+        Effect.catchAllCause((cause) =>
+          Effect.logWarning(
+            "skip-fresh planning failed; running full round",
+            Cause.pretty(cause),
+          ).pipe(Effect.as<ReadonlySet<string>>(allIds())),
+        ),
+      )
+    : allIds();
+  const { results, afterRound, layer } = syncRoundFor(userId, { only, gate: opts.gate });
   const head = { portfolioId: round.portfolioId, roundId: round.roundId };
   return driveRound(results, {
     layer,
@@ -231,7 +284,7 @@ const syncUserRounds = (userId: string): Effect.Effect<Sweep.Tally> =>
       tally = {
         ok: tally.ok + view.synced,
         failed: tally.failed + view.failed.length,
-        skipped: tally.skipped + view.needsKeys,
+        skipped: tally.skipped + view.needsKeys + view.skipped,
       };
     }
     return tally;

@@ -223,6 +223,7 @@ test.describe("面板读轮", () => {
       synced: 1,
       failed: [],
       needsKeys: 0,
+      skipped: 0,
       current: null,
       unresolved: 0,
       error: null,

@@ -23,10 +23,14 @@ import { userCache } from "../schema";
 export type SyncRoundTrigger = "manual" | "cron";
 
 /**
- * 一个账户在这一轮里的下场。**三分,不是「成功 / 失败」两分**(ADR 0048 裁定 7):
- * 缺凭据的账户既不是成功也不是失败,它是「你还没填 API key」——把它算进任何一边都在撒谎。
+ * 一个账户在这一轮里的下场。**四档,不是「成功 / 失败」两分**(ADR 0048 裁定 7 + FOL-18 子票 4):
+ * 缺凭据的账户既不是成功也不是失败,它是「你还没填 API key」——把它算进任何一边都在撒谎;
+ * `skipped` 是自动轮里「这个账户刚同步过、还很新,这一轮不必再问上游」——它也不是成功(没重拉)、
+ * 更不是失败,是一次刻意的不做。手动轮不产生 `skipped`(强制全量)。
+ *
+ * 状态只是 JSON 里的一个字符串值(见 `settle` 的 `json_set`),加一档不需要 SQL 迁移。
  */
-export type SyncRoundAccountStatus = "pending" | "synced" | "failed" | "needs-keys";
+export type SyncRoundAccountStatus = "pending" | "synced" | "failed" | "needs-keys" | "skipped";
 
 export interface SyncRoundAccount {
   /** 开轮那一刻的展示名。冻在轮里 —— 事后改名不该让上一轮的失败清单变成一串陌生名字。 */

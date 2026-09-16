@@ -20,16 +20,22 @@ const log = getLogger(["folio", "web", "sync"]);
 // **开轮幂等,所以重复 POST 不会叠出第二轮**:活轮还在时 `opened` 为假,这里就不再起一条后台
 // 任务,直接把正在跑的那一轮原样回给调用方。
 
-// 请求体只带「我在看哪个组合」(ADR 0047)。**不收账户名单** —— 这一轮跑哪些账户由服务端算。
-// 空 body / 坏 JSON / 认不出的 id 一律当没带 = 默认组合:这是个按钮触发的动作,不该因为一个
-// 参数没解出来就 400。
-const Body = z.object({ portfolioId: z.string().min(1).optional() }).catch({});
+// 请求体带「我在看哪个组合」(ADR 0047)与「是不是自动补的那一轮」(FOL-18 子票 4)。
+// **不收账户名单** —— 这一轮跑哪些账户由服务端算。空 body / 坏 JSON / 认不出的字段一律当默认
+//(默认组合、手动全量):这是个按钮/进页触发的动作,不该因为一个参数没解出来就 400。
+//
+// `auto`:进首页数据过期时前端静默补的那一轮。它让服务端按新鲜度逐账户跳过(手动点同步 `auto`
+// 缺省为 false → 强制全量)。
+const Body = z
+  .object({ portfolioId: z.string().min(1).optional(), auto: z.boolean().optional() })
+  .catch({});
 
-const portfolioOf = async (request: Request): Promise<string | undefined> => {
+const parseBody = async (request: Request): Promise<{ portfolioId?: string; auto: boolean }> => {
   try {
-    return Body.parse(await request.json()).portfolioId;
+    const body = Body.parse(await request.json());
+    return { portfolioId: body.portfolioId, auto: body.auto ?? false };
   } catch {
-    return undefined;
+    return { auto: false };
   }
 };
 
@@ -43,14 +49,15 @@ export const Route = createFileRoute("/api/sync")({
           return userId;
         }
 
-        const portfolioId = await portfolioOf(request);
+        const { portfolioId, auto } = await parseBody(request);
         const out = await runForUser(userId, openSyncRound({ portfolioId, trigger: "manual" }));
         // 没抢到、现场也读不到轮:那一行在两句之间被删了(级联删用户)。**别递一个幽灵轮回去**
         // 让前端对着一个不存在的键轮询 —— 如实报冲突,面板走「发起失败」那一句。
         if (out.round == null) {
           return Response.json(null, { status: 409, headers: { "cache-control": "no-store" } });
         }
-        if (out.opened) waitUntil(runSyncRound(userId, out.round));
+        // 自动补的那一轮按新鲜度跳过刚同步过的(FOL-18 子票 4);手动点同步强制全量。
+        if (out.opened) waitUntil(runSyncRound(userId, out.round, { skipFresh: auto }));
 
         // 回的是这一轮此刻的样子,好让面板立刻有东西可画(等第一次轮询要 1.5 秒)。
         return Response.json(syncRoundView(out.round, Date.now()), {
