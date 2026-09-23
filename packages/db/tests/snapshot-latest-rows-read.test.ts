@@ -1,10 +1,10 @@
 import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
-import { Effect, Layer } from "effect";
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { dbClientLayer } from "../src/client";
+import { provideDbClient } from "../src/client";
 import { getDb } from "../src/connect";
-import { CurrentUser } from "../src/current-user";
+import { provideCurrentUser } from "../src/current-user";
 import { Database } from "../src/database";
 import { user } from "../src/schema/auth";
 import { forDomain } from "./effect";
@@ -62,17 +62,14 @@ function recordingD1(db: D1Database, log: Recorded[]): D1Database {
 
 // 以 USER 跑一次 `pick(snapshots)`,返回它发出的**第一条**语句(快照那条;第二条是按 id 取余额)。
 async function firstStatementOf(
-  pick: (s: Database["snapshots"]) => Effect.Effect<unknown>,
+  pick: (s: Database["snapshots"]) => ReturnType<Database["snapshots"]["latest"]>,
 ): Promise<Recorded> {
   const log: Recorded[] = [];
-  const layer = Database.Default.pipe(
-    Layer.provide(Layer.succeed(CurrentUser, USER)),
-    Layer.provide(dbClientLayer({ DB: recordingD1(env.DB, log) })),
-  );
   await Effect.runPromise(
-    Effect.provide(
-      Effect.flatMap(Database, (db) => pick(db.snapshots)),
-      layer,
+    Effect.flatMap(Database, (db) => pick(db.snapshots)).pipe(
+      Effect.provide(Database.Default),
+      provideCurrentUser(USER),
+      provideDbClient({ DB: recordingD1(env.DB, log) }),
     ),
   );
   const first = log[0];
@@ -157,12 +154,10 @@ describe("snapshots rows_read 不随快照总数增长", () => {
 
     // 行为没变:每账户一张,且是最新那张(序号 599)。
     const rows = await Effect.runPromise(
-      Effect.provide(
-        Effect.flatMap(Database, (db) => db.snapshots.latest()),
-        Database.Default.pipe(
-          Layer.provide(Layer.succeed(CurrentUser, USER)),
-          Layer.provide(dbClientLayer(env)),
-        ),
+      Effect.flatMap(Database, (db) => db.snapshots.latest()).pipe(
+        Effect.provide(Database.Default),
+        provideCurrentUser(USER),
+        provideDbClient(env),
       ),
     );
     expect(rows).toHaveLength(ACCOUNTS);

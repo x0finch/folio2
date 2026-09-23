@@ -1,8 +1,7 @@
 import type { ConnectorId } from "@folio/connectors";
 import { and, asc, eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { DbClient } from "../client";
-import { CurrentUser } from "../current-user";
+import type { DbClient } from "../client";
 import { InvalidInput, NotFound } from "../errors";
 import { tabPins } from "../schema";
 import type { TabPin } from "../schema/types";
@@ -10,10 +9,12 @@ import { assertAccountOwned, assertTagOwned } from "./ownership";
 
 // 自定义 Tab(pin,ADR 0034):把某个 tag / 账户 / connector 钉成导航上的一栏。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):建服务那一刻从 `CurrentUser` 读一次(ADR 0044)。
+// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
+// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
 //
-// **这个领域没有自己的 Tag**(P0 打样先到达的形状):出口只有 `makeTabPinStore(userId)` 这个
-// 「怎么造」的 Effect,由 `../database.ts` 的聚合 `Database` 挂到 `tabPins` 字段上。
+// **这个领域没有自己的 Tag**(P0 打样先到达的形状):出口只有纯函数 `makeTabPinStore(client, userId)`
+// (ADR 0054:userId 与 db 句柄在每次 op 调用时由 `../database.ts` 的 `bindPerCall` 传入),由聚合
+// `Database` 挂到 `tabPins` 字段上。
 // 以前这里还有 `TabPinStore` 这个 Tag + `tabPinStoreLayer` —— 它们存在的唯一理由是让 app 侧
 // `yield* TabPinStore`;调用点改成 `(yield* Database).tabPins` 之后就没有第二个消费者了。
 // 手写的 `interface TabPinStore` 也删了(#501):类型从这里的返回值推导,cmd+click 直接落实现,
@@ -77,10 +78,7 @@ const resolvePinTarget = (
 const missingTarget = (what: string, field: string): Effect.Effect<never, InvalidInput> =>
   Effect.fail(new InvalidInput({ what, why: `requires ${field}` }));
 
-export const makeTabPinStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-  const userId = yield* CurrentUser;
-
+export const makeTabPinStore = (client: DbClient, userId: string) => {
   return {
     /**
      * 固定一个自定义 Tab。tag pin 校验 Tag 归属本人。
@@ -176,4 +174,4 @@ export const makeTabPinStore = Effect.gen(function* () {
         ),
       ),
   };
-});
+};

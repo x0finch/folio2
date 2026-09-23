@@ -1,6 +1,6 @@
 import type { ConnectorId } from "@folio/connectors";
-import { Database, type SnapshotBalanceInput } from "@folio/db";
-import { Effect } from "effect";
+import { Database, type DbRequest, type SnapshotBalanceInput } from "@folio/db";
+import { type Context, Effect } from "effect";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { categorizeFields } from "@/lib/server/creds";
 import { createImporter, type ImportCounts, type ImportDeps, parseImportLine } from "./import";
@@ -8,17 +8,23 @@ import { createImporter, type ImportCounts, type ImportDeps, parseImportLine } f
 // POST /api/import —— 流式读 NDJSON 重建账户/分组/历史(单遍 + id 重映射)。
 // CEX 账户(有 secret 输入、导出已剥密钥)→ encCredentials=null = 缺凭据态,待补录。
 
+// `request`:这次请求的连接与用户(ADR 0054)。`ImportDeps` 的 `R` 是 `never`,所以 db 的 op
+// 在这里各自 provide 进去 —— 与 `transfer` 一样,是建导入器那一刻已解析好的东西。
 const depsFrom = (
   transfer: Database["transfer"],
   specs: ConnectorRegistry["specs"],
+  request: Context.Context<DbRequest>,
 ): ImportDeps => ({
   categorize: (connectorId) => {
     const f = categorizeFields(specs[connectorId as ConnectorId] ?? []);
     return { publicKeys: f.public, semiKeys: f.semi, secretKeys: f.secret };
   },
-  importToken: (t, refs) => Effect.map(transfer.importToken(t, refs), (id) => ({ id })),
+  importToken: (t, refs) =>
+    Effect.map(transfer.importToken(t, refs), (id) => ({ id })).pipe(Effect.provide(request)),
   importAccount: (input) =>
-    transfer.importAccount({ ...input, connectorId: input.connectorId as ConnectorId }),
+    transfer
+      .importAccount({ ...input, connectorId: input.connectorId as ConnectorId })
+      .pipe(Effect.provide(request)),
   importSnapshot: (accountId, input) =>
     Effect.asVoid(
       transfer
@@ -29,10 +35,14 @@ const depsFrom = (
             kind: b.kind as SnapshotBalanceInput["kind"],
           })),
         })
-        .pipe(Effect.orDie),
+        .pipe(Effect.provide(request), Effect.orDie),
     ),
   importManualActivity: (accountId, tokenId, input) =>
-    Effect.asVoid(transfer.importManualActivity(accountId, tokenId, input).pipe(Effect.orDie)),
+    Effect.asVoid(
+      transfer
+        .importManualActivity(accountId, tokenId, input)
+        .pipe(Effect.provide(request), Effect.orDie),
+    ),
 });
 
 export const importData = Effect.fn("importData")(function* (
@@ -40,7 +50,11 @@ export const importData = Effect.fn("importData")(function* (
 ) {
   return yield* Effect.gen(function* () {
     const importer = createImporter(
-      depsFrom((yield* Database).transfer, (yield* ConnectorRegistry).specs),
+      depsFrom(
+        (yield* Database).transfer,
+        (yield* ConnectorRegistry).specs,
+        yield* Effect.context<DbRequest>(),
+      ),
     );
     const decoder = new TextDecoder();
     let buffer = "";

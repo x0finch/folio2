@@ -15,9 +15,8 @@ import {
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { Effect } from "effect";
-import { DbClient } from "../client";
+import type { DbClient } from "../client";
 import type { Drizzle } from "../connect";
-import { CurrentUser } from "../current-user";
 import type { NotFound } from "../errors";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
@@ -31,7 +30,8 @@ import { assertAccountOwned } from "./ownership";
 
 // 快照 —— 一次同步落下的余额切片,以及总额 / 历史 / 分页那几条读路。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):由 `SnapshotStore.Default(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
+// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
 
 // D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 现在每行 10 列 → 每块 8 行(80 个,限内)。
 // **加列必须回来改这个数**:列数 × 块行数不得超 100,否则 "too many SQL variables",只在持仓多的账户上炸。
@@ -113,10 +113,7 @@ export interface SnapshotBalanceHistoryRow {
   metaJson: string | null;
 }
 
-export const makeSnapshotStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-  const userId = yield* CurrentUser;
-
+export const makeSnapshotStore = (client: DbClient, userId: string) => {
   /**
    * 每账户「窗口内最新」的快照 + 其余额;`upTo`/`floor` 缺省 = 不设那一侧的界。
    *   · `upTo == null && floor == null` → 每账户最新那张(`latest()`)。
@@ -550,4 +547,4 @@ export const makeSnapshotStore = Effect.gen(function* () {
         return { snapshots: snapCount?.n ?? 0, balances: balCount?.n ?? 0 };
       }),
   };
-});
+};

@@ -46,6 +46,8 @@
 
 **考虑过 —— 一个模块级单例 client。** 否决:CF Workers 有 startup-CPU 限制(better-auth 那条教训:模块加载期不许干活),而且单例连「per-request 的状态」这个可能性都堵死了 —— 而那正是这一层将来要装的东西。
 
+**后记(ADR 0054,2026-09-22):红线不动,「谁是 per-request 的」重划了一次。** 门票(`Database` / `DatabaseForOracle` / `GlobalDatabase`)、参考层的服务与 CoinGecko 那几格现在**每个 isolate 建一次**(app 的 `runtime.ts` 里一个惰性 `ManagedRuntime`) —— 它们建的时候只造闭包,不握连接、不握用户。**`DbClient` 仍然每请求一个**:装配点每请求 `provideDbClient(env)` 一次(一个值,不是一个 layer),每个 op 跑的那一刻从 context 里取,于是这次请求里所有 op 读到的都是同一个句柄 —— 上面那条「将来这一层会长出 per-request 状态」的理由一个字没动,`packages/db/tests/one-db-client.test.ts` 换了计数方式照旧钉着「一次请求建一个」。上面那段「memoisation 的作用域是一次构建」的坑随之不再是这条红线的机制,但 `/api/sync` 那条根 fiber 仍然是「另一次跑、另一个句柄」。「一个模块级单例 client」那条否决照旧:isolate 级的是**纯的**那几层,不是连接。
+
 ## 四、参考层也出一张门票 `Oracle`,与 `Database` 对称
 
 handler 现在从三张票拿参考层(`TokenService` / `FxService` / `PlatformService`);改成一张 `Oracle`,字段 `tokens / fx / platforms`,取法与 `yield* Database` 对称。

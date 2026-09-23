@@ -1,3 +1,4 @@
+import { type DbEnv, type DbRequest, provideCurrentUser, provideDbClient } from "@folio/db";
 import { Oracle } from "@folio/oracle";
 import { Effect, Layer, Option, TestClock, TestContext } from "effect";
 
@@ -61,22 +62,31 @@ const oracleStubLayer = (stub: OracleStub = {}) =>
     } as Oracle),
   );
 
+/**
+ * 一次「请求」的两样(ADR 0054):参考层与 db 门票的方法 `R` 里如实写着 `DbRequest`(连接 + 用户,
+ * op 跑的那一刻才取)。桩一样都不读 —— 给它们只因为类型要,与生产的装配点同一个给法。
+ * 连接指着一个空对象:真有一条查询打到它,`drizzle` 会当场炸,那就是桩漏了一个方法。
+ */
+export const stubRequest = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(provideCurrentUser("stub-user"), provideDbClient({ DB: {} } as DbEnv));
+
 // 跑一个用了参考层的 effect —— 拿 Promise,用例照旧 `await`。
 export const runWithOracle = <A, E>(
   stub: OracleStub,
-  effect: Effect.Effect<A, E, Oracle>,
-): Promise<A> => Effect.runPromise(Effect.provide(effect, oracleStubLayer(stub)));
+  effect: Effect.Effect<A, E, Oracle | DbRequest>,
+): Promise<A> => Effect.runPromise(stubRequest(Effect.provide(effect, oracleStubLayer(stub))));
 
 // 同上,但把时钟钉在一个固定时刻 —— 用到 `Clock`(如 `priceTickets` 的 `asOf`)的用例走这个,
 // 别拿 `Date.now()` 去猜(CODING.md:时序断言用 `TestClock`、断言精确值)。
 export const runWithOracleAt = <A, E>(
   nowMs: number,
   stub: OracleStub,
-  effect: Effect.Effect<A, E, Oracle>,
+  effect: Effect.Effect<A, E, Oracle | DbRequest>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.zipRight(TestClock.setTime(nowMs), effect).pipe(
       Effect.provide(oracleStubLayer(stub)),
+      stubRequest,
       Effect.provide(TestContext.TestContext),
     ),
   );

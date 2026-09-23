@@ -1,34 +1,36 @@
 import { env } from "cloudflare:test";
 import {
-  CurrentUser,
   Database,
   DatabaseForOracle,
   type DbClient,
-  dbClientLayer,
+  type DbRequest,
   GlobalDatabase,
+  provideCurrentUser,
+  provideDbClient,
 } from "@folio/db";
 import { UPSTREAM_ID } from "@folio/oracle-upstream-coingecko";
 import { Effect, Layer } from "effect";
 
 // **workers 池里的测试要往 D1 里塞行 / 读回来看看时用这几个把手。**
 //
-// 底下补的是两环:`dbClientLayer(env)`(真 D1,Miniflare)与 `CurrentUser`(ADR 0044)。
+// 底下补的是一次请求的两样:`provideDbClient(env)`(真 D1,Miniflare)与 `provideCurrentUser`
+// (ADR 0044 / 0054 —— 门票的 op 在跑的那一刻才取它们)。
 // (`runForUser` 那条是给**被测代码**用的;夹具要的是「往库里塞一行」,不必经参考层。)
 //
 // 以前这里还有一个 `withStore(port, layer, userId, use)` —— 参考层那几个端口的通用取法。
 // 端口没了(契约就是 db 里的实现),取法也就统一成了下面这三个门票把手。
 
 const runWith = <I, A>(
-  layer: Layer.Layer<I, never, DbClient | CurrentUser>,
+  layer: Layer.Layer<I>,
   userId: string,
-  effect: Effect.Effect<A, never, I | Database | DbClient | CurrentUser>,
+  effect: Effect.Effect<A, never, I | Database | DbRequest>,
 ): Promise<A> =>
   Effect.runPromise(
     effect.pipe(
       Effect.provide(layer),
       Effect.provide(Database.Default),
-      Effect.provide(dbClientLayer(env)),
-      Effect.provideService(CurrentUser, userId),
+      provideCurrentUser(userId),
+      provideDbClient(env),
     ),
   );
 
@@ -101,12 +103,8 @@ export const dbFor = (userId: string) => {
  */
 export const oracleDbFor = (userId: string) => {
   const of = <S extends object>(pick: (db: DatabaseForOracle) => S) =>
-    promisifiedFrom(
-      Effect.provide(
-        Effect.map(DatabaseForOracle, pick),
-        Layer.provide(DatabaseForOracle.Default(UPSTREAM_ID), Layer.succeed(CurrentUser, userId)),
-      ),
-      (effect) => runWith(Layer.empty, userId, effect),
+    promisifiedFrom(Effect.map(DatabaseForOracle, pick), (effect) =>
+      runWith(DatabaseForOracle.Default(UPSTREAM_ID), userId, effect),
     );
   return {
     tokens: of((db) => db.tokens),
@@ -116,10 +114,8 @@ export const oracleDbFor = (userId: string) => {
 
 // 跑一个只要 `GlobalDatabase` 的 effect。**这里没有 `CurrentUser` 可 provide** —— 那张门票上的
 // op 本来就没有「谁的」这回事,而这正是它与上面那半在类型上的全部区别。
-const runGlobal = <A>(effect: Effect.Effect<A, never, GlobalDatabase>): Promise<A> =>
-  Effect.runPromise(
-    effect.pipe(Effect.provide(GlobalDatabase.Default), Effect.provide(dbClientLayer(env))),
-  );
+const runGlobal = <A>(effect: Effect.Effect<A, never, GlobalDatabase | DbClient>): Promise<A> =>
+  Effect.runPromise(effect.pipe(Effect.provide(GlobalDatabase.Default), provideDbClient(env)));
 
 /**
  * 不带 userId 的那张门票的夹具把手:`globalDb.refIndex.putAll(…)`。

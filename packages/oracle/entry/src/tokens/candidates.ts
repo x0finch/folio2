@@ -1,4 +1,4 @@
-import type { CacheStore } from "@folio/db";
+import type { CacheStore, DbRequest } from "@folio/db";
 import { DatabaseForOracle } from "@folio/db";
 import type { TokenCandidate, TokenMetaUpstream } from "@folio/oracle-basic";
 import { DEFAULT_TOP_N, normalizeSymbol } from "@folio/oracle-basic";
@@ -36,7 +36,8 @@ export const warmCatalogue = (
   cache: CacheStore,
   upstream: TokenMetaUpstream,
   topN: number,
-): Effect.Effect<readonly WarmRow[]> => warmBlob(cache, upstream, topN, () => false);
+): Effect.Effect<readonly WarmRow[], never, DbRequest> =>
+  warmBlob(cache, upstream, topN, () => false);
 
 // 按 symbol 筛候选。**与排行榜同一份 rows** —— 候选不额外存一份。
 export function candidatesBySymbol(rows: readonly WarmRow[], symbol: string): TokenCandidate[] {
@@ -58,7 +59,7 @@ export class CandidateSource extends Effect.Service<CandidateSource>()("oracle/C
     // **唯一的出网口**,且只在缓存完全为空时被调用(见 `warmCatalogue`)。
     const coldStart = yield* TokenUpstream;
     return {
-      bySymbol: (symbol: string): Effect.Effect<TokenCandidate[]> =>
+      bySymbol: (symbol: string): Effect.Effect<TokenCandidate[], never, DbRequest> =>
         Effect.map(warmCatalogue(cache, coldStart, DEFAULT_TOP_N), (rows) =>
           candidatesBySymbol(rows, symbol),
         ),

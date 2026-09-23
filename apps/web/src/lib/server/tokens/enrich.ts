@@ -1,3 +1,4 @@
+import type { DbRequest } from "@folio/db";
 import { Oracle, type RefreshStaleReport } from "@folio/oracle";
 import { Effect } from "effect";
 import { type BalanceLike, refreshableTokenIds } from "@/lib/core/token-model";
@@ -8,5 +9,5 @@ import { type BalanceLike, refreshableTokenIds } from "@/lib/core/token-model";
 // cron(waitUntil)与手动 sync 后调用 —— cron 尤其需要,它没有前端来触发 pricesStale 那条刷价路径。
 export const warmHeldPrices = (
   balances: BalanceLike[],
-): Effect.Effect<RefreshStaleReport, never, Oracle> =>
+): Effect.Effect<RefreshStaleReport, never, Oracle | DbRequest> =>
   Effect.flatMap(Oracle, (o) => o.tokens.refreshStale(refreshableTokenIds(balances)));

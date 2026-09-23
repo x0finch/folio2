@@ -1,4 +1,4 @@
-import type { CacheStore } from "@folio/db";
+import type { CacheStore, DbRequest } from "@folio/db";
 import { DatabaseForOracle } from "@folio/db";
 import type { PlatformMeta } from "@folio/oracle-basic";
 import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS } from "@folio/oracle-basic";
@@ -44,7 +44,7 @@ const decodePlatform = Schema.decodeUnknownOption(PlatformEntryShape);
 export const readPlatforms = (
   cache: CacheStore,
   keys: readonly string[],
-): Effect.Effect<Map<string, { entry: PlatformEntry; stale: boolean }>> =>
+): Effect.Effect<Map<string, { entry: PlatformEntry; stale: boolean }>, never, DbRequest> =>
   Effect.map(cache.getMany(keys.map(platformKey)), (hits) => {
     const out = new Map<string, { entry: PlatformEntry; stale: boolean }>();
     for (const key of keys) {
@@ -61,7 +61,7 @@ export const readPlatforms = (
 export const writePlatforms = (
   cache: CacheStore,
   entries: readonly { key: string; entry: PlatformEntry }[],
-): Effect.Effect<void> =>
+): Effect.Effect<void, never, DbRequest> =>
   cache.putMany(
     entries.map(({ key, entry }) => ({
       key: platformKey(key),
@@ -79,7 +79,9 @@ export class PlatformService extends Effect.Service<PlatformService>()("oracle/P
 
     return {
       // 每个 key 都给一份展示。命中真名就用真名,否则按 key 推一个兜底名。**不出网、一次读。**
-      resolve: (keys: readonly string[]): Effect.Effect<Map<string, PlatformMeta>> =>
+      resolve: (
+        keys: readonly string[],
+      ): Effect.Effect<Map<string, PlatformMeta>, never, DbRequest> =>
         Effect.gen(function* () {
           const unique = [...new Set(keys)];
           const out = new Map<string, PlatformMeta>();
@@ -100,7 +102,7 @@ export class PlatformService extends Effect.Service<PlatformService>()("oracle/P
         }),
 
       // 同步后预热:这些 key 里有缺的或过期的 → 拉一次整张链表 → **一个批次写回这几个 key**。
-      warm: (keys: readonly string[]): Effect.Effect<void> =>
+      warm: (keys: readonly string[]): Effect.Effect<void, never, DbRequest> =>
         Effect.gen(function* () {
           const unique = [...new Set(keys)];
           if (unique.length === 0) return;

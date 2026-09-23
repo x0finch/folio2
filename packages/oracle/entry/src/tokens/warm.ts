@@ -1,4 +1,4 @@
-import type { CacheStore } from "@folio/db";
+import type { CacheStore, DbRequest } from "@folio/db";
 import type { TokenMetaUpstream } from "@folio/oracle-basic";
 import { WARM_TTL_MS } from "@folio/oracle-basic";
 import { Clock, Effect, Option, Schema } from "effect";
@@ -25,7 +25,8 @@ import { swr } from "./swr";
 // 三条都不看缓存条目的 `stale`(store 过期不删),判据一律落在 blob 的 `asOf` 上。
 //
 // 本文件的函数**收已解析好的服务对象**(`cache` / `upstream`),不从 context 取 —— 于是它们的
-// `R` 是 `never`,服务的方法签名不会把自己的依赖漏给调用方。从 Tag 取服务只发生在 Layer 那一层。
+// `R` 里没有任何服务(只有 `DbRequest`,见 `./index`),服务的方法签名不会把自己的依赖漏给调用方。
+// 从 Tag 取服务只发生在 Layer 那一层。
 
 export const WARM_KEY = "warm";
 
@@ -68,7 +69,7 @@ export const warmBlob = (
   upstream: TokenMetaUpstream,
   topN: number,
   isStale: (blob: WarmBlob, now: number) => boolean,
-): Effect.Effect<readonly WarmRow[]> =>
+): Effect.Effect<readonly WarmRow[], never, DbRequest> =>
   Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
 

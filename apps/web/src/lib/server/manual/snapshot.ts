@@ -1,4 +1,4 @@
-import type { SnapshotWithBalances } from "@folio/db";
+import type { DbRequest, SnapshotWithBalances } from "@folio/db";
 import { Oracle } from "@folio/oracle";
 import { fiatCodeOf, type TokenRecord } from "@folio/oracle-basic";
 import { Effect, Option } from "effect";
@@ -27,7 +27,7 @@ export const manualUnitPrices = (
   tokens: readonly CredsToken[],
   enriched: ReadonlyMap<string, TokenRecord>,
   fiatRefs: ReadonlyMap<string, string>,
-): Effect.Effect<(number | undefined)[], never, Oracle> =>
+): Effect.Effect<(number | undefined)[], never, Oracle | DbRequest> =>
   Effect.gen(function* () {
     const { fx } = yield* Oracle;
     const codeOf = (t: CredsToken): string | undefined => {

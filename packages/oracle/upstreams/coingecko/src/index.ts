@@ -8,7 +8,6 @@
 // 临时包名:#202 那片改名接管 `@folio/oracle-upstream-coingecko`(目录 `packages/oracle/upstreams/coingecko`)。
 
 export { NON_EVM_PLATFORMS, UPSTREAM_ID } from "./constants";
-export { coinGeckoFxUpstreamLayer } from "./fx";
 export { coinGeckoNamerLayer } from "./layer";
 // 纯解析器另导出,便于按 fixture 单测与上层复用。
 export {
@@ -19,7 +18,6 @@ export {
   parseSearch,
   parseSimplePrice,
 } from "./parse";
-export { coinGeckoPlatformUpstreamLayer } from "./platform";
 export { toRefIndexRows } from "./ref-index";
-export { type CoinGeckoConfig, coinGeckoTokenUpstreamLayer } from "./upstream";
+export type { CoinGeckoConfig } from "./upstream";
 export { coinGeckoUpstreamLayers } from "./upstreams";

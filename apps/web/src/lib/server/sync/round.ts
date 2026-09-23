@@ -1,5 +1,6 @@
 import {
   Database,
+  type DbRequest,
   type OpenSyncRoundResult,
   type SyncRoundAccountStatus,
   type SyncRoundRecord,
@@ -11,7 +12,7 @@ import { Cause, Clock, Effect, Option } from "effect";
 import { z } from "zod";
 import { dataFreshness } from "@/lib/core/sync-status";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
-import { userLayer } from "@/lib/server/runtime";
+import { forUser } from "@/lib/server/runtime";
 import { type SyncScope, syncRoundFor } from "./deps";
 import { driveRound } from "./drive";
 import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
@@ -55,7 +56,7 @@ export const ROUND_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const openSyncRound = (input: {
   portfolioId?: string;
   trigger: SyncRoundTrigger;
-}): Effect.Effect<OpenSyncRoundResult, never, Database> =>
+}): Effect.Effect<OpenSyncRoundResult, never, Database | DbRequest> =>
   Effect.gen(function* () {
     const db = yield* Database;
     const scope = yield* scopedMembership(input.portfolioId);
@@ -89,7 +90,9 @@ const statusOf = (r: AccountSyncResult): Exclude<SyncRoundAccountStatus, "pendin
 // 与同步内核共用一个 DbClient(红线:一次请求一个 DbClient),不另起一条根 fiber 建第二个连接。
 // 解析时读一次 latest 快照,逐个 settle('skipped');被收掉的账户不进返回的名单,于是 Sweep 那条流
 // 根本不 emit 它们,它们的 settle 这里已经写过,total 与 settled 仍对得上。
-const planFreshSkips = (round: SyncRoundRecord): Effect.Effect<Set<string>, never, Database> =>
+const planFreshSkips = (
+  round: SyncRoundRecord,
+): Effect.Effect<Set<string>, never, Database | DbRequest> =>
   Effect.gen(function* () {
     const db = yield* Database;
     const now = yield* Clock.currentTimeMillis;
@@ -225,7 +228,7 @@ const NO_ACCOUNTS: Sweep.Tally = { ok: 0, failed: 0, skipped: 0 };
  * 小计**从收官后的轮记录读回来**,不在旁边再攒一份:那份记录就是这一轮的账本,而两份账
  * (一份攒在内存里、一份写在库里)只会在某天对不上。
  */
-const syncUserRounds = (userId: string): Effect.Effect<Sweep.Tally> =>
+const syncUserRounds = (userId: string): Effect.Effect<Sweep.Tally, Error> =>
   Effect.gen(function* () {
     const cronLog = getLogger(["folio", "cron"]);
     const db = yield* Database;
@@ -288,7 +291,7 @@ const syncUserRounds = (userId: string): Effect.Effect<Sweep.Tally> =>
       };
     }
     return tally;
-  }).pipe(Effect.provide(userLayer(userId)), Effect.annotateLogs({ userId }));
+  }).pipe((work) => forUser(userId, work));
 
 /**
  * cron 的全量 sweep:**逐用户串行**,再把小计加起来。
@@ -306,7 +309,7 @@ const syncUserRounds = (userId: string): Effect.Effect<Sweep.Tally> =>
  */
 export const syncAllUsers = (
   userIds: readonly string[],
-  syncOne: (userId: string) => Effect.Effect<Sweep.Tally> = syncUserRounds,
+  syncOne: (userId: string) => Effect.Effect<Sweep.Tally, Error> = syncUserRounds,
 ): Effect.Effect<SweepResult, never> =>
   Effect.forEach(userIds, (userId) =>
     // **逐用户各自兜住,而且兜的是 Cause**(与 `warmAllUsers` 同一条纵深防御):`syncOne` 的

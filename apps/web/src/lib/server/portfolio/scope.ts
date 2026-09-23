@@ -1,4 +1,4 @@
-import { Database } from "@folio/db";
+import { Database, type DbRequest } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
 import { inView, type TabPinScope } from "@/lib/core/accounts-in-view";
@@ -33,7 +33,7 @@ export interface PortfolioScope {
 // 不泄露任何数据,但显式回退到默认更符合直觉)。返回选中 id + 默认 Portfolio。
 export const resolveScope = (
   requested: string | undefined,
-): Effect.Effect<{ selectedId: string; defaultId: string }, never, Database> =>
+): Effect.Effect<{ selectedId: string; defaultId: string }, never, Database | DbRequest> =>
   Effect.gen(function* () {
     const store = (yield* Database).portfolios;
     const [portfolios, defaultPf] = yield* Effect.all([store.list(), store.ensureDefault()], {
@@ -59,7 +59,7 @@ export interface ScopedMembership {
 
 export const scopedMembership = (
   requested: string | undefined,
-): Effect.Effect<ScopedMembership, never, Database> =>
+): Effect.Effect<ScopedMembership, never, Database | DbRequest> =>
   Effect.gen(function* () {
     const store = (yield* Database).portfolios;
     const { selectedId, defaultId } = yield* resolveScope(requested);

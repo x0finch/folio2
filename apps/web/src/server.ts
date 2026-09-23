@@ -6,7 +6,7 @@ import { Cause, Effect, Option } from "effect";
 import { withDefaultNoStore } from "./lib/server/entry/cache-headers";
 import { configureLogging } from "./lib/server/entry/log";
 import { pruneNotesAllUsers } from "./lib/server/entry/note-retention";
-import { runAtEdge, withGlobalDb, withOracleWarm } from "./lib/server/oracle";
+import { runAtEdge, withGlobalDb, withOracleWarm } from "./lib/server/runtime";
 import { warmAllUsers } from "./lib/server/sync/deps";
 import { syncAllUsers } from "./lib/server/sync/round";
 

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { ConnectorId } from "@folio/connectors";
-import { type AccountSafe, Database } from "@folio/db";
+import { type AccountSafe, Database, type DbRequest } from "@folio/db";
 import type { Oracle } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
@@ -32,7 +32,7 @@ export const createAccountFor = (
   connectorId: ConnectorId,
   label: string,
   rawValues: Record<string, string>,
-): Effect.Effect<AccountSafe, Error, ConnectorRegistry | Database | Oracle> =>
+): Effect.Effect<AccountSafe, Error, ConnectorRegistry | Database | Oracle | DbRequest> =>
   Effect.gen(function* () {
     const connectors = yield* ConnectorRegistry;
     // 丢掉空串:未填的可选字段缺省即不参与;必填字段留空 → 变 undefined → 校验直接拒。

@@ -5,7 +5,8 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 // 单页上限不进导出面(调用方不需要知道分页存在),测分页边界要从常量模块直接取。
 import { IDS_PER_REQUEST, MARKETS_PER_PAGE, UPSTREAM_ID } from "../src/constants";
-import { coinGeckoTokenUpstreamLayer, makeUpstreamEffects } from "../src/upstream";
+import { makeUpstreamEffects } from "../src/upstream";
+import { coinGeckoUpstreamLayers } from "../src/upstreams";
 import assetPlatforms from "./fixtures/asset-platforms.json" with { type: "json" };
 import { type Call, routed, run, type Stub, stubbing } from "./harness";
 
@@ -42,7 +43,7 @@ describe("端口 layer", () => {
     const stub = routed({ "/coins/markets": [] });
     const id = await runClient(
       stub.http,
-      Effect.map(TokenUpstream, (u) => u.id).pipe(Effect.provide(coinGeckoTokenUpstreamLayer())),
+      Effect.map(TokenUpstream, (u) => u.id).pipe(Effect.provide(coinGeckoUpstreamLayers().token)),
       "none",
     );
     expect(id).toBe(UPSTREAM_ID);
@@ -53,7 +54,7 @@ describe("端口 layer", () => {
     const rows = await runClient(
       stub.http,
       Effect.flatMap(TokenUpstream, (u) => u.fetchMarkets({ topN: 1 })).pipe(
-        Effect.provide(coinGeckoTokenUpstreamLayer()),
+        Effect.provide(coinGeckoUpstreamLayers().token),
       ),
       "none",
     );

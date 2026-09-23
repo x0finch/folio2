@@ -46,7 +46,7 @@ describe("span 树", () => {
   // **三层:handler → domain op → D1**(#504 T16)。
   //
   // 只有 handler 一层时,`getPortfolioOverview` 的树就一行 —— 答得了「哪个端点慢」,答不了
-  // 「慢在哪」。`DbClient` 那一处收口点给出最里那层,`Database` 聚合出口的 `tracedStores`
+  // 「慢在哪」。`DbClient` 那一处收口点给出最里那层,`Database` 聚合出口的 `bindPerCall`
   // 给出中间那层「哪个 domain 方法」。同一次请求实测(测试库、数据少,毫秒数只看相对):
   //
   //     getPortfolioOverview 36.0ms userId=user-probe

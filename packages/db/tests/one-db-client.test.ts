@@ -1,80 +1,84 @@
 import { env } from "cloudflare:test";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
-import { DbClient, dbClientLayer } from "../src/client";
-import { CurrentUser } from "../src/current-user";
+import { DbClient, provideDbClient } from "../src/client";
+import type { DbEnv } from "../src/connect";
+import { provideCurrentUser } from "../src/current-user";
+import { Database, DatabaseForOracle, GlobalDatabase } from "../src/database";
 
-// **一次请求只有一个 drizzle 句柄。** 这条是红线(ADR 0044/0045,#504 T13),而它以前只被一个
-// **一次性探针**验过 —— 探针跑完就删了,于是「哪天有人把两次 provide 拆开」这件事没有任何东西
-// 会红。#504 复验清单点出的正是这个缺口:代码形状对,但没有可回归的断言。
+// **一次请求只有一个 drizzle 句柄。** 这条是红线(ADR 0044/0045,#504 T13),ADR 0054 之后
+// **一个字没动** —— 变的是给法:门票(`Database` 等)每个 isolate 建一次,不再握着连接;连接由
+// 装配点每请求 `provideDbClient(env)` 一次,每个 op 跑的那一刻从 context 里取。
 //
-// 钉的是**机制本身**,不是某个调用点。而写这两条用例时**实测纠正了一个说法**:边界是
-// **「一次构建」,不是「一次 `Layer.provide`」**。
-//   · 同一个引用在**一张 layer 图里**被 `Layer.provide` 两次 → 仍然一份(memo 表按构建走)
-//   · 分成**两次构建**(两次 `Effect.provide` / 两个根 fiber)→ 两份,哪怕引用相同
+// 于是「一次请求一个」的机制从「layer memoisation 的作用域是一次构建」换成了更直白的一条:
+// **context 里只有一个值,谁读都是它**。下面钉的是这条,外加它的负对照。
 //
-// 后一条才是会出事的那半,也正是 T12 在日志层上撞到的同一个性质:根 fiber 不继承外层的
-// provide,它自己那次装配就是第二次构建。
-//
-// 为什么这两条足够:app 侧那个 `userLayer(userId)`(`apps/web/src/lib/server/runtime.ts`)做的
-// 就是「建一个 `perRequest` 引用,在**一次**装配里分给聚合与参考层」。它的正确性全部落在
-// 下面这条性质上 —— 而这条性质在 db 这边才观测得到:`DbClient` 只在包内流通(原则 #6),
-// 包外拿不到那个对象,也就没法在 app 的测试里比对身份。
+// **怎么数**:`drizzle(env.DB)` 读一次 `env.DB` —— 给一个 `DB` 是 getter 的 env,读几次就是
+// 建了几个句柄。数的是真构造,不是引用比对(门票不再握着句柄,比对也无从比起)。
+const counting = (): { env: DbEnv; built: () => number } => {
+  let n = 0;
+  return {
+    env: {
+      get DB() {
+        n += 1;
+        return env.DB;
+      },
+    },
+    built: () => n,
+  };
+};
 
-// 捕获「我这一层拿到的是哪个 DbClient」。两个**不同**的服务,因为一个服务在一次构建里本来就
-// 只建一次 —— 要看的是两个消费者会不会共用同一份。
-class ProbeA extends Effect.Service<ProbeA>()("test/ProbeA", {
-  effect: Effect.map(DbClient, (client) => ({ client })),
-}) {}
+// 与生产同形:三张门票一次建好(生产里是 isolate 级的 `ManagedRuntime`),之后每个请求只给两样值。
+const tickets = Layer.mergeAll(
+  Database.Default,
+  DatabaseForOracle.Default("coingecko"),
+  GlobalDatabase.Default,
+);
 
-class ProbeB extends Effect.Service<ProbeB>()("test/ProbeB", {
-  effect: Effect.map(DbClient, (client) => ({ client })),
-}) {}
-
-// 与生产同款的那两样底料(ADR 0044):一个句柄 + 「这次请求是谁的」。
-const perRequest = () => Layer.merge(dbClientLayer(env), Layer.succeed(CurrentUser, "user-probe"));
-
-const bothFrom = (layer: Layer.Layer<ProbeA | ProbeB>) =>
-  Effect.runPromise(
-    Effect.provide(
-      Effect.all([Effect.map(ProbeA, (a) => a.client), Effect.map(ProbeB, (b) => b.client)]),
-      layer,
-    ),
-  );
+// 一次「请求」:跨三张门票、四个领域各跑一个 op。
+const oneRequest = Effect.gen(function* () {
+  const db = yield* Database;
+  const forOracle = yield* DatabaseForOracle;
+  const global = yield* GlobalDatabase;
+  yield* db.accounts.list();
+  yield* db.settings.get();
+  yield* forOracle.cache.get("probe");
+  yield* global.accounts.listUserIds();
+});
 
 describe("一次请求一个 DbClient", () => {
-  it("两个消费者在同一次装配里 → 同一份句柄", async () => {
-    const shared = perRequest();
-    const [a, b] = await bothFrom(
-      Layer.provide(Layer.mergeAll(ProbeA.Default, ProbeB.Default), shared),
+  it("一次请求里跨门票、跨领域的全部 op → 只建一个句柄", async () => {
+    const c = counting();
+    const runtime = ManagedRuntime.make(tickets);
+    await runtime.runPromise(
+      oneRequest.pipe(provideCurrentUser("user-probe"), provideDbClient(c.env)),
+    );
+    expect(c.built()).toBe(1);
+    await runtime.dispose();
+  });
+
+  it("同一次请求里两处去读,拿到的是同一个句柄", async () => {
+    const [a, b] = await Effect.runPromise(
+      Effect.all([DbClient, DbClient]).pipe(provideDbClient(env)),
     );
     expect(a).toBe(b);
   });
 
-  // 同一次构建里 `Layer.provide` 两次也还是一份 —— 这条是**实测出来的**,写这个文件之前
-  // `runtime.ts` 的注释说的是「分两次 provide 就是两份」,那句话按字面读是错的(已改)。
-  it("同一次构建里 provide 两次 → 还是一份", async () => {
-    const shared = perRequest();
-    const [a, b] = await bothFrom(
-      Layer.merge(Layer.provide(ProbeA.Default, shared), Layer.provide(ProbeB.Default, shared)),
+  // **负对照。** 证明计数器数的真是构造(第一条的 1 不是「计数器没在数」的假象),而且句柄是
+  // **跑一次建一次**(`Effect.sync`,不是套上组合子那一刻)。门票则跨请求是同一份 —— 这正是
+  // ADR 0054 要的形状。另起一条根 fiber 也就是另一次「跑」:`/api/sync` 的后台任务(#504 T12)。
+  it("同一个组合子跑两次 → 两个句柄;门票仍是同一份", async () => {
+    const c = counting();
+    const runtime = ManagedRuntime.make(tickets);
+    const request = oneRequest.pipe(
+      Effect.zipRight(Database),
+      provideCurrentUser("user-probe"),
+      provideDbClient(c.env),
     );
-    expect(a).toBe(b);
-  });
-
-  // **负对照。** 少了它,上面两条在「每次都新建一份」的实现下也会绿(两份句柄各自可用、行为
-  // 一样,只是白开一条连接,而且这一层将来长出状态时会被悄悄劈成两半)。
-  //
-  // 两次 `runPromise` = 两次构建。这就是 `/api/sync` 那个后台任务的形状(#504 T12):
-  // 它另起一条根 fiber,于是自己又装配了一次。
-  it("分两次构建 → 两份句柄,哪怕 layer 引用相同", async () => {
-    const shared = perRequest();
-    const clientOf = (probe: typeof ProbeA) =>
-      Effect.runPromise(
-        Effect.provide(
-          Effect.map(probe, (p) => p.client),
-          Layer.provide(probe.Default, shared),
-        ),
-      );
-    expect(await clientOf(ProbeA)).not.toBe(await clientOf(ProbeA));
+    const first = await runtime.runPromise(request);
+    const second = await runtime.runPromise(request);
+    expect(c.built()).toBe(2);
+    expect(first).toBe(second);
+    await runtime.dispose();
   });
 });

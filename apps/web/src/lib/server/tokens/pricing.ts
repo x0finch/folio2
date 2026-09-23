@@ -1,3 +1,4 @@
+import type { DbRequest } from "@folio/db";
 import { Oracle } from "@folio/oracle";
 import { fiatCodeOf, type TokenRef, tokenTicket } from "@folio/oracle-basic";
 import { Clock, Effect, Option } from "effect";
@@ -36,7 +37,7 @@ export interface PriceTicketsOptions {
 export const priceTickets = (
   tickets: readonly string[],
   options: PriceTicketsOptions,
-): Effect.Effect<PricedTicket[], never, Oracle> =>
+): Effect.Effect<PricedTicket[], never, Oracle | DbRequest> =>
   Effect.gen(function* () {
     // 票 → ref(解不开 / 别家命名者的丢掉),并记 ref→票 好把结果映射回票。同一 ref 的重复票收敛成一条。
     const byRef = new Map<TokenRef, string>();

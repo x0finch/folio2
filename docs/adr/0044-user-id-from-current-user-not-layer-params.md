@@ -1,5 +1,7 @@
 # per-user 服务的 userId 从 layer 参数改成 `CurrentUser`
 
+> **部分被 [ADR 0054](0054-service-graph-per-isolate-user-per-call.md) 取代(2026-09-22)。** 「userId 由一个无默认值的 `CurrentUser` Tag 给、装配点给一次」仍然成立(下面「为什么是 `Context.Tag` 不是 `Context.Reference`」一节原样有效);**被换掉的是读的时机**:不再是「建服务那一刻读一次、绑进闭包」,而是每个 op 跑的那一刻从 context 里读 —— 服务图因此能每个 isolate 只建一次。下文「读的时机也没变」「本 ADR 不走那条」两段说的正是被推翻的那半,原文留档;0054 写了它当初担心的「同一个实例对不同用户各跑一遍」怎么被结构性地挡住(Tag 不再出包)。
+
 ADR 0037 定下的那条保证是:**userId 在装配那一刻被吃掉** —— per-user 服务的方法签名里一个 user 参数都没有,拿错用户在编译期就发生不了。
 
 它当时的**实现方式**是「每个领域一个带参 layer 工厂」:`accountStoreLayer(userId)` / `userTokenStoreLayer({ userId, namer })`,九个领域 + 三张参考层 store 各一个。装配点因此要把同一个 userId 传十来遍。

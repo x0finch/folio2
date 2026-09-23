@@ -1,3 +1,4 @@
+import type { DbRequest } from "@folio/db";
 import { Oracle } from "@folio/oracle";
 import { Effect, Option } from "effect";
 
@@ -17,7 +18,9 @@ import { Effect, Option } from "effect";
 //
 // **不再收 userId、也不再自己发动**(#504 T7):它现在是一段 effect,由调用它的 handler
 // 带着一起交给 `runEffect`。参考层从聚合 `Oracle` 一张门票取(T15),不再点名 `FxService`。
-export const displayRate = (code: string): Effect.Effect<number | undefined, never, Oracle> =>
+export const displayRate = (
+  code: string,
+): Effect.Effect<number | undefined, never, Oracle | DbRequest> =>
   code === "USD"
     ? Effect.succeed(1)
     : Effect.gen(function* () {

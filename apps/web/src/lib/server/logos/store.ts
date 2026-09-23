@@ -1,4 +1,4 @@
-import { Database } from "@folio/db";
+import { Database, type DbRequest } from "@folio/db";
 import { PLATFORM_TTL_MS } from "@folio/oracle-basic";
 import { Effect, Option, Schema } from "effect";
 
@@ -24,7 +24,7 @@ const decodeUrl = Schema.decodeUnknownOption(Schema.String);
 // 单个协议的图 URL(缓存命中且是个字符串 → URL;否则 `none` → 调用方走首字母兜底)。
 export const readDefiLogo = (
   protocol: string,
-): Effect.Effect<Option.Option<string>, never, Database> =>
+): Effect.Effect<Option.Option<string>, never, Database | DbRequest> =>
   Effect.flatMap(Database, ({ cache }) =>
     Effect.map(cache.get(key(protocol)), (hit) =>
       Option.flatMap(hit, (entry) => decodeUrl(entry.value)),
@@ -35,7 +35,7 @@ export const readDefiLogo = (
 // 逐键往返会把一次 D1 变成 N 次)。没图就不写 —— 这里**没有否定缓存**,读不到就是没有。
 export const recordDefiLogos = (
   entries: readonly { protocol: string; logo: string }[],
-): Effect.Effect<void, never, Database> =>
+): Effect.Effect<void, never, Database | DbRequest> =>
   Effect.flatMap(Database, ({ cache }) => {
     const seen = new Map<string, string>();
     for (const e of entries) {

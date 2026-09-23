@@ -15,9 +15,11 @@ import { CandidateSource } from "./tokens/candidates";
 //   · `namer` / `overrides` 不再由装配点从 adapter 搬到服务层 —— adapter 的 layer 直接给 `Namer`
 //   · `now?: () => number` 五个字段全删,时间走 `Clock`(测试 `TestClock`)
 //
-// **userId 仍然在类型上防错**:`DatabaseForOracle` 由 app 侧按 userId 现建(装配点 provide 一个
-// `CurrentUser`,ADR 0044),服务层的方法签名里一个 user 参数都没有 —— 拿错用户在编译期
-// 就发生不了,而这一层压根不知道有 userId 这回事。
+// **userId 仍然在类型上防错**:`DatabaseForOracle` 的 op 在跑的那一刻从 context 里取用户
+// (ADR 0044 / 0054),所以本层的方法 `R` 里带着 `DbRequest` —— 没给用户的 effect 编译不过;
+// 服务层的方法签名里一个 user 参数都没有,而这一层压根不知道有 userId 这回事。
+// 也因此这三个服务**每个 isolate 建一次**(app 的 `runtime.ts`):它们建自己时只抓门票与上游,
+// 没有一样是某个请求、某个用户的。
 //
 // 一个用户的参考层由**三个**服务组成,按**领域**分(ADR 0012 的口径),不按能力切碎:
 //   · `TokenService`     代币 —— mint(写时定死身份)/ 富化 / 现价 / 历史价 / 橱窗 / 搜索

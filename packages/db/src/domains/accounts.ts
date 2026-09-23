@@ -1,15 +1,15 @@
 import type { ConnectorId } from "@folio/connectors";
 import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { DbClient } from "../client";
-import { CurrentUser } from "../current-user";
+import type { DbClient } from "../client";
 import { accounts, portfolioAccounts } from "../schema";
 import type { AccountSafe } from "../schema/types";
 import { ensureDefault } from "./portfolios";
 
 // 账户:建 / 列 / 改名 / 归档 / 删,外加 creds 的原样存取(db 不解释 creds 的内容)。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):它由 `AccountStore.Default(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
+// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
 // 方法名也不再带领域前缀(`createAccount` → `create`)—— 服务本身就是领域。
 
 // 安全列:不含 creds(内含 secret 密文),常规查询一律走这组列。
@@ -44,9 +44,7 @@ export interface AccountRawCreds {
 // **它住 `GlobalDatabase` 而不是 `Database`**:后者是 per-user 的,建它就得先有一个 userId ——
 // 而这一条问的正是「有哪些用户」。判据与 `global-ref-index.ts` 那张表同一条:**「有没有『谁的』
 // 这回事」**,没有 → 不隔离,也不该从 per-user 的那张门票上拿。
-export const makeGlobalAccountStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-
+export const makeGlobalAccountStore = (client: DbClient) => {
   return {
     listUserIds: (): Effect.Effect<string[]> =>
       Effect.map(
@@ -54,12 +52,9 @@ export const makeGlobalAccountStore = Effect.gen(function* () {
         (rows) => rows.map((r) => r.userId),
       ),
   };
-});
+};
 
-export const makeAccountStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-  const userId = yield* CurrentUser;
-
+export const makeAccountStore = (client: DbClient, userId: string) => {
   return {
     // 不变量(ADR 0033):每个账户恰一行归属。新账户落进用户的默认 Portfolio —— 建账户与建归属
     // 一个 batch 原子写,杜绝「有账户没归属」的空窗(否则该账户会从 accountsInView 里消失)。
@@ -168,4 +163,4 @@ export const makeAccountStore = Effect.gen(function* () {
         ),
       ),
   };
-});
+};

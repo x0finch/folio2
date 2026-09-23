@@ -2,7 +2,7 @@ import type { TokenRef, TokenRefIndexRow } from "@folio/oracle-basic";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray, max, sql } from "drizzle-orm";
 import { Effect, Option } from "effect";
-import { chunk, DbClient } from "../client";
+import { chunk, type DbClient } from "../client";
 import { globalTokenRefIndex } from "../schema";
 
 // `global_token_ref_index`:链上地址 → 上游对同一个币的叫法(ADR 0022,#199)。
@@ -99,17 +99,7 @@ export function diffRefIndexPage(
 
 // 不碰 `Clock`(另外三个 store 都要):本 store 没有一处需要「现在几点」——
 // `putAll` 的时刻由调用方给(契约如此,cron 记的是那一轮的时刻),读侧无 TTL 门控。
-/**
- * 这张表的契约 —— **从实现推出来的,不是另抄一份签名**。
- *
- * 出包是给 `@folio/oracle` 用的:它的 mint 那一片把这个 store 当参数传下去
- * (`MintDeps.globalRefIndex`),要一个能写在签名里的名字。
- */
-export type GlobalRefIndexStore = Effect.Effect.Success<typeof makeGlobalRefIndexStore>;
-
-export const makeGlobalRefIndexStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-
+export const makeGlobalRefIndexStore = (client: DbClient) => {
   // 落一批目标行(update + insert 同形):多行 upsert,冲突用 `excluded` 逐行覆盖。
   // 两级分批同旧实现 —— 每语句 ROWS_PER_STATEMENT 行(绑定参数上限)、每批 STATEMENTS_PER_BATCH 语句。
   const writeRefRows = (
@@ -304,4 +294,4 @@ export const makeGlobalRefIndexStore = Effect.gen(function* () {
         (rows) => Option.fromNullable(rows[0]?.latest),
       ),
   };
-});
+};

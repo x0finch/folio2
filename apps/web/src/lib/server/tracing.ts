@@ -22,7 +22,7 @@ import { Effect, Layer, Option, Tracer } from "effect";
 // —— **开销与开关:只在 `LOG_LEVEL` 为 debug 时装** ——
 //
 // 这一层原先「不加开关」,理由是「一次请求个位数个 span,量级在微秒」。**实测不是这样**
-//(生产 bundle 的 V8 profile):一次请求十几到几十个 span(`Database` 聚合出口的 `tracedStores`
+//(生产 bundle 的 V8 profile):一次请求十几到几十个 span(`Database` 聚合出口的 `bindPerCall`
 // 一个 op 一个、桥那头一个查询一个),每个一行 + 一个 Map + 一次 depth 登记,根收工时再把整棵树
 // 拼成一个字符串 —— 而默认级别(`info`)下 LogTape 收到它就丢,拼了白拼。免费计划一次请求
 // 10ms CPU,这笔账付不起。
@@ -39,7 +39,7 @@ import { Effect, Layer, Option, Tracer } from "effect";
 //   · 却会弄丢错误里的 handler 名。关掉之后子 span 认不到父(no-op span 带 `DisablePropagation`,
 //     父链在那儿断掉),`Cause.pretty` 只剩最里那一层:`at db.query`,没有 `at createTabPin`。
 //     `requireAuth` 的兜底日志正是靠那条链认出「哪个 handler」(见 session/require-auth.ts)。
-//   抓调用点那笔账在它真没信息的地方直接免掉:`@folio/db` 的 `tracedStores` 传了
+//   抓调用点那笔账在它真没信息的地方直接免掉:`@folio/db` 的 `bindPerCall` 传了
 //   `captureStackTrace: false`(七十个 op 的调用点全是同一行)。
 //
 // 也因此 `flush` 不做惰性拼串:树只在 debug 落地时才存在,它拼出来的字符串一定会被打出去。
@@ -158,5 +158,5 @@ const spanTracer: Layer.Layer<never> = spanTracerTo((tree) =>
  * 「开销与开关」)。在**发动那一刻**问 LogTape、不缓存:门限是 `configureLogging` 配好的,
  * 这里只是查一下它已经解析好的那张表。
  */
-export const withSpanTree = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+export const withSpanTree = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
   log.isEnabledFor("debug") ? Effect.provide(effect, spanTracer) : effect;

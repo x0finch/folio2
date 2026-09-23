@@ -1,5 +1,5 @@
 import type { UpstreamError } from "@folio/client-core";
-import type { CacheEntry, CacheStore, TokenPriceStore } from "@folio/db";
+import type { CacheEntry, CacheStore, DbRequest, TokenPriceStore } from "@folio/db";
 import { DatabaseForOracle } from "@folio/db";
 import type { TokenPricePoint, TokenRef } from "@folio/oracle-basic";
 import {
@@ -56,7 +56,10 @@ export const fxKey = (currency: string): string => `fx:${norm(currency)}`;
 // 而不是把坏值 `as number` 一路端到展示层。
 const decodeNumber = Schema.decodeUnknownOption(Schema.Number);
 
-export const readFx = (cache: CacheStore, currency: string): Effect.Effect<Option.Option<number>> =>
+export const readFx = (
+  cache: CacheStore,
+  currency: string,
+): Effect.Effect<Option.Option<number>, never, DbRequest> =>
   Effect.map(cache.get(fxKey(currency)), (hit) =>
     Option.flatMap(hit, (entry) => decodeNumber(entry.value)),
   );
@@ -65,13 +68,13 @@ export const readFx = (cache: CacheStore, currency: string): Effect.Effect<Optio
 const readFxFreshness = (
   cache: CacheStore,
   currencies: readonly string[],
-): Effect.Effect<Map<string, CacheEntry>> => cache.getMany(currencies.map(fxKey));
+): Effect.Effect<Map<string, CacheEntry>, never, DbRequest> => cache.getMany(currencies.map(fxKey));
 
 // 一次批量写回。上游那个端点一把全给,所以这里恒是「十来个键一个批次」。
 export const writeFx = (
   cache: CacheStore,
   rates: readonly { currency: string; usdPerUnit: number }[],
-): Effect.Effect<void> =>
+): Effect.Effect<void, never, DbRequest> =>
   cache.putMany(
     rates.map((r) => ({ key: fxKey(r.currency), value: r.usdPerUnit, ttlMs: FX_TTL_MS })),
   );
@@ -80,15 +83,16 @@ export const writeFx = (
 // 已暖的直接命中),缺的过去日拉一次并落库(顺带暖给 BTC 持有者),今日桶现取不落。返回全桶的
 // Map(命中什么给什么)。ADR 0026 的「BTC 美元腿优先读缓存、不重取」就在这里。
 //
-// **收已解析好的服务对象**(与本文件其余几个辅助件、以及 `./warm` 同款),所以它的 `R` 是
-// `never`、能被直接喂假端口打 —— 那条「不重取」的规则因此有自己的用例,不必绕整条反算去数请求。
+// **收已解析好的服务对象**(与本文件其余几个辅助件、以及 `./warm` 同款),所以它的 `R` 里没有
+// 任何服务、能被直接喂假端口打 —— 那条「不重取」的规则因此有自己的用例,不必绕整条反算去数请求。
+// (`R` 里只剩 `DbRequest`:一次请求的连接 + 用户,store 的 op 跑的那一刻才取,ADR 0054。)
 export const btcUsdDaily = (
   prices: TokenPriceStore,
   upstream: TokenUpstream,
   btcRef: TokenRef,
   buckets: readonly number[],
   todayB: number,
-): Effect.Effect<Map<number, number>, UpstreamError> =>
+): Effect.Effect<Map<number, number>, UpstreamError, DbRequest> =>
   Effect.gen(function* () {
     const cached = yield* prices.getDailyByRef(btcRef, buckets);
     const missingPast = buckets.filter((b) => b < todayB && !cached.has(b));
@@ -144,11 +148,11 @@ export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
 
     return {
       // 1 单位该币种值多少美元。USD 恒 1(不查缓存);缓存里没有 → `none`(调用方回退 USD)。
-      resolve: (currency: string): Effect.Effect<Option.Option<number>> =>
+      resolve: (currency: string): Effect.Effect<Option.Option<number>, never, DbRequest> =>
         norm(currency) === "USD" ? Effect.succeed(Option.some(1)) : readFx(cache, currency),
 
       // 预热(同步之后 / 用户第一次切币种时)。缺省预热全部支持币种。
-      warm: (currencies: readonly string[] = ALL_CODES): Effect.Effect<void> =>
+      warm: (currencies: readonly string[] = ALL_CODES): Effect.Effect<void, never, DbRequest> =>
         Effect.gen(function* () {
           // USD 不进目标:它恒为 1、不存缓存,算进去会让「全都新鲜」永远判不成立。
           const targets = [...new Set(currencies.map(norm))].filter((c) => c !== "USD");
@@ -184,7 +188,7 @@ export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
         code: string,
         fromMs: number,
         toMs: number,
-      ): Effect.Effect<readonly TokenPricePoint[]> =>
+      ): Effect.Effect<readonly TokenPricePoint[], never, DbRequest> =>
         Effect.gen(function* () {
           if (fromMs > toMs) return [];
           const CODE = norm(code);

@@ -1,8 +1,7 @@
 import { formatTokenRef, type TokenRef } from "@folio/oracle-ref";
 import { and, asc, eq, getTableColumns, type InferSelectModel, inArray, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { DbClient } from "../client";
-import { CurrentUser } from "../current-user";
+import type { DbClient } from "../client";
 import { NotFound } from "../errors";
 import { accounts, manualActivity, tokenRefs, tokens } from "../schema";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
@@ -39,7 +38,8 @@ export interface ManualHolding {
 //
 // **`ManualStore` 是手记这个领域的**唯一**服务** —— 持仓与账本是同一件事的两面(持仓正是账本
 // 折叠出来的),按能力切成两个服务会重蹈 #392 拆掉的那种分法。所以这里把两半合成一个。
-// 方法签名里没有 userId(ADR 0037):由 `ManualStore.Default(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
+// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
 
 export type ManualActivityKind = "add" | "reduce" | "set";
 export interface ManualActivityInput {
@@ -108,10 +108,7 @@ const assertActivityOwned = (
       }),
     );
 
-export const makeManualStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-  const userId = yield* CurrentUser;
-
+export const makeManualStore = (client: DbClient, userId: string) => {
   return {
     // —— 持仓(账本折叠出来的那一面)——
     // `namer` 决定 `ref` 从哪个命名者那一行读 —— 由调用方传(同 userTokenStoreLayer),db 层不预设任何厂商。
@@ -344,4 +341,4 @@ export const makeManualStore = Effect.gen(function* () {
         ]);
       }),
   };
-});
+};

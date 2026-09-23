@@ -1,4 +1,4 @@
-import type { GlobalRefIndexStore, TokenStore } from "@folio/db";
+import type { DbRequest, GlobalRefIndexStore, TokenStore } from "@folio/db";
 import type { ProviderTokenSeed, TokenCandidate, TokenRef, TokenRefHit } from "@folio/oracle-basic";
 import {
   FIAT_NAMER,
@@ -37,7 +37,7 @@ import type { CandidateSource } from "./candidates";
 // 它读的是缓存目录 —— 唯一那条冷启动出网路径收在**它自己的 layer** 里,仍然是类型事实)。
 export interface TokenMinting {
   // 一批 (ref, provider 报的元信息) → 各自的 token_id。输入里重复的 ref 只处理一次。
-  mint(inputs: readonly MintInput[]): Effect.Effect<Map<TokenRef, string>>;
+  mint(inputs: readonly MintInput[]): Effect.Effect<Map<TokenRef, string>, never, DbRequest>;
 }
 
 export interface MintInput {
@@ -84,7 +84,8 @@ export function pickByConfidence(candidates: readonly TokenCandidate[]): TokenRe
 }
 
 // **收已解析好的服务对象**,不从 context 取 —— 与本文件夹其余几片、以及 `./warm` 同款,
-// 于是 `mint` 的 `R` 是 `never`:服务的方法签名不会把 mint 的依赖漏给调用方。
+// 于是 `mint` 的 `R` 里没有任何服务(只有 `DbRequest`,见 `./index`):服务的方法签名不会把
+// mint 的依赖漏给调用方。
 // 从 Tag 取服务只发生在 `./index` 那一层。
 export function makeMinting(deps: MintDeps): TokenMinting {
   const { store, globalRefIndex, candidates } = deps;
@@ -96,7 +97,7 @@ export function makeMinting(deps: MintDeps): TokenMinting {
     ref: TokenRef,
     parsed: ParsedTokenRef,
     seed: ProviderTokenSeed,
-  ): Effect.Effect<Option.Option<TokenRef>> =>
+  ): Effect.Effect<Option.Option<TokenRef>, never, DbRequest> =>
     Effect.gen(function* () {
       // **这条 ref 本身就是上游的命名** —— 手记里用户选了币,报的就是 `<上游>/<id>`。
       // 它已经是锚,直接返回:不查映射表(那张表只装链上地址)、更不掉回 symbol 去猜一个
@@ -129,7 +130,7 @@ export function makeMinting(deps: MintDeps): TokenMinting {
     ref: TokenRef,
     seed: ProviderTokenSeed,
     hit: TokenRefHit | undefined,
-  ): Effect.Effect<string> =>
+  ): Effect.Effect<string, never, DbRequest> =>
     Effect.gen(function* () {
       // 已经认出来过(有当前源的 ref 行)→ 什么都不用做,绝大多数行停在这。
       if (hit?.linked) return hit.tokenId;

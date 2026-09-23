@@ -1,4 +1,4 @@
-import type { TokenPriceStore, TokenStore } from "@folio/db";
+import type { DbRequest, TokenPriceStore, TokenStore } from "@folio/db";
 import type { TokenPricePoint } from "@folio/oracle-basic";
 import { dayBucketOf, MS_PER_DAY } from "@folio/oracle-basic";
 import type { TokenUpstream } from "@folio/oracle-basic/ports";
@@ -17,9 +17,9 @@ export interface TokenHistory {
     tokenId: string,
     fromMs: number,
     toMs: number,
-  ): Effect.Effect<readonly TokenPricePoint[]>;
+  ): Effect.Effect<readonly TokenPricePoint[], never, DbRequest>;
   // 某时刻的历史价:atMs 所属 UTC 日桶的价;该日无数据 → `none`(调用方降级)。
-  priceAt(tokenId: string, atMs: number): Effect.Effect<Option.Option<number>>;
+  priceAt(tokenId: string, atMs: number): Effect.Effect<Option.Option<number>, never, DbRequest>;
 }
 
 export const makeHistory = (
@@ -31,7 +31,7 @@ export const makeHistory = (
     tokenId: string,
     fromMs: number,
     toMs: number,
-  ): Effect.Effect<readonly TokenPricePoint[]> =>
+  ): Effect.Effect<readonly TokenPricePoint[], never, DbRequest> =>
     Effect.gen(function* () {
       const info = yield* store.getById(tokenId);
       // 上游还没认出它 → 取不到历史价(本源只认自己给的名字)。

@@ -1,4 +1,4 @@
-import type { TokenPriceStore, TokenStore } from "@folio/db";
+import type { DbRequest, TokenPriceStore, TokenStore } from "@folio/db";
 import type { TokenPrice, TokenRecord, TokenRecordPrice, TokenRef } from "@folio/oracle-basic";
 import { PRICE_TTL_MS } from "@folio/oracle-basic";
 import type { TokenUpstream } from "@folio/oracle-basic/ports";
@@ -25,14 +25,14 @@ import { degradeTo, swr } from "./swr";
 
 export interface TokenReading {
   // 富化:按内部 id 批量读整行(info + 价合并)。输入**不再需要** symbol 或 tokenRef。
-  enrich(ids: readonly string[]): Effect.Effect<Map<string, TokenRecord>>;
+  enrich(ids: readonly string[]): Effect.Effect<Map<string, TokenRecord>, never, DbRequest>;
   // 按主键读一行的上游图 URL(logo 代理端点用):源给的优先,没有就用连接器自带那张。
-  logoUrlById(id: string): Effect.Effect<Option.Option<string>>;
+  logoUrlById(id: string): Effect.Effect<Option.Option<string>, never, DbRequest>;
 }
 
 export interface TokenPricing {
   // 取单价:新鲜 → 直接回;stale/miss → 回源 → 写回。长尾币按需取价走这条。
-  priceOf(tokenId: string): Effect.Effect<Option.Option<TokenRecordPrice>>;
+  priceOf(tokenId: string): Effect.Effect<Option.Option<TokenRecordPrice>, never, DbRequest>;
   // 选币表单预填单价:按 ref 现取,**不建行、不写缓存**。
   // 取不到(上游不认识 / 上游挂了)→ `none`,表单让用户自己填。
   priceByRef(ref: TokenRef): Effect.Effect<Option.Option<TokenPrice>>;

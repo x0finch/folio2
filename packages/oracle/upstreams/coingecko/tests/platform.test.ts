@@ -2,7 +2,8 @@ import { runClient } from "@folio/client-core/testing";
 import { PlatformUpstream } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { coinGeckoPlatformUpstreamLayer, fetchChainsEffect } from "../src/platform";
+import { fetchChainsEffect } from "../src/platform";
+import { coinGeckoUpstreamLayers } from "../src/upstreams";
 import { routed, run, stubbing } from "./harness";
 
 const ASSET_PLATFORMS = [
@@ -52,7 +53,7 @@ describe("fetchChains", () => {
     const id = await runClient(
       routed({ "/asset_platforms": [] }).http,
       Effect.map(PlatformUpstream, (u) => u.id).pipe(
-        Effect.provide(coinGeckoPlatformUpstreamLayer()),
+        Effect.provide(coinGeckoUpstreamLayers().platform),
       ),
       "none",
     );

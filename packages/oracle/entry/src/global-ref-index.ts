@@ -1,5 +1,5 @@
 import type { UpstreamError } from "@folio/client-core";
-import { GlobalDatabase, type RefIndexDiffCounts } from "@folio/db";
+import { type DbClient, GlobalDatabase, type RefIndexDiffCounts } from "@folio/db";
 import { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Clock, Effect, type Option } from "effect";
 
@@ -36,7 +36,8 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
             unmatchedPlatforms: readonly string[];
             skipped: number;
           } & RefIndexDiffCounts,
-          UpstreamError
+          UpstreamError,
+          DbClient
         > =>
           Effect.gen(function* () {
             const result = yield* upstream.fetchRefIndex();
@@ -66,7 +67,8 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
           }),
 
         // 某个源最近一次成功刷新的时刻;从未刷过 → `none`(首次部署要手动触发一次)。
-        refreshedAt: (): Effect.Effect<Option.Option<number>> => refIndex.refreshedAt(upstream.id),
+        refreshedAt: (): Effect.Effect<Option.Option<number>, never, DbClient> =>
+          refIndex.refreshedAt(upstream.id),
       };
     }),
   },

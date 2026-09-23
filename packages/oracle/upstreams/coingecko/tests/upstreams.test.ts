@@ -3,10 +3,6 @@ import { CoinGeckoClient, type CoinGeckoConfig } from "@folio/coingecko-client";
 import { FxUpstream, Namer, PlatformUpstream, TokenUpstream } from "@folio/oracle-basic/ports";
 import { Effect, Layer } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { coinGeckoFxUpstreamLayer } from "../src/fx";
-import { coinGeckoNamerLayer } from "../src/layer";
-import { coinGeckoPlatformUpstreamLayer } from "../src/platform";
-import { coinGeckoTokenUpstreamLayer } from "../src/upstream";
 import { coinGeckoUpstreamLayers } from "../src/upstreams";
 import { routed } from "./harness";
 
@@ -54,21 +50,17 @@ describe("coinGeckoUpstreamLayers", () => {
     expect(counter.builds).toBe(1);
   });
 
-  // 对照组:各自的工厂各 `transport(config)` 一次 —— 引用不同,memo 认不出,哪怕 config 相同。
-  // 这正是装配点以前的写法;留着这条,是为了让「为什么要 `coinGeckoUpstreamLayers`」有据可查。
-  it("对照:三个单端口工厂各建一份", async () => {
+  // 对照组:memo 按**引用**认,不按 config 认 —— 两次调用、config 逐字相同,照样各建一份。
+  // 这就是「为什么三格必须出自同一次调用」:以前三个单端口工厂各 `transport(config)` 一次,
+  // 一次请求建三遍(已删);这条钉住共用靠的是引用,别指望 config 相同就能省。
+  it("对照:两次调用即使 config 相同也各建一份", async () => {
     const counter = countBuilds();
     const config = { apiKey: "k" };
+    const a = coinGeckoUpstreamLayers(config);
+    const b = coinGeckoUpstreamLayers(config);
 
-    await idsFrom(
-      Layer.mergeAll(
-        coinGeckoTokenUpstreamLayer(config),
-        coinGeckoFxUpstreamLayer(config),
-        coinGeckoPlatformUpstreamLayer(config),
-        coinGeckoNamerLayer,
-      ),
-    );
+    await idsFrom(Layer.mergeAll(a.token, b.fx, b.platform, a.namer));
 
-    expect(counter.builds).toBe(3);
+    expect(counter.builds).toBe(2);
   });
 });

@@ -2,9 +2,9 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { Cause, Effect, Exit, Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { dbClientLayer } from "../src/client";
+import { provideDbClient } from "../src/client";
 import { getDb } from "../src/connect";
-import { CurrentUser } from "../src/current-user";
+import { provideCurrentUser } from "../src/current-user";
 import { Database } from "../src/database";
 import { InvalidInput } from "../src/errors";
 import { user } from "../src/schema/auth";
@@ -47,8 +47,8 @@ const createExit = (userId: string, input: Parameters<TabPinCreate>[0]) =>
   Effect.runPromiseExit(
     Effect.flatMap(Database, (db) => db.tabPins.create(input)).pipe(
       Effect.provide(Database.Default),
-      Effect.provide(dbClientLayer(env)),
-      Effect.provideService(CurrentUser, userId),
+      provideCurrentUser(userId),
+      provideDbClient(env),
     ),
   );
 

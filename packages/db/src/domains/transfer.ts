@@ -1,7 +1,6 @@
 import { and, asc, eq, isNull, or } from "drizzle-orm";
 import { Effect } from "effect";
-import { DbClient } from "../client";
-import { CurrentUser } from "../current-user";
+import type { DbClient } from "../client";
 import type { NotFound } from "../errors";
 import {
   accounts,
@@ -19,7 +18,8 @@ import { makeSnapshotStore, type WriteSnapshotInput } from "./snapshots";
 
 // 导出 / 导入 v3(#204):Token 行 + 它的 ref 随文件走。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):由 `TransferStore.Default(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
+// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
 //
 // **它要用快照与手记那两个 store** —— 导快照/导活动本来就是「查重之后调那一个写」,而两个写口
 // 连同它们的归属校验都已经在那两个服务里。所以这里直接 `yield*` 它们的 make,而不是 `yield*` 它们的
@@ -50,11 +50,9 @@ export interface ImportTokenInput {
 // **layer 依赖另外两个 store**(不是方法的 `R`):导快照/导活动就是「查重之后调那一个写」。
 // —— 合并式导入(#204,A 方案):按内容自然键 find-or-create,让「反复导入 / 合并不同文件」幂等。 ——
 // 全程用**新 id**(不碰全局 id 主键,多用户安全);去重靠 per-user 自然键。原样再导一遍 = 命中既有、不新建。
-export const makeTransferStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-  const userId = yield* CurrentUser;
-  const snapshotStore = yield* makeSnapshotStore;
-  const manualStore = yield* makeManualStore;
+export const makeTransferStore = (client: DbClient, userId: string) => {
+  const snapshotStore = makeSnapshotStore(client, userId);
+  const manualStore = makeManualStore(client, userId);
 
   return {
     listTokensForExport: (): Effect.Effect<ExportToken[]> =>
@@ -278,4 +276,4 @@ export const makeTransferStore = Effect.gen(function* () {
         return { created: true };
       }),
   };
-});
+};
