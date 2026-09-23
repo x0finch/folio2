@@ -15,7 +15,15 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const SKIP_DIRS = new Set(["node_modules", ".git", "dist", ".wrangler", ".scratch", "drizzle"]);
+const SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".claude",
+  "dist",
+  ".wrangler",
+  ".scratch",
+  "drizzle",
+]);
 const CHECKED_FIELDS = ["dependencies", "devDependencies"];
 
 // pnpm-workspace.yaml 的 `catalog:` 块。手搓解析而不是引 `yaml` —— 形状是固定的两层缩进,

@@ -23,3 +23,6 @@ test-results/
 playwright-report/
 blob-report/
 .playwright/
+
+# Claude Code agent worktrees(临时工作现场,不是产出;Biome/knip 走 gitignore,不加这行会把它们当仓库代码扫)
+.claude/worktrees/
