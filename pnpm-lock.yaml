@@ -237,6 +237,9 @@ importers:
       wrangler:
         specifier: 'catalog:'
         version: 4.105.0(@cloudflare/workers-types@4.20260626.1)
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
 
   packages/clients/binance:
     dependencies:

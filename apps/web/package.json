@@ -23,6 +23,7 @@
     "deploy:preview": "CLOUDFLARE_ENV=preview pnpm run build && wrangler deploy --env preview",
     "upload:preview": "CLOUDFLARE_ENV=preview pnpm run build && wrangler versions upload --env preview --preview-alias \"$PREVIEW_ALIAS\"",
     "gen:icons": "node scripts/gen-icons.mjs",
+    "perf:cpu": "node --disable-warning=ExperimentalWarning scripts/perf/cpu.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
@@ -81,6 +82,7 @@
     "typescript": "catalog:",
     "vite": "^8.0.0",
     "vitest": "catalog:",
-    "wrangler": "catalog:"
+    "wrangler": "catalog:",
+    "ws": "^8.21.0"
   }
 }
