@@ -1,27 +1,20 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocale } from "use-intl";
+import { storeLocale } from "@/lib/i18n/locale-preference";
 import type { Locale } from "@/lib/i18n/messages";
-import { invalidateFor } from "@/lib/queries/refresh";
-import { setLocalePreference } from "@/lib/server/preferences";
 
 const OPTIONS: { value: Locale; label: string }[] = [
   { value: "en", label: "EN" },
   { value: "zh", label: "中文" },
 ];
 
-// 切语言:写 cookie(SSR 下次可读)+ 定向刷新偏好域 → IntlProvider 换 locale。
-// 顺带刷代币域 —— 法币选项的名字是服务端按请求 locale 本地化的(见刷新映射表那条)。
+// 切语言:写 localStorage → 根上的 IntlProvider 订阅着它,当场换 locale(ADR 0049 补记)。
+// 法币选项的名字把语言放进了查询键,换语言即换键,不需要另外刷新。
 export function LocaleSwitcher() {
-  const queryClient = useQueryClient();
   const locale = useLocale();
-  const setLocale = useMutation({
-    mutationFn: (next: Locale) => setLocalePreference({ data: { locale: next } }),
-    onSuccess: () => invalidateFor(queryClient, "preference.locale"),
-  });
 
   function set(next: Locale) {
     if (next === locale) return;
-    setLocale.mutate(next);
+    storeLocale(next);
   }
   return (
     <div className="flex gap-2 text-sm">

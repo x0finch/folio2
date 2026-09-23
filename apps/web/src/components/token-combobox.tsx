@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useTranslations } from "use-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { formatNumber } from "@/lib/core/format-number";
 import type { TokenOption } from "@/lib/core/token-model";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
@@ -177,8 +177,9 @@ export function TokenCombobox({
   const remoteQuery = useQuery({ ...tokenSearchQuery(search), enabled: open && wantRemote });
 
   // 法币组(#272):SUPPORTED_CURRENCIES 的 10 法币。**票在服务端造**(与目录/已有一致,前端只拿不透明串,
-  // 不构造 tokenRef/票 —— 红线见 lib/core/token-model.ts 的 `TokenOption`),名字按请求 locale 已本地化。静态数据,挂载即预取。
-  const fiatQuery = useQuery(fiatOptionsQuery());
+  // 不构造 tokenRef/票 —— 红线见 lib/core/token-model.ts 的 `TokenOption`),名字按界面语言本地化(语言进键,切语言即换键)。静态数据,挂载即预取。
+  const locale = useLocale();
+  const fiatQuery = useQuery(fiatOptionsQuery(locale));
   const fiat = useMemo(() => fiatQuery.data ?? [], [fiatQuery.data]);
 
   // 分组(#269):已有代币 → Tokens(目录)→ 法币(Cash)。各组内部按 search 过滤,目录再并进

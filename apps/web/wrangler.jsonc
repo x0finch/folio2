@@ -41,6 +41,17 @@
   // 带 account 级 note 的账户另加约 37 MB —— note 每次同步原样重存,去重是 #456。
   "triggers": { "crons": ["0 23 * * *", "30 * * * *"] },
 
+  // 静态资源路由(ADR 0049 补记):HTML 文档是构建期 prerender 出的 `index.html`(vite.config.ts 的
+  // SPA 模式),**导航请求不进 Worker**。没命中文件的路径一律回 index.html(SPA 兜底),
+  // 只有 run_worker_first 这几条前缀先给 Worker:API 路由、server fn、以及 wrangler dev 的 cron 入口。
+  // 线上 cron 直接进 `scheduled()`,不经 fetch,那条只为本地方便。
+  // `directory` 不写:@cloudflare/vite-plugin 在构建产物的 wrangler.json 里补上(指向 ../client)。
+  // **env 里不继承**,下面 test / preview 各抄一份 —— 少一份的症状是那个环境的导航又回到 Worker SSR。
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/_serverFn/*", "/cdn-cgi/*"]
+  },
+
   // 可观测性(P6.7):开启 Workers Logs —— 自动摄取 console.* / LogTape 的 console sink 输出,
   // JSON 自动抽成可索引字段(Dashboard Query Builder + wrangler tail)。单用户 → 全量采样。
   "observability": { "enabled": true, "head_sampling_rate": 1 },
@@ -62,6 +73,10 @@
     "test": {
       "vars": { "LOG_LEVEL": "warning" },
       "cache": { "enabled": true },
+      "assets": {
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/api/*", "/_serverFn/*", "/cdn-cgi/*"]
+      },
       "d1_databases": [
         {
           "binding": "DB",
@@ -105,6 +120,10 @@
         "PREVIEW_TRUSTED_ORIGINS": "https://*-folio-preview.*.workers.dev"
       },
       "cache": { "enabled": true },
+      "assets": {
+        "not_found_handling": "single-page-application",
+        "run_worker_first": ["/api/*", "/_serverFn/*", "/cdn-cgi/*"]
+      },
       "d1_databases": [
         {
           "binding": "DB",

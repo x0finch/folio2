@@ -10,7 +10,7 @@ flowchart TD
       Y --> Z["③ 缓存<br/>fx_rates 表(软过期)"]
     end
     subgraph READ["展示侧(打开总览)"]
-      C["④ 选币种<br/>folio_currency cookie = EUR"] --> RS["⑤ 读出<br/>_authed loader: resolve(EUR) cache-only"]
+      C["④ 选币种<br/>localStorage folio_currency = EUR"] --> RS["⑤ 读出<br/>_authed loader: resolve(EUR) cache-only"]
       RS --> CTX["⑥ 下发<br/>CurrencyProvider context"]
       CTX --> FM["⑦ 换算+排版<br/>formatMoney(880, {rate, EUR})"]
       FM --> UI["⑧ 渲染<br/>€809.57"]
@@ -65,9 +65,9 @@ USD: 恒 1
 
 📍 **地点**:`apps/web/src/components/currency-switcher.tsx`(topbar,仿 `locale-switcher`)
 
-🔧 **做了什么**:写 `folio_currency=EUR` cookie(每浏览器,非账户级)+ `router.invalidate()` 重跑 `_authed` loader。
+🔧 **做了什么**:先把 EUR 那份汇率取进查询缓存,再把 `folio_currency=EUR` 写进 localStorage(每浏览器,非账户级)。币种码是查询键的一部分,外壳换键那一刻数据已在手,不闪骨架。
 
-📦 **形态**:一个 cookie 值 `EUR`。
+📦 **形态**:一个 localStorage 值 `EUR`;服务端不存它,每次取汇率时作为参数带过去(ADR 0049 补记:HTML 是静态资源,没有服务端能读 cookie 塑形页面)。
 
 ## ⑤ 读出 —— loader 解析币种 + cache-only 取汇率
 
@@ -116,7 +116,7 @@ USD: 恒 1
 
 **4. 为什么 fiat / crypto 两条格式化路径?** `Intl.NumberFormat(style:"currency")` 只认 ISO 4217 → **BTC/ETH 会抛 `RangeError`**。故 fiat 走 Intl currency(随币种/ locale 正确),crypto 走 `₿`/`Ξ` 前缀 + 高精度(复用 `formatNumber`)。代币数量与货币是两套格式化:数量要精度,货币要 currency-aware。
 
-**5. 为什么 cookie,不做 per-account?** 展示币种是每浏览器的展示偏好,和语言一样 —— 照抄现有 `folio_locale` 的 cookie 模式,零 DB、零迁移。
+**5. 为什么每浏览器,不做 per-account?** 展示币种是每浏览器的展示偏好,和语言一样,零 DB、零迁移。最初存 cookie(仿 `folio_locale`);文档变成静态资源之后(ADR 0049 补记)两者都改存 localStorage。
 
 **6. 历史净值图怎么办?** 按**当前汇率整体换算**(不存历史汇率),图形按当前 rate 缩放,语义="此刻若换成 EUR 值多少"。逐日历史 FX 范围差一个数量级,刻意不做。
 

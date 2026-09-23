@@ -54,7 +54,9 @@ async function seedHolding(page: Page) {
   });
 }
 
-const IS_MISMATCH = /Hydration failed|hydration-mismatch|did not match/i;
+// 最后一支是**构建产物**里的写法:CI 跑的是 preview,React 生产包只报 `Minified React error #418`
+// (#423 / #425 同族),不带上面那几句原文 —— 少了它,这条测试在 CI 上对 mismatch 是瞎的。
+const IS_MISMATCH = /Hydration failed|hydration-mismatch|did not match|React error #(418|423|425)/i;
 
 test.describe("首屏 hydration", () => {
   test.describe.configure({ timeout: 180_000 });

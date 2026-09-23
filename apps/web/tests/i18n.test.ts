@@ -1,26 +1,19 @@
 import { createTranslator } from "use-intl/core";
 import { describe, expect, it } from "vitest";
-import { pickLocale, readLocaleCookie } from "@/lib/i18n/detect";
+import { pickLocale } from "@/lib/i18n/detect";
 import { messages } from "@/lib/i18n/messages";
 
-describe("readLocaleCookie", () => {
-  it("extracts folio_locale from a Cookie header", () => {
-    expect(readLocaleCookie("a=1; folio_locale=zh; b=2")).toBe("zh");
-    expect(readLocaleCookie("folio_locale=en")).toBe("en");
-    expect(readLocaleCookie("other=x")).toBeUndefined();
-    expect(readLocaleCookie(null)).toBeUndefined();
-  });
-});
-
 describe("pickLocale", () => {
-  it("prefers a valid cookie", () => {
+  it("prefers a valid stored choice", () => {
     expect(pickLocale("zh", "en-US,en")).toBe("zh");
     expect(pickLocale("en", "zh-CN")).toBe("en");
   });
-  it("falls back to Accept-Language when no/invalid cookie", () => {
+  it("falls back to the browser language when no/invalid choice", () => {
     expect(pickLocale(undefined, "zh-CN,zh;q=0.9,en;q=0.8")).toBe("zh");
     expect(pickLocale("bogus", "zh")).toBe("zh");
     expect(pickLocale(undefined, "en-US")).toBe("en");
+    // navigator.language 的形状(没有逗号、没有 q 值)
+    expect(pickLocale(null, "zh-TW")).toBe("zh");
   });
   it("defaults to en", () => {
     expect(pickLocale(undefined, undefined)).toBe("en");

@@ -60,6 +60,8 @@ export const THEME_COLORS: { media: string; content: string }[] = [
 // iOS PWA 启动首帧常是 0、下一帧跳到真实值 → 文案抖;换成固定 rem,启动时视口/安全区怎么安顿都不动。
 // **进场不做任何动画**:文案直接显示、切换阶段也是原地换字(不淡入、不重挂)—— 入场动画在冷启动那一下
 // 看着像屏闪,不值当。动画只留呼吸(持续)+ 放行的放大扩散(退场)。
+// **「准备中」按 `<html lang>` 选语种**:静态壳里两种语言都在(见 splash 的 PreparingText),只露一条;
+// 认不出的 lang 落英文,与 pickLocale 的默认一致。
 export const SPLASH_STYLE = `
 html{background:${THEME_COLOR_LIGHT}}
 :root.dark{background:${THEME_COLOR_DARK}}
@@ -71,6 +73,8 @@ font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 transform-origin:center;will-change:transform,opacity;animation:folio-breathe 1.8s ease-in-out infinite}
 #folio-splash-msg{position:absolute;left:0;right:0;bottom:7rem;margin:0;padding:0 1.5rem;
 text-align:center;font-size:.875rem;font-weight:500;line-height:1.4;color:${SPLASH_MUTED}}
+#folio-splash-msg>[lang]{display:none}
+html:not([lang="zh"]) #folio-splash-msg>[lang="en"],html[lang="zh"] #folio-splash-msg>[lang="zh"]{display:inline}
 #app-splash[data-exit="true"]{pointer-events:none;animation:folio-splash-out ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
 #app-splash[data-exit="true"] #folio-splash-logo{animation:folio-splash-burst ${SPLASH_EXIT_MS}ms cubic-bezier(0.16,1,0.3,1) forwards}
 @keyframes folio-breathe{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.06);opacity:.72}}

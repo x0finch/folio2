@@ -14,9 +14,6 @@ const { signOutSpy, navigateSpy } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/server/preferences", () => ({
   getCurrencyPreference: vi.fn(),
-  getLocalePreference: vi.fn(),
-  setCurrencyPreference: vi.fn(),
-  setLocalePreference: vi.fn(),
 }));
 vi.mock("@/lib/core/auth-client", () => ({
   signIn: { passkey: vi.fn(), email: vi.fn() },

@@ -2,7 +2,7 @@ import { Oracle } from "@folio/oracle";
 import { Effect, Option } from "effect";
 
 // 展示币种的汇率:1 单位该币种值多少美元。**唯一的读入口**,`currency.ts` 那个 handler
-// 只负责读 cookie、定币种、把结果套成 `PreferCurrency`。
+// 只负责校验调用方传来的币种码、把结果套成 `PreferCurrency`。
 //
 // 三档,顺序就是代价从小到大:
 //   ① USD 恒 1 —— 不查缓存、不出网

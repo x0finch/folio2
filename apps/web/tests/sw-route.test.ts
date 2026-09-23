@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 // 手搓 SW 的纯路由决策(唯一值钱的自动化缝,见 ADR 0027)。import 的是服务端静态资源 public/sw.js
 // 本体 —— 它把 SW 事件挂载守在 `self.skipWaiting` 探测后,node 里只会执行到 export,不触发副作用。
-import { swRoute } from "../public/sw.js";
+import { isCacheableAsset, swRoute } from "../public/sw.js";
 
 // 更新检测靠「每次发版 sw.js 内容不同」,而这由构建期替换 `__SW_BUILD__` 占位实现(vite 的
 // stampSwVersion)。占位一旦被误删,替换就没了着落 → sw.js 恒定 → 更新检测对普通发版永不触发。守住它。
@@ -74,5 +74,29 @@ describe("swRoute", () => {
 
   it("导航优先于路径判断", () => {
     expect(swRoute({ ...base, mode: "navigate", pathname: "/api/x" })).toBe("navigation");
+  });
+});
+
+// cache-first 的第二道门(见 sw.js 里 isCacheableAsset 的注释):壳化后 `run_worker_first` 是数组,
+// 平台放弃「只对导航做 SPA 回退」的判断,丢失的 `/assets/<旧哈希>.js` 会拿到 200 的 index.html。
+// `res.ok` 为真,不看内容类型的话 SW 会把 HTML 永久钉在 JS 地址上。
+describe("isCacheableAsset", () => {
+  it("script 只收 JavaScript", () => {
+    expect(isCacheableAsset("script", "text/javascript; charset=utf-8")).toBe(true);
+    expect(isCacheableAsset("script", "application/javascript")).toBe(true);
+    expect(isCacheableAsset("script", "text/html; charset=utf-8")).toBe(false);
+  });
+  it("style 只收 CSS", () => {
+    expect(isCacheableAsset("style", "text/css")).toBe(true);
+    expect(isCacheableAsset("style", "text/html")).toBe(false);
+  });
+  it("font 收 font/* 与 octet-stream", () => {
+    expect(isCacheableAsset("font", "font/woff2")).toBe(true);
+    expect(isCacheableAsset("font", "application/octet-stream")).toBe(true);
+    expect(isCacheableAsset("font", "text/html")).toBe(false);
+  });
+  it("没有内容类型或别的 destination → 不缓存", () => {
+    expect(isCacheableAsset("script", null)).toBe(false);
+    expect(isCacheableAsset("image", "image/png")).toBe(false);
   });
 });

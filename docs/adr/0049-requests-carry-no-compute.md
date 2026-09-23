@@ -48,3 +48,28 @@
 
 生产日志实测存量账号:首页与每个数据接口的 CPU 全部 <10ms(非冷启动也达标);免费档连续正常
 使用;页面数字口径不变。
+
+## 补记(2026-09-22):文档本身变成静态资源
+
+- **「几毫秒」的壳实测 9.2ms CPU**(V8 profiler,零数据骨架,一条业务计算都没有)—— 花在
+  React SSR + 序列化这些框架杂务上,10ms 预算下没有余量。所以第 1 条的壳不再由 Worker 渲:
+  TanStack Start 的 SPA 模式在**构建期** prerender `/`,落成 `dist/client/index.html`,wrangler
+  `assets.not_found_handling: "single-page-application"` 让所有导航(含 /login)回这一份,
+  只有 `/api/*`、`/_serverFn/*` 进 Worker。导航请求的 Worker CPU = 0。
+- **第 1 条的 307 搬到了客户端**。文档里没有服务端代码可跑,「cookie 在不在」无从判定;未登录
+  硬加载 = 静态壳 → 闪屏 → `_authed.beforeLoad` 的真鉴权 → 客户端跳 /login。安全面不变
+  (壳零数据,本条原文已接受「壳等于静态资源」)。
+- **根路由从此不许有请求相关的输入**:它在构建期算的东西会烤进那一份、发给所有人(实测烤进过
+  发版时刻的 `now`、构建机的 locale、登录页的 DOM)。`now` 改在浏览器取;界面语言与展示币种
+  码改存 localStorage(同主题 / 闲置锁),`<head>` 内联脚本首帧设好 `<html lang>`;汇率仍是
+  per-user 的服务端读,币种码作参数传过去。偏好 cookie 与它的读写端点一并删除。
+  **接受一次性的偏好重置**:旧 cookie 是 HttpOnly,浏览器脚本读不到,没有可迁移的路;发版后
+  展示币种回到 USD、语言回到浏览器默认,用户重选一次即可(自托管单用户,代价可接受)。
+- 框架的「壳模式」短路在 CF 的 prerender worker 里不生效(`TSS_PRERENDERING` 读不到宿主进程的
+  env),prerender 渲的是一次真实的 `/`。壳干净靠两条:根路由零服务端输入;根上一层 `ClientOnly`
+  让静态壳与补水那一帧只渲骨架、不渲路由 —— 壳要给所有地址用,渲路由的话别的地址补水必然对不上
+  (实测:去掉它,硬加载 /login、/accounts 均报 React #418)。
+- **更正「背景」里定时任务那句**:免费档的 Cron Trigger 同样是 10ms CPU 上限,742ms 是墙钟不是 CPU。
+  `waitUntil` 里的 CPU 是否计入同一份预算,官方文档没写 —— 第 3 条别把它当宽松的去处来倚仗。
+- Service Worker 的导航策略不变(仍 network-first,ADR 0051 的版本比对依赖它);HTML 可缓存之后
+  要不要改,另立 ADR。

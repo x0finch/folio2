@@ -12,3 +12,6 @@ export interface SwRequestShape {
 }
 
 export function swRoute(req: SwRequestShape): SwStrategy;
+
+// cache-first 的第二道门(sw.js 里有全文注释):响应内容类型要与 destination 对得上才进缓存。
+export function isCacheableAsset(destination: string, contentType: string | null): boolean;

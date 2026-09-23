@@ -1,13 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import {
-  accountKeys,
-  portfolioKeys,
-  preferenceKeys,
-  settingsKeys,
-  syncKeys,
-  tagKeys,
-  tokenKeys,
-} from "./keys";
+import { accountKeys, portfolioKeys, settingsKeys, syncKeys, tagKeys, tokenKeys } from "./keys";
 
 // 刷新映射表:**一个写操作的语义 → 它改动了哪些 key 前缀**。
 //
@@ -114,14 +106,9 @@ export const REFRESH_MAP = {
    */
   "portfolio.pin.write": [portfolioKeys.tabs()],
 
-  /** 切展示币种:写完 cookie 刷这一条,汇率与格式跟着换。总览数据是 USD 计价的,不受影响。 */
-  "preference.currency": [preferenceKeys.currency()],
-
-  /**
-   * 切界面语言。**连代币域一起刷**:法币选项的名字是按请求 locale 在服务端本地化的,
-   * 不刷的话切完语言那几行还是旧语种。
-   */
-  "preference.locale": [preferenceKeys.locale(), tokenKeys.all],
+  // 切展示币种 / 界面语言**不在这张表里**:两者都存在浏览器(ADR 0049 补记),而且都进了查询键
+  // (`preferenceKeys.currency(code)` / `tokenKeys.fiatOptions(locale)`)—— 换值就是换键,
+  // 没有一份旧数据需要标记为旧。
 
   /**
    * 改估值口径(self-first / source-first)。它是**读时重估**,所以历史不用重算,

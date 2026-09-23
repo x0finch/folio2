@@ -115,12 +115,10 @@ export const settingsKeys = {
 };
 
 export const preferenceKeys = {
-  /** 整个偏好域的前缀(展示币种、界面语言)。 */
+  /** 整个偏好域的前缀(只剩展示币种;界面语言住 localStorage,不是查询)。 */
   all: ["preferences"] as const,
-  /** 展示币种 + 当前汇率。 */
-  currency: () => [...preferenceKeys.all, "currency"] as const,
-  /** 界面语言。 */
-  locale: () => [...preferenceKeys.all, "locale"] as const,
+  /** 某个展示币种 + 它当前的汇率(码来自浏览器,见 lib/hooks/use-prefer-currency)。 */
+  currency: (code: string) => [...preferenceKeys.all, "currency", code] as const,
 };
 
 export const connectorKeys = {
@@ -137,8 +135,8 @@ export const tokenKeys = {
   all: ["tokens"] as const,
   /** 代币目录(选币下拉的本地筛底料)。 */
   catalogue: () => [...tokenKeys.all, "catalogue"] as const,
-  /** 法币选项(名字按请求 locale 本地化 → 切语言要刷)。 */
-  fiatOptions: () => [...tokenKeys.all, "fiat-options"] as const,
+  /** 法币选项(名字按界面语言本地化 → 语言进键,切语言即换键)。 */
+  fiatOptions: (locale: string) => [...tokenKeys.all, "fiat-options", locale] as const,
   /** 上游代币搜索(本地目录凑不够时才问)。 */
   search: (query: string) => [...tokenKeys.all, "search", query] as const,
   /** 用户全部已知代币的展示富化(name/price/logo/change24h,FOL-54)。 */

@@ -4,7 +4,7 @@ import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleListTokenCatalogue } from "./catalogue";
 import { handleGetTokenEnrichment } from "./enrichment";
 import { handleListTokens, ListTokensInput } from "./list";
-import { handleListFiatOptions } from "./list-fiat-options";
+import { handleListFiatOptions, ListFiatOptionsInput } from "./list-fiat-options";
 import { handleGetTokenPrice, TokenPriceInput } from "./price";
 import { handleRefreshTokenPrices, RefreshTokenPricesInput } from "./refresh-prices";
 
@@ -25,6 +25,7 @@ export const getTokenEnrichment = createServerFn({ method: "GET" })
 // requireAuth 与其余选币端点一致(只在 authed 加账户模态里调)。
 export const listFiatOptions = createServerFn({ method: "GET" })
   .middleware([requireAuth])
+  .validator(ListFiatOptionsInput)
   .handler(runEffect(handleListFiatOptions));
 
 export const listTokens = createServerFn({ method: "GET" })

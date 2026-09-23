@@ -2,9 +2,8 @@ import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { LogoAvatar, Select, SelectContent, SelectItem, SelectTrigger } from "@folio/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
-import { invalidateFor } from "@/lib/queries/refresh";
-import { setCurrencyPreference } from "@/lib/server/preferences";
+import { storeCurrency, usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
+import { currencyPreferenceQuery } from "@/lib/queries/preferences";
 
 // 一项/触发器共用的行内容:logo + 本地化标签(如 "USD 美元" / "USD Dollar",crypto 附符号)。
 // logo 是 base64 data URI,内嵌在 SUPPORTED_CURRENCIES(法币 CMC / crypto CoinGecko)。
@@ -27,7 +26,8 @@ function CurrencyRow({
   );
 }
 
-// 切展示币种:写 cookie(SSR 下次可读)+ 定向刷新偏好域 → 换汇率/格式。总览数据是 USD 计价的,不受影响。
+// 切展示币种:先取到新币种的汇率,再把码写进 localStorage → 外壳换成新键的那份(已在缓存里)→
+// 换汇率/格式。总览数据是 USD 计价的,不受影响。
 // beUI motion Select。触发器**自渲染选中项**(不是 SelectValue)—— SelectValue 只吃字符串 label,
 // 塞不下 logo;SelectTrigger 的 children 由消费侧给,故直接摆一个 CurrencyRow。不改 registry 件(ADR 0004)。
 export function CurrencySwitcher() {
@@ -35,10 +35,13 @@ export function CurrencySwitcher() {
   const t = useTranslations("Currency");
   const { currency } = usePreferCurrency();
 
-  // cookie 由服务端写(见 lib/server/preferences):客户端设不上 HttpOnly/SameSite/Secure。
+  // **顺序是要点**:码是外壳 `useSuspenseQuery` 的键。先写码的话,新键没有数据 → 整个外壳挂起成
+  // 骨架闪一下;先把新键取进缓存再写码,换键那一刻数据已经在手。
   const setCurrency = useMutation({
-    mutationFn: (code: string) => setCurrencyPreference({ data: { code } }),
-    onSuccess: () => invalidateFor(queryClient, "preference.currency"),
+    mutationFn: async (code: string) => {
+      await queryClient.ensureQueryData(currencyPreferenceQuery(code));
+      storeCurrency(code);
+    },
   });
 
   function set(next: string) {
