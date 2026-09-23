@@ -365,6 +365,25 @@ describe("snapshots", () => {
     expect(r2.balances[0]!.tokenId).toBe("tk-atom");
   });
 
+  // 同毫秒并列(不折叠的写入才会有):每账户恰好一张,取后写的那张 —— latest 与 asOf 同一条规则。
+  it("same-ms tie: exactly one snapshot per account, the later-written one", async () => {
+    const acc = await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
+    await snapshotsOf(USER_A).write(acc.id, { takenAt: 1000, totalUsd: 1, balances: [] });
+    const second = await snapshotsOf(USER_A).write(acc.id, {
+      takenAt: 1000,
+      totalUsd: 2,
+      balances: [],
+    });
+
+    for (const rows of [
+      await snapshotsOf(USER_A).latest(),
+      await snapshotsOf(USER_A).asOf(1000, 0),
+    ]) {
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.snapshot.id).toBe(second);
+    }
+  });
+
   it("returns [] for a user with no snapshots", async () => {
     await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
     expect(await snapshotsOf(USER_A).latest()).toEqual([]);
