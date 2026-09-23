@@ -22,3 +22,4 @@ export {
 export { coinGeckoPlatformUpstreamLayer } from "./platform";
 export { toRefIndexRows } from "./ref-index";
 export { type CoinGeckoConfig, coinGeckoTokenUpstreamLayer } from "./upstream";
+export { coinGeckoUpstreamLayers } from "./upstreams";

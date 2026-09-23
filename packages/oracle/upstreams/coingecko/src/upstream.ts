@@ -191,7 +191,10 @@ const make = Effect.map(closeOver, (close): TokenUpstream => {
   };
 });
 
+/** 接在给定的传输层上 —— 三个端口共用一个 client 时走这条(见 ./upstreams.ts)。 */
+export const tokenUpstreamOn = (t: Layer.Layer<Needs>): Layer.Layer<TokenUpstream> =>
+  Layer.provide(Layer.effect(TokenUpstream, make), t);
+
 export const coinGeckoTokenUpstreamLayer = (
   config: CoinGeckoConfig = {},
-): Layer.Layer<TokenUpstream> =>
-  Layer.provide(Layer.effect(TokenUpstream, make), transport(config));
+): Layer.Layer<TokenUpstream> => tokenUpstreamOn(transport(config));

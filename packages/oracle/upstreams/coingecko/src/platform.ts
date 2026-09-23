@@ -4,7 +4,7 @@ import type { PlatformMeta } from "@folio/oracle-basic";
 import { PlatformUpstream } from "@folio/oracle-basic/ports";
 import { Effect, Layer } from "effect";
 import { EVM_NAMER_PREFIX, UPSTREAM_ID } from "./constants";
-import { closeOver, transport } from "./layer";
+import { closeOver, type Needs, transport } from "./layer";
 import { req, withClient } from "./runtime";
 
 // `PlatformUpstream` 的 CoinGecko 实现:一次 `/asset_platforms` 拿整张链表。
@@ -41,7 +41,10 @@ const make = Effect.map(
   }),
 );
 
+/** 接在给定的传输层上 —— 三个端口共用一个 client 时走这条(见 ./upstreams.ts)。 */
+export const platformUpstreamOn = (t: Layer.Layer<Needs>): Layer.Layer<PlatformUpstream> =>
+  Layer.provide(Layer.effect(PlatformUpstream, make), t);
+
 export const coinGeckoPlatformUpstreamLayer = (
   config: CoinGeckoConfig = {},
-): Layer.Layer<PlatformUpstream> =>
-  Layer.provide(Layer.effect(PlatformUpstream, make), transport(config));
+): Layer.Layer<PlatformUpstream> => platformUpstreamOn(transport(config));

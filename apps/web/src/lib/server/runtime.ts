@@ -5,9 +5,16 @@ import { ConnectorRegistry } from "./connectors/registry";
 import { logCategory, logTapeLogger } from "./effect-log";
 import { type AppError, toError } from "./errors";
 import { oracleFor, perRequestLayer } from "./oracle";
-import { spanTracer } from "./tracing";
+import { withSpanTree } from "./tracing";
 
-/** 给 server fn 补一行 info 级的 handler + 耗时 —— TanStack 路径在 Workers 日志里是 REDACTED,靠这个排快慢。 */
+/**
+ * 给 server fn 补一行 info 级的 handler + 耗时 —— TanStack 路径在 Workers 日志里是 REDACTED,靠这个排快慢。
+ *
+ * **`durationMs` 是 I/O 墙钟,不是 CPU。** 生产 workerd 里 `performance.now()` 在同步计算期间
+ * 是冻住的(Spectre 缓解),只在 I/O 之后才前进 —— 所以这个数量的是「等 D1/出网等了多久」,
+ * 纯计算再重它也可能是 0。CPU 只能看 Workers Logs 的 `cpuTime` 或一份 V8 profile(FOL-40 就是
+ * 被这个字段误导过)。字段名不改:日志的消费方可能认它。
+ */
 const withServerFnTiming =
   <A, E extends AppError>(handler: string) =>
   (effect: Effect.Effect<A, E, UserServices>): Effect.Effect<A, E, UserServices> =>
@@ -122,9 +129,10 @@ export const runForUser = <A, E extends AppError>(
 ): Promise<A> =>
   forUser(userId, effect).pipe(
     Effect.provide(logTapeLogger),
-    // 一次请求一棵 span 树(#504 T16)。装在这儿而不是 `forUser` 里:cron 那条路把 N 个用户
-    // 拼成**一个** effect,树该按那一整趟算,由它自己的边缘装(见 server.ts)。
-    Effect.provide(spanTracer),
+    // 一次请求一棵 span 树(#504 T16)—— **只在 `LOG_LEVEL` 为 debug 时装**(理由见 tracing.ts
+    // 「开销与开关」)。装在这儿而不是 `forUser` 里:cron 那条路把 N 个用户拼成**一个** effect,
+    // 树该按那一整趟算,由它自己的边缘装(见 oracle.ts 的 `runAtEdge`)。
+    withSpanTree,
     Effect.runPromise,
   );
 

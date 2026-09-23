@@ -19,14 +19,32 @@ import { Effect, Layer, Option, Tracer } from "effect";
 // 换不来的:跨请求聚合、百分位、火焰图。真需要那些的那天,再把这个 tracer 换成 OTLP 导出器 ——
 // 被测代码一个字都不用改,那正是 `Effect.fn` 已经把名字写在原地的好处。
 //
-// —— **开销** ——
+// —— **开销与开关:只在 `LOG_LEVEL` 为 debug 时装** ——
 //
-// 不加采样、不加开关:span 对象**本来就在建**(no-op tracer 也建,错误堆栈要它),这一层多的
-// 只是每个 span 一次 `push` 和两个时间戳。一次请求个位数个 span,量级在微秒。
+// 这一层原先「不加开关」,理由是「一次请求个位数个 span,量级在微秒」。**实测不是这样**
+//(生产 bundle 的 V8 profile):一次请求十几到几十个 span(`Database` 聚合出口的 `tracedStores`
+// 一个 op 一个、桥那头一个查询一个),每个一行 + 一个 Map + 一次 depth 登记,根收工时再把整棵树
+// 拼成一个字符串 —— 而默认级别(`info`)下 LogTape 收到它就丢,拼了白拼。免费计划一次请求
+// 10ms CPU,这笔账付不起。
 //
-// 真正可能贵的是**打**那一下,所以它是 `debug`:默认级别(`info`)下 LogTape 直接丢掉,
-// 连字符串都不拼。要看树就把 `LOG_LEVEL` 调成 `debug`(见 entry/log-level.ts)。
+// 所以现在是 **`withSpanTree` 在发动点问一句「这行 debug 会不会真的落地」**:会,才装树;
+// 不会,就不装,span 落回 Effect 自带的 native tracer(它只建 span 对象,不收集、不拼串)。
+// 判据问的是 LogTape 本身(`isEnabledFor("debug")`),而 LogTape 的门限就是 `entry/log.ts` 从
+// `LOG_LEVEL` 解析出来的那一个 —— **不另读一次 env**,两边不可能对不上。
 //
+// **没有顺手 `Effect.withTracerEnabled(false)`,是实测过的**:
+//   · 省不下东西。三个端点 A/B 交替各测两轮,关与不关的 CPU 差在噪声以内。原因是贵的那一下
+//     (`withSpan` / `Effect.fn` 每次调用 `new Error()` 抓调用点)**不看开关**,Effect 3.22 的
+//     `addSpanStackTrace` 无条件执行;开关只把 native span 换成 no-op span。
+//   · 却会弄丢错误里的 handler 名。关掉之后子 span 认不到父(no-op span 带 `DisablePropagation`,
+//     父链在那儿断掉),`Cause.pretty` 只剩最里那一层:`at db.query`,没有 `at createTabPin`。
+//     `requireAuth` 的兜底日志正是靠那条链认出「哪个 handler」(见 session/require-auth.ts)。
+//   抓调用点那笔账在它真没信息的地方直接免掉:`@folio/db` 的 `tracedStores` 传了
+//   `captureStackTrace: false`(七十个 op 的调用点全是同一行)。
+//
+// 也因此 `flush` 不做惰性拼串:树只在 debug 落地时才存在,它拼出来的字符串一定会被打出去。
+// 要看树就把 `LOG_LEVEL` 调成 `debug`(见 entry/log-level.ts)。
+
 // —— **它接不到的那一处** ——
 //
 // `/api/sync` 的后台任务(`driveRound` 里那句 `runPromise`)**另起一条根 fiber**,而根 fiber
@@ -129,6 +147,16 @@ const tracerOf = (c: Collector): Tracer.Tracer =>
 export const spanTracerTo = (emit: (tree: string) => void): Layer.Layer<never> =>
   Layer.unwrapEffect(Effect.sync(() => Layer.setTracer(tracerOf(makeCollector(emit)))));
 
-export const spanTracer: Layer.Layer<never> = spanTracerTo((tree) =>
+const spanTracer: Layer.Layer<never> = spanTracerTo((tree) =>
   log.debug("span tree\n{tree}", { tree }),
 );
+
+/**
+ * **发动点用的就是它** —— `runForUser` 与 cron 的 `runAtEdge` 各包一次,别处不装树。
+ *
+ * `LOG_LEVEL` 为 debug(或 trace)→ 装上面那棵树;否则原样放行(判据与理由见文件头
+ * 「开销与开关」)。在**发动那一刻**问 LogTape、不缓存:门限是 `configureLogging` 配好的,
+ * 这里只是查一下它已经解析好的那张表。
+ */
+export const withSpanTree = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E> =>
+  log.isEnabledFor("debug") ? Effect.provide(effect, spanTracer) : effect;

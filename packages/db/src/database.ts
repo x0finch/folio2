@@ -28,6 +28,11 @@ type DomainStores = Record<string, Record<string, EffectMethod>>;
 // 约束里 `Effect.Effect<...>` 那个返回类型是有用的:哪天有人往域里加一个不返回 Effect 的
 // 方法(同步 helper、返回 Stream 的),这里当场红。代价是报错点落在下面 `Database` 那一行,
 // 而不是那个方法上 —— 见到这条红先回头看最近加的方法。
+//
+// **`captureStackTrace: false`**:`Effect.withSpan` 默认每调用一次就 `new Error()` 抓一份调用点
+// (供 `Cause.pretty` 打 `at accounts.list (文件:行)`)。**不论 tracer 开没开都抓**(Effect 3.22
+// 的 `addSpanStackTrace` 不看开关),而这里的调用点永远是下面这一行 —— 七十个 op 的位置全是
+// 同一个,抓了也没有信息。span 名字照旧进 `Cause.pretty`,只是不带位置。
 const tracedStores = <D extends DomainStores>(domains: D): D =>
   Object.fromEntries(
     Object.entries(domains).map(([domain, store]) => [
@@ -36,7 +41,7 @@ const tracedStores = <D extends DomainStores>(domains: D): D =>
         Object.entries(store).map(([method, fn]) => [
           method,
           (...args: Parameters<EffectMethod>) =>
-            fn(...args).pipe(Effect.withSpan(`${domain}.${method}`)),
+            fn(...args).pipe(Effect.withSpan(`${domain}.${method}`, { captureStackTrace: false })),
         ]),
       ),
     ]),

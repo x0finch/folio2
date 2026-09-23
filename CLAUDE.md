@@ -72,7 +72,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
   - **single module-level auth instance**, lazy-init by `env` from `cloudflare:workers`: a *per-request* instance → D1/SQLite write-lock contention → ~33s local-dev hang + prod 503 cascade. One instance kills both.
   - **`ctx.waitUntil` for post-response work** (token cleanup / session writes): the Worker exits before they finish otherwise → `Network connection lost`.
   - **secondaryStorage TTL ≥ 60s**: some endpoints pass 10s, below KV's 60s min → silent failure (`Math.max(ttl, 60)`).
-  - **disable cookieCache**: cookieCache + secondaryStorage has an upstream bug → take one extra D1 read/request for correctness.
+  - **cookieCache 开着(5 分钟)**:每个 server fn 都要认人,关着它就是每请求一次 D1 会话读 + 验签(V8 profile 实测约 2–3ms,免费档 10ms 预算里的一大块)。旧注释说「与 secondaryStorage 组合有 bug」—— 本部署**没配** secondaryStorage,不适用。代价:别处吊销的会话在本机最多再活 5 分钟;登出清 cookie,不受影响。要即时看到吊销的路径用 `disableCookieCache: true`(目前一处都没有)。
   - **no auth calls at module load**: Worker startup-CPU limit → keep all auth calls inside handlers/server fns.
   - `@better-auth/cli` (1.4.x) lags better-auth (1.6.x) and fails under this repo's jiti (stale `better-call`) → hand-define the Drizzle auth schema per the official spec. Verify via curl with `Origin: http://localhost:3000` (CSRF guard).
 - **TanStack Start server routes**: `createFileRoute("/path/$").server.handlers` (GET/POST → `Response`). The `server` option is a Start augmentation of `@tanstack/router-core`; since app `src` doesn't import `@tanstack/react-start`, add `/// <reference types="@tanstack/react-start" />` (in `src/env.d.ts`) so `tsc` sees it. Run `wrangler types` after editing `wrangler.jsonc` bindings → `worker-configuration.d.ts` (Biome-excluded).
@@ -85,7 +85,7 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 - Read-only tracking, **no signing** → no private-key field in any `provider.inputs`; on-chain accounts store address/xpub only (`public`).
 - Decrypt (`openCreds`) only inside server functions / sync at fetch time, discard immediately, never log (P6.7 red line: log only accountId/type/code/counts).
 - **数据一律按用户隔离**,`@folio/db` 的每个 op 都按 userId 作用域(原则 #6)。**作用域怎么加是有讲究的**(ADR 0037):参考层与 `domains/` 的领域都是 **在装配时从 `CurrentUser` 吃掉 userId**(ADR 0044),方法签名里没有 user 参数。判据是「这个 op 有没有『谁的』这回事」,不是「userId 在不在签名里」。**两张表除外**:`global_token_ref_index` 与 `token_daily_prices` —— 它们只装上游的公开知识,泄露面为零,所以不隔离也不是风险。判据是「表里有没有『谁的』这回事」,不是「这张表大不大 / 共用起来省不省」。参考层其余部分(代币行、ref 行、per-user 缓存)**全部** per-user,userId 在装配那一层就被吃掉(装配点 provide 一个 `CurrentUser`,各 store 建自己时读一次,ADR 0044),服务的方法签名里一个 user 参数都没有 —— 拿错用户在编译期就发生不了。
-- better-auth CF gotchas (apply in P2.1): native `node:crypto` scrypt hash override; single module-level auth instance; `ctx.waitUntil` for background tasks; secondaryStorage TTL ≥ 60s; disable cookieCache; no auth calls at module load.
+- better-auth CF gotchas (apply in P2.1): native `node:crypto` scrypt hash override; single module-level auth instance; `ctx.waitUntil` for background tasks; secondaryStorage TTL ≥ 60s; cookieCache 开着(见上,5 分钟);no auth calls at module load.
 
 ---
 

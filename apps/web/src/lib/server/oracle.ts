@@ -9,16 +9,14 @@ import {
 } from "@folio/db";
 import { GlobalRefIndexService, type OracleServices, oracleLayer } from "@folio/oracle";
 import {
-  coinGeckoFxUpstreamLayer,
-  coinGeckoNamerLayer,
-  coinGeckoPlatformUpstreamLayer,
   coinGeckoTokenUpstreamLayer,
+  coinGeckoUpstreamLayers,
   UPSTREAM_ID,
 } from "@folio/oracle-upstream-coingecko";
 import { Effect, Layer } from "effect";
 import { logTapeLogger } from "./effect-log";
 import { toError } from "./errors";
-import { spanTracer } from "./tracing";
+import { withSpanTree } from "./tracing";
 
 // 参考层的装配点(ADR 0023,#199/#200)。**这是全仓唯一同时认识两边的文件** ——
 // 一边是 D1 store,一边是 CoinGecko adapter;`@folio/oracle` 自己两边都不认识。
@@ -46,13 +44,14 @@ export const NAMER = UPSTREAM_ID;
 
 // 三个上游端口 + 命名身份。**各自一个 layer**:汇率、平台、代币身份是三件事,当前恰好都落在
 // CoinGecko 上,但那是这一行的选择,服务层不知道它们是同一家(ADR 0023)。
-const upstreams = () =>
-  Layer.mergeAll(
-    coinGeckoTokenUpstreamLayer(cgConfig()),
-    coinGeckoFxUpstreamLayer(cgConfig()),
-    coinGeckoPlatformUpstreamLayer(cgConfig()),
-    coinGeckoNamerLayer,
-  );
+//
+// **config 取一次、client 建一次**:三格出自同一个 `coinGeckoUpstreamLayers`,挂在同一个传输层
+// 引用上,所以一次请求只建一个 CoinGecko client(以前三格各 `cgConfig()` 一次、各建一个,
+// layer memoisation 按引用认,config 相同也省不掉)。哪天某一格换供应商,换掉那一格就行。
+const upstreams = () => {
+  const cg = coinGeckoUpstreamLayers(cgConfig());
+  return Layer.mergeAll(cg.token, cg.fx, cg.platform, cg.namer);
+};
 
 /**
  * **一次请求的两样底料**:那一个 drizzle 句柄,和「这次请求是谁的」(ADR 0044)。
@@ -133,7 +132,8 @@ export const withOracleWarm = <A>(
  */
 export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
   // span 树也在这儿装(#504 T16):cron 一次调用就是一趟,那棵树该按整趟算。
-  Effect.runPromise(effect.pipe(Effect.provide(logTapeLogger), Effect.provide(spanTracer)));
+  // 同样只在 `LOG_LEVEL` 为 debug 时装(见 tracing.ts「开销与开关」)。
+  Effect.runPromise(effect.pipe(Effect.provide(logTapeLogger), withSpanTree));
 
 /** 系统级(无 userId)的 db 查询 —— cron 枚举用户那一条。原则 #6 的受控例外。 */
 export const withGlobalDb = <A>(
