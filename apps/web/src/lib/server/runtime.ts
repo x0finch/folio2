@@ -7,7 +7,18 @@ import { type AppError, toError } from "./errors";
 import { oracleFor, perRequestLayer } from "./oracle";
 import { spanTracer } from "./tracing";
 
-/** 给 server fn 补一行 info 级的 handler + 耗时 —— TanStack 路径在 Workers 日志里是 REDACTED,靠这个排快慢。 */
+/**
+ * 给 server fn 补一行 info 级的 handler + 耗时 —— TanStack 路径在 Workers 日志里是 REDACTED,
+ * 靠这个认出是哪个 handler、它在上游 / D1 上等了多久。
+ *
+ * **`durationMs` 量的是 I/O 等待,不是 CPU 时间。** Workers 为防计时侧信道(Spectre)把时钟冻住:
+ * `performance.now()` / `Date.now()` 在代码执行期间不走,只在一次 I/O(fetch、D1、KV)返回后
+ * 才跳到当前时刻。所以纯计算 —— 解析、换算、Effect 自己的调度开销 —— 在这里一律记成 0;
+ * 一个 handler 哪怕烧掉 9ms CPU、只要没碰 I/O,这行也写 ~0。
+ *
+ * 免费版的「每请求 10ms CPU」要看平台给的数:面板 Metrics 的 **CPU Time**,或 Workers Logs /
+ * `wrangler tail` 每条请求记录里的 `cpuTime`。别拿这行日志去判断会不会撞 CPU 上限。
+ */
 const withServerFnTiming =
   <A, E extends AppError>(handler: string) =>
   (effect: Effect.Effect<A, E, UserServices>): Effect.Effect<A, E, UserServices> =>
