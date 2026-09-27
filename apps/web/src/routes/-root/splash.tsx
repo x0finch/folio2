@@ -2,6 +2,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { Logo } from "@/components/logo";
+import { type Locale, messages } from "@/lib/i18n/messages";
 import { useSplashUpdating } from "@/lib/pwa/service-worker";
 import {
   SPLASH_EXIT_MS,
@@ -23,6 +24,19 @@ import {
 
 // 未放行时给页面容器的样式:留在 DOM(布局/hydration 照常),仅不绘制。
 const CONTENT_HIDDEN: CSSProperties = { visibility: "hidden" };
+
+const LOCALES = Object.keys(messages) as Locale[];
+
+// 「准备中」那一帧(静态壳 + 补水那一帧)**还不知道用户的语言**:壳是构建期按默认语言渲的、所有人同一份。
+// 所以把每种语言都写进去,由 `<html lang>`(<head> 里 LOCALE_INIT_SCRIPT 在首帧前设好)经 SPLASH_STYLE
+// 选一条显示 —— 中文用户的首帧就是「准备中…」,不先闪一下英文。补水后换回按真实语言取的单条文案。
+function PreparingText() {
+  return LOCALES.map((l) => (
+    <span key={l} lang={l}>
+      {messages[l].Splash.preparing}
+    </span>
+  ));
+}
 
 function messageKey(phase: SplashPhase): "preparing" | "loading" | "updating" {
   // exit 不是一个「文案」阶段:退场时整层在淡出,沿用上一条文案即可(见组件里的 lastMsg)。
@@ -92,7 +106,7 @@ export function SplashScreen({ children }: { children: ReactNode }) {
         >
           <Logo id="folio-splash-logo" />
           {/* 无入场/切换动画(避免冷启动那下的屏闪):原地换字,不用 key 重挂。 */}
-          <p id="folio-splash-msg">{t(msg)}</p>
+          <p id="folio-splash-msg">{hydrated ? t(msg) : <PreparingText />}</p>
         </div>
       )}
     </>

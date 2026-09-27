@@ -14,7 +14,13 @@ import {
   fromProviderError,
   type ProviderNeeds,
 } from "@folio/connectors-basic";
-import { type AccountSafe, Database, type NotFound, type WriteSnapshotInput } from "@folio/db";
+import {
+  type AccountSafe,
+  Database,
+  type DbRequest,
+  type NotFound,
+  type WriteSnapshotInput,
+} from "@folio/db";
 import { Oracle, type OracleServices } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
 import {
@@ -61,8 +67,9 @@ export const warmTokens: Effect.Effect<
   void,
   UpstreamError | NotFound,
   // = `UserServices` 去掉 connector 那张。写开是为了别让这个签名读起来像「预热要整个
-  // handler 面」—— 它要的就是这两样:自己的数据(含那片 DeFi 协议图缓存)、参考层。
-  Database | OracleServices
+  // handler 面」—— 它要的就是这两样:自己的数据(含那片 DeFi 协议图缓存)、参考层
+  // (外加一次请求的连接与用户,`DbRequest`)。
+  Database | OracleServices | DbRequest
 > = Effect.gen(function* () {
   const syncLog = getLogger(["folio", "web", "sync"]);
   const db = yield* Database;
@@ -261,7 +268,7 @@ export interface SyncScope {
    *(自动轮的按新鲜度跳过 FOL-18:规划要读快照、settle 掉新鲜账户 —— 让它在同步轮这次装配里
    * 解析,就跟同步内核共用同一个 DbClient,不必另起一条根 fiber 建第二个连接)。
    */
-  only: ReadonlySet<string> | Effect.Effect<ReadonlySet<string>, never, Database>;
+  only: ReadonlySet<string> | Effect.Effect<ReadonlySet<string>, never, Database | DbRequest>;
   /**
    * 出网的闸。**它只盖得住同一次调用里的多轮**(cron 一次 scheduled 里那批):信号量是进程内
    * 的对象,而手动 `POST /api/sync` 与 cron 的 scheduled 跑在**不同的 isolate 里** —— 跨 isolate
@@ -284,7 +291,9 @@ export const makeSyncServicesLayer = (
   SyncServices,
   never,
   // 端口那八个不在这里(#504 T17):`mint` / `revalue` 自 T12 起都经聚合 `Oracle`。
-  Database | OracleServices
+  // `DbRequest`:这一轮是谁的、那一个 D1 句柄 —— 建这一层时各服务抓一份(见下),
+  // 于是 `@folio/sync` 那四个能力的 `R` 仍是 `never`。
+  Database | OracleServices | DbRequest
 > =>
   Layer.unwrapEffect(
     Effect.sync(() => {
@@ -299,6 +308,10 @@ export const makeSyncServicesLayer = (
           SyncAccountStore,
           Effect.gen(function* () {
             const { accounts } = yield* Database;
+            // 这一轮的连接与用户(ADR 0054):db 的 op 在跑的那一刻才取它们,而编排那头的能力
+            // `R` 是 `never` —— 所以在建这一层(= 这一轮)的时候抓一份,每个方法出口 provide 进去。
+            // 一轮一层,抓的就是这一轮的那一份,不会串到别的请求。
+            const request = yield* Effect.context<DbRequest>();
             // **这一轮跑哪些账户,开轮那一步已经定死了**(ADR 0048):`only` 就是那一轮记录里
             // 的名单,所以面板上的 `x / N` 与这里真跑的条数是同一份名单,不可能对不上。
             //
@@ -313,27 +326,31 @@ export const makeSyncServicesLayer = (
               list: () =>
                 Effect.map(accounts.list(), (rows) =>
                   rows.filter(isSyncableAccount).filter((a) => only == null || only.has(a.id)),
-                ).pipe(asDep("listAccounts")),
+                ).pipe(Effect.provide(request), asDep("listAccounts")),
               // 批量取全用户 creds(消 syncAccount 的 N+1)
-              rawCreds: () => accounts.listRawCreds().pipe(asDep("listRawCreds")),
+              rawCreds: () =>
+                accounts.listRawCreds().pipe(Effect.provide(request), asDep("listRawCreds")),
             };
           }),
         ),
         Layer.effect(
           SyncSnapshotStore,
-          Effect.map(Database, ({ snapshots }) => ({
-            // **同步落的快照按钟点折叠**(#461):同账户、同一个钟点里已有的那份被这次覆盖。
-            // 同步写的是「此刻的状态」,而读侧的趋势图本来就只画每个钟点的最后一个点 —— 同钟点里
-            // 更早的那些份存了也看不到。开关默认是关的(默认追加),导入那条路要的正是默认值:
-            // 它恢复的是历史事实,不能折叠。判据与理由见 `SnapshotStore.write` 的文档注释。
-            // `orDie` 在 `asDep` 之前:`write` 会 fail `NotFound`(账户归属断言),而这条路的
-            // accountId 来自本用户自己的账户列表 —— 到这一步还找不到就是 bug。`orDie` 把它变回
-            // defect,`asDep` 再照旧收成 `SyncDepError`,与改造前逐字一致。
-            write: (accountId: string, input: WriteSnapshotInput) =>
-              snapshots
-                .write(accountId, input, { collapseSameHour: true })
-                .pipe(Effect.orDie, asDep("writeSnapshot")),
-          })),
+          Effect.map(
+            Effect.zip(Database, Effect.context<DbRequest>()),
+            ([{ snapshots }, request]) => ({
+              // **同步落的快照按钟点折叠**(#461):同账户、同一个钟点里已有的那份被这次覆盖。
+              // 同步写的是「此刻的状态」,而读侧的趋势图本来就只画每个钟点的最后一个点 —— 同钟点里
+              // 更早的那些份存了也看不到。开关默认是关的(默认追加),导入那条路要的正是默认值:
+              // 它恢复的是历史事实,不能折叠。判据与理由见 `SnapshotStore.write` 的文档注释。
+              // `orDie` 在 `asDep` 之前:`write` 会 fail `NotFound`(账户归属断言),而这条路的
+              // accountId 来自本用户自己的账户列表 —— 到这一步还找不到就是 bug。`orDie` 把它变回
+              // defect,`asDep` 再照旧收成 `SyncDepError`,与改造前逐字一致。
+              write: (accountId: string, input: WriteSnapshotInput) =>
+                snapshots
+                  .write(accountId, input, { collapseSameHour: true })
+                  .pipe(Effect.provide(request), Effect.orDie, asDep("writeSnapshot")),
+            }),
+          ),
         ),
         Layer.succeed(BalanceSource, {
           // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/
@@ -361,15 +378,15 @@ export const makeSyncServicesLayer = (
             // 参考层那几个服务已经在外面那次装配里装好了 —— 抓住 context,别让它们
             // 漏进本服务的 `R`(CODING.md:服务对外的 `R` 恒是 `never`)。
             // **抓的是服务不是端口**(#504 T17):`mint` / `revalue` 现在都经聚合 `Oracle`,
-            // 端口那八个本来就不该出现在这一层。
-            const oracle = yield* Effect.context<OracleServices>();
+            // 端口那八个本来就不该出现在这一层。连这一轮的连接与用户一起抓(同上面 `request`)。
+            const oracle = yield* Effect.context<OracleServices | DbRequest>();
             // 估值模式一轮读一次,**惰性**:纯链上的一轮同步压根不重估,不该为此白发一次 D1 查询。
             // 以前得按 userId 分桶缓存(一份 deps 跨多用户),现在一个用户一层,一个闭包变量就够。
             let mode: ValuationMode | undefined;
             const modeOnce = Effect.suspend(() =>
               mode !== undefined
                 ? Effect.succeed(mode)
-                : Effect.map(settings.get(), (row) => {
+                : Effect.map(settings.get().pipe(Effect.provide(oracle)), (row) => {
                     mode = row.valuationMode;
                     return row.valuationMode;
                   }),
@@ -415,9 +432,10 @@ export const makeSyncServicesLayer = (
 
 // 一个用户的一轮同步,**装配好了但还没跑**。流式端点与 cron 各取所需。
 //
-// `provideMerge` 而不是 `provide`:底下那层(`Database` + 参考层)也透出去 —— 流式那条路的
-// 收尾(`warmTokens`)要的正是它,而它必须与同步内核用**同一次构建**出来的那一份
-//(否则一个请求两个 `DbClient`)。cron 那条路只用到 `SyncServices`,多透出来不花什么。
+// `provideMerge` 而不是 `provide`:底下那层(`userLayer`:isolate 里现成的服务图 + 这一轮的连接
+// 与用户)也透出去 —— 流式那条路的收尾(`warmTokens`)要的正是它,而这一轮的 `DbClient` 必须与
+// 同步内核是**同一次构建**出来的那一份(否则一个请求两个 `DbClient`)。服务图本身不在这一次构建里
+// 建(ADR 0054),这里新建的只有那两个值和四个同步能力。
 /** 不收口的那一份:cron 的全量 sweep 与单账户同步用它。 */
 export const syncServicesLayer = makeSyncServicesLayer();
 

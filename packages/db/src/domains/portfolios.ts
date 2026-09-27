@@ -1,8 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { DbClient } from "../client";
+import type { DbClient } from "../client";
 import type { Drizzle } from "../connect";
-import { CurrentUser } from "../current-user";
 import { InvalidInput, NotFound } from "../errors";
 import { accounts, accountTags, portfolioAccounts, portfolios, user } from "../schema";
 import type { Portfolio } from "../schema/types";
@@ -10,8 +9,9 @@ import { assertAccountOwned, assertPortfolioOwned } from "./ownership";
 
 // Portfolio —— 命名账户集(ADR 0033)。每个账户恰属一个,新用户首次落地建默认那个。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):它由 `PortfolioStore.Default(userId)` 在装配那一刻
-// 吃掉,拿错用户在编译期就发生不了。方法名也不再带领域前缀(`createPortfolio` → `create`)——
+// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
+// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
+// 方法名也不再带领域前缀(`createPortfolio` → `create`)——
 // 服务本身就是领域,名字里再带一遍是平铺函数时代的遗留。
 
 // 默认 Portfolio 名:`<用户名>'s`,用户名为空兜底 `My Portfolio`。
@@ -111,10 +111,7 @@ export const ensureDefault = (client: DbClient, userId: string): Effect.Effect<P
     return after;
   });
 
-export const makePortfolioStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-  const userId = yield* CurrentUser;
-
+export const makePortfolioStore = (client: DbClient, userId: string) => {
   return {
     /** 拿默认 Portfolio,没有就建一个(find-or-create,幂等)。 */
     ensureDefault: (): Effect.Effect<Portfolio> => ensureDefault(client, userId),
@@ -261,4 +258,4 @@ export const makePortfolioStore = Effect.gen(function* () {
         ]);
       }),
   };
-});
+};

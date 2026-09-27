@@ -11,13 +11,12 @@ import {
   isNotNull,
   lt,
   lte,
-  max,
   sql,
 } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { Effect } from "effect";
-import { DbClient } from "../client";
+import type { DbClient } from "../client";
 import type { Drizzle } from "../connect";
-import { CurrentUser } from "../current-user";
 import type { NotFound } from "../errors";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
@@ -31,7 +30,8 @@ import { assertAccountOwned } from "./ownership";
 
 // 快照 —— 一次同步落下的余额切片,以及总额 / 历史 / 分页那几条读路。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):由 `SnapshotStore.Default(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
+// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
 
 // D1 每条 SQL 最多 100 个绑定参数;snapshot_balances 现在每行 10 列 → 每块 8 行(80 个,限内)。
 // **加列必须回来改这个数**:列数 × 块行数不得超 100,否则 "too many SQL variables",只在持仓多的账户上炸。
@@ -113,10 +113,7 @@ export interface SnapshotBalanceHistoryRow {
   metaJson: string | null;
 }
 
-export const makeSnapshotStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-  const userId = yield* CurrentUser;
-
+export const makeSnapshotStore = (client: DbClient, userId: string) => {
   /**
    * 每账户「窗口内最新」的快照 + 其余额;`upTo`/`floor` 缺省 = 不设那一侧的界。
    *   · `upTo == null && floor == null` → 每账户最新那张(`latest()`)。
@@ -130,41 +127,37 @@ export const makeSnapshotStore = Effect.gen(function* () {
     floor?: number;
   }): Effect.Effect<SnapshotWithBalances[]> =>
     Effect.gen(function* () {
-      // ① 取每账户窗口内最新快照整行(1 查询)。
-      // 子查询:该用户每个账户在 `[floor, upTo]` 内的最新 takenAt(经 snapshots ⨝ accounts 用 userId 限定)。
-      const latestSnapshots = yield* client.query((db) => {
-        const conds = [eq(accounts.userId, userId)];
-        if (bounds?.upTo != null) conds.push(lte(snapshots.takenAt, bounds.upTo));
-        if (bounds?.floor != null) conds.push(gte(snapshots.takenAt, bounds.floor));
-        const latestPerAccount = db
-          .select({
-            accountId: snapshots.accountId,
-            maxTakenAt: max(snapshots.takenAt).as("max_taken_at"),
-          })
-          .from(snapshots)
-          .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+      // ① 每账户窗口内最新那张(1 查询):从本用户的账户出发,**每个账户一次点查**。
+      //
+      // **不写成 `GROUP BY account_id` + `max(taken_at)` 再 join 回来**(以前就是)—— 那个形状
+      // SQLite 得把每个账户的索引项全走一遍才知道 max,`rows_read ≈ 2 × 快照总数`,随历史线性长;
+      // 而 D1 按 `rows_read` 计费、超额直接报错,这条又是每次页面加载 + 每轮 cron 两趟都跑的。
+      // 点查走 `(account_id, taken_at)` 复合索引倒着取第一条,读数 ≈ 账户数 × 3,**与攒了多少张无关**
+      // (`tests/snapshot-latest-rows-read.test.ts` 钉着:2000 / 6000 张读数相同)。
+      //
+      // 子查询没命中(窗口内一张都没有)→ `s.id = NULL` → inner join 丢掉这个账户,正是「不出现」。
+      // 同毫秒并列:每账户恰好一行,取**后写的那张**(`rowid DESC` 第二排序键)。旧写法在 JS 里留
+      // id 最大的 —— id 是随机 UUID,那条规则只图「定死一张」,挑中谁没有含义。换成 rowid 是因为
+      // 它本来就在 `(account_id, taken_at)` 索引项的尾巴上:排序键全由索引给,取到第一条即停;
+      // 写成 `id DESC` 要回表取 id、还得多读一条才知道并列段结束,实测每账户 3 → 5 行。
+      // (并列本身几乎碰不到:同步走 collapseSameHour、导入按 (account, takenAt) 去重。)
+      const snaps = yield* client.query((db) => {
+        const x = alias(snapshots, "x");
+        const conds = [eq(x.accountId, accounts.id)];
+        if (bounds?.upTo != null) conds.push(lte(x.takenAt, bounds.upTo));
+        if (bounds?.floor != null) conds.push(gte(x.takenAt, bounds.floor));
+        const latestId = db
+          .select({ id: x.id })
+          .from(x)
           .where(and(...conds))
-          .groupBy(snapshots.accountId)
-          .as("latest_per_account");
+          .orderBy(desc(x.takenAt), desc(sql`"x"."rowid"`))
+          .limit(1);
         return db
           .select(getTableColumns(snapshots))
-          .from(snapshots)
-          .innerJoin(
-            latestPerAccount,
-            and(
-              eq(snapshots.accountId, latestPerAccount.accountId),
-              eq(snapshots.takenAt, latestPerAccount.maxTakenAt),
-            ),
-          );
+          .from(accounts)
+          .innerJoin(snapshots, eq(snapshots.id, latestId))
+          .where(eq(accounts.userId, userId));
       });
-
-      // 同毫秒并列保护:每账户保留一条(id 最大者)。
-      const byAccount = new Map<string, Snapshot>();
-      for (const s of latestSnapshots) {
-        const cur = byAccount.get(s.accountId);
-        if (!cur || s.id > cur.id) byAccount.set(s.accountId, s);
-      }
-      const snaps = [...byAccount.values()];
       if (snaps.length === 0) return [];
 
       // ② 取这些快照的全部余额(1 查询)。
@@ -554,4 +547,4 @@ export const makeSnapshotStore = Effect.gen(function* () {
         return { snapshots: snapCount?.n ?? 0, balances: balCount?.n ?? 0 };
       }),
   };
-});
+};

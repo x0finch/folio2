@@ -5,6 +5,9 @@ import { betterAuth } from "better-auth";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { derivePasskeyRp } from "./passkey-rp";
 
+// 会话 cookie 缓存的有效期(秒)。= better-auth 自己的默认值;取舍见下面 `cookieCache` 那处。
+const SESSION_COOKIE_CACHE_MAX_AGE_S = 5 * 60;
+
 // 密码哈希:better-auth 1.6 + nodejs_compat 默认走原生 node:crypto scrypt(坑 ① 已默认修复)。
 function createAuth() {
   // WebAuthn RP 从 BETTER_AUTH_URL 派生(rpID=host、origin=完整 origin);challenge 走插件默认 cookie,
@@ -34,7 +37,18 @@ function createAuth() {
     session: {
       expiresIn: 60 * 60 * 24 * 7, // 7d
       updateAge: 60 * 60 * 24, // 1d
-      // cookieCache 保持关闭(坑 ⑤:与 secondaryStorage 组合有 bug,且单实例下收益小)
+      // **cookieCache 开着**:认会话先看那枚签过名的 `session_data` cookie(compact 策略 = HMAC),
+      // 命中就直接返回,不碰 D1 —— 否则每个 server fn(`requireAuth` → `getSession`)都要一次
+      // 会话表 SELECT。免费计划一次请求 10ms CPU,这一笔省得下来。
+      //
+      // 代价(明知接受):**在别处撤销的会话,最多 maxAge 之后才在这台设备上失效**,因为缓存命中时
+      // 不回库看那行还在不在。退出登录不受影响 —— sign-out 会把这枚 cookie 一起清掉。
+      // 本应用没有「踢掉其他设备」「改密码」「删账号」这类要求撤销立即生效的服务端路径;哪天有了,
+      // 那一处给 `getSession` 传 `query: { disableCookieCache: true }`。
+      //
+      // 以前关着的理由(坑 ⑤:cookieCache + secondaryStorage 的上游 bug)**在这里不成立**:
+      // 本部署没有配 secondaryStorage。哪天配了,先回头复核这一条。
+      cookieCache: { enabled: true, maxAge: SESSION_COOKIE_CACHE_MAX_AGE_S },
     },
     plugins: [
       passkey({

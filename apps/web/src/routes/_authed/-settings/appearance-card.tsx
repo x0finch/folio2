@@ -13,9 +13,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "use-intl";
 import { CurrencySwitcher } from "@/components/currency-switcher";
 import { type Theme, useMountedTheme } from "@/lib/hooks/use-theme";
-import { invalidateFor } from "@/lib/queries/refresh";
+import { storeLocale } from "@/lib/i18n/locale-preference";
 import { valuationSettingsQuery } from "@/lib/queries/settings";
-import { setLocalePreference } from "@/lib/server/preferences";
 import { updatePrivacySettings } from "@/lib/server/settings";
 import { SettingRow } from "./setting-row";
 
@@ -27,17 +26,14 @@ export function AppearanceCard() {
   const queryClient = useQueryClient();
   const locale = useLocale();
   // 选中态用 useMountedTheme(SSR 安全):挂载前按 "system" 渲染避免 hydration mismatch + pill 硬跳,
-  // 挂载后借 layoutId 平滑滑到位。语言走 cookie/SSR 一致,无需此处理。
+  // 挂载后借 layoutId 平滑滑到位。语言不需要:它由根上的 IntlProvider 订阅 localStorage,
+  // 到这张卡渲染时早已是真值(`_authed` 整树只在浏览器里渲)。
   const { theme: themeValue, setTheme } = useMountedTheme();
 
-  const localeMut = useMutation({
-    mutationFn: (next: string) => setLocalePreference({ data: { locale: next } }),
-    onSuccess: () => invalidateFor(queryClient, "preference.locale"),
-  });
-
+  // 写 localStorage → IntlProvider 当场换语言(ADR 0049 补记)。
   function setLocale(next: string) {
     if (next === locale) return;
-    localeMut.mutate(next);
+    storeLocale(next);
   }
 
   // 隐藏余额(FOL-75,ADR 0052)。开关来自 user_settings(与估值口径同一份读,见 settings.ts)。

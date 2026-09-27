@@ -2,7 +2,8 @@ import { runClient } from "@folio/client-core/testing";
 import { FxUpstream } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { coinGeckoFxUpstreamLayer, fetchRatesEffect } from "../src/fx";
+import { fetchRatesEffect } from "../src/fx";
+import { coinGeckoUpstreamLayers } from "../src/upstreams";
 import { failing, run, stubbing } from "./harness";
 
 // 上游那个端点以 **BTC** 为基准:value = 1 BTC 值多少该币种。
@@ -58,7 +59,7 @@ describe("fetchRates", () => {
   it("id 自报为当前上游 —— 与代币那面同一个命名者", async () => {
     const id = await runClient(
       stubbing(() => ({})).http,
-      Effect.map(FxUpstream, (u) => u.id).pipe(Effect.provide(coinGeckoFxUpstreamLayer())),
+      Effect.map(FxUpstream, (u) => u.id).pipe(Effect.provide(coinGeckoUpstreamLayers().fx)),
       "none",
     );
     expect(id).toBe("coingecko");
@@ -71,7 +72,7 @@ describe("btcRef", () => {
   it("btcRef = coingecko/issued:bitcoin —— 与代币那面 BTC 历史价同键(可复用)", async () => {
     const ref = await runClient(
       stubbing(() => ({})).http,
-      Effect.map(FxUpstream, (u) => u.btcRef).pipe(Effect.provide(coinGeckoFxUpstreamLayer())),
+      Effect.map(FxUpstream, (u) => u.btcRef).pipe(Effect.provide(coinGeckoUpstreamLayers().fx)),
       "none",
     );
     expect(ref).toBe("coingecko/issued:bitcoin");

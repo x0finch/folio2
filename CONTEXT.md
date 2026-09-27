@@ -132,7 +132,7 @@ USD。全站**存储 / 聚合 / provider** 一律以 USD 计价;非美元只是�
 _Avoid_: 把 Display currency 也叫 base
 
 **Display currency(展示币种 / 偏好币种)**:
-用户选择的、金额呈现所用的币种 —— **法币或加密**(如 EUR、JPY、BTC、ETH)。按浏览器保存(cookie `folio_currency`),非账户级。仅在展示层生效。
+用户选择的、金额呈现所用的币种 —— **法币或加密**(如 EUR、JPY、BTC、ETH)。按浏览器保存(localStorage `folio_currency`),非账户级。仅在展示层生效。
 _Avoid_: base currency(那恒为 USD)、locale(那管语言/分隔符,与币种正交)
 
 **FX rate(汇率)**:

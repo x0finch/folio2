@@ -1,5 +1,5 @@
 import type { UpstreamError } from "@folio/client-core";
-import type { CacheStore } from "@folio/db";
+import type { CacheStore, DbRequest } from "@folio/db";
 import type { TokenMetaUpstream, UpstreamToken } from "@folio/oracle-basic";
 import { DEFAULT_TOP_N, PRICE_TTL_MS, WARM_TTL_MS } from "@folio/oracle-basic";
 import type { TokenUpstream } from "@folio/oracle-basic/ports";
@@ -17,14 +17,14 @@ import { type WarmRow, warmBlob } from "./warm";
 // 调用方知道(它自己决定怎么显示)。
 export interface TokenCatalogue {
   // 选币橱窗:市值 top-N,走 warm blob(冷则预热一次;价旧了也刷 —— 用户在看)。
-  topTokens(limit: number): Effect.Effect<UpstreamToken[]>;
+  topTokens(limit: number): Effect.Effect<UpstreamToken[], never, DbRequest>;
   // 按关键词搜币(用户选币)。恒回源 —— 结果与用户无关,边缘缓存管它。
   // **唯一会把上游错误交出去的方法**(见本接口开头那段)。
   search(query: string): Effect.Effect<UpstreamToken[], UpstreamError>;
   // 后台预热:目录超过 WARM_TTL_MS(一周)就整份刷一次,否则零请求。返回目录条数。
   // **唯一主动让目录跟上的那条路** —— 写路径按设计永不刷,橱窗只在用户打开下拉时才跑。
   // 调用方须把它放在 best-effort 的位置(同步后 `waitUntil`),别挂在任何人的关键路径上。
-  refreshCatalogue(): Effect.Effect<number>;
+  refreshCatalogue(): Effect.Effect<number, never, DbRequest>;
 }
 
 // —— warm blob 的两个读者(第三个是候选源,在 ./candidates)——
@@ -38,7 +38,7 @@ export const warmMarkets = (
   cache: CacheStore,
   upstream: TokenMetaUpstream,
   topN: number,
-): Effect.Effect<readonly WarmRow[]> =>
+): Effect.Effect<readonly WarmRow[], never, DbRequest> =>
   warmBlob(cache, upstream, topN, (blob, now) => now - blob.asOf > PRICE_TTL_MS);
 
 /**
@@ -53,7 +53,7 @@ export const refreshWarmCatalogue = (
   cache: CacheStore,
   upstream: TokenMetaUpstream,
   topN: number,
-): Effect.Effect<readonly WarmRow[]> =>
+): Effect.Effect<readonly WarmRow[], never, DbRequest> =>
   warmBlob(cache, upstream, topN, (blob, now) => now - blob.asOf > WARM_TTL_MS);
 
 // 市值升序取前 limit(无 rank 者垫底)。

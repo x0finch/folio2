@@ -1,0 +1,351 @@
+// 往 perf 专用的本地 D1(Miniflare SQLite 文件)里灌一份确定性的「老用户」数据集。
+//
+// 直接写 SQLite 文件(node:sqlite),不走 `/api/import`:几万行快照走 HTTP 要几分钟,直写一两秒。
+// **worker 必须是停着的** —— workerd 自己也开着这个文件,两边同时写会撞锁。
+//
+// 确定性:id 由「种类 + 序号」散列出来,数值是序号的函数;只有时间戳锚在「当前整点」上 ——
+// 「现在」本身就是被测的东西(getSnapshots now / 24h 窗口),锚死一个过去的时刻反而测不到它。
+//
+// **刻意不造 manual 账户**:有它在,每次 getSnapshots / getPortfolioHistory 都会去 CoinGecko 取
+// 今日价(今日桶永不缓存),沙箱里出网被挡,一发 36s —— 测出来的是网络,不是 CPU。
+import { createHash } from "node:crypto";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import {
+  DAILY_PRICE_DAYS,
+  DAILY_PRICE_TOKENS,
+  DAY_MS,
+  HOUR_MS,
+  PERF_STATE_DIR,
+} from "./constants.mjs";
+
+const D1_DIR = join(PERF_STATE_DIR, "v3", "d1", "miniflare-D1DatabaseObject");
+
+/** better-auth 的表 —— 重灌时保留(用户、会话都在里面),其余业务表整表清空。 */
+const AUTH_TABLES = new Set(["user", "session", "account", "verification", "passkey"]);
+
+// 账户模板:一个 perf 数据集按 `--accounts N` 从这里循环取。nBal = 每张快照几行持仓。
+const ACCOUNT_TEMPLATES = [
+  { connectorId: "binance", platform: "binance", label: "Binance main", kind: "spot", nBal: 14 },
+  { connectorId: "okx", platform: "okx", label: "OKX", kind: "spot", nBal: 9 },
+  { connectorId: "bybit", platform: "bybit", label: "Bybit", kind: "spot", nBal: 7 },
+  { connectorId: "evm", platform: "evm:1", label: "Ledger EVM", kind: "spot", nBal: 12 },
+  { connectorId: "evm", platform: "evm:42161", label: "Arb hot wallet", kind: "spot", nBal: 8 },
+  { connectorId: "bitcoin", platform: "bitcoin", label: "BTC cold", kind: "spot", nBal: 1 },
+  { connectorId: "solana", platform: "solana", label: "Solana wallet", kind: "spot", nBal: 6 },
+  { connectorId: "hyperliquid", platform: "hyperliquid", label: "HL perp", kind: "perp", nBal: 4 },
+];
+
+const SYMBOLS = [
+  "BTC",
+  "ETH",
+  "SOL",
+  "USDT",
+  "USDC",
+  "BNB",
+  "XRP",
+  "ADA",
+  "DOGE",
+  "AVAX",
+  "LINK",
+  "DOT",
+  "MATIC",
+  "TON",
+  "TRX",
+  "SHIB",
+  "LTC",
+  "BCH",
+  "NEAR",
+  "APT",
+  "ARB",
+  "OP",
+  "SUI",
+  "ATOM",
+  "FIL",
+  "INJ",
+  "HBAR",
+  "ICP",
+  "IMX",
+  "STX",
+];
+
+/** 现汇率(每单位多少 USD)—— 预先放进缓存,读路径就不必出网。 */
+const FX_USD_PER_UNIT = { EUR: 1.08, GBP: 1.27, CNY: 0.14, JPY: 0.0067 };
+
+/** 缓存条目的有效期:远大于一次 perf 运行,保证整轮都是命中。 */
+const CACHE_TTL_MS = 30 * DAY_MS;
+/** 代币价的新鲜期:在此之内 enrichment 不回源。 */
+const PRICE_TTL_MS = DAY_MS;
+/** 快照记在整点后一分钟,与生产 sweep 的节拍(每小时一次)同形。 */
+const SNAPSHOT_OFFSET_MS = 60_000;
+/** 持仓数量随时间的正弦扰动:周期与幅度。纯粹为了让曲线不是一条直线。 */
+const DRIFT_PERIOD_H = 11;
+const DRIFT_AMPLITUDE = 0.08;
+/** 账户与组合的「创建时间」往前推多少天。 */
+const HISTORY_AGE_DAYS = 90;
+
+/** 由种子串散列出一个 UUID 形状的 id(版本位 4、变体位 8),同一种子恒得同一个 id。 */
+function stableId(seed) {
+  const h = createHash("sha256").update(`folio-perf:${seed}`).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+/**
+ * perf 库的 SQLite 文件。文件名是 database_id 的散列(Miniflare 的规矩),所以不写死,
+ * 按「里面有 user 表」认。迁移没跑过 → 找不到,报错指路。
+ */
+function perfDbPath() {
+  let files = [];
+  try {
+    files = readdirSync(D1_DIR).filter((f) => f.endsWith(".sqlite") && f !== "metadata.sqlite");
+  } catch {
+    // 目录还不存在 —— 下面统一报错
+  }
+  for (const f of files) {
+    const path = join(D1_DIR, f);
+    const db = new DatabaseSync(path, { readOnly: true });
+    try {
+      const hasUser = db
+        .prepare("select 1 from sqlite_master where type = 'table' and name = 'user'")
+        .get();
+      if (hasUser) return path;
+    } finally {
+      db.close();
+    }
+  }
+  throw new Error(`perf D1 not found under ${D1_DIR} — migrations were not applied`);
+}
+
+/** perf 用户的 id;还没注册过 → undefined。 */
+export function findUserId(email) {
+  const db = new DatabaseSync(perfDbPath(), { readOnly: true });
+  try {
+    return db.prepare("select id from user where email = ?").get(email)?.id;
+  } finally {
+    db.close();
+  }
+}
+
+/** 端点入参要用的那几样:默认组合的 id、账户覆盖到的平台。 */
+export function endpointInputs(userId) {
+  const db = new DatabaseSync(perfDbPath(), { readOnly: true });
+  try {
+    const row = db
+      .prepare("select id from portfolios where user_id = ? order by is_default desc limit 1")
+      .get(userId);
+    if (!row) throw new Error("perf user has no portfolio — run without --no-seed once");
+    const platforms = db
+      .prepare("select distinct platform from accounts where user_id = ? and platform is not null")
+      .all(userId)
+      .map((r) => r.platform);
+    return { portfolioId: row.id, platforms };
+  } finally {
+    db.close();
+  }
+}
+
+function wipeDataTables(db) {
+  const tables = db
+    .prepare(
+      "select name from sqlite_master where type = 'table' and name not like 'sqlite_%' and name not like '_cf_%' and name != 'd1_migrations'",
+    )
+    .all()
+    .map((r) => r.name)
+    .filter((name) => !AUTH_TABLES.has(name));
+  for (const t of tables) db.exec(`DELETE FROM "${t}"`);
+}
+
+function seedTokens(db, userId, nTokens, now) {
+  const insToken = db.prepare(
+    "insert into tokens (id,user_id,symbol,name,logo,provider_logo,market_cap_rank,info_expires_at,unit_price,change_24h,price_as_of,price_expires_at,self_price) values (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  );
+  const insRef = db.prepare(
+    "insert into token_refs (user_id,namer,local_name,token_id) values (?,?,?,?)",
+  );
+  const tokens = [];
+  for (let i = 0; i < nTokens; i++) {
+    const sym = SYMBOLS[i % SYMBOLS.length] + (i >= SYMBOLS.length ? String(i) : "");
+    const id = stableId(`token:${i}`);
+    const price = 0.5 + ((i * 37) % 900) + (i % 7) / 3;
+    const localName = `issued:${sym.toLowerCase()}-coin`;
+    insToken.run(
+      id,
+      userId,
+      sym,
+      `${sym} Token`,
+      `https://assets.example/coins/${sym.toLowerCase()}.png`,
+      null,
+      i + 1,
+      now + CACHE_TTL_MS,
+      price,
+      ((i % 21) - 10) / 2,
+      now - 5 * 60_000,
+      now + PRICE_TTL_MS,
+      null,
+    );
+    insRef.run(userId, "coingecko", localName, id);
+    tokens.push({ id, sym, price, ref: `coingecko/${localName}` });
+  }
+  return tokens;
+}
+
+function seedAccounts(db, userId, portfolioId, nAccounts, now) {
+  const insAccount = db.prepare(
+    "insert into accounts (id,user_id,connector_id,platform,label,enc_credentials,created_at,archived_at) values (?,?,?,?,?,?,?,?)",
+  );
+  const insLink = db.prepare(
+    "insert into portfolio_accounts (portfolio_id,account_id) values (?,?)",
+  );
+  const accounts = [];
+  for (let i = 0; i < nAccounts; i++) {
+    const t = ACCOUNT_TEMPLATES[i % ACCOUNT_TEMPLATES.length];
+    const id = stableId(`account:${i}`);
+    const label = i < ACCOUNT_TEMPLATES.length ? t.label : `${t.label} #${i}`;
+    // 凭据只放一个 public 字段:读路径不解密,也就不需要 SECRETS_KEY 封过的密文。
+    const creds = JSON.stringify({ address: "0x00000000000000000000000000000000000000ff" });
+    insAccount.run(
+      id,
+      userId,
+      t.connectorId,
+      t.platform,
+      label,
+      creds,
+      now - HISTORY_AGE_DAYS * DAY_MS,
+      null,
+    );
+    insLink.run(portfolioId, id);
+    accounts.push({ ...t, id });
+  }
+  return accounts;
+}
+
+function seedTags(db, userId, portfolioId, accounts, now) {
+  const insTag = db.prepare(
+    "insert into tags (id,user_id,portfolio_id,name,sort_order,created_at) values (?,?,?,?,?,?)",
+  );
+  const insAccountTag = db.prepare("insert into account_tags (tag_id,account_id) values (?,?)");
+  for (const [i, name] of ["CEX", "Cold"].entries()) {
+    const id = stableId(`tag:${i}`);
+    insTag.run(id, userId, portfolioId, name, i, now);
+    if (accounts[i]) insAccountTag.run(id, accounts[i].id);
+  }
+}
+
+// 平台名/图标与现汇率预先进 per-user 缓存(形状见 @folio/oracle 的 platforms.ts / fx.ts),
+// 读路径因此零出网。
+function seedCache(db, userId, accounts, now) {
+  const ins = db.prepare(
+    "insert or replace into user_cache (user_id,k,v,expires_at) values (?,?,?,?)",
+  );
+  for (const key of new Set(accounts.map((a) => a.platform))) {
+    ins.run(
+      userId,
+      `platform:${key}`,
+      JSON.stringify({ name: key, logo: `https://assets.example/p/${key}.png` }),
+      now + CACHE_TTL_MS,
+    );
+  }
+  for (const [cur, rate] of Object.entries(FX_USD_PER_UNIT)) {
+    ins.run(userId, `fx:${cur}`, JSON.stringify(rate), now + CACHE_TTL_MS);
+  }
+}
+
+function seedSnapshots(db, accounts, tokens, hours, now) {
+  const insSnap = db.prepare(
+    "insert into snapshots (id,account_id,taken_at,total_usd,note) values (?,?,?,?,?)",
+  );
+  const insBal = db.prepare(
+    "insert into snapshot_balances (id,snapshot_id,amount,usd_value,kind,self_price,platform,token_id,meta_json,note) values (?,?,?,?,?,?,?,?,?,?)",
+  );
+  const anchor = Math.floor(now / HOUR_MS) * HOUR_MS;
+  let nSnap = 0;
+  let nBal = 0;
+  for (const a of accounts) {
+    const held = Array.from({ length: a.nBal }, (_, i) => tokens[(i * 3 + a.nBal) % tokens.length]);
+    for (let h = hours; h >= 0; h--) {
+      const sid = stableId(`snap:${a.id}:${h}`);
+      const rows = held.map((t, i) => {
+        const drift = 1 + Math.sin((h + i) / DRIFT_PERIOD_H) * DRIFT_AMPLITUDE;
+        const amount = (2 + i) * 1.37 * drift;
+        const meta =
+          a.kind === "perp"
+            ? JSON.stringify({
+                coin: t.sym,
+                entryPrice: t.price,
+                liqPrice: t.price * 0.7,
+                leverage: 3,
+              })
+            : null;
+        return { id: stableId(`bal:${sid}:${i}`), amount, usd: amount * t.price * drift, t, meta };
+      });
+      const total = rows.reduce((sum, r) => sum + r.usd, 0);
+      insSnap.run(sid, a.id, anchor - h * HOUR_MS + SNAPSHOT_OFFSET_MS, total, null);
+      for (const r of rows) {
+        insBal.run(r.id, sid, r.amount, r.usd, a.kind, r.t.price, a.platform, r.t.id, r.meta, null);
+      }
+      nSnap++;
+      nBal += rows.length;
+    }
+  }
+  return { nSnap, nBal };
+}
+
+function seedDailyPrices(db, tokens, now) {
+  const ins = db.prepare(
+    "insert or replace into token_daily_prices (token_ref,day_bucket,unit_price) values (?,?,?)",
+  );
+  let n = 0;
+  for (const t of tokens.slice(0, DAILY_PRICE_TOKENS)) {
+    for (let d = 0; d < DAILY_PRICE_DAYS; d++) {
+      ins.run(t.ref, Math.floor((now - d * DAY_MS) / DAY_MS), t.price * (1 + (d % 13) / 50));
+      n++;
+    }
+  }
+  return n;
+}
+
+/**
+ * 清空业务表并重灌。返回各表行数,调用方打印出来 —— 数据集大小是结果的一部分,
+ * 不同大小的两次运行不可比。
+ */
+export function seedDataset({ userId, accounts: nAccounts, tokens: nTokens, days }) {
+  const db = new DatabaseSync(perfDbPath());
+  let open = false;
+  try {
+    // 整表清空不按父子顺序删 → 先关外键。PRAGMA 在事务里是空操作,所以必须在 BEGIN 之前。
+    db.exec("PRAGMA foreign_keys=OFF");
+    const now = Date.now();
+    db.exec("BEGIN");
+    open = true;
+    wipeDataTables(db);
+    const portfolioId = stableId("portfolio:main");
+    db.prepare(
+      "insert into portfolios (id,user_id,name,is_default,sort_order,created_at) values (?,?,?,?,?,?)",
+    ).run(portfolioId, userId, "Main", 1, 0, now - HISTORY_AGE_DAYS * DAY_MS);
+    db.prepare(
+      "insert into user_settings (user_id,valuation_mode,updated_at,hide_balances) values (?,?,?,?)",
+    ).run(userId, "self-first", now, 0);
+    const tokens = seedTokens(db, userId, nTokens, now);
+    const accounts = seedAccounts(db, userId, portfolioId, nAccounts, now);
+    seedTags(db, userId, portfolioId, accounts, now);
+    seedCache(db, userId, accounts, now);
+    const { nSnap, nBal } = seedSnapshots(db, accounts, tokens, days * 24, now);
+    const nDaily = seedDailyPrices(db, tokens, now);
+    db.exec("COMMIT");
+    open = false;
+    return {
+      portfolioId,
+      accounts: accounts.length,
+      tokens: tokens.length,
+      snapshots: nSnap,
+      snapshotBalances: nBal,
+      dailyPrices: nDaily,
+    };
+  } catch (err) {
+    if (open) db.exec("ROLLBACK");
+    throw err;
+  } finally {
+    db.close();
+  }
+}

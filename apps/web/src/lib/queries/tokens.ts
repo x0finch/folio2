@@ -22,10 +22,10 @@ export const tokenCatalogueQuery = () =>
     staleTime: STALE_TIME.catalogue,
   });
 
-export const fiatOptionsQuery = () =>
+export const fiatOptionsQuery = (locale: string) =>
   queryOptions({
-    queryKey: tokenKeys.fiatOptions(),
-    queryFn: () => listFiatOptions(),
+    queryKey: tokenKeys.fiatOptions(locale),
+    queryFn: () => listFiatOptions({ data: { locale } }),
     staleTime: STALE_TIME.catalogue,
   });
 

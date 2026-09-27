@@ -1,4 +1,4 @@
-import { Database, type SnapshotBalance } from "@folio/db";
+import { Database, type DbRequest, type SnapshotBalance } from "@folio/db";
 import { Effect, Option, Stream } from "effect";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { readStoredCreds, safeView } from "@/lib/server/creds";
@@ -29,14 +29,18 @@ const encoder = new TextEncoder();
 //
 // **服务在建流之前就解析好**(闭包里的 `transfer` / `accounts` / …),所以流本身的 `R` 是 `never`,
 // `toReadableStream` 才收得下。这正是 CODING.md 那条「把已解析好的服务对象当参数传给内部函数」。
+// db 的 op 还要这次请求的连接与用户(`DbRequest`,op 跑的那一刻才取,ADR 0054)—— 同样在建流之前
+// 抓一份,流收尾时整条 provide 进去:响应体是在 handler 返回**之后**才被拉的,那时已经不在这条
+// fiber 里了,不预先装上就没人给。
 export const exportStream = (): Effect.Effect<
   ReadableStream<Uint8Array>,
   never,
-  ConnectorRegistry | Database
+  ConnectorRegistry | Database | DbRequest
 > =>
   Effect.gen(function* () {
     const { transfer, accounts, snapshots, manual } = yield* Database;
     const specsByType = (yield* ConnectorRegistry).specs;
+    const request = yield* Effect.context<DbRequest>();
 
     const meta = Stream.make(metaRecord(Date.now())); // 首行:版本号等
 
@@ -90,6 +94,7 @@ export const exportStream = (): Effect.Effect<
       Stream.concat(snapshotLines),
       Stream.concat(activities),
       Stream.map((record: unknown) => encoder.encode(ndjsonLine(record))),
+      Stream.provideContext(request),
     );
     return Stream.toReadableStream(bytes);
   });

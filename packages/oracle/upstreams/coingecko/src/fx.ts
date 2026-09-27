@@ -1,11 +1,11 @@
 import { type Outbound, type UpstreamError, UpstreamParseError } from "@folio/client-core";
-import type { CoinGeckoClient, CoinGeckoConfig } from "@folio/coingecko-client";
+import type { CoinGeckoClient } from "@folio/coingecko-client";
 import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { FxUpstream } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect, Layer } from "effect";
 import { BTC_COIN_ID, UPSTREAM_ID } from "./constants";
-import { closeOver, transport } from "./layer";
+import { closeOver, type Needs } from "./layer";
 import { req, withClient } from "./runtime";
 
 const EXCHANGE_RATES_PATH = "/exchange_rates";
@@ -62,5 +62,6 @@ const make = Effect.map(
   }),
 );
 
-export const coinGeckoFxUpstreamLayer = (config: CoinGeckoConfig = {}): Layer.Layer<FxUpstream> =>
-  Layer.provide(Layer.effect(FxUpstream, make), transport(config));
+/** 接在给定的传输层上 —— 唯一的出口是 `coinGeckoUpstreamLayers`(./upstreams.ts),三个端口共用那一个 client。 */
+export const fxUpstreamOn = (t: Layer.Layer<Needs>): Layer.Layer<FxUpstream> =>
+  Layer.provide(Layer.effect(FxUpstream, make), t);

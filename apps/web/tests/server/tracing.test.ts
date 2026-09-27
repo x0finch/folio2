@@ -1,10 +1,11 @@
 import { env } from "cloudflare:test";
 import { Database } from "@folio/db";
-import { Effect } from "effect";
-import { beforeEach, describe, expect, it } from "vitest";
+import { configure, type LogLevel, type LogRecord, reset } from "@logtape/logtape";
+import { Cause, Effect, Exit } from "effect";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { forUser } from "@/lib/server/runtime";
 import { handleCreateTabPin } from "@/lib/server/tab-pins/create";
-import { spanTracerTo } from "@/lib/server/tracing";
+import { spanTracerTo, withSpanTree } from "@/lib/server/tracing";
 
 // span 树(#504 T16)。**驱动真链路**(真 D1 + 生产那条装配),不是喂几个假 span —— 要回答的
 // 问题是「一次真请求的树长什么样、够不够用」,那只有真跑一遍才看得出来。
@@ -45,7 +46,7 @@ describe("span 树", () => {
   // **三层:handler → domain op → D1**(#504 T16)。
   //
   // 只有 handler 一层时,`getPortfolioOverview` 的树就一行 —— 答得了「哪个端点慢」,答不了
-  // 「慢在哪」。`DbClient` 那一处收口点给出最里那层,`Database` 聚合出口的 `tracedStores`
+  // 「慢在哪」。`DbClient` 那一处收口点给出最里那层,`Database` 聚合出口的 `bindPerCall`
   // 给出中间那层「哪个 domain 方法」。同一次请求实测(测试库、数据少,毫秒数只看相对):
   //
   //     getPortfolioOverview 36.0ms userId=user-probe
@@ -78,5 +79,64 @@ describe("span 树", () => {
       expect.stringMatching(/^ {2}tabPins\.list \d/),
       expect.stringMatching(/^ {4}db\.query \d/),
     ]);
+  });
+});
+
+// **开关跟着 `LOG_LEVEL` 走**(免费计划 10ms CPU 那一刀)。`withSpanTree` 问的是 LogTape
+// 「debug 这行会不会落地」,所以这里用 LogTape 的门限来驱动它 —— 与生产同一条路
+// (`configureLogging` 把 `LOG_LEVEL` 解析成 `lowestLevel`,这里直接给那个结果)。
+describe("span 树只在 debug 时装", () => {
+  const captured: LogRecord[] = [];
+  const logAt = async (lowestLevel: LogLevel) => {
+    captured.length = 0;
+    await configure({
+      reset: true,
+      sinks: { capture: (record: LogRecord) => captured.push(record) },
+      loggers: [{ category: ["folio"], sinks: ["capture"], lowestLevel }],
+    });
+  };
+  const trees = () =>
+    captured
+      .filter((r) => r.category.join(".") === "folio.web.trace")
+      .map((r) => r.properties.tree);
+  const createPin = () =>
+    forUser(USER, handleCreateTabPin({ kind: "connector", connectorId: "binance" })).pipe(
+      Effect.orDie,
+    );
+
+  afterAll(async () => {
+    await reset();
+  });
+
+  it("LOG_LEVEL=debug → 一次请求打一棵树", async () => {
+    await logAt("debug");
+    await Effect.runPromise(withSpanTree(createPin()));
+    expect(trees()).toHaveLength(1);
+    expect(String(trees()[0]).split("\n")[0]).toMatch(
+      /^createTabPin \d+\.\d+ms userId=user-tracing$/,
+    );
+  });
+
+  it("LOG_LEVEL=info → 一行树都没有", async () => {
+    await logAt("info");
+    await Effect.runPromise(withSpanTree(createPin()));
+    expect(trees()).toEqual([]);
+  });
+
+  // 不装树时**没有**顺手关掉 Effect 的 tracing(`withTracerEnabled(false)`),理由写在
+  // tracing.ts 文件头:关掉之后父链断在 no-op span 上,错误里只剩最里那一层。这条钉的就是
+  // 「info 下错误堆栈仍带着外层的 handler 名」—— `requireAuth` 的兜底日志靠它认 handler。
+  it("LOG_LEVEL=info → 错误堆栈里仍有外层 handler 名", async () => {
+    await logAt("info");
+    const failing = Effect.fn("outerHandler")(function* () {
+      return yield* Effect.fail(new Error("boom")).pipe(Effect.withSpan("inner.op"));
+    });
+    const exit = await Effect.runPromiseExit(withSpanTree(failing()));
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const pretty = Cause.pretty(exit.cause);
+      expect(pretty).toContain("at inner.op");
+      expect(pretty).toContain("at outerHandler");
+    }
   });
 });

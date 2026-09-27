@@ -2,8 +2,7 @@ import type { TokenPriceWrite, TokenRecordPrice, TokenRef } from "@folio/oracle-
 import { formatTokenRef } from "@folio/oracle-ref";
 import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Option } from "effect";
-import { chunk, DbClient } from "../client";
-import { CurrentUser } from "../current-user";
+import { chunk, type DbClient } from "../client";
 import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
 
 // 代币的**价** facet(ADR 0021/0023,#199)。**每个用户一份** —— userId 由 layer 吃掉。
@@ -17,176 +16,169 @@ import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
 //
 // **时间走 `Clock`**(以前是 `opts.now`);`env` 不再出现在签名里(见 ../client.ts)。
 
-/** 这一层的契约 —— 从实现推导。`@folio/oracle` 的几片把它当参数传下去,要一个能写在签名里的名字。 */
-export type TokenPriceStore = Effect.Effect.Success<ReturnType<typeof makeUserTokenPriceStore>>;
+export const makeUserTokenPriceStore = (namer: string) => (client: DbClient, userId: string) => {
+  // tokenId → 它在当前上游那里的 tokenRef(历史日价的键)。没有那一档的 ref 行 → `none`。
+  const upstreamRefOf = (tokenId: string): Effect.Effect<Option.Option<string>> =>
+    Effect.map(
+      client.query((db) =>
+        db
+          .select({ localName: tokenRefs.localName })
+          .from(tokenRefs)
+          .where(
+            and(
+              eq(tokenRefs.userId, userId),
+              eq(tokenRefs.namer, namer),
+              eq(tokenRefs.tokenId, tokenId),
+            ),
+          ),
+      ),
+      (rows) =>
+        Option.map(Option.fromNullable(rows[0]?.localName), (localName) =>
+          formatTokenRef({ namer, localName }),
+        ),
+    );
 
-export const makeUserTokenPriceStore = (namer: string) =>
-  Effect.gen(function* () {
-    const client = yield* DbClient;
-    const userId = yield* CurrentUser;
-
-    // tokenId → 它在当前上游那里的 tokenRef(历史日价的键)。没有那一档的 ref 行 → `none`。
-    const upstreamRefOf = (tokenId: string): Effect.Effect<Option.Option<string>> =>
-      Effect.map(
+  // 按 ref 读一批日桶。**`getDaily` 与 `getDailyByRef` 共用它** —— 迁移前那两个方法的方法体
+  // 逐行相同(只差前面那一步 tokenId→ref 的翻译),那是抄的,不是两件事。
+  const dailyByRef = (
+    ref: string,
+    dayBuckets: readonly number[],
+  ): Effect.Effect<Map<number, number>> =>
+    Effect.gen(function* () {
+      const out = new Map<number, number>();
+      if (dayBuckets.length === 0) return out;
+      // 固定 1 个绑定(token_ref)+ 每块 ≤90 个日桶,稳在 D1 ~100 参数上限内。
+      const parts = chunk([...new Set(dayBuckets)]).filter((p) => p.length > 0);
+      const batches = yield* Effect.forEach(parts, (part) =>
         client.query((db) =>
           db
-            .select({ localName: tokenRefs.localName })
-            .from(tokenRefs)
+            .select({
+              dayBucket: tokenDailyPrices.dayBucket,
+              unitPrice: tokenDailyPrices.unitPrice,
+            })
+            .from(tokenDailyPrices)
             .where(
-              and(
-                eq(tokenRefs.userId, userId),
-                eq(tokenRefs.namer, namer),
-                eq(tokenRefs.tokenId, tokenId),
-              ),
+              and(eq(tokenDailyPrices.tokenRef, ref), inArray(tokenDailyPrices.dayBucket, part)),
             ),
         ),
-        (rows) =>
-          Option.map(Option.fromNullable(rows[0]?.localName), (localName) =>
-            formatTokenRef({ namer, localName }),
-          ),
       );
+      for (const rows of batches) for (const r of rows) out.set(r.dayBucket, r.unitPrice);
+      return out;
+    });
 
-    // 按 ref 读一批日桶。**`getDaily` 与 `getDailyByRef` 共用它** —— 迁移前那两个方法的方法体
-    // 逐行相同(只差前面那一步 tokenId→ref 的翻译),那是抄的,不是两件事。
-    const dailyByRef = (
-      ref: string,
-      dayBuckets: readonly number[],
-    ): Effect.Effect<Map<number, number>> =>
+  // 按 ref 写一批日桶:upsert(撞主键改价)。同样是两个 put 共用的那一份。
+  const writeDaily = (
+    ref: string,
+    prices: readonly { dayBucket: number; unitPrice: number }[],
+  ): Effect.Effect<void> =>
+    client.batch((db) =>
+      prices.map((p) =>
+        db
+          .insert(tokenDailyPrices)
+          .values({ tokenRef: ref, dayBucket: p.dayBucket, unitPrice: p.unitPrice })
+          .onConflictDoUpdate({
+            target: [tokenDailyPrices.tokenRef, tokenDailyPrices.dayBucket],
+            set: { unitPrice: p.unitPrice },
+          }),
+      ),
+    );
+
+  return {
+    // 过期不删,读出带 stale(SWR)。尚无价的行不出现在结果里。
+    getByIds: (ids: readonly string[]): Effect.Effect<Map<string, TokenRecordPrice>> =>
       Effect.gen(function* () {
-        const out = new Map<number, number>();
-        if (dayBuckets.length === 0) return out;
-        // 固定 1 个绑定(token_ref)+ 每块 ≤90 个日桶,稳在 D1 ~100 参数上限内。
-        const parts = chunk([...new Set(dayBuckets)]).filter((p) => p.length > 0);
+        const out = new Map<string, TokenRecordPrice>();
+        if (ids.length === 0) return out;
+        const t = yield* Clock.currentTimeMillis;
+        const parts = chunk([...new Set(ids)]).filter((p) => p.length > 0);
         const batches = yield* Effect.forEach(parts, (part) =>
           client.query((db) =>
             db
               .select({
-                dayBucket: tokenDailyPrices.dayBucket,
-                unitPrice: tokenDailyPrices.unitPrice,
+                id: tokens.id,
+                unitPrice: tokens.unitPrice,
+                change24h: tokens.change24h,
+                marketCapRank: tokens.marketCapRank,
+                priceAsOf: tokens.priceAsOf,
+                priceExpiresAt: tokens.priceExpiresAt,
               })
-              .from(tokenDailyPrices)
-              .where(
-                and(eq(tokenDailyPrices.tokenRef, ref), inArray(tokenDailyPrices.dayBucket, part)),
-              ),
+              .from(tokens)
+              .where(and(eq(tokens.userId, userId), inArray(tokens.id, part))),
           ),
         );
-        for (const rows of batches) for (const r of rows) out.set(r.dayBucket, r.unitPrice);
+        for (const rows of batches) {
+          for (const r of rows) {
+            if (r.unitPrice == null || r.priceAsOf == null) continue; // 尚无价
+            out.set(r.id, {
+              unitPrice: r.unitPrice,
+              change24h: r.change24h ?? undefined,
+              marketCapRank: r.marketCapRank ?? undefined,
+              asOf: r.priceAsOf,
+              stale: (r.priceExpiresAt ?? 0) <= t,
+            });
+          }
+        }
         return out;
-      });
+      }),
 
-    // 按 ref 写一批日桶:upsert(撞主键改价)。同样是两个 put 共用的那一份。
-    const writeDaily = (
-      ref: string,
+    put: (prices: readonly TokenPriceWrite[], ttlMs: number): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        if (prices.length === 0) return;
+        const priceExpiresAt = (yield* Clock.currentTimeMillis) + ttlMs;
+        yield* client.batch((db) =>
+          prices.map((p) =>
+            db
+              .update(tokens)
+              .set({
+                unitPrice: p.unitPrice,
+                change24h: p.change24h ?? null,
+                // 排名只在有值时写。喂刷价的 simple/price 端点不含排名,`?? null` 会把持仓币
+                // (反复刷价)的排名反复抹掉 —— 只剩没被刷价的币有排名。
+                ...(p.marketCapRank !== undefined ? { marketCapRank: p.marketCapRank } : {}),
+                priceAsOf: p.asOf,
+                priceExpiresAt,
+              })
+              .where(and(eq(tokens.userId, userId), eq(tokens.id, p.tokenId))),
+          ),
+        );
+      }),
+
+    // 历史日价(时序、按范围查 → 真表):过去某 UTC 日的价不可变 → 永久存,无 TTL。
+    getDaily: (
+      tokenId: string,
+      dayBuckets: readonly number[],
+    ): Effect.Effect<Map<number, number>> =>
+      Effect.gen(function* () {
+        if (dayBuckets.length === 0) return new Map<number, number>();
+        const ref = yield* upstreamRefOf(tokenId);
+        // 还没认出来的币没有全局键可查 —— 空,不是错。
+        return Option.isNone(ref)
+          ? new Map<number, number>()
+          : yield* dailyByRef(ref.value, dayBuckets);
+      }),
+
+    putDaily: (
+      tokenId: string,
       prices: readonly { dayBucket: number; unitPrice: number }[],
     ): Effect.Effect<void> =>
-      client.batch((db) =>
-        prices.map((p) =>
-          db
-            .insert(tokenDailyPrices)
-            .values({ tokenRef: ref, dayBucket: p.dayBucket, unitPrice: p.unitPrice })
-            .onConflictDoUpdate({
-              target: [tokenDailyPrices.tokenRef, tokenDailyPrices.dayBucket],
-              set: { unitPrice: p.unitPrice },
-            }),
-        ),
-      );
+      Effect.gen(function* () {
+        if (prices.length === 0) return;
+        const ref = yield* upstreamRefOf(tokenId);
+        if (Option.isNone(ref)) return; // 还没认出来的币没有全局键可落
+        yield* writeDaily(ref.value, prices);
+      }),
 
-    return {
-      // 过期不删,读出带 stale(SWR)。尚无价的行不出现在结果里。
-      getByIds: (ids: readonly string[]): Effect.Effect<Map<string, TokenRecordPrice>> =>
-        Effect.gen(function* () {
-          const out = new Map<string, TokenRecordPrice>();
-          if (ids.length === 0) return out;
-          const t = yield* Clock.currentTimeMillis;
-          const parts = chunk([...new Set(ids)]).filter((p) => p.length > 0);
-          const batches = yield* Effect.forEach(parts, (part) =>
-            client.query((db) =>
-              db
-                .select({
-                  id: tokens.id,
-                  unitPrice: tokens.unitPrice,
-                  change24h: tokens.change24h,
-                  marketCapRank: tokens.marketCapRank,
-                  priceAsOf: tokens.priceAsOf,
-                  priceExpiresAt: tokens.priceExpiresAt,
-                })
-                .from(tokens)
-                .where(and(eq(tokens.userId, userId), inArray(tokens.id, part))),
-            ),
-          );
-          for (const rows of batches) {
-            for (const r of rows) {
-              if (r.unitPrice == null || r.priceAsOf == null) continue; // 尚无价
-              out.set(r.id, {
-                unitPrice: r.unitPrice,
-                change24h: r.change24h ?? undefined,
-                marketCapRank: r.marketCapRank ?? undefined,
-                asOf: r.priceAsOf,
-                stale: (r.priceExpiresAt ?? 0) <= t,
-              });
-            }
-          }
-          return out;
-        }),
+    // 按 ref 直读/直写(法币历史汇率,ADR 0026):跳过 tokenId→ref 翻译。法币 ref
+    // (`fiat/issued:CODE`)与 BTC 反算腿(`coingecko/issued:bitcoin`)在 per-user `token_refs`
+    // 里未必有行 → 必须按 ref 直接落这张全局表。ref 就是主键的一列,无 user 参与。
+    getDailyByRef: (
+      ref: TokenRef,
+      dayBuckets: readonly number[],
+    ): Effect.Effect<Map<number, number>> => dailyByRef(ref, dayBuckets),
 
-      put: (prices: readonly TokenPriceWrite[], ttlMs: number): Effect.Effect<void> =>
-        Effect.gen(function* () {
-          if (prices.length === 0) return;
-          const priceExpiresAt = (yield* Clock.currentTimeMillis) + ttlMs;
-          yield* client.batch((db) =>
-            prices.map((p) =>
-              db
-                .update(tokens)
-                .set({
-                  unitPrice: p.unitPrice,
-                  change24h: p.change24h ?? null,
-                  // 排名只在有值时写。喂刷价的 simple/price 端点不含排名,`?? null` 会把持仓币
-                  // (反复刷价)的排名反复抹掉 —— 只剩没被刷价的币有排名。
-                  ...(p.marketCapRank !== undefined ? { marketCapRank: p.marketCapRank } : {}),
-                  priceAsOf: p.asOf,
-                  priceExpiresAt,
-                })
-                .where(and(eq(tokens.userId, userId), eq(tokens.id, p.tokenId))),
-            ),
-          );
-        }),
-
-      // 历史日价(时序、按范围查 → 真表):过去某 UTC 日的价不可变 → 永久存,无 TTL。
-      getDaily: (
-        tokenId: string,
-        dayBuckets: readonly number[],
-      ): Effect.Effect<Map<number, number>> =>
-        Effect.gen(function* () {
-          if (dayBuckets.length === 0) return new Map<number, number>();
-          const ref = yield* upstreamRefOf(tokenId);
-          // 还没认出来的币没有全局键可查 —— 空,不是错。
-          return Option.isNone(ref)
-            ? new Map<number, number>()
-            : yield* dailyByRef(ref.value, dayBuckets);
-        }),
-
-      putDaily: (
-        tokenId: string,
-        prices: readonly { dayBucket: number; unitPrice: number }[],
-      ): Effect.Effect<void> =>
-        Effect.gen(function* () {
-          if (prices.length === 0) return;
-          const ref = yield* upstreamRefOf(tokenId);
-          if (Option.isNone(ref)) return; // 还没认出来的币没有全局键可落
-          yield* writeDaily(ref.value, prices);
-        }),
-
-      // 按 ref 直读/直写(法币历史汇率,ADR 0026):跳过 tokenId→ref 翻译。法币 ref
-      // (`fiat/issued:CODE`)与 BTC 反算腿(`coingecko/issued:bitcoin`)在 per-user `token_refs`
-      // 里未必有行 → 必须按 ref 直接落这张全局表。ref 就是主键的一列,无 user 参与。
-      getDailyByRef: (
-        ref: TokenRef,
-        dayBuckets: readonly number[],
-      ): Effect.Effect<Map<number, number>> => dailyByRef(ref, dayBuckets),
-
-      putDailyByRef: (
-        ref: TokenRef,
-        prices: readonly { dayBucket: number; unitPrice: number }[],
-      ): Effect.Effect<void> => (prices.length === 0 ? Effect.void : writeDaily(ref, prices)),
-    };
-  });
+    putDailyByRef: (
+      ref: TokenRef,
+      prices: readonly { dayBucket: number; unitPrice: number }[],
+    ): Effect.Effect<void> => (prices.length === 0 ? Effect.void : writeDaily(ref, prices)),
+  };
+};

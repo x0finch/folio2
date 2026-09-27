@@ -59,8 +59,9 @@ export type { MintInput, RefreshStaleReport };
 // **`now` 那个 config 字段没了** —— 时间从 `Clock` 取,测试用 `TestClock` 推。
 // 判据是 CODING.md 那条:只有测试会传的字段,就不该是字段(它当初有 5 个默认值散在各处)。
 //
-// 从 Tag 取服务**只发生在这里**:五片工厂全都收已解析好的端口对象,所以它们的 `R` 是 `never`
-// (与 `./warm` 同款),服务的方法签名不会把自己的依赖漏给调用方。
+// 从 Tag 取服务**只发生在这里**:五片工厂全都收已解析好的端口对象,所以它们的 `R` 里没有任何服务
+// (与 `./warm` 同款),服务的方法签名不会把自己的依赖漏给调用方。碰 store 的方法 `R` 里只有
+// `DbRequest` —— 那不是依赖,是「这次请求的连接 + 用户」,op 跑的那一刻才取(ADR 0054)。
 export class TokenService extends Effect.Service<TokenService>()("oracle/TokenService", {
   effect: Effect.gen(function* () {
     // 代币行 / 价格行 / 缓存三片来自 db 的那张**只给参考层**的门票。它们不是端口 ——

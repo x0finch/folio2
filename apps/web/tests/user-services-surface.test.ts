@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
+import * as db from "@folio/db";
 import { Database, DatabaseForOracle, GlobalDatabase } from "@folio/db";
 import { Oracle } from "@folio/oracle";
 import { Effect } from "effect";
@@ -42,5 +45,39 @@ describe("UserServices 的面", () => {
       db.accounts.listUserIds(),
     );
     expect(ids).toBeDefined();
+  });
+});
+
+// **「这是谁的请求」只有装配点能说**(ADR 0054)。
+//
+// 服务图每个 isolate 建一次之后,用户不再是「建服务那一刻」绑死的,而是每个 op 跑的那一刻从
+// context 里读 —— 于是「同一个实例对不同用户各跑一遍」成了日常(两个请求并发就是)。那不危险,
+// 危险的是**有人能随手给一段 effect 换一个用户**。所以材料本身被收走:`CurrentUser` 的 Tag 不出
+// `@folio/db`(只出类型),包外唯一的给法是 `provideCurrentUser`,而 app 的源码里只许
+// `lib/server/runtime.ts` 写它。下面两条一条钉类型、一条钉源码。
+describe("给 user 的材料只在装配点", () => {
+  it("`CurrentUser` 出包只是类型 —— 包外拿不到能 `Layer.succeed` 的那个值", () => {
+    // @ts-expect-error `CurrentUser` 是 `export type`:当值用编译不过(运行时也确实不在)
+    const tag = db.CurrentUser;
+    expect(tag).toBeUndefined();
+    expect(typeof db.provideCurrentUser).toBe("function");
+  });
+
+  it("app 源码里提到 `CurrentUser`(含 `provideCurrentUser`、Tag 的键)或 `provideDbClient` 的只有 runtime.ts", () => {
+    const src = join(__dirname, "../src");
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory()
+          ? walk(join(dir, e.name))
+          : /\.tsx?$/.test(e.name)
+            ? [join(dir, e.name)]
+            : [],
+      );
+    const offenders = walk(src)
+      .filter((f) => /CurrentUser|provideDbClient/.test(readFileSync(f, "utf8")))
+      .map((f) => relative(src, f));
+    // 查的是子串,所以 `provideCurrentUser`、`"db/CurrentUser"`(自造一个同键的 Tag 顶上去)
+    // 都算在内;`provideDbClient` 同理 —— 两个 provide 都只许出现在发动点。**名单只许短不许长**:要给 user 的新地方,该去 runtime.ts 里拿现成的发动点。
+    expect(offenders).toEqual(["lib/server/runtime.ts"]);
   });
 });

@@ -8,7 +8,7 @@
     "predev:tunnel": "node scripts/kill-stale-dev.mjs",
     "dev:tunnel": "node scripts/dev-tunnel.mjs",
     "generate-routes": "tsr generate",
-    "build": "vite build",
+    "build": "vite build && node scripts/check-shell-is-zero-data.mjs",
     "preview": "vite preview",
     "test": "vitest run --passWithNoTests && vitest run --config vitest.workers.config.ts",
     "typecheck": "tsc --noEmit",
@@ -23,6 +23,7 @@
     "deploy:preview": "CLOUDFLARE_ENV=preview pnpm run build && wrangler deploy --env preview",
     "upload:preview": "CLOUDFLARE_ENV=preview pnpm run build && wrangler versions upload --env preview --preview-alias \"$PREVIEW_ALIAS\"",
     "gen:icons": "node scripts/gen-icons.mjs",
+    "perf:cpu": "node --disable-warning=ExperimentalWarning scripts/perf/cpu.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
@@ -81,6 +82,7 @@
     "typescript": "catalog:",
     "vite": "^8.0.0",
     "vitest": "catalog:",
-    "wrangler": "catalog:"
+    "wrangler": "catalog:",
+    "ws": "^8.21.0"
   }
 }

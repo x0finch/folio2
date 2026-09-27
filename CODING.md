@@ -85,10 +85,15 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
   而当初担心的构造成本经实测是不存在的(`packages/db/src/connect.ts` 自己写着「drizzle(env.DB) 很轻」)。
   **判据同上:生产只传一个值的字段,不该是字段** —— `namer` / `overrides` 是 adapter 的知识,
   就该由 adapter 的 layer 给(`Namer`),不该经装配点转手。
-- **服务的方法签名里不许出现自己的依赖。** 服务对外的 `R` 恒是 `never`:实现面(`R` 里带着
+- **服务的方法签名里不许出现自己的依赖。** 服务对外的 `R` 里没有任何**服务**:实现面(`R` 里带着
   client / HttpClient / store)在**建服务那一刻**把 context 抓住(`Effect.context` + `Effect.provide`),
   或者干脆把已解析好的服务对象当参数传给内部函数。漏出去一次,调用方的 `R` 就长出一条
   `Outbound`,再往上传染到每个 server fn。
+  **唯一的例外是 `DbRequest`(`CurrentUser | DbClient`,ADR 0054)**:那不是依赖(没有第二个实现、
+  不会被换掉),是「这次请求是谁的、用哪条连接」—— 服务图每个 isolate 建一次之后,它只能在 op
+  跑的那一刻取,所以它**就该**出现在碰 db 的每个方法的 `R` 里,由装配点每请求给一次。
+  一次请求内部又要交给 `R = never` 的端口(`@folio/sync` 的四个能力、`ImportDeps`、流)时,
+  在建那一层的时候 `Effect.context<DbRequest>()` 抓一份 —— 那一层本来就是这次请求的。
 - **契约包里的 Tag 单开一个入口。** `Context.GenericTag(...)` 是**运行时值**,而契约包的主入口
   常被客户端组件 value-import(`@folio/oracle-basic` 的 `SUPPORTED_CURRENCIES` / `valuate` /
   `tokenTicket`)。并进主入口就等于把 `effect` 挂在前端 bundle 的可达图上(+75 KB gzip),
@@ -112,11 +117,18 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
     类型、Tag、layer(`.Default`)一次拿全,并排的那个 `xxxServiceLayer` 随之退场。
     **测试的假实现走它自己的构造器**(`new FxService({ … })`):实例带 `_tag`,裸对象编译期就被拦,
     而且假的与真的是同一条构造路。
-  - **要 userId 的服务也不带参数**(ADR 0044):`make` 里 `const userId = yield* CurrentUser` 读一次,
-    于是 `.Default` 仍是一个普通 layer,`R` 里多一个 `CurrentUser`。装配点一次请求 provide 一次
-    (`perRequestLayer(userId)`),不再每个领域一个 `xxxStoreLayer(userId)` 工厂。
-    **在建服务那一刻读,不在每次调用时读** —— 后者会把 `CurrentUser` 漏进每个方法的 `R`,
-    也就等于允许「同一个实例在一次请求里对不同用户各跑一遍」,那才是真的动了 ADR 0037。
+  - **要 userId 的服务也不带参数,而且不在建的时候读 userId**(ADR 0044 → 0054):db 的每个领域
+    写成纯函数 `(client, userId) => 方法表`,聚合门票(`@folio/db` 的 `database.ts`,`bindPerCall`)
+    在**每个 op 跑的那一刻**从 context 取 `DbClient` 与 `CurrentUser`、绑一次、调那一个方法。
+    于是门票与它之上的整张服务图(参考层、connector)**每个 isolate 建一次**,每请求只给两个值
+    (app 的 `runtime.ts`:`provideCurrentUser` + `provideDbClient`)。
+    **以前这里写的是反过来的规矩**(「在建服务那一刻读,不在每次调用时读」),理由是后者「允许同一个
+    实例对不同用户各跑一遍」。那条担心是对的,答法换了:不再靠「每请求一个实例」,而是**把给
+    user 的材料收走** —— `CurrentUser` 的 Tag 不出 `@folio/db`(只出类型),包外唯一的给法是
+    `provideCurrentUser`,而 app 源码里只许 `runtime.ts` 写它(`user-services-surface.test.ts`
+    按源码钉着);`R` 里的 `CurrentUser` 保证没给 user 的 effect 编译不过。两个用户交错跑同一个
+    实例的情形有 workers 池里的用例钉着(`isolate-runtime.test.ts`,反向改成「缓存第一次的
+    context」当场红两条)。代价见 ADR 0054:碰 db 的方法 `R` 里多一个 `DbRequest`。
     `effect` 字段**也**能收函数(`.Default(userId)`),但本仓不用它:userId 有更该待的地方。
   两种都**逐方法显式标注返回类型** —— 契约精度不靠推断,推断只用来省掉那份复述。
   **一契约多实现的端口不在此列**:那边 interface 必须独立存在(见下一条),没有模板可省。
@@ -164,14 +176,21 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 
 ### CF Workers 上的状态
 
-- **模块级可变状态在这里是刻意的,不是偷懒。** 每个请求一次 `runPromise`,而 **Layer memoisation 是
-  per-run 的** —— 状态放 `Scope` 或 Layer 里就等于每请求重置。跨请求要活的东西(限频游标、
-  近静态数据的缓存)只能在模块级。
-- **同理:官方那些「状态绑 Scope」的组合子在这里会静默失效。** `RateLimiter`(semaphore + 后台
-  refill fiber)、`Cache` / `cachedWithTTL` —— 类型上能用,运行时每请求一份新的,等于没有。
-  用之前先问:**它的状态活在哪?**
-- 反过来,这也意味着「改成每 isolate 一个 `ManagedRuntime`」这条路**要先验证**:Workers 有
-  「不能替另一个请求做 I/O」的限制,跨请求存活的 fiber / timer 可能直接抛。
+- **两种 layer,活得不一样长**(ADR 0054)。app 的 `runtime.ts` 里有一个惰性的 isolate 级
+  `ManagedRuntime`:进它的 layer **跨请求活**(建一次,isolate 回收才没);每请求 `Effect.provide`
+  的 layer 仍是 **per-run** 的,每请求重置。跨请求要活、又不该绑在服务图上的东西(限频游标)照旧
+  在模块级。
+- **所以官方那些「状态绑 Scope」的组合子要先问它落在哪一种里。** `RateLimiter`(semaphore + 后台
+  refill fiber)、`Cache` / `cachedWithTTL`:放在每请求那一侧,每请求一份新的,等于没有;放进
+  isolate 运行时,就是一条**跨请求活着的 fiber / timer** —— 下一条。用之前先问:**它的状态活在哪?**
+- **进 isolate 运行时的 layer,建的时候只许造闭包。** Workers 不许用一个请求里造的 I/O 对象(fetch、
+  D1 语句、timer、挂着 I/O 的 fiber)替另一个请求干活。所以判据是:**建的时候握着 fiber、timer、
+  I/O 句柄的,留在每请求那一侧**;只有纯闭包的才进 isolate。连接(`DbClient`)因此每请求一个,
+  用户每请求一个。**这条是验过的,不是推的**(ADR 0054):逐层列了建的时候握着什么(门票 / 参考层 /
+  CoinGecko client 与它的 `isolated` 限频闸 / `FetchHttpClient` / connector / 日志转发器 —— 全是
+  闭包;唯一会 fork 后台 fiber 的是限频的 `memory` 档,生产不走),再在构建产物的 `wrangler dev`
+  上并发打多个 server fn、两个用户、`POST /api/sync`、外加一次 cron 触发:零个非 200、零串号、
+  没有跨请求 I/O 报错。
 
 ### 用官方的东西之前,先读它默认记了什么
 

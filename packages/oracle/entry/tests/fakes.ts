@@ -3,11 +3,13 @@ import { UpstreamUnavailableError } from "@folio/client-core";
 import type {
   CacheEntry,
   CacheStore,
+  DbEnv,
+  DbRequest,
   GlobalRefIndexStore,
   TokenPriceStore,
   TokenStore,
 } from "@folio/db";
-import { DatabaseForOracle, GlobalDatabase } from "@folio/db";
+import { DatabaseForOracle, GlobalDatabase, provideCurrentUser, provideDbClient } from "@folio/db";
 import type {
   FxUpstream,
   PlatformMeta,
@@ -54,8 +56,17 @@ import { CandidateSource } from "../src/tokens/candidates";
 const NOW0 = 1_700_000_000_000;
 export const now0 = NOW0;
 
+// 真 store 的 op 在跑的那一刻从 context 里取连接与用户(ADR 0054),所以契约类型的 `R` 里有
+// `DbRequest`。内存假货两样都不要 —— 它的方法 `R` 是 `never`,于是测试能直接 `runPromise` 它,
+// 而它照样能顶真 store 的位置(`never` 比任何 `R` 都窄)。
+type InMemory<S> = {
+  [K in keyof S]: S[K] extends (...args: infer P) => Effect.Effect<infer A, infer E, DbRequest>
+    ? (...args: P) => Effect.Effect<A, E>
+    : S[K];
+};
+
 // —— per-user:代币行的 info facet + ref 行 ——
-export interface FakeTokenStore extends TokenStore {
+export interface FakeTokenStore extends InMemory<TokenStore> {
   readonly rows: Map<string, TokenInfo>;
   readonly refs: Map<TokenRef, string>;
   // 历史快照的 token_id —— merge 要把它们一并改指,测试据此验「身份可变、金额不变」。
@@ -198,7 +209,7 @@ export function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeToken
 const clone = (row: TokenInfo): TokenInfo => ({ ...row });
 
 // —— per-user:价 facet + 历史日价 ——
-export interface FakeTokenPriceStore extends TokenPriceStore {
+export interface FakeTokenPriceStore extends InMemory<TokenPriceStore> {
   readonly current: Map<string, { price: TokenPrice; expiresAt: number }>;
   readonly daily: Map<string, Map<number, number>>;
   // 按 ref 直存的历史日价(与 `daily` 分开:那个键是 tokenId,这个键是 ref —— 真表里两者
@@ -272,7 +283,7 @@ export function fakeTokenPriceStore(): FakeTokenPriceStore {
 // —— 全局映射表 ——
 // 契约来自 `@folio/db` 的那张门票(它没有「谁的」这回事,所以不是参考层的端口)——
 // 取字段类型而不是另抄一份签名。
-export interface FakeGlobalRefIndexStore extends GlobalRefIndexStore {
+export interface FakeGlobalRefIndexStore extends InMemory<GlobalRefIndexStore> {
   // 测试用它直接塞一条映射(模拟 cron 刷完表)。**不暴露内部键格式** ——
   // 让测试自己拼键的话,键格式一改测试就静默失配(踩过一次)。
   // chainRef → 整条 upstreamRef(#228:值是整条,不是裸 id)。
@@ -339,7 +350,7 @@ export function fakeGlobalRefIndexStore(
 }
 
 // —— per-user KV 缓存 ——
-interface FakeCacheStore extends CacheStore {
+interface FakeCacheStore extends InMemory<CacheStore> {
   readonly entries: Map<string, { value: unknown; expiresAt: number }>;
   writes: number; // 写**批次**数(不是键数)—— 「一个批次写回」那类断言看这个
   reads: number; // 读**往返**数 —— 「一次读拿全」那类断言看这个
@@ -552,7 +563,7 @@ export interface Harness {
     effect: Effect.Effect<
       A,
       E,
-      OraclePorts | OracleServices | GlobalRefIndexService | CandidateSource
+      OraclePorts | OracleServices | GlobalRefIndexService | CandidateSource | DbRequest
     >,
   ): Promise<A>;
 }
@@ -569,6 +580,11 @@ export interface HarnessOpts {
   // 本身就是断言对象)。不给就用真的(读缓存目录)。
   candidates?: CandidateSource;
 }
+
+// harness 里的「这次请求」。假 store 不按用户分桶,所以它只是个名字。
+const HARNESS_USER = "harness-user";
+// 假 store 从不碰 D1,这个连接只为满足类型;真有一条查询打到它,`drizzle` 会当场炸。
+const unreachableD1 = { DB: {} } as DbEnv;
 
 export function harness(opts: HarnessOpts = {}): Harness {
   const namer = opts.namer ?? "src";
@@ -648,6 +664,10 @@ export function harness(opts: HarnessOpts = {}): Harness {
         // 起点拨到固定基准(日桶算得出确定的值);用例内部要推时间就 `yield* TestClock.adjust(…)`。
         Effect.zipRight(TestClock.setTime(NOW0), effect).pipe(
           Effect.provide(everything),
+          // 一次请求的两样(ADR 0054),与生产的装配点同一个给法。假 store 一样都不读 ——
+          // 给它们是因为参考层方法的 `R` 如实写着「要一个请求」,不给就编译不过。
+          provideCurrentUser(HARNESS_USER),
+          provideDbClient(unreachableD1),
           Effect.provide(logger),
           Effect.provide(TestContext.TestContext),
         ),

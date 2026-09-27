@@ -1,7 +1,6 @@
 import { eq } from "drizzle-orm";
 import { Effect } from "effect";
-import { DbClient } from "../client";
-import { CurrentUser } from "../current-user";
+import type { DbClient } from "../client";
 import { userSettings } from "../schema";
 import type { UserSettings, ValuationMode } from "../schema/types";
 
@@ -18,10 +17,7 @@ export interface UserSettingsView {
   hideBalances: boolean;
 }
 
-export const makeSettingsStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-  const userId = yield* CurrentUser;
-
+export const makeSettingsStore = (client: DbClient, userId: string) => {
   return {
     /** 读带缺省:无行返默认(不为每个用户强制建行)。 */
     get: (): Effect.Effect<UserSettingsView> =>
@@ -63,4 +59,4 @@ export const makeSettingsStore = Effect.gen(function* () {
         );
       }),
   };
-});
+};

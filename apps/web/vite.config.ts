@@ -102,12 +102,25 @@ const config = defineConfig({
     // 证书是现签的自签名证书(缓存在 node_modules/.vite),没有 CA 认它:浏览器第一次会拦一下,点
     // 「继续前往」之后地址栏会一直挂着 Not Secure —— 只是提示,`isSecureContext` 仍为真,WebAuthn
     // 照常。dev 和 preview 都配上:e2e 在 CI 上跑的正是 preview。
-    localHttps() && basicSsl(),
+    //
+    // **构建期 prerender 那个 preview 不配证书**(ADR 0049 补记):SPA 模式在构建里用本配置再起一个
+    // preview、用 Node 的 fetch 去取 `/`,而 Node 不认自签名证书 —— 配上就 `DEPTH_ZERO_SELF_SIGNED_CERT`、
+    // 整个 build 失败(CI 的 e2e 用 `CLOUDFLARE_ENV=test` 构建,`.dev.vars.test` 正是 https)。
+    // `TSS_PRERENDERING` 是 TanStack 在起那个 preview 之前、在同一个进程里设的。
+    localHttps() && process.env.TSS_PRERENDERING !== "true" && basicSsl(),
     stampSwVersion(build.version),
     devtools(),
     cloudflare({ viteEnvironment: { name: "ssr" } }),
     tailwindcss(),
-    tanstackStart(),
+    // **HTML 文档是静态资源**(ADR 0049 补记):SPA 模式在构建期把 `/` prerender 一次,落成
+    // `dist/client/index.html`;wrangler 的 `assets.not_found_handling` 把所有导航都回这一份,
+    // Worker 一次都不进。免费档 10ms CPU,而「零数据骨架壳」在请求里 SSR 一次实测就要 9.2ms。
+    //
+    // outputPath 必须是 `/index`(默认 `/_shell` 落成 `_shell.html`,平台的 SPA 兜底只认 index.html)。
+    // 框架的「壳模式」短路在 CF 的 prerender worker 里不生效(`TSS_PRERENDERING` 读不到宿主进程的
+    // env),所以 prerender 渲的是一次真实的 `/` —— 壳干不干净靠根路由没有任何服务端输入来保证,
+    // 见 routes/__root.tsx 与 -root/root-document。
+    tanstackStart({ spa: { enabled: true, prerender: { outputPath: "/index" } } }),
     viteReact(),
   ],
 });

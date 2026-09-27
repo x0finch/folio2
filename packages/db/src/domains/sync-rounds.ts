@@ -1,7 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { Clock, Effect, Option } from "effect";
-import { DbClient } from "../client";
-import { CurrentUser } from "../current-user";
+import type { DbClient } from "../client";
 import { userCache } from "../schema";
 
 // 一次同步轮的状态(ADR 0048)。**轮跑在服务端,所以状态也在服务端** —— 以前它记在浏览器的
@@ -118,10 +117,7 @@ const decode = (row: { v: string; expiresAt: number }): SyncRoundRecord | undefi
   }
 };
 
-export const makeSyncRoundStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-  const userId = yield* CurrentUser;
-
+export const makeSyncRoundStore = (client: DbClient, userId: string) => {
   const mine = (portfolioId: string) =>
     and(eq(userCache.userId, userId), eq(userCache.k, keyOf(portfolioId)));
 
@@ -265,4 +261,4 @@ export const makeSyncRoundStore = Effect.gen(function* () {
         );
       }),
   };
-});
+};

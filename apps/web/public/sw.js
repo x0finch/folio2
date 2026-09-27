@@ -49,6 +49,26 @@ export function swRoute(req) {
   return "network-only"; // 其余默认不缓存(图片 / manifest 等保持新鲜)
 }
 
+/**
+ * cache-first 的第二道门:**响应的内容类型必须与请求的 destination 对得上**,否则不进缓存。
+ *
+ * 为什么要有它:壳化之后 wrangler `assets.run_worker_first` 给的是数组,平台文档明写这会**放弃**
+ * 「只对导航请求做 SPA 回退」的判断 —— 于是一个已被新版删掉的 `/assets/<旧哈希>.js`(旧标签页
+ * 在发版后懒加载 chunk 时会请求它)拿到的不再是 404,而是 200 的 `index.html`。chunk 照样加载
+ * 失败、刷新即好,这一点与今天的 404 同级;但 `res.ok` 为真,不加这道门 SW 就会把那份 HTML
+ * 永久钉在 JS 的地址上。守卫只看内容类型,不改 swRoute 的任何决策,导航策略与更新流不受影响。
+ * @param {string} destination
+ * @param {string | null} contentType
+ * @returns {boolean}
+ */
+export function isCacheableAsset(destination, contentType) {
+  const type = (contentType ?? "").toLowerCase();
+  if (destination === "script") return type.includes("javascript") || type.includes("ecmascript");
+  if (destination === "style") return type.includes("text/css");
+  if (destination === "font") return type.includes("font") || type.includes("application/octet-stream");
+  return false;
+}
+
 // SW 全局特征探测:window / node 都没有 skipWaiting → 只有真在 Service Worker 里才挂事件
 //(node 单测 self 未定义,短路;只导出 swRoute)。
 if (typeof self !== "undefined" && typeof self.skipWaiting === "function") {
@@ -105,7 +125,9 @@ if (typeof self !== "undefined" && typeof self.skipWaiting === "function") {
         const hit = await cache.match(req);
         if (hit) return hit;
         const res = await fetch(req);
-        if (res.ok) cache.put(req, res.clone());
+        if (res.ok && isCacheableAsset(req.destination, res.headers.get("content-type"))) {
+          cache.put(req, res.clone());
+        }
         return res;
       })(),
     );

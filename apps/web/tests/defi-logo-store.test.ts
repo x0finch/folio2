@@ -1,7 +1,8 @@
-import { type CacheEntry, type CacheStore, Database } from "@folio/db";
+import { type CacheEntry, type CacheStore, Database, type DbRequest } from "@folio/db";
 import { Effect, Layer, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { readDefiLogo, recordDefiLogos } from "@/lib/server/logos/store";
+import { stubRequest } from "./oracle-stub";
 
 // DeFi 协议图这一小片**搬回 app 了**(#390 review 第 4 条):它没有上游、不出网 —— 同步时把余额
 // meta 里现成的 URL 记进 per-user 缓存,图片端点再读出来。所以它不属于参考层,但键没变
@@ -34,9 +35,9 @@ const fakeCache = () => {
 
 // 那片缓存现在是 `Database` 的一个字段(不再是从参考层漏出来的端口),所以假的也从那张票给。
 // 只填 `cache` 一个字段:被测代码碰不到别的,填全反而会掩盖「它到底用了什么」。
-const run = <A>(cache: CacheStore, effect: Effect.Effect<A, never, Database>) =>
+const run = <A>(cache: CacheStore, effect: Effect.Effect<A, never, Database | DbRequest>) =>
   Effect.runPromise(
-    Effect.provide(effect, Layer.succeed(Database, { cache } as unknown as Database)),
+    stubRequest(Effect.provide(effect, Layer.succeed(Database, { cache } as unknown as Database))),
   );
 
 describe("DeFi 协议图的名址", () => {

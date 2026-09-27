@@ -14,7 +14,11 @@ import { LockScreen } from "@/components/lock-screen";
 import { PortfolioSelector } from "@/components/portfolio-selector";
 import { BalancePrivacyProvider } from "@/lib/hooks/use-balance-privacy";
 import { PortfolioProvider, pickSelectedPortfolio, usePortfolio } from "@/lib/hooks/use-portfolio";
-import { CurrencyProvider } from "@/lib/hooks/use-prefer-currency";
+import {
+  CurrencyProvider,
+  readStoredCurrency,
+  useStoredCurrency,
+} from "@/lib/hooks/use-prefer-currency";
 import { RETRY, withRetry } from "@/lib/queries/constants";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
@@ -25,7 +29,7 @@ import type { PageKey } from "./_authed/-page-keys";
 import { prefetchPage } from "./_authed/-pages";
 
 // 受保护布局:无 session 则重定向到 /login(仅 UX;数据安全靠各 authedServerFn)。
-// loader 定展示币种 + 汇率(cookie + FX cache-only),并**预取**全局同步状态
+// loader 定展示币种 + 汇率(localStorage 里的币种码 + 服务端汇率),并**预取**全局同步状态
 // → CurrencyProvider + AppShell 下发给整个认证区。
 //
 // 同步状态不再由 loader 返回,而是 `ensureQueryData` 预取 + 组件 `useSuspenseQuery` 读(ADR 0038)。
@@ -44,11 +48,11 @@ export const Route = createFileRoute("/_authed")({
   //
   // 这个设置**整树继承**(router-core 的 `parentMatch?.ssr === false` 分支),所以四个子页面
   // 不必各写一遍;跟着一起下去的还有 `beforeLoad`,也就是下面那次真鉴权只在浏览器里跑了。
-  // 「没登录 → 307 /login」因此搬去了根路由,判据换成 cookie 存在性,见 routes/-root/authed-guard。
+  // 「没登录 → /login」因此也只在浏览器里发生:HTML 文档是构建期产出的静态文件(ADR 0049 补记),
+  // 未登录访客先拿到那张零数据的壳,闪屏盖着,这里判定后客户端跳走。
   ssr: false,
-  // 服务端渲染的**唯一**东西:零数据骨架壳。`ssr: false` 的匹配在服务端会被渲成
-  // `<ClientOnly fallback={pendingComponent}>`,所以这里填什么,服务器就发什么。
-  // 它同时是客户端接手后 loader 未落地那一段的 Suspense fallback —— 首帧到数据浮现之间
+  // 客户端接手后 loader 未落地那一段的 Suspense fallback。与静态壳里那张骨架(根上的
+  // `ClientOnly` fallback,见 -root/root-document)是**同一个组件**—— 首帧到数据浮现之间
   // 观感连续,不闪两种东西。
   pendingComponent: PendingShell,
   // 选中的 Portfolio 进 URL(ADR 0046):`?portfolio=<id>`,默认那个不写。声明在**这一层** ——
@@ -84,7 +88,7 @@ export const Route = createFileRoute("/_authed")({
     // **同步摘要要先知道是哪个 Portfolio**(ADR 0033),所以这两个不能并发:先拿到 Portfolio 列表
     // 才认得出地址里那个 id(以及默认那个)。
     const [, portfolios] = await Promise.all([
-      context.queryClient.ensureQueryData(currencyPreferenceQuery()),
+      context.queryClient.ensureQueryData(currencyPreferenceQuery(readStoredCurrency())),
       context.queryClient.ensureQueryData(portfolioListQuery()),
     ]);
     // 按**地址里那个**组合预取(ADR 0046)。以前写死 `defaultId` 恰好是对的 —— 那时选中态总是从默认
@@ -117,8 +121,8 @@ export const Route = createFileRoute("/_authed")({
 /** 等了这么久还没数据,就把「连不上」这句话摆出来 —— 短于它的等待是正常首屏,不必解释。 */
 const SAY_STALLED_AFTER = 12_000;
 
-// 等待态的壳。**服务端渲染的就是它**(`ssr: false` 下 pendingComponent 即服务器发的 HTML),
-// 那一趟没有计时器、也就没有那句话:首帧永远是干净的骨架。话只在浏览器里等超时后才出现。
+// 等待态的壳。首帧没有那句话,只在浏览器里等超时后才出现 —— 静态壳里那张骨架(构建期渲的)
+// 也就与它的首帧逐像素相同。
 function PendingShell() {
   const t = useTranslations("Shell");
   const [stalled, setStalled] = useState(false);
@@ -168,7 +172,8 @@ function ShellWithSync({ userName, children }: { userName: string; children: Rea
 
 function AuthedLayout() {
   const { user } = Route.useRouteContext();
-  const { data: preferCurrency } = useSuspenseQuery(currencyPreferenceQuery());
+  const currencyCode = useStoredCurrency();
+  const { data: preferCurrency } = useSuspenseQuery(currencyPreferenceQuery(currencyCode));
   const { data: portfolios } = useSuspenseQuery(portfolioListQuery());
   // 隐私开关的权威值喂给 Provider(ADR 0052)。**非 suspense**:loader 只 fire-and-forget 预取它,
   // 没读到时 `undefined` 让 Provider 走 fail-closed,不该为它挂起整个外壳。

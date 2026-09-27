@@ -1,4 +1,4 @@
-import type { SnapshotWithBalances } from "@folio/db";
+import type { DbRequest, SnapshotWithBalances } from "@folio/db";
 import { Oracle } from "@folio/oracle";
 import { Effect } from "effect";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
@@ -18,7 +18,7 @@ import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 // 以前看不出来是因为两处各自 `db.getLatestSnapshotByUser(userId)`,一次请求里读两遍这件事藏在门面后面。
 export const warmPlatforms = (
   snapshots: readonly SnapshotWithBalances[],
-): Effect.Effect<void, never, Oracle> =>
+): Effect.Effect<void, never, Oracle | DbRequest> =>
   Effect.gen(function* () {
     const keys = new Set<string>();
     for (const s of snapshots) {

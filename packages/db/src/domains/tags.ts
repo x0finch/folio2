@@ -1,8 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { Effect } from "effect";
-import { DbClient } from "../client";
+import type { DbClient } from "../client";
 import type { Drizzle } from "../connect";
-import { CurrentUser } from "../current-user";
 import { InvalidInput, type NotFound } from "../errors";
 import { accounts, accountTags, portfolioAccounts, tags } from "../schema";
 import type { Tag } from "../schema/types";
@@ -10,7 +9,8 @@ import { assertAccountOwned, assertPortfolioOwned, assertTagOwned } from "./owne
 
 // Tag —— Portfolio 内的软标签(ADR 0034)。一个账户可挂多个,但只能挂同 Portfolio 的 tag。
 //
-// **服务的方法签名里没有 userId**(ADR 0037):由 `TagStore.Default(userId)` 在装配那一刻吃掉。
+// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
+// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
 
 // 某账户当前归属的 Portfolio(1:1,恰一行;无行 = 账户不存在 / 越权,返回 undefined)。
 async function accountPortfolioId(db: Drizzle, accountId: string): Promise<string | undefined> {
@@ -62,10 +62,7 @@ export interface AccountTagLink {
   tagId: string;
 }
 
-export const makeTagStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-  const userId = yield* CurrentUser;
-
+export const makeTagStore = (client: DbClient, userId: string) => {
   return {
     /** 建一个 Tag(归属指定 Portfolio)。名字 trim 后落库、同 Portfolio 内忽略大小写唯一。 */
     create: (input: CreateTagInput): Effect.Effect<Tag, NotFound | InvalidInput> =>
@@ -180,4 +177,4 @@ export const makeTagStore = Effect.gen(function* () {
           .where(eq(accounts.userId, userId)),
       ),
   };
-});
+};

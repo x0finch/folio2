@@ -1,4 +1,6 @@
-import { Effect } from "effect";
+import { Context, Effect } from "effect";
+import { DbClient } from "./client";
+import { CurrentUser } from "./current-user";
 import { makeAccountStore, makeGlobalAccountStore } from "./domains/accounts";
 import { makeUserCacheStore } from "./domains/cache";
 import { makeGlobalRefIndexStore } from "./domains/global-ref-index";
@@ -13,34 +15,88 @@ import { makeUserTokenPriceStore } from "./domains/token-prices";
 import { makeUserTokenStore } from "./domains/tokens";
 import { makeTransferStore } from "./domains/transfer";
 
-type EffectMethod = (...args: never[]) => Effect.Effect<unknown, unknown, unknown>;
-type DomainStores = Record<string, Record<string, EffectMethod>>;
+/**
+ * **一次请求要给 db 的两样**:这次是谁的(`CurrentUser`)+ 那一个 D1 句柄(`DbClient`)。
+ *
+ * per-user 的 op 的 `R` 就是它(ADR 0054):服务图每个 isolate 建一次,这两样每个 op 跑的那一刻
+ * 从 context 里取。包外拿不到这两个 Tag 的值 —— 只能经 `provideCurrentUser` / `provideDbClient`
+ * 两个组合子给,而 app 里给的地方只有装配点。
+ */
+export type DbRequest = CurrentUser | DbClient;
 
-// **一处包装,七十个 op 全都有名字**(#504 T16)。键名即域名,与方法名拼成 `accounts.create`。
-//
-// T16 那张票原本判过「db 层不值得全链路命名」—— 前提是「得手写七十个 `Effect.fn`」。
-// 聚合是这次重构才长出来的收口点,有了它成本就是下面这十几行,**一个方法都不用改**,
-// 那个前提不成立了(票里已改)。
-//
-// 与桥那一层(`client.ts` 的 `db.query`)合起来是三层树:handler → domain op → D1。
-// 中间这层答的是「哪个 domain 方法」—— 一个方法发多条查询时,只有它分得开。
-//
-// 约束里 `Effect.Effect<...>` 那个返回类型是有用的:哪天有人往域里加一个不返回 Effect 的
-// 方法(同步 helper、返回 Stream 的),这里当场红。代价是报错点落在下面 `Database` 那一行,
-// 而不是那个方法上 —— 见到这条红先回头看最近加的方法。
-const tracedStores = <D extends DomainStores>(domains: D): D =>
-  Object.fromEntries(
-    Object.entries(domains).map(([domain, store]) => [
-      domain,
-      Object.fromEntries(
-        Object.entries(store).map(([method, fn]) => [
-          method,
-          (...args: Parameters<EffectMethod>) =>
-            fn(...args).pipe(Effect.withSpan(`${domain}.${method}`)),
-        ]),
-      ),
-    ]),
-  ) as D;
+type EffectMethod = (...args: never[]) => Effect.Effect<unknown, unknown, unknown>;
+type Methods = Record<string, EffectMethod>;
+
+// 一个领域「绑定到一个连接(+ 一个用户)之后」的样子 → 门票上那一格的样子:参数与成败不变,
+// `R` 多出 `R`。
+type PerCall<S, R> = {
+  [K in keyof S]: S[K] extends (...args: infer P) => Effect.Effect<infer A, infer E, infer R0>
+    ? (...args: P) => Effect.Effect<A, E, R0 | R>
+    : never;
+};
+
+/**
+ * **全包唯一一处读 `CurrentUser` / `DbClient` 的地方**(ADR 0054)。
+ *
+ * 每个领域写成一个纯函数 `(client, userId) => 方法表`:给它一个连接、一个用户,它就是那个用户的
+ * 那一组 op —— 与以前「建服务那一刻读一次、绑进闭包」是同一份代码,只是不再由 `Effect.gen`
+ * 从 context 里抓。这里把它们挂成门票:门票上的每个方法在**被调用、真跑起来的那一刻**从 fiber 的
+ * context 里取那两样,绑一次,调那一个方法。于是门票本身不含任何请求的东西,可以每个 isolate
+ * 只建一份;两个请求(两个用户)同时拿着它,各跑各的 context,互相看不见。
+ *
+ * **为什么每次调用都绑一次而不缓存**:绑定只是十来个闭包(领域函数里没有任何 I/O —— 见下面那个
+ * 占位),而缓存得有地方放 —— 按连接对象记的表就是模块级可变状态,正是这次不许加的东西。
+ *
+ * **方法名怎么来**:建门票时拿一个**占位**绑一次,只读它有哪些键。领域函数是纯的,这一次什么都
+ * 不跑;万一哪天有人在领域函数的顶层(而不是方法里)碰了连接,占位 `die` 出来的 effect 也不会被
+ * 执行 —— 真跑起来的每一次都是上面那条「调用时绑定」的路。
+ *
+ * **span 顺带挂在这里**(#504 T16):键名即域名,与方法名拼成 `accounts.create`,七十个 op 一处包上。
+ * 与桥那一层(`client.ts` 的 `db.query`)合起来是三层树:handler → domain op → D1。
+ * `captureStackTrace: false`:`Effect.withSpan` 默认每调用一次就 `new Error()` 抓一份调用点
+ * (不论 tracer 开没开,Effect 3.22 的 `addSpanStackTrace` 不看开关),而这里的调用点永远是
+ * 同一行 —— 抓了也没有信息。
+ */
+const bindPerCall =
+  <Args extends readonly unknown[], R>(read: Effect.Effect<Args, never, R>, placeholder: Args) =>
+  <D extends Record<string, (...args: Args) => Methods>>(
+    domains: D,
+  ): { [K in keyof D]: PerCall<ReturnType<D[K]>, R> } =>
+    Object.fromEntries(
+      Object.entries(domains).map(([domain, bind]) => [
+        domain,
+        Object.fromEntries(
+          Object.keys(bind(...placeholder)).map((method) => [
+            method,
+            (...args: never[]) =>
+              Effect.flatMap(read, (ctx) => bind(...ctx)[method](...args)).pipe(
+                Effect.withSpan(`${domain}.${method}`, { captureStackTrace: false }),
+              ),
+          ]),
+        ),
+      ]),
+    ) as { [K in keyof D]: PerCall<ReturnType<D[K]>, R> };
+
+// 占位连接:只给上面那一次「读有哪些键」用。它的两个方法**从不该被跑到**,真跑到了就是 bug。
+const unbound = DbClient.make({
+  query: () => Effect.die(new Error("db: an op ran against the placeholder client")),
+  batch: () => Effect.die(new Error("db: an op ran against the placeholder client")),
+});
+
+// per-user 的那几张门票用这个:连接 + 用户,两样都在 op 跑的那一刻取。
+const perUser = bindPerCall(
+  Effect.contextWith(
+    (ctx: Context.Context<DbRequest>) =>
+      [Context.get(ctx, DbClient), Context.get(ctx, CurrentUser)] as const,
+  ),
+  [unbound, ""] as const,
+);
+
+// 没有「谁的」这回事的那张用这个:**只取连接** —— 于是它的 `R` 里压根没有 `CurrentUser`。
+const ownerless = bindPerCall(
+  Effect.map(DbClient, (client) => [client] as const),
+  [unbound] as const,
+);
 
 // **`@folio/db` 对外的那一张门票。** app 侧一次 `yield* Database` 拿到全部领域操作,
 // 按领域取用:`db.tabPins.list()`、`db.accounts.list()`。以前是每个领域一个 Tag + 一个 layer
@@ -51,41 +107,37 @@ const tracedStores = <D extends DomainStores>(domains: D): D =>
 //     **只在包内流通**(原则 #6):出包了包外就能拼任意查询,绕过全部包装。
 //   · `Database` —— 本文件,包装好的领域 op 的聚合。**出包正是它的用途。**
 //
-// **不自己开连接。** `Database.Default` 的 `R` 通道声明 `DbClient`,谁装配谁给。这是硬性红线:
-// 一次请求只能有一个 drizzle 句柄。如果这里自己 `dbClientLayer(env)`,那参考层那四个端口
-// (它们也要 `DbClient`)就只能各自再开一条 —— 一次请求握着两三个句柄,今天只是浪费,
-// 等这一层长出状态(span、慢查询计数)就是悄悄劈成几半的状态。
-// 装配点(app 的 `lib/server/runtime.ts`)建一次 `dbClientLayer(env)`,一个 `Layer.provide`
-// 分给所有人,Effect 的 layer memoisation 保证只建一次。
+// **不自己开连接,也不握着连接。** 门票上的 op 在跑的那一刻从 context 里取 `DbClient`(上面的
+// `bindPerCall`),谁装配谁给。红线仍是**一次请求一个 drizzle 句柄**(ADR 0045 §3):装配点
+// (app 的 `lib/server/runtime.ts`)一次请求 `provideDbClient(env)` 一次,这次请求里的每一个 op ——
+// 这张票上的、参考层那张票上的 —— 读到的都是那同一个值。
 //
-// **userId 在装配那一刻被吃掉**(ADR 0037):各领域建自己那一刻从 `CurrentUser` 读一次
-// (ADR 0044),下面每个字段的方法签名里一个 user 参数都没有,拿错用户在编译期就发生不了。
+// **门票本身每个 isolate 建一次**(ADR 0054):它里面没有连接、没有用户,只有「怎么绑」。
+// userId 同样在 op 跑的那一刻取;下面每个字段的方法签名里一个 user 参数都没有(ADR 0037),
+// 而 `R` 里的 `CurrentUser` 保证没给 user 的 effect 编译不过(ADR 0044 选 Tag 不选 Reference 的理由)。
 //
-// **挂的是各领域的 `make`,不是它们的 Tag**(#504 T5):`yield* AccountStore` 会把八个 Tag 顶到
-// `Database.Default` 的 `R` 上,装配点就得先把八个 layer 合出来再 provide 一次 —— 聚合的意义
-// 正是让装配点不必知道里头有几个领域。各领域那八个 class 现在只是过渡壳(app 还有调用点直接
-// `yield*` 它们),T7–T12 搬完即删,留下的就是这里 yield 的这排 make。
+// **挂的是各领域的绑定函数,不是它们的 Tag**(#504 T5):聚合的意义正是让装配点不必知道里头有几个
+// 领域。
 export class Database extends Effect.Service<Database>()("db/Database", {
-  effect: Effect.gen(function* () {
-    return tracedStores({
-      accounts: yield* makeAccountStore,
-      manual: yield* makeManualStore,
-      portfolios: yield* makePortfolioStore,
-      settings: yield* makeSettingsStore,
-      snapshots: yield* makeSnapshotStore,
+  sync: () =>
+    perUser({
+      accounts: makeAccountStore,
+      manual: makeManualStore,
+      portfolios: makePortfolioStore,
+      settings: makeSettingsStore,
+      snapshots: makeSnapshotStore,
       // 同步轮的状态(ADR 0048)。它落在 `user_cache` 上,但**不是**那片 KV 的一个用法 ——
       // 它的写入是带轮 id 条件的单语句,通用 `put(key, value)` 表达不了,漏网竞态会互相盖。
-      syncRounds: yield* makeSyncRoundStore,
-      tabPins: yield* makeTabPinStore,
-      tags: yield* makeTagStore,
-      transfer: yield* makeTransferStore,
+      syncRounds: makeSyncRoundStore,
+      tabPins: makeTabPinStore,
+      tags: makeTagStore,
+      transfer: makeTransferStore,
       // **per-user 的 KV 缓存也在这张票上。** 它不是「领域」,是一片存储 —— 但取用方式与领域
       // 一样,而 app 真的有一处直接用它:DeFi 协议图(`logos/store.ts`)那份数据来自用户
       // 自己同步下来的余额 meta,没有上游、不出网,不属于参考层。以前它只能从参考层的装配里
       // 漏一个 `CacheStore` 端口出来给 app,那是「借道」;现在它就在 db 的门票上。
-      cache: yield* makeUserCacheStore,
-    });
-  }),
+      cache: makeUserCacheStore,
+    }),
 }) {}
 
 // **第二张门票:没有「谁的」这回事的那些 op。**
@@ -105,12 +157,11 @@ export class Database extends Effect.Service<Database>()("db/Database", {
 // `R` 里只有 `DbClient`,**没有 `CurrentUser`** —— 这就是它与 `Database` 的全部区别,
 // 也是类型上「这里够不到任何用户数据」的写法。
 export class GlobalDatabase extends Effect.Service<GlobalDatabase>()("db/GlobalDatabase", {
-  effect: Effect.gen(function* () {
-    return tracedStores({
-      refIndex: yield* makeGlobalRefIndexStore,
-      accounts: yield* makeGlobalAccountStore,
-    });
-  }),
+  sync: () =>
+    ownerless({
+      refIndex: makeGlobalRefIndexStore,
+      accounts: makeGlobalAccountStore,
+    }),
 }) {}
 
 // **第三张门票:参考层要的那几片。**
@@ -129,11 +180,18 @@ export class GlobalDatabase extends Effect.Service<GlobalDatabase>()("db/GlobalD
 // `provideMerge` 把参考层内部那一个透出去给 app 共用,反倒是更绕的写法。
 export class DatabaseForOracle extends Effect.Service<DatabaseForOracle>()("db/DatabaseForOracle", {
   effect: (namer: string) =>
-    Effect.gen(function* () {
-      return tracedStores({
-        tokens: yield* makeUserTokenStore(namer),
-        tokenPrices: yield* makeUserTokenPriceStore(namer),
-        cache: yield* makeUserCacheStore,
-      });
-    }),
+    Effect.sync(() =>
+      perUser({
+        tokens: makeUserTokenStore(namer),
+        tokenPrices: makeUserTokenPriceStore(namer),
+        cache: makeUserCacheStore,
+      }),
+    ),
 }) {}
+
+// 参考层那几片的契约 —— **就是门票上那一格的类型**(从实现推导,不另抄一份签名)。出包是因为
+// `@folio/oracle` 的几片把 store 当参数往下传,要一个能写在签名里的名字。
+export type TokenStore = DatabaseForOracle["tokens"];
+export type TokenPriceStore = DatabaseForOracle["tokenPrices"];
+export type CacheStore = DatabaseForOracle["cache"];
+export type GlobalRefIndexStore = GlobalDatabase["refIndex"];

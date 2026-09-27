@@ -1,20 +1,17 @@
 import { Toaster, useMediaQuery } from "@folio/ui";
 import { TanStackDevtools } from "@tanstack/react-devtools";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { getRouteApi, HeadContent, Scripts } from "@tanstack/react-router";
+import { ClientOnly, HeadContent, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { IntlProvider } from "use-intl";
+import { AppShellSkeleton } from "@/components/app-shell";
 import { applyStoredTheme, THEME_INIT_SCRIPT } from "@/lib/hooks/use-theme";
+import { LOCALE_INIT_SCRIPT, useLocalePreference } from "@/lib/i18n/locale-preference";
 import { messages } from "@/lib/i18n/messages";
 import { registerServiceWorker, useUpdateToast } from "@/lib/pwa/service-worker";
-import { localePreferenceQuery } from "@/lib/queries/preferences";
 import appCss from "@/styles.css?url";
 import { appCssLoaderScript, SPLASH_STYLE, THEME_COLORS } from "./pwa-head";
 import { SplashScreen } from "./splash";
-
-// 从 __root 的 loader 读 now(getRouteApi 免于反向 import Route 造成环)。
-const rootRoute = getRouteApi("__root__");
 
 // toast 的落位:手机顶部(叠安全区)、桌面右下角。
 //
@@ -49,9 +46,17 @@ function UpdateWatcher() {
   return null;
 }
 
+// **这份文档在构建期渲一次,作为静态文件发给所有人**(ADR 0049 补记:SPA 模式 prerender 出
+// `index.html`,导航请求不进 Worker)。所以这里渲出来的东西不能依赖「是谁、什么时候、什么语言」:
+//   · locale:服务端 / 补水那一帧是默认语言(壳就是按它渲的),补水后换成 localStorage /
+//     浏览器语言那个真值(useLocalePreference 的 useSyncExternalStore 负责两帧衔接,不报 mismatch)。
+//     `<html lang>` 首帧就对:<head> 里的 LOCALE_INIT_SCRIPT 在 React 之前设好。
+//   · now:浏览器里取。它若在服务端取,就是**发版那一刻**,永远错。作为 IntlProvider 的全局 now,
+//     relativeTime 才有基准(否则 use-intl 抛 ENVIRONMENT_FALLBACK);壳里没有用到它的文字,
+//     构建期那个值不会进 DOM,补水也就不会对不上。
 export function RootDocument({ children }: { children: React.ReactNode }) {
-  const { now } = rootRoute.useLoaderData();
-  const { data: locale } = useSuspenseQuery(localePreferenceQuery());
+  const locale = useLocalePreference();
+  const [now] = useState(() => new Date());
   // 挂载后重放主题:<head> 脚本负责首帧无闪,但 hydration recovery / 重渲染可能把它设的 .dark 冲掉
   // 且全站再无人恢复(useTheme 仅设置页挂载)→ 此处兜底,让 React 生命周期在每次(重)挂载后自愈。见 lib/hooks/use-theme。
   useEffect(() => {
@@ -71,6 +76,9 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
         {/* 深色模式无闪烁:hydration 前就按 localStorage/system 设好 .dark(见 lib/hooks/use-theme)。 */}
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,无用户输入 */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {/* 首帧即正确的 <html lang>:壳是静态的,语言只能由浏览器在 hydration 前自己定(见 lib/i18n/locale-preference)。 */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,无用户输入 */}
+        <script dangerouslySetInnerHTML={{ __html: LOCALE_INIT_SCRIPT }} />
         {/* 冷启动闪屏的关键样式(ADR 0051):内联,不依赖 app 样式表,首帧即可画覆盖层。 */}
         {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量样式,无用户输入 */}
         <style dangerouslySetInnerHTML={{ __html: SPLASH_STYLE }} />
@@ -87,14 +95,20 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
           locale={locale}
           messages={messages[locale]}
           timeZone="UTC"
-          now={new Date(now)}
+          now={now}
           // 缺翻译 → 回退到请求的 key 本身(对 Inputs 而言即英文源串 label;见 ProviderInput.label)。
           getMessageFallback={({ key }) => key}
         >
           {/* 冷启动闪屏(ADR 0051):**包住页面**。未放行前把 children 设 visibility:hidden(照常
               SSR/hydrate,只是不绘制)—— 没有可露脸的东西,从根上消除「页面抢在 splash 前闪一下」。
               就绪后覆盖层淡出、露出下面已渲好的页;阶段文案住 IntlProvider 内取。 */}
-          <SplashScreen>{children}</SplashScreen>
+          <SplashScreen>
+            {/* **静态壳与补水那一帧只渲骨架,不渲路由**。壳只有一份(`/` 的 prerender),却要给
+                `/login`、`/accounts`…… 所有地址用;若在这里渲路由,烤进去的就是 `/` 那棵树,
+                在别的地址上补水必然对不上。所以这一帧与地址无关:永远是这张零数据骨架,
+                补水完成后才换成真正的路由(闪屏盖着,看不到这次交接)。 */}
+            <ClientOnly fallback={<AppShellSkeleton />}>{children}</ClientOnly>
+          </SplashScreen>
           <AppToaster />
           {/* 运行中更新提示:探到新版弹「有新版本 · 更新」toast(住 IntlProvider 内取文案)。 */}
           <UpdateWatcher />

@@ -15,9 +15,10 @@ import { OVERRIDES, UPSTREAM_ID } from "./constants";
 //    每个方法出口 `Effect.provide` 进去。这样实现面仍是纯 Effect(测试直接 provide 一个假
 //    `HttpClient` 就能跑,见 tests/harness.ts),而端口那一侧是干净的。
 //
-// 三个 layer 各建一次 client 是明知接受的:`makeRateLimit` 的游标按 key 存在模块级
-// (CF Workers 上跨请求活着的那份,见 client-core),所以「建三次」不会让额度凭空回满,
-// 代价只是三个闭包。换来的是三个端口各自可换供应商(ADR 0023)。
+// `transport` 只在 `coinGeckoUpstreamLayers`(./upstreams.ts)里调一次:三个端口挂在同一个引用上,
+// 一次构建只建一个 client(建 client 不是免费的,profile 里每次约 1.7ms CPU),而出口仍是三个
+// 各自可换供应商的 layer(ADR 0023)。`makeRateLimit` 的游标按 key 存在模块级(CF Workers 上
+// 跨请求活着的那份,见 client-core),所以建几份 client 都是同一个闸。
 export type Needs = CoinGeckoClient | Outbound;
 
 export const transport = (config: CoinGeckoConfig): Layer.Layer<Needs> =>

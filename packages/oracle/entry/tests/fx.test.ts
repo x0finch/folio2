@@ -13,7 +13,8 @@ import { harness, now0, upstreamDown } from "./fakes";
 // 历史日汇率一个 `CacheStore` 都不碰(它落全局的 `token_daily_prices`)。
 
 const setup = (rates: Record<string, number> = {}) => harness({ rates });
-const withFx = <A, E>(f: (fx: FxService) => Effect.Effect<A, E>) => Effect.flatMap(FxService, f);
+const withFx = <A, E, R>(f: (fx: FxService) => Effect.Effect<A, E, R>) =>
+  Effect.flatMap(FxService, f);
 
 describe("resolve —— 读", () => {
   it("USD 恒 1,而且不查缓存", async () => {

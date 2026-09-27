@@ -10,7 +10,7 @@ import type {
 import { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Clock, Effect, Layer } from "effect";
 import { IDS_PER_REQUEST, MARKETS_PER_PAGE, UPSTREAM_ID, VS_USD } from "./constants";
-import { closeOver, type Needs, transport } from "./layer";
+import { closeOver, type Needs } from "./layer";
 import { coinIdOf, parseMarkets, parsePriceSeries, parseSearch, parseSimplePrice } from "./parse";
 import { toRefIndexRows } from "./ref-index";
 import { req, withClient } from "./runtime";
@@ -191,7 +191,6 @@ const make = Effect.map(closeOver, (close): TokenUpstream => {
   };
 });
 
-export const coinGeckoTokenUpstreamLayer = (
-  config: CoinGeckoConfig = {},
-): Layer.Layer<TokenUpstream> =>
-  Layer.provide(Layer.effect(TokenUpstream, make), transport(config));
+/** 接在给定的传输层上 —— 唯一的出口是 `coinGeckoUpstreamLayers`(./upstreams.ts),三个端口共用那一个 client。 */
+export const tokenUpstreamOn = (t: Layer.Layer<Needs>): Layer.Layer<TokenUpstream> =>
+  Layer.provide(Layer.effect(TokenUpstream, make), t);

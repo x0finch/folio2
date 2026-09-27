@@ -26,9 +26,6 @@ vi.mock("@/lib/server/settings", () => ({
 }));
 vi.mock("@/lib/server/preferences", () => ({
   getCurrencyPreference: vi.fn(),
-  getLocalePreference: vi.fn(),
-  setCurrencyPreference: vi.fn(),
-  setLocalePreference: vi.fn(),
 }));
 vi.mock("@/lib/core/auth-client", () => ({
   authClient: { passkey: {} },

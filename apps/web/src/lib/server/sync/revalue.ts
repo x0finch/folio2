@@ -1,4 +1,5 @@
 import type { Balance } from "@folio/connectors-basic";
+import type { DbRequest } from "@folio/db";
 import { Oracle } from "@folio/oracle";
 import { fiatCodeOf, type ValuationMode, valuate } from "@folio/oracle-basic";
 import { Effect, Option } from "effect";
@@ -29,7 +30,7 @@ export const revalue = (
   balances: Balance[],
   idByRef: ReadonlyMap<string, string>,
   mode: ValuationMode = "self-first",
-): Effect.Effect<Balance[], never, Oracle> =>
+): Effect.Effect<Balance[], never, Oracle | DbRequest> =>
   Effect.gen(function* () {
     const { tokens, fx } = yield* Oracle;
     return yield* Effect.forEach(

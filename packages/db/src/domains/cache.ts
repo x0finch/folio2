@@ -1,8 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { Clock, Effect, Option } from "effect";
-import { chunk, DbClient } from "../client";
+import { chunk, type DbClient } from "../client";
 import type { Drizzle } from "../connect";
-import { CurrentUser } from "../current-user";
 import { userCache } from "../schema";
 
 // per-user 的 KV 缓存(#199)。**通用读写这一条路上有三种键**(`warm` / `fx:<币种>` /
@@ -39,9 +38,6 @@ export interface CacheEntry {
   value: unknown;
   stale: boolean;
 }
-
-/** 这一层的契约 —— 从实现推导,不另抄一份签名。 */
-export type CacheStore = Effect.Effect.Success<typeof makeUserCacheStore>;
 
 /** 一行待写:值已经序列化过 —— 分批要按字节算,而序列化一次就够了。 */
 interface Row {
@@ -102,10 +98,7 @@ const byBytes = (rows: readonly Row[]): Row[][] => {
   return parts;
 };
 
-export const makeUserCacheStore = Effect.gen(function* () {
-  const client = yield* DbClient;
-  const userId = yield* CurrentUser;
-
+export const makeUserCacheStore = (client: DbClient, userId: string) => {
   // 存进去的一定是 JSON.stringify 的产物;真读到坏值就当没有这条 ——
   // 下次访问会照常回源覆盖,不该让一条脏缓存把整个页面弄崩。
   const decode = (row: { v: string; expiresAt: number }, now: number): CacheEntry | undefined => {
@@ -178,4 +171,4 @@ export const makeUserCacheStore = Effect.gen(function* () {
         );
       }),
   };
-});
+};

@@ -157,30 +157,6 @@ describe("刷新映射表", () => {
     expect(isInvalidated(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT))).toBe(false);
   });
 
-  it("preference.locale 连法币选项一起刷,但不碰快照", async () => {
-    seed(preferenceKeys.locale());
-    seed(tokenKeys.fiatOptions());
-    seed(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT));
-
-    await invalidateFor(queryClient, "preference.locale");
-
-    expect([preferenceKeys.locale(), tokenKeys.fiatOptions()].map(isInvalidated)).toEqual([
-      true,
-      true,
-    ]);
-    expect(isInvalidated(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT))).toBe(false);
-  });
-
-  it("preference.currency 只刷币种偏好", async () => {
-    seed(preferenceKeys.currency());
-    seed(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT));
-
-    await invalidateFor(queryClient, "preference.currency");
-
-    expect(isInvalidated(preferenceKeys.currency())).toBe(true);
-    expect(isInvalidated(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT))).toBe(false);
-  });
-
   it("settings.valuation 只刷估值口径键", async () => {
     seed(settingsKeys.valuation());
     seed(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT));

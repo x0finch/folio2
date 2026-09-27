@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { CurrentUser, Database, dbClientLayer } from "@folio/db";
+import { Database, type DbRequest, provideCurrentUser, provideDbClient } from "@folio/db";
 import { Effect } from "effect";
 
 // **夹具那一侧的库把手。**
@@ -16,13 +16,12 @@ type Promisified<S> = {
     : S[K];
 };
 
-const runOnce = <A>(userId: string, effect: Effect.Effect<A, never, Database>): Promise<A> =>
+const runOnce = <A>(
+  userId: string,
+  effect: Effect.Effect<A, never, Database | DbRequest>,
+): Promise<A> =>
   Effect.runPromise(
-    effect.pipe(
-      Effect.provide(Database.Default),
-      Effect.provide(dbClientLayer(env)),
-      Effect.provideService(CurrentUser, userId),
-    ),
+    effect.pipe(Effect.provide(Database.Default), provideCurrentUser(userId), provideDbClient(env)),
   );
 
 const promisify = <S extends object>(userId: string, pick: (db: Database) => S): Promisified<S> =>
@@ -39,7 +38,7 @@ const promisify = <S extends object>(userId: string, pick: (db: Database) => S):
             }
             // 夹具只用不会失败的那些 op;真会失败的(attach 之类)由用例自己经 `call` 走。
             return (method as (...a: unknown[]) => Effect.Effect<unknown>).apply(svc, args);
-          }) as Effect.Effect<unknown, never, Database>,
+          }) as Effect.Effect<unknown, never, Database | DbRequest>,
         ),
   });
 

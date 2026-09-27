@@ -1,4 +1,4 @@
-import type { TokenPriceStore, TokenStore } from "@folio/db";
+import type { DbRequest, TokenPriceStore, TokenStore } from "@folio/db";
 import { INFO_TTL_MS, normalizeSymbol, PRICE_TTL_MS } from "@folio/oracle-basic";
 import type { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
@@ -20,7 +20,7 @@ export interface TokenStaleRefresh {
   //
   // `degraded` = 这一轮有上游挂了(而不是「没什么要刷」)。`E` 仍是 `never` —— 调用方不被逼 catch,
   // 变化只是「挂了」从只进日志变成也进返回值,于是「连续几天暖不上价」有了抓手(#375)。
-  refreshStale(ids: readonly string[]): Effect.Effect<RefreshStaleReport>;
+  refreshStale(ids: readonly string[]): Effect.Effect<RefreshStaleReport, never, DbRequest>;
 }
 
 export interface RefreshStaleReport {
@@ -39,7 +39,7 @@ export const makeStaleRefresh = (
   // 一批 (ref → tokenId) 的价:回源 → 写回。返回写了几条 + 这一轮有没有降级。
   const refreshPrices = (
     byRef: Map<string, string>,
-  ): Effect.Effect<{ written: number; degraded: boolean }> =>
+  ): Effect.Effect<{ written: number; degraded: boolean }, never, DbRequest> =>
     Effect.gen(function* () {
       if (byRef.size === 0) return { written: 0, degraded: false };
       const fetched = yield* Effect.either(upstream.fetchPrices([...byRef.keys()]));
@@ -66,7 +66,7 @@ export const makeStaleRefresh = (
   // 而它们其实是同一行 —— 用户看到的名字取决于哪个账户先同步,这不该是随机的。
   const refreshInfos = (
     byRef: Map<string, string>,
-  ): Effect.Effect<{ written: number; degraded: boolean }> =>
+  ): Effect.Effect<{ written: number; degraded: boolean }, never, DbRequest> =>
     Effect.gen(function* () {
       if (byRef.size === 0) return { written: 0, degraded: false };
       const fetched = yield* Effect.either(upstream.fetchTokens([...byRef.keys()]));

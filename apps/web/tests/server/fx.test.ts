@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { handleGetCurrencyPreference } from "@/lib/server/preferences/currency";
 import { displayRate as rateOf } from "@/lib/server/preferences/fx";
 import { runEffect } from "@/lib/server/runtime";
 
@@ -153,5 +154,30 @@ describe("软过期", () => {
 
     expect(await displayRate(USER, "EUR")).toBeCloseTo(100000 / 92000, 6);
     expect(outbound).toEqual([]); // 读路径不为新鲜度出网,那是预热的活
+  });
+});
+
+// `getCurrencyPreference` 那个 handler:码由浏览器作参数传来(ADR 0049 补记,以前读 cookie ——
+// 那时它要 TanStack 的请求上下文,这一层 import 不进来,这几条只能 skip)。现在它只是
+// 「校验码 → 问汇率 → 套形状」,可以在这里走真 D1 了。
+describe("getCurrencyPreference", () => {
+  const preferenceOf = (userId: string, code: string) =>
+    runEffect(handleGetCurrencyPreference)({ data: { code }, context: { userId } });
+
+  it("支持的币种 + 汇率可得 → 就是那个币种和它的汇率", async () => {
+    const pref = await preferenceOf(USER, "EUR");
+    expect(pref.currency.code).toBe("EUR");
+    expect(pref.rate).toBeCloseTo(100000 / 92000, 6);
+  });
+
+  it("取不到汇率 → 整体回退 USD(不是「EUR 按 1 算」)", async () => {
+    const pref = await preferenceOf(USER, "KRW");
+    expect(pref).toMatchObject({ currency: { code: "USD" }, rate: 1 });
+  });
+
+  it("认不出的码 → 当 USD,且一次网都不出(码是用户可改的输入)", async () => {
+    const pref = await preferenceOf(USER, "DOGE");
+    expect(pref).toMatchObject({ currency: { code: "USD" }, rate: 1 });
+    expect(outbound).toEqual([]);
   });
 });
