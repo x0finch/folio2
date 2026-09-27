@@ -8,7 +8,7 @@
     "predev:tunnel": "node scripts/kill-stale-dev.mjs",
     "dev:tunnel": "node scripts/dev-tunnel.mjs",
     "generate-routes": "tsr generate",
-    "build": "vite build",
+    "build": "vite build && node scripts/check-shell-is-zero-data.mjs",
     "preview": "vite preview",
     "test": "vitest run --passWithNoTests && vitest run --config vitest.workers.config.ts",
     "typecheck": "tsc --noEmit",
