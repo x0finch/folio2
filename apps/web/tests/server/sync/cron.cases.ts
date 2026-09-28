@@ -102,7 +102,7 @@ describe("sync/cron(fan-out)", () => {
       ["platforms", true],
       ["defi-logos", true],
     ]);
-    expect(result).toEqual({ users: 1, accounts: 2, failed: 0 });
+    expect(result).toEqual({ users: 1, accounts: 2, failed: 0, jobs: 2 + 5 });
     // 轮开着、还没收官 —— 收官是最后一个 consumer 的事。
     expect(mine?.finishedAt).toBeNull();
   });

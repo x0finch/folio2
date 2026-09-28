@@ -326,6 +326,8 @@ export interface FanOutResult {
   accounts: number;
   /** 开轮 / 投递那一步就炸了的用户数。 */
   failed: number;
+  /** 投出去的消息总数(`sync-account` + 每个用户的 `hourlyUserJobs`)。 */
+  jobs: number;
 }
 
 /**
@@ -359,13 +361,14 @@ export const fanOutAllUsers = (
       Effect.map((batch) => ({
         accounts: batch.filter((m) => m.job.kind === "sync-account").length,
         failed: 0,
+        jobs: batch.length,
       })),
       Effect.catchAllCause((cause) =>
         Effect.sync(() => {
           getLogger(["folio", "cron"]).warn("user fan-out failed, user skipped", {
             error: Cause.pretty(cause),
           });
-          return { accounts: 0, failed: 1 };
+          return { accounts: 0, failed: 1, jobs: 0 };
         }),
       ),
     ),
@@ -374,6 +377,7 @@ export const fanOutAllUsers = (
       users: userIds.length,
       accounts: per.reduce((n, p) => n + p.accounts, 0),
       failed: per.reduce((n, p) => n + p.failed, 0),
+      jobs: per.reduce((n, p) => n + p.jobs, 0),
     })),
   );
 

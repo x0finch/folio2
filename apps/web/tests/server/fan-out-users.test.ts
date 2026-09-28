@@ -48,7 +48,7 @@ describe("fanOutAllUsers", () => {
 
     expect(maxInFlight).toBe(1);
     expect(events).toEqual(["start:u1", "end:u1", "start:u2", "end:u2", "start:u3", "end:u3"]);
-    expect(result).toEqual({ users: 3, accounts: 3, failed: 0 });
+    expect(result).toEqual({ users: 3, accounts: 3, failed: 0, jobs: 3 + 3 * 5 });
   });
 
   // `prices` 不延后(FOL-87):同步只读价表,两者不排先后。
@@ -93,13 +93,13 @@ describe("fanOutAllUsers", () => {
     );
 
     expect(seen).toEqual(["a", "b", "c"]);
-    expect(result).toEqual({ users: 3, accounts: 2, failed: 1 });
+    expect(result).toEqual({ users: 3, accounts: 2, failed: 1, jobs: 2 + 2 * 5 });
     expect(sent.some((m) => m.job.userId === "b")).toBe(false);
   });
 
   it("空名单:零调用、零投递", async () => {
     const { result, sent } = await run([], () => Effect.succeed([]));
-    expect(result).toEqual({ users: 0, accounts: 0, failed: 0 });
+    expect(result).toEqual({ users: 0, accounts: 0, failed: 0, jobs: 0 });
     expect(sent).toEqual([]);
   });
 });

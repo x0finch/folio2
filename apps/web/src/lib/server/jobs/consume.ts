@@ -97,12 +97,15 @@ export const consumeMessage = (
     }
     const job = decoded.right;
     const exit = yield* Effect.exit(run(job));
+    const meta = { kind: job.kind, messageId: message.id, attempts: message.attempts };
     if (Exit.isSuccess(exit)) {
+      // 每条一行、带 kind:Workers Logs 里一次 queue 调用本身不带「这是哪件活」,按 kind 拆 CPU
+      // (线上查询与 perf:cpu:jobs 都靠它认)就只能读这一行。
+      log.info("job done", meta);
       message.ack();
       return;
     }
     const error = Cause.pretty(exit.cause);
-    const meta = { kind: job.kind, messageId: message.id, attempts: message.attempts };
     if (message.attempts <= JOB_MAX_RETRIES) {
       log.warn("job failed, will retry", { ...meta, error });
       message.retry();

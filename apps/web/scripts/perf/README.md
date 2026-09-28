@@ -110,8 +110,10 @@ pnpm --filter @folio/web perf:cpu:jobs --list              # cron-daily / cron-s
 pnpm --filter @folio/web perf:cpu:jobs --help
 ```
 
-上面那个 `perf:cpu` 只量读路径。这个量**后台写路径**:整点 sweep(`30 * * * *`,同步每个账户 +
-预热)与每天那条(`0 23 * * *`,投剪 note / 目录的活)。改 cron 之前、之后各跑一遍,两张表
+上面那个 `perf:cpu` 只量读路径。这个量**后台写路径**:整点 sweep(`30 * * * *`,开轮 + 给每个账户投
+一条 `sync-account`、给每个用户投 `prices` / `daily-prices` / `fx` / `platforms` / `defi-logos`)与每天
+那条(`0 23 * * *`,投 `prune-notes` / `catalogue`)。两个 cron 本体都只投活(FOL-86 / FOL-88),真活在
+队列 consumer 里一条一次调用地跑,所以表里分开量:cron 那一次,与**每件活的每一次 consumer 调用**。改 cron 之前、之后各跑一遍,两张表
 贴进 PR。基线存在 `baselines/`(`jobs-before-2026-09-28.txt` 是改成队列扇出之前的那一份,里面的
 `cron-ref-index` 行是刷全局映射表还在 Worker 里跑的时候量的)。
 
@@ -147,18 +149,27 @@ pnpm --filter @folio/web perf:cpu:jobs --help
 5. 每个任务先单列一次 **`:first`**(灌完数据后的第一次:目录没缓存 / 代币没建行),
    再量 `--reps` 次稳态(默认 sweep 5、每天那条 3)。映射表是空的就先用 `scripts/ref-index` 刷一次
    (不计时,见上)—— 链上的币靠它认。
-6. **队列(前向兼容)**:构建出的 wrangler.json 里有 `queues.consumers` 时,触发之后接着等队列
-   排空(一段时间既没有 CPU 活动、也没有新的 `QUEUE <name> a/b (Nms)` 日志行,阈值随配置的
-   `max_batch_timeout`),多出两行:`<任务>:window`(cron + 它引出的全部消费,每次触发的总数)与
-   `<任务>:queue`(逐批)。逐批的拆法是按时间窗:一批的起点 = 看到那行日志的时刻 − 它自报的耗时,
-   与 cron 本体重叠时会拆错,所以逐批是**近似**,总数是准的。没有队列 → 这两行不出现。
+6. **队列**:触发之后接着等**这次投的每一条消息**都收尾。条数来自 cron 投完那行日志的 `jobs`
+   (`cron sweep enqueued` / `daily jobs enqueued`),收尾来自 consumer 每条一行、带 `kind` 的日志
+   (`job done` / `job failed…` / `invalid job dropped`,见 `jobs/consume.ts`);条数收齐之后再等一段
+   安静(没有新的 `QUEUE <name> a/b (Nms)` 行 / 收尾行,阈值随 `max_batch_timeout`),接住
+   接力投的后续消息(`prices` 拆条、`daily-prices` 补不完再投)。**只靠安静不够**:`platforms` /
+   `defi-logos` 延后 120s 才投递,中间整段是安静的 —— 所以一次 sweep 触发本机要两分多钟。
+   多出的行:`<任务>:window`(cron + 它引出的全部 consumer 调用,每次触发的总数)与
+   `<任务>:queue:<kind>`(每件活的**每次调用**一个样本 —— 免费计划的 10ms 是按一次调用算的)。
+   拆法是按时间窗:一次调用的起点 = 看到那行 `QUEUE` 的时刻 − 它自报的耗时,kind 按日志先后配上;
+   consumer 并发(`max_concurrency`)时相邻两次会配错,所以逐 kind 是**近似**,总数是准的。
+   构建产物里没有 `queues.consumers` → 这些行不出现。
 
 ### 怎么读输出
 
 ```
-   invocation         n  status  mean  p50  max  proc  wall p50  fetches  result      owners (mean ms/invocation)
-!  cron-sweep:first*  1  200     …                                    83  synced 8/8  Effect … · app code … · D1 driver …
-!  cron-sweep         5  200     …                                    63  synced 8/8  …
+   invocation                     n  status   mean … fetches  result                  owners (mean ms/invocation)
+!  cron-sweep:first*              1  200      70.0 …     0  synced 8/8, jobs 13/13  Effect … · app code … · D1 driver …
+!  cron-sweep                     1  200      86.4 …     0  synced 8/8, jobs 13/13  …
+!  cron-sweep:window              1  200     645.5 …     0  synced 8/8, jobs 13/13  …
+!  cron-sweep:queue:prices        1  acked    62.1 …     3  1.0 per trigger
+!  cron-sweep:queue:sync-account  8  acked    59.0 …     3  8.0 per trigger
 ```
 
 - **mean / p50 / max** —— 每次调用的采样 CPU(JS + GC),在 n 次之间比。
@@ -173,8 +184,10 @@ pnpm --filter @folio/web perf:cpu:jobs --help
 - **wall p50** —— 触发到答的往返。sweep 的 wall 主要是闸在排队(Rabby 每秒 1 发、CoinGecko 每分钟
   80 发),不是 CPU。
 - **fetches** —— 这次调用假上游收到几发(按上游 + 路径的明细在 `summary.json` 的 `fetchesByRoute`)。
-- **result** —— 从这次调用自己的日志里读出来的:sweep 是 `synced ok/总数`,刷表是
-  `rows 总数 +新增/~改/-删`。没干成(有账户失败、没见到收尾日志)的状态格会标 `✗`,那行数字作废。
+- **result** —— 从这次调用自己的日志里读出来的:sweep 是 `synced 同步成功/总数`(各轮收官那行
+  `queued round done` 相加)+ `jobs 收尾/投出`;每天那条是用户数 + `jobs 收尾/投出`。没干成(有账户
+  失败、有消息放弃或超时、没见到投递日志)的状态格会标 `✗`,那行数字作废。逐 kind 那几行的 result
+  是「每次触发平均几次这种调用」。
 - **owners** —— 同 perf:cpu。
 
 输出目录默认 `.wrangler/perf-state/runs/jobs-<时间戳>/`:每次调用一份 `<任务>-<first|repN>.cpuprofile`、

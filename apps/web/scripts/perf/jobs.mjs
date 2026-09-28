@@ -14,9 +14,10 @@
 // 多半落在一个没热过这条路径的 isolate 上;连着在同一个 isolate 里触发,第二次起 JIT 与模块级缓存
 // (Rabby 的链表、各家的闸)都是热的,量小了。重起之间还把代币价标成过期,理由见 expirePrices。
 //
-// 队列(前向兼容):构建出的 wrangler.json 里有 `queues.consumers` 时,一次触发之后接着等队列排空,
-// 从 wrangler 的 `QUEUE <name> a/b (Nms)` 日志行认出每一批消费,按时间窗把采样拆给各批。没有队列
-// (当前代码)→ 这一截整个跳过。
+// 队列(FOL-86 起两个 cron 都只投活,真活在 consumer 里):一次触发之后接着等**它投的每一条消息**都
+// 跑完(cron 那行日志报了投几条,consumer 每条收尾打一行带 kind 的日志),再等一段安静(接力投的
+// 后续消息)。每一次消费从 wrangler 的 `QUEUE <name> a/b (Nms)` 日志行认出来,按时间窗把采样拆给它,
+// 按 kind 汇总成表里的一行一件活。构建产物里没有 `queues.consumers` → 这一截整个跳过。
 //
 // 为什么要它、怎么读输出:见 scripts/perf/README.md。
 import { execFile } from "node:child_process";
@@ -58,6 +59,9 @@ import {
  * `resultOf`:从这次调用的日志里读出「它干成了什么」—— 量到的若是报错路径,数字作废。
  */
 const SCENARIOS = [
+  // 两条都只投活:`enqueued` 是 cron 投完那行日志的 message,它的 `jobs` 字段 = 投了几条 —— 等队列
+  // 排空时就等这么多条收尾(`settleQueue`)。
+  //
   // 每天那条只投活(prune-notes / catalogue,FOL-88)。**全局映射表不在这里刷了**(FOL-85):它挪到了
   // GitHub Actions 里的 Node 脚本,不再吃 Worker 的预算,所以这里没有 `cron-ref-index` 那一格了。
   // 那个脚本的耗时见下面 `refreshRefIndex`(sweep 要一张非空的表,灌数据后先跑它一次)。
@@ -66,42 +70,83 @@ const SCENARIOS = [
     cron: "0 23 * * *",
     label: "daily: enqueue prune-notes + catalogue",
     reps: DEFAULT_DAILY_REPS,
+    enqueued: "daily jobs enqueued",
     beforeEach: () => {},
-    resultOf: (logs) => {
+    resultOf: (logs, settled) => {
       const done = logEvent(logs, "daily jobs enqueued");
       if (!done) return { ok: false, text: "no enqueued log" };
-      return { ok: true, text: `users ${done.users}`, detail: done };
+      const drained = drainedResult(settled);
+      return {
+        ok: drained.ok,
+        text: `users ${done.users}, ${drained.text}`,
+        detail: { ...done, queue: settled?.summary },
+      };
     },
   },
+  // 整点 sweep(FOL-86):cron 那一次只开轮 + 投消息;每个账户一条 `sync-account`,每个用户再补
+  // `hourlyUserJobs`(prices / daily-prices / fx 立即,platforms / defi-logos 延后 120s —— 所以排空
+  // 不能只靠「安静了几秒」,要等投的条数收完)。**干成没有**看两处:每一轮的收官日志
+  // (`queued round done`,最后一个 consumer 打)里 synced == total,以及每条消息都 ack 了。
   {
     key: "cron-sweep",
     cron: "30 * * * *",
-    label: "hourly: sync every account + warm",
+    label: "hourly: open rounds + enqueue (sync-account per account, reference jobs per user)",
     reps: DEFAULT_SWEEP_REPS,
+    enqueued: "cron sweep enqueued",
     beforeEach: ({ userId }) => expirePrices(userId),
-    resultOf: (logs) => {
-      const done = logEvent(logs, "cron sweep done");
-      if (!done) return { ok: false, text: "no done log" };
-      const synced = done.ok + done.failed + done.skipped;
+    resultOf: (logs, settled) => {
+      const done = logEvent(logs, "cron sweep enqueued");
+      if (!done) return { ok: false, text: "no enqueued log" };
+      const rounds = logEvents(logs, "queued round done");
+      const total = rounds.reduce((n, r) => n + r.total, 0);
+      const synced = rounds.reduce((n, r) => n + r.synced, 0);
+      const drained = drainedResult(settled);
       return {
-        ok: done.failed === 0 && done.skipped === 0,
-        text: `synced ${done.ok}/${synced}`,
-        detail: done,
+        ok: done.failed === 0 && rounds.length > 0 && synced === total && drained.ok,
+        text: `synced ${synced}/${total}, ${drained.text}`,
+        detail: { ...done, rounds, queue: settled?.summary },
       };
     },
   },
 ];
+
+/** 队列那半干成没有:投的每一条都收尾了、没有一条放弃 / 进死信 / 解不开。没有队列 → 不判。 */
+function drainedResult(settled) {
+  if (!settled?.summary) return { ok: true, text: "no queue" };
+  const { expected, done, gaveUp, retried, invalid, timedOut } = settled.summary;
+  const ok = !timedOut && expected !== null && done >= expected && gaveUp === 0 && invalid === 0;
+  const extra = [
+    retried && `${retried} retried`,
+    gaveUp && `${gaveUp} gave up`,
+    timedOut && "timeout",
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return { ok, text: `jobs ${done}/${expected ?? "?"}${extra ? ` (${extra})` : ""}` };
+}
 const SCENARIO_KEYS = SCENARIOS.map((s) => s.key);
 
 /** 一次触发最多等多久(cron 自己有闸在排队,首轮要翻目录、写几万行)。 */
 const INVOCATION_TIMEOUT_MS = 10 * 60_000;
-/** 队列排空的判据:这么久没有 CPU 活动、也没有新的消费日志。 */
+/**
+ * 队列排空的判据:cron 投的条数都收尾了之后,再这么久没有新的消费日志(接力投的
+ * 后续消息 —— `prices` 超预算拆条、`daily-prices` 补不完再投一条 —— 不带延迟,落在这段安静里)。
+ */
 const QUEUE_QUIET_MS = 2_000;
+/**
+ * consumer 每条消息的收尾日志(`jobs/consume.ts`,都带 `kind`)。`terminal`:这条消息不会再投了。
+ * 最后一次失败之后的「give-up failed」那行不单列 —— 它前面必有一行 final attempt,已经记过。
+ */
+const JOB_LOGS = {
+  "job done": { terminal: true, outcome: "done" },
+  "job failed, will retry": { terminal: false, outcome: "retried" },
+  "job failed on final attempt, giving up": { terminal: true, outcome: "gaveUp" },
+  "invalid job dropped": { terminal: true, outcome: "invalid" },
+};
 /** 本地队列默认的攒批上限(秒)—— wrangler 的默认值;配置里写了就用配置的。 */
 const DEFAULT_MAX_BATCH_TIMEOUT_S = 5;
-/** 排空轮询的间隔,以及「这一格算活动」的 CPU 门槛(纳秒)—— 采样器空转远低于它。 */
+/** 排空轮询的间隔。 */
 const SETTLE_POLL_MS = 50;
-const ACTIVE_CPU_NS_PER_POLL = 5_000_000;
 /** wrangler 打给每一批队列消费的那一行(miniflare 的 formatQueueResponse),去掉颜色后匹配。 */
 const QUEUE_LINE = /QUEUE (\S+) (\d+)\/(\d+)(?: \((\d+)ms\))?/;
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
@@ -197,19 +242,34 @@ function logCursor(file) {
   };
 }
 
-/** 日志里某条 LogTape JSON 行(生产格式,JSON Lines)的 properties;没有 → undefined。 */
-function logEvent(text, message) {
-  for (const line of text.split("\n").reverse()) {
-    const at = line.indexOf("{");
-    if (at < 0 || !line.includes(`"${message}"`)) continue;
-    try {
-      const rec = JSON.parse(line.slice(at));
-      if (rec.message === message) return rec.properties ?? {};
-    } catch {
-      // 半行 / 不是 JSON —— 跳过
-    }
+/** 一行日志若是 LogTape 的 JSON 行(生产格式,JSON Lines)→ `{ message, properties }`;否则 undefined。 */
+function logRecord(line) {
+  const at = line.indexOf("{");
+  if (at < 0 || !line.includes('"message"')) return undefined;
+  try {
+    const rec = JSON.parse(line.slice(at));
+    return typeof rec.message === "string"
+      ? { message: rec.message, properties: rec.properties ?? {} }
+      : undefined;
+  } catch {
+    return undefined; // 半行 / 不是 JSON —— 跳过
   }
-  return undefined;
+}
+
+/** 日志里某条消息的**全部**记录的 properties,按出现顺序。 */
+function logEvents(text, message) {
+  const out = [];
+  for (const line of text.split("\n")) {
+    if (!line.includes(`"${message}"`)) continue;
+    const rec = logRecord(line);
+    if (rec?.message === message) out.push(rec.properties);
+  }
+  return out;
+}
+
+/** 日志里某条消息的最后一条记录的 properties;没有 → undefined。 */
+function logEvent(text, message) {
+  return logEvents(text, message).at(-1);
 }
 
 /** 构建产物里的队列配置(消费者 + 攒批上限)。没有 → null,整段队列逻辑跳过。 */
@@ -227,40 +287,82 @@ function queueConfig() {
 
 /**
  * 触发一次之后等后续调用跑完。没队列 → 立刻返回(scheduled 那一发答了就是跑完了)。
- * 有队列 → 一直等到「quietMs 内既没有 CPU 活动也没有新的消费日志」;每一批消费从日志行认出来,
- * 起点 = 看到那一行的时刻 − 它自报的耗时(日志在一批跑完之后才打)。
+ *
+ * 有队列 → 边读日志边记三样,**按日志里出现的顺序**:
+ *   · cron 投完那一行(`scenario.enqueued`)的 `jobs` —— 要等收尾的条数;
+ *   · consumer 每条消息的收尾行(`JOB_LOGS`)—— 记下它的 kind,排进一个先进先出的队;
+ *   · wrangler 每次消费打的 `QUEUE <name> a/b (Nms)` —— 这是一次 consumer 调用的边界:从队头取走
+ *     它那几条的 kind(`max_batch_size: 1`,通常就是一条),起点 = 看到那行的时刻 − 它自报的耗时
+ *     (那行在一批跑完之后才打)。
+ * 停下来的条件:收尾的条数 ≥ 投的条数,**并且**之后 quietMs 内没有新的消费行 / 收尾行。
+ * 只靠「安静了几秒」是不够的 —— `platforms` / `defi-logos` 延后 120s 才投递,中间整段是安静的。
+ *
+ * **不拿 workerd 的 CPU 判「安静」**(以前是):开着采样器的 workerd 空转本身每 50ms 就有 5–10ms CPU、
+ * 还上下抖,固定门槛判不出安静,每次触发都白等到 10 分钟超时。条数收齐之后只剩接力投的后续消息,
+ * 它们在 quietMs 之内开跑、跑完各打一行,靠日志就够了。
+ *
+ * consumer 并发(`max_concurrency`)时,两次调用的日志会交错,kind 与时间窗都可能配错到相邻那一次:
+ * 逐 kind 的数是**近似**,整段窗口的总数是准的。
  */
-async function settleQueue(queue, readLog, cpuNs) {
-  if (!queue) return { invocations: [], queueLines: 0 };
+async function settleQueue(queue, readLog, scenario) {
+  if (!queue) return { invocations: [], queueLines: 0, summary: null };
   const invocations = [];
+  const kinds = []; // 收尾了、还没配上 QUEUE 行的消息的 kind(先进先出)
+  // 反过来:QUEUE 行先到、收尾行还没读到的那几次调用(两路输出进同一个日志,先后不保证)。
+  const unlabeled = [];
+  const tally = { expected: null, done: 0, retried: 0, gaveUp: 0, invalid: 0, timedOut: false };
+  let terminal = 0;
   let lastActive = nowUs();
-  let lastCpu = cpuNs();
   const deadline = Date.now() + INVOCATION_TIMEOUT_MS;
-  while (Date.now() < deadline) {
+  for (;;) {
+    if (Date.now() >= deadline) {
+      tally.timedOut = true;
+      break;
+    }
     await sleep(SETTLE_POLL_MS);
     const seenUs = nowUs();
     for (const raw of readLog().split("\n")) {
-      const m = QUEUE_LINE.exec(raw.replace(ANSI, ""));
-      if (!m || !queue.queues.includes(m[1])) continue;
-      const wallMs = m[4] === undefined ? 0 : Number(m[4]);
-      invocations.push({
-        startUs: seenUs - wallMs * 1000,
-        queue: m[1],
-        acked: Number(m[2]),
-        messages: Number(m[3]),
-        wallMs,
-        queueBatch: true,
-      });
+      const line = raw.replace(ANSI, "");
+      const m = QUEUE_LINE.exec(line);
+      if (m && queue.queues.includes(m[1])) {
+        const wallMs = m[4] === undefined ? 0 : Number(m[4]);
+        const messages = Number(m[3]);
+        const batchKinds = kinds.splice(0, Math.max(1, messages));
+        const inv = {
+          startUs: seenUs - wallMs * 1000,
+          queue: m[1],
+          kind: batchKinds.length ? [...new Set(batchKinds)].join("+") : "?",
+          acked: Number(m[2]),
+          messages,
+          wallMs,
+          queueBatch: true,
+        };
+        if (batchKinds.length === 0) unlabeled.push(inv);
+        invocations.push(inv);
+        lastActive = seenUs;
+        continue;
+      }
+      const rec = logRecord(line);
+      if (!rec) continue;
+      if (rec.message === scenario.enqueued) {
+        tally.expected = Number(rec.properties.jobs ?? 0);
+        continue;
+      }
+      const job = JOB_LOGS[rec.message];
+      if (!job) continue;
+      const kind = rec.properties.kind ?? "invalid";
+      const waiting = unlabeled.shift();
+      if (waiting) waiting.kind = kind;
+      else kinds.push(kind);
+      tally[job.outcome]++;
+      if (job.terminal) terminal++;
       lastActive = seenUs;
     }
-    const cpu = cpuNs();
-    if (cpu !== null && lastCpu !== null && cpu - lastCpu > ACTIVE_CPU_NS_PER_POLL)
-      lastActive = seenUs;
-    lastCpu = cpu;
-    if (seenUs - lastActive > queue.quietMs * 1000) break;
+    const allSettled = tally.expected !== null && terminal >= tally.expected;
+    if (allSettled && seenUs - lastActive > queue.quietMs * 1000) break;
   }
   invocations.sort((a, b) => a.startUs - b.startUs);
-  return { invocations, queueLines: invocations.length };
+  return { invocations, queueLines: invocations.length, summary: tally };
 }
 
 const execFileAsync = promisify(execFile);
@@ -330,7 +432,7 @@ async function measureOnce(ctx, scenario, tag) {
       profileWindow(cdp, {
         cpuNs: w.cpuNs,
         trigger: () => fireScheduled(originOf(opts.port), scenario.cron),
-        settle: () => settleQueue(queue, readLog, w.cpuNs),
+        settle: () => settleQueue(queue, readLog, scenario),
       }),
     );
     writeFileSync(join(opts.out, `${scenario.key}-${tag}.cpuprofile`), JSON.stringify(run.profile));
@@ -342,7 +444,7 @@ async function measureOnce(ctx, scenario, tag) {
     const starts = run.requests.map((r) => r.startUs);
     const fetches = fetchesPerSlot(fake.hits.slice(hitsFrom), starts);
     const perSlotMs = a.perRequestCpuMs ?? [a.totalCpuMs];
-    const result = scenario.resultOf(readFileFrom(workerOpts.logFile, logFrom));
+    const result = scenario.resultOf(readFileFrom(workerOpts.logFile, logFrom), run.settled);
     return {
       tag,
       status: run.triggered.status,
@@ -358,6 +460,7 @@ async function measureOnce(ctx, scenario, tag) {
       upstreamErrors: fetches.errors,
       queueBatches: run.requests.slice(1).map((r, i) => ({
         queue: r.queue,
+        kind: r.kind,
         messages: r.messages,
         acked: r.acked,
         wallMs: r.wallMs,
@@ -411,30 +514,42 @@ function rowOf(key, label, runs, { pick = (r) => r.cpuMs } = {}) {
   };
 }
 
-/** 队列那一行:所有次、所有批摊平,每批一个样本。 */
-function queueRowOf(key, runs) {
-  const batches = runs.flatMap((r) => r.queueBatches);
-  if (batches.length === 0) return null;
-  const cpu = batches.map((b) => b.cpuMs).filter((x) => x != null);
-  return {
-    key: `${key}:queue`,
-    label: "queue consumer (per batch, split by log timing — approximate)",
-    n: batches.length,
-    status: batches.every((b) => b.acked === b.messages) ? "acked" : "retried",
-    ok: batches.every((b) => b.acked === b.messages),
-    result: `${mean(batches.map((b) => b.messages))?.toFixed(1)} msg/batch`,
-    meanCpuMs: mean(cpu),
-    p50CpuMs: quantile(cpu, 0.5),
-    maxCpuMs: cpu.length ? Math.max(...cpu) : null,
-    procCpuMs: null,
-    wallP50Ms: quantile(
-      batches.map((b) => b.wallMs),
-      0.5,
-    ),
-    fetches: mean(batches.map((b) => b.fetches)),
-    coarseShare: 0,
-    owners: [],
-  };
+/**
+ * 队列那几行:所有次、所有批摊平,**按 kind 一行**(每次 consumer 调用一个样本)。免费计划的 10ms 是
+ * 按一次调用算的,所以要看的是「哪件活的一次调用」超了,不是整段的总数。
+ */
+function queueRowsOf(key, runs) {
+  const byKind = new Map();
+  for (const b of runs.flatMap((r) => r.queueBatches)) {
+    const list = byKind.get(b.kind) ?? [];
+    list.push(b);
+    byKind.set(b.kind, list);
+  }
+  return [...byKind]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([kind, batches]) => {
+      const cpu = batches.map((b) => b.cpuMs).filter((x) => x != null);
+      const ok = batches.every((b) => b.acked === b.messages);
+      return {
+        key: `${key}:queue:${kind}`,
+        label: `queue consumer, ${kind} (per invocation, split by log timing — approximate)`,
+        n: batches.length,
+        status: ok ? "acked" : "retried",
+        ok,
+        result: `${(batches.length / runs.length).toFixed(1)} per trigger`,
+        meanCpuMs: mean(cpu),
+        p50CpuMs: quantile(cpu, 0.5),
+        maxCpuMs: cpu.length ? Math.max(...cpu) : null,
+        procCpuMs: null,
+        wallP50Ms: quantile(
+          batches.map((b) => b.wallMs),
+          0.5,
+        ),
+        fetches: mean(batches.map((b) => b.fetches)),
+        coarseShare: 0,
+        owners: [],
+      };
+    });
 }
 
 async function runScenario(ctx, scenario) {
@@ -453,15 +568,15 @@ async function runScenario(ctx, scenario) {
   const rows = [rowOf(`${scenario.key}:first`, `${scenario.label} — first after seed`, [first])];
   if (runs.length) rows.push(rowOf(scenario.key, scenario.label, runs));
   if (ctx.queue) {
-    // 队列那两行只看稳态那几次(没有就看第一次):一次触发背后的全部 CPU,与逐批的。
+    // 队列那几行只看稳态那几次(没有就看第一次):一次触发背后的全部 CPU,与逐 kind 的每次调用。
+    // `:first` 那一次的逐 kind 在 summary.json 里(目录冷、代币没建行,与稳态不是一回事)。
     const steady = runs.length ? runs : [first];
     rows.push(
-      rowOf(`${scenario.key}:window`, "cron + every queue batch it caused", steady, {
+      rowOf(`${scenario.key}:window`, "cron + every queue invocation it caused", steady, {
         pick: (r) => r.totalCpuMs,
       }),
     );
-    const q = queueRowOf(scenario.key, steady);
-    if (q) rows.push(q);
+    rows.push(...queueRowsOf(scenario.key, steady));
   }
   return { key: scenario.key, cron: scenario.cron, first, runs, rows };
 }
