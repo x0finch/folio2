@@ -5,7 +5,7 @@ import type { Job } from "./message";
 
 // **往队列里投活的那一处**(FOL-86)。
 
-/** 一条要投的消息:活本身 + 可选的延迟(秒,见 `WARM_AFTER_SYNC_DELAY_SECONDS`)。 */
+/** 一条要投的消息:活本身 + 可选的延迟(秒,见 `AFTER_SYNC_DELAY_SECONDS`)。 */
 export interface Enqueued {
   readonly job: Job;
   readonly delaySeconds?: number;

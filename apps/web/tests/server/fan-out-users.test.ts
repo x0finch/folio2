@@ -52,7 +52,8 @@ describe("fanOutAllUsers", () => {
   });
 
   // `prices` 不延后(FOL-87):同步只读价表,两者不排先后。
-  it("每个用户在自己的同步消息之后补一条 prices(不延后)与一条延后的 warm-user", async () => {
+  // FOL-88:参考层按件拆开,一件一条;读快照的两件延后到同步落库之后。
+  it("每个用户在自己的同步消息之后补 prices / fx(不延后)与 platforms / defi-logos(延后)", async () => {
     const { sent } = await run(["a", "b"], (userId) =>
       Effect.succeed([job(userId, `${userId}-1`), job(userId, `${userId}-2`)]),
     );
@@ -60,21 +61,26 @@ describe("fanOutAllUsers", () => {
       "sync-account:a",
       "sync-account:a",
       "prices:a",
-      "warm-user:a",
+      "fx:a",
+      "platforms:a",
+      "defi-logos:a",
       "sync-account:b",
       "sync-account:b",
       "prices:b",
-      "warm-user:b",
+      "fx:b",
+      "platforms:b",
+      "defi-logos:b",
     ]);
     for (const m of sent) {
-      if (m.job.kind === "warm-user") expect(m.delaySeconds).toBeGreaterThan(0);
+      if (m.job.kind === "platforms" || m.job.kind === "defi-logos")
+        expect(m.delaySeconds).toBeGreaterThan(0);
       else expect(m.delaySeconds).toBeUndefined();
     }
   });
 
   // 一个用户炸(defect —— db 挂了那种,不是类型化失败)不拖累后面的用户。没有这层隔离,
   // 整点 cron 里排在坏用户后面的**所有人**这一小时都不同步。
-  it("某个用户 defect → 其余照投,整体不抛,计一个 failed、不投他的 prices / warm-user", async () => {
+  it("某个用户 defect → 其余照投,整体不抛,计一个 failed、不投他的 prices / 参考层活", async () => {
     const seen: string[] = [];
     const { result, sent } = await run(["a", "b", "c"], (userId) =>
       Effect.sync(() => {

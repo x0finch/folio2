@@ -18,10 +18,14 @@ describe("decodeJob", () => {
     expect(decodeJob(sync)).toEqual(Either.right(sync));
   });
 
-  it("warm-user 原样解出", () => {
-    expect(decodeJob({ kind: "warm-user", userId: "u1" })).toEqual(
-      Either.right({ kind: "warm-user", userId: "u1" }),
-    );
+  // FOL-88 的五件参考层活:都只带 userId。
+  it.each(["fx", "platforms", "catalogue", "defi-logos", "prune-notes"])("%s 原样解出", (kind) => {
+    expect(decodeJob({ kind, userId: "u1" })).toEqual(Either.right({ kind, userId: "u1" }));
+  });
+
+  // 上一个版本投的、已经不存在的 kind(队列跨部署版本):解不开 → consumer ack 丢弃,不重试。
+  it("退场的 warm-user → Left", () => {
+    expect(Either.isLeft(decodeJob({ kind: "warm-user", userId: "u1" }))).toBe(true);
   });
 
   it("多出来的字段丢掉 —— 老版本多带的东西不会漏进 consumer", () => {

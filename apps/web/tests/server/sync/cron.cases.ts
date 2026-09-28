@@ -62,7 +62,7 @@ describe("sync/cron(fan-out)", () => {
     expect(other?.trigger).toBe("cron");
   });
 
-  it("一个账户一条 sync-account,指着它所在的那一轮;外加一条延后的 warm-user", async () => {
+  it("一个账户一条 sync-account,指着它所在的那一轮;外加每用户一套参考层活", async () => {
     const def = await db(USER).portfolios.ensureDefault();
     const watch = await db(USER).portfolios.create({ name: "看单" });
     const here = await cex("默认组合里的");
@@ -91,9 +91,16 @@ describe("sync/cron(fan-out)", () => {
         },
       ].sort((a, b) => a.accountId.localeCompare(b.accountId)),
     );
-    const warm = sent.filter((m) => m.job.kind === "warm-user");
-    expect(warm).toHaveLength(1);
-    expect(warm[0]?.delaySeconds).toBeGreaterThan(0);
+    // 每小时那套(FOL-88):一件一条;读快照的两件延后,每天那两件(剪 note / 目录)不在这里。
+    const perUser = sent
+      .filter((m) => m.job.kind !== "sync-account")
+      .map((m) => [m.job.kind, m.delaySeconds !== undefined] as const);
+    expect(perUser).toEqual([
+      ["prices", false],
+      ["fx", false],
+      ["platforms", true],
+      ["defi-logos", true],
+    ]);
     expect(result).toEqual({ users: 1, accounts: 2, failed: 0 });
     // 轮开着、还没收官 —— 收官是最后一个 consumer 的事。
     expect(mine?.finishedAt).toBeNull();

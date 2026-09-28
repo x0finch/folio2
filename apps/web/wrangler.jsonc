@@ -23,7 +23,8 @@
   ],
 
   // 两个定时任务,**刻意拆成两个 trigger**(ADR 0022 / #199):
-  //   · 每天 23:00 整 —— 刷全局代币映射表(拉几 MB JSON + 写几万行,重活)
+  //   · 每天 23:00 整 —— 先投每天的逐用户活(`prune-notes` / `catalogue`,FOL-88,只投不跑),
+  //     再刷全局代币映射表(拉几 MB JSON + 写几万行,重活)
   //   · 每小时 30 分 —— 全量 sync sweep(#446)。**FOL-86 起它只开轮 + 投队列**(见下面 `queues`),
   //     不在这一次调用里碰上游;每个账户的同步各自是一次 consumer 调用。
   // 挤一次调用有超预算风险,而且刷表卡住会拖到 sync 跑不完;拆开则各自一份 CPU / 时间预算。
@@ -44,7 +45,8 @@
 
   // 后台任务队列(FOL-86,ADR 0055)。**免费计划每次调用 10ms CPU / 50 个外部 subrequest,
   // HTTP、cron、queue consumer 一视同仁** —— 所以整点 sweep 不再在 cron 那一次调用里跑完所有账户:
-  // cron 只开轮 + 往这里投消息(一个账户一条 `sync-account`,一个用户一条 `warm-user`),
+  // cron 只开轮 + 往这里投消息(一个账户一条 `sync-account`,一个用户 `prices` / `fx` / `platforms` /
+  // `defi-logos` 各一条;每天另投 `prune-notes` / `catalogue`,见 src/lib/server/jobs/schedule.ts),
   // 真活由 consumer 一条消息一次调用地跑,每条各自一份预算。消息的形状在
   // src/lib/server/jobs/message.ts,consumer 入口是 src/server.ts 的 `queue()`。
   //   · `max_batch_size: 1` —— 一次调用只处理一条,预算按「一个账户」算,而不是「一批账户」。

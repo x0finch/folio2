@@ -4,9 +4,9 @@ import { PRICES_IDS_PER_MESSAGE } from "./constants";
 // **队列里一条消息长什么样**(FOL-86,ADR 0055)。
 //
 // 判别在 `kind` 上 —— consumer 的分派(`./consume` 的 `runJob`)按它 `switch`,TS 保证穷尽:加一个
-// kind 忘了接,编译不过。**加新 kind 的路**(FOL-88 那批:`fx` / `platforms` / `catalogue`
-// / `defi-logos` / `prune-notes` / `daily-prices`):在这里加一个 `Schema.Struct` 并进 `Job` 的
-// union,再在 `runJob` / `giveUp` 里各接一支。消息体只装**找得到活的那几个 id**,不装数据 —— 数据在
+// kind 忘了接,编译不过。**加新 kind 的路**(下一个是 FOL-90 的 `daily-prices`):在这里加一个
+// `Schema.Struct` 并进 `Job` 的 union,再在 `runJob` / `giveUp` 里各接一支,并在 `./schedule`
+// 决定谁投、多久投一次。消息体只装**找得到活的那几个 id**,不装数据 —— 数据在
 // 跑的那一刻从库里读,排队期间它可能已经变了。
 //
 // **进来的东西一律先过 schema。** 队列是 at-least-once、跨部署版本的:上一个版本投的、形状已经
@@ -25,15 +25,36 @@ export const SyncAccountJob = Schema.Struct({
 });
 export type SyncAccountJob = typeof SyncAccountJob.Type;
 
-/**
- * 一个用户同步之后的参考层预热(平台元数据 / DeFi 协议图 / 汇率 / 目录)。**过渡形态**:FOL-88 会把它
- * 拆成 `fx` / `platforms` / `catalogue` / `defi-logos` 各自一条,每条各一份预算。持仓价已经拆出去了
- * (`prices`,FOL-87)。
- */
-const WarmUserJob = Schema.Struct({
-  kind: Schema.Literal("warm-user"),
-  userId: Schema.NonEmptyString,
-});
+// —— 参考层的五件小活(FOL-88)——
+//
+// 以前是一条 `warm-user` 包下四件(平台 / DeFi 图 / 汇率 / 目录),剪 note 还在每天那个 cron 里
+// 逐用户串行跑 —— 几件的出网与 CPU 叠在一次调用里。现在一件一条消息,各自一份 10ms / 50 发的预算
+// (每件最坏出网数见 `./constants` 的 `REFERENCE_JOB_UPSTREAM_CALLS`)。
+//
+// 五条都只装 `userId`:汇率 / 平台 / 目录 / DeFi 图都住 per-user 缓存(`user_cache`),note 在用户的
+// 快照上 —— 没有一件是全局的。跑什么、多久投一次见 `./schedule`。**五条都幂等**:汇率 / 平台 / 目录
+// 各按自己的 TTL 门控(新鲜就零出网),DeFi 图是覆盖写,剪 note 是带 `IS NOT NULL` 门的 UPDATE。
+const userJob = <K extends string>(kind: K) =>
+  Schema.Struct({ kind: Schema.Literal(kind), userId: Schema.NonEmptyString });
+
+/** 汇率:全部支持币种一把拉(`fx.warm()`),6h TTL 内零出网。 */
+const FxJob = userJob("fx");
+/** 平台元数据:最新快照里出现的链键,缺 / 过期才拉一次整张链表。 */
+const PlatformsJob = userJob("platforms");
+/** 代币目录(市值前 N):一周 TTL,内部门控 —— 绝大多数次零出网。 */
+const CatalogueJob = userJob("catalogue");
+/** DeFi 协议图:从最新快照的余额 meta 里收集、写缓存。零出网。 */
+const DefiLogosJob = userJob("defi-logos");
+/** 剪保留期外的展示 note(#456)。零出网。 */
+const PruneNotesJob = userJob("prune-notes");
+
+/** 上面五件共用一个 consumer 形状(只带 `userId`),`./consume` 按 kind 分派。 */
+export type ReferenceJob =
+  | typeof FxJob.Type
+  | typeof PlatformsJob.Type
+  | typeof CatalogueJob.Type
+  | typeof DefiLogosJob.Type;
+export type PruneNotesJob = typeof PruneNotesJob.Type;
 
 /**
  * 刷一个用户持仓的价(+ 元信息),按 100 个一批回源、写回价表(FOL-87)。同步的重估只读这张表。
@@ -54,7 +75,15 @@ export const PricesJob = Schema.Struct({
 });
 export type PricesJob = typeof PricesJob.Type;
 
-export const Job = Schema.Union(SyncAccountJob, WarmUserJob, PricesJob);
+export const Job = Schema.Union(
+  SyncAccountJob,
+  PricesJob,
+  FxJob,
+  PlatformsJob,
+  CatalogueJob,
+  DefiLogosJob,
+  PruneNotesJob,
+);
 export type Job = typeof Job.Type;
 
 /**

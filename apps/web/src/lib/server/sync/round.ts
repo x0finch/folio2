@@ -11,9 +11,9 @@ import { getLogger } from "@logtape/logtape";
 import { Cause, Chunk, Clock, Effect, Option, Stream } from "effect";
 import { z } from "zod";
 import { dataFreshness } from "@/lib/core/sync-status";
-import { WARM_AFTER_SYNC_DELAY_SECONDS } from "@/lib/server/jobs/constants";
 import type { SyncAccountJob } from "@/lib/server/jobs/message";
 import { type Enqueued, enqueue } from "@/lib/server/jobs/queue";
+import { hourlyUserJobs } from "@/lib/server/jobs/schedule";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { forUser } from "@/lib/server/runtime";
 import { makeSyncServicesLayer, type SyncScope, syncRoundFor } from "./deps";
@@ -286,7 +286,8 @@ export interface FanOutResult {
 }
 
 /**
- * cron 的全量 sweep:**逐用户串行**开轮、投消息,再补一条 `prices`(不延后)与一条延后的 `warm-user`。
+ * cron 的全量 sweep:**逐用户串行**开轮、投消息,再补上 `hourlyUserJobs` 那几条(`prices` / `fx`
+ * 不延后,读快照的 `platforms` / `defi-logos` 延后到同步落库之后,FOL-88)。
  *
  * **`prices` 与 `sync-account` 同时投,不排先后**(FOL-87)。同步的重估只读价表,所以这一轮的快照
  * 可能用上一轮刷的价(最多约一小时旧,展示层照样按价表现价重算,影响的只是快照里冻的那一格 value)。
@@ -308,13 +309,9 @@ export const fanOutAllUsers = (
 ): Effect.Effect<FanOutResult> =>
   Effect.forEach(userIds, (userId) =>
     fanOutOne(userId).pipe(
-      // 预热排在同步之后(延后投),供下次总览 cache-only 富化。**一个用户一条**:以前 cron 在收尾
-      // 统一逐用户预热,那一步现在是它自己的消息、自己的预算(FOL-88 再按件拆细)。
-      Effect.map((jobs): Enqueued[] => [
-        ...jobs,
-        { job: { kind: "prices", userId } },
-        { job: { kind: "warm-user", userId }, delaySeconds: WARM_AFTER_SYNC_DELAY_SECONDS },
-      ]),
+      // 同步之后的那几件(价 / 汇率 / 平台 / DeFi 图)各一条、各一份预算;投什么、延不延后
+      // 在 `hourlyUserJobs` 一处(FOL-88)。
+      Effect.map((jobs): Enqueued[] => [...jobs, ...hourlyUserJobs(userId)]),
       Effect.tap(enqueue),
       Effect.map((batch) => ({
         accounts: batch.filter((m) => m.job.kind === "sync-account").length,

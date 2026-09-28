@@ -5,8 +5,8 @@ import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { Cause, Effect, Option } from "effect";
 import { withDefaultNoStore } from "./lib/server/entry/cache-headers";
 import { configureLogging } from "./lib/server/entry/log";
-import { pruneNotesAllUsers } from "./lib/server/entry/note-retention";
 import { consumeMessage } from "./lib/server/jobs/consume";
+import { fanOutDaily } from "./lib/server/jobs/schedule";
 import { runAtEdge, withGlobalDb, withOracleWarm } from "./lib/server/runtime";
 import { fanOutAllUsers } from "./lib/server/sync/round";
 
@@ -53,33 +53,36 @@ const refreshGlobalRefIndex = (cron: string): Effect.Effect<void, Error> =>
 // —— db 那张「表里没有『谁的』这回事」的门票,不是 per-user 的 `Database`。
 const listUserIds = withGlobalDb(Effect.flatMap(GlobalDatabase, (db) => db.accounts.listUserIds()));
 
-// 每天那趟顺带剪掉保留期外的展示 note(#456)。
+// 每天那趟的逐用户活(FOL-88):每个用户一条 `prune-notes`(剪保留期外的展示 note,#456)与一条
+// `catalogue`(目录一周 TTL,一天投一次足够)。**这里只投,不剪、不出网** —— 以前剪 note 在这一次
+// 调用里逐用户串行跑,现在每个用户是 consumer 的一次调用、自己一份预算。
 //
 // **搭在这个 trigger 上而不是新开一个**:它要的就是「每天一次」,而另一个 trigger 是每小时
-// (#446 起)—— 挂那儿会一天跑 24 遍同一件事。
+// (#446 起)—— 挂那儿会一天投 24 遍同一件事。
 //
 // **排在刷表之前,而且整趟自己兜住。** 排在后面的话,一个**持续**失败的刷表(上游改了格式、
 // 配额用光)会把剪 note 永久停掉,而不只是推迟一天 —— 那时存储会一直长而没有任何迹象。
-// 自己兜住则保证反方向也不会发生:剪 note 出问题不会挡住刷表(新币认不出来是更重的后果),
+// 自己兜住则保证反方向也不会发生:投递出问题不会挡住刷表(新币认不出来是更重的后果),
 // 也不会把整趟 cron 拖成异常收尾。两个方向都不再互相牵连。
 //
-// 兜的是 `Cause` 不是类型化失败:`listUserIds` 那步抛的是 defect(db 挂了),
+// 兜的是 `Cause` 不是类型化失败:`listUserIds` / 投递抛的是 defect(db / 队列挂了),
 // `catchAll` 接不住(同 `fanOutAllUsers` 的注释)。
-const pruneNotesSweep = (cron: string): Effect.Effect<void> =>
+const enqueueDailyJobs = (cron: string): Effect.Effect<void> =>
   Effect.gen(function* () {
     const userIds = yield* listUserIds;
-    const pruned = yield* pruneNotesAllUsers(userIds);
-    cronLog.info("prune notes done", { cron, ...pruned });
+    const result = yield* fanOutDaily(userIds);
+    cronLog.info("daily jobs enqueued", { cron, users: userIds.length, ...result });
   }).pipe(
     Effect.catchAllCause((cause) =>
       Effect.sync(() =>
-        cronLog.warn("prune notes sweep failed", { cron, error: Cause.pretty(cause) }),
+        cronLog.warn("daily jobs enqueue failed", { cron, error: Cause.pretty(cause) }),
       ),
     ),
   );
 
-// 全量 sweep(FOL-86):**只开轮、只投消息,不碰上游**。每个账户一条 `sync-account`、每个用户一条
-// 延后的 `warm-user`,真活在 `queue()` 里一条一次调用地跑 —— 免费计划每次调用只有 10ms CPU /
+// 全量 sweep(FOL-86):**只开轮、只投消息,不碰上游**。每个账户一条 `sync-account`、每个用户补
+// `prices` / `fx` / `platforms` / `defi-logos` 各一条(FOL-88,见 jobs/schedule),真活在 `queue()`
+// 里一条一次调用地跑 —— 免费计划每次调用只有 10ms CPU /
 // 50 subrequest,cron 那一次调用跑完所有账户时,42% 的整点 sweep 死在 exceededCpu。
 // 逐用户各自兜住在 `fanOutAllUsers` 里;sweep 本身(列用户那一步)不兜 —— 它失败了就该上抛、就该可见。
 const sweepAllUsers = (cron: string): Effect.Effect<void, Error> =>
@@ -115,7 +118,7 @@ export default {
   ...serverEntry,
 
   // 两个定时任务共一个 scheduled(),按 controller.cron 分支(见 wrangler.jsonc 的 triggers):
-  //   · GLOBAL_REF_INDEX_CRON(每天 23:00)—— 先剪过期 note(#456),再刷全局代币映射表
+  //   · GLOBAL_REF_INDEX_CRON(每天 23:00)—— 先投每天的逐用户活(剪 note / 目录,FOL-88),再刷全局代币映射表
   //   · 其余(每小时 :30,#446)—— 全量 sync sweep(FOL-86 起只投队列,见 `sweepAllUsers`)
   // 拆两个 trigger 而不是挤一次:拉几 MB JSON + 写几万行是重活,与 sweep 挤一次调用有超预算风险。
   // waitUntil 保证跑完才结束本次调用。env/ctx 由运行时传入;env 不单独取用
@@ -130,7 +133,7 @@ export default {
           await runAtEdge(
             controller.cron === GLOBAL_REF_INDEX_CRON
               ? Effect.zipRight(
-                  pruneNotesSweep(controller.cron),
+                  enqueueDailyJobs(controller.cron),
                   refreshGlobalRefIndex(controller.cron),
                 )
               : sweepAllUsers(controller.cron),
@@ -149,7 +152,7 @@ export default {
   },
 
   // 后台任务队列的 consumer(FOL-86,ADR 0055)。wrangler.jsonc 里 `max_batch_size: 1`,所以一批就是
-  // 一条 —— 一次调用的预算只花在一个账户(或一个用户的预热)上。仍按批循环,不假设批大小:
+  // 一条 —— 一次调用的预算只花在一个账户(或一个用户的一件参考层活)上。仍按批循环,不假设批大小:
   // 配置改了这里也对。
   //
   // **每条一次 `runAtEdge`**,ack / retry 由 `consumeMessage` 一处决定,它的错误面是 `never` —— 这里

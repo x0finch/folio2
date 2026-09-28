@@ -422,6 +422,7 @@ const en = {
     CHF: "Franc",
     BTC: "Bitcoin",
     ETH: "Ethereum",
+    noRateYet: "No {code} exchange rate yet — showing USD. It'll switch over within the hour.",
   },
 };
 
@@ -835,6 +836,7 @@ const zh: Messages = {
     CHF: "瑞士法郎",
     BTC: "比特币",
     ETH: "以太坊",
+    noRateYet: "{code} 的汇率还没取到,先按美元显示,一小时内会自动切过去。",
   },
 };
 
