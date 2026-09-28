@@ -6,15 +6,15 @@
 // fiber 调度?)。这里按函数(名字 + 源模块 + 行号)累加两种时间,都按**每次调用**平均:
 // - self:采样落在这一帧本身;
 // - inclusive:采样的调用栈里有这一帧(一个样本对同一个函数只记一次,递归不重复算)。
-// 源模块用 owners.mjs 的 region 映射(`//#region <源路径>`),所以要对着**产出这份 profile 的那次
-// 构建**跑(`dist/server` 没被重建过)。
+// 源模块用 owners.mjs 的 region 映射(`//#region <源路径>`)。行号只对产出 profile 的那次构建有效,
+// 所以 perf:cpu:jobs 把那次的 region 表存进输出目录(`regions.json`),这里优先用它。
 //
 // 时间窗与样本封顶和 jobs.mjs 同一个规则:第 i 格 = [第 i 次调用开始, 第 i+1 次开始),单个样本最多
 // 记 `maxSampleUs`(`<scenario>-<tag>.slots.json` 里带着)。`:first` 那次单列(冷数据),默认跳过。
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { NON_CPU_FRAMES, ownerOf } from "./owners.mjs";
+import { NON_CPU_FRAMES, ownerOf, useRegions } from "./owners.mjs";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -41,6 +41,10 @@ if (!dir) {
   process.exit(2);
 }
 const TOP = Number(values.top);
+// profile 的行号只对产出它的那次构建有效:输出目录里有 region 表就用它,没有(老的输出)才读当前 `dist/`。
+if (existsSync(join(dir, "regions.json")))
+  useRegions(JSON.parse(readFileSync(join(dir, "regions.json"), "utf8")));
+else console.error("no regions.json in the run dir — mapping frames against the current dist/");
 const COLLAPSE = new RegExp(values.collapse);
 const MIN_US = Number(values["min-ms"]) * 1000;
 function newTreeNode(name) {

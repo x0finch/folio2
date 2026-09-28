@@ -4,7 +4,7 @@
 // 只是 rolldown 挑的第一个模块,里面装的是一堆别的):服务端构建产物没压缩,rolldown 给每个
 // 源模块留了 `//#region <源路径>` … `//#endregion` 注释。按帧的行号落进哪个 region,就知道它
 // 来自哪个源文件、哪个包 —— 构建怎么切 chunk 都不影响归属。
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DIST_SERVER_DIR, WEB_ROOT } from "./constants.mjs";
 
@@ -93,6 +93,28 @@ function regionsOf(url) {
   }
   regionCache.set(url, regions);
   return regions;
+}
+
+/**
+ * 构建产物里全部 chunk 的 region 表 —— perf:cpu:jobs 把它存进输出目录(`regions.json`),
+ * `perf:cpu:analyze` 读回来:profile 里的行号只对产出它的那次构建有效,`dist/` 一重建就对不上了。
+ */
+export function snapshotRegions() {
+  const dir = join(DIST_SERVER_DIR, "assets");
+  const out = {};
+  for (const f of existsSync(dir) ? readdirSync(dir) : []) {
+    if (f.endsWith(".js")) out[`assets/${f}`] = regionsOf(`assets/${f}`);
+  }
+  for (const f of existsSync(DIST_SERVER_DIR) ? readdirSync(DIST_SERVER_DIR) : []) {
+    if (f.endsWith(".js")) out[f] = regionsOf(f);
+  }
+  return out;
+}
+
+/** 用存下来的 region 表代替当前 `dist/`(见 `snapshotRegions`)。 */
+export function useRegions(snapshot) {
+  regionCache.clear();
+  for (const [url, regions] of Object.entries(snapshot)) regionCache.set(url, regions);
 }
 
 function regionAt(url, line) {

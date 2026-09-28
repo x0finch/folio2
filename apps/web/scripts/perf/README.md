@@ -196,7 +196,8 @@ pnpm --filter @folio/web perf:cpu:jobs --help
 
 ### 看到函数这一级:`perf:cpu:analyze`
 
-owners 只说到包(「Effect 325 ms」)。要知道是 Effect 里的哪件事,对着**同一次构建**的输出目录跑:
+owners 只说到包(「Effect 325 ms」)。要知道是 Effect 里的哪件事,对着输出目录跑(profile 的行号只对那次构建有效,
+所以输出目录里存了一份那次的 region 表 `regions.json`,`dist/` 重建过也照样认得):
 
 ```sh
 pnpm --filter @folio/web perf:cpu:analyze <run-dir>                    # 每个 kind:self / inclusive top-25

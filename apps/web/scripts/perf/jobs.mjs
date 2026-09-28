@@ -48,6 +48,7 @@ import {
 } from "./constants.mjs";
 import { clearSyncRounds, expirePrices, refIndexRowCount } from "./dataset.mjs";
 import { startFakeUpstream } from "./fake-upstream.mjs";
+import { snapshotRegions } from "./owners.mjs";
 import { attribute, COARSE_SAMPLE_FACTOR, hostLoad, profileWindow, withCdp } from "./profiler.mjs";
 import { formatJobsTable, quantile } from "./report.mjs";
 import { prepareData } from "./session.mjs";
@@ -715,6 +716,8 @@ async function main() {
       scenarios: results,
     };
     writeFileSync(join(opts.out, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
+    // profile 的行号只对这次构建有效 —— 存一份 region 表,`perf:cpu:analyze` 以后照样认得出来。
+    writeFileSync(join(opts.out, "regions.json"), JSON.stringify(snapshotRegions()));
     const title = "cron CPU per invocation, production build under wrangler dev, fake upstream";
     console.log(formatJobsTable(rows, { budgetMs: opts.budgetMs, title }));
     const broken = rows.filter((r) => !r.ok).map((r) => r.key);
