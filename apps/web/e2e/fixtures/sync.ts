@@ -143,18 +143,6 @@ export async function unblockPostCreateSync(page: Page) {
   await page.unroute("**/_serverFn/**");
 }
 
-/**
- * 点页头那枚同步胶囊 = 跑整轮同步(见 sync-status.tsx 的 StatusSegment onClick),
- * 返回时 `POST /api/sync` 已经发出。
- *
- * 同样要重试点击:reload 之后头几百毫秒的点击会被吞(见 addBinanceAccount 的注释)。
- * 重复点不会多跑一轮 —— `useSyncRound` 的 `sync()` 在 disabled 时直接 return,而**开轮本身也是
- * 幂等的**(ADR 0048):真发出去两次,第二次拿回的是同一轮。
- *
- * **只等请求发出,不等响应体**:这条请求开轮、投完队列消息即返(FOL-89),「回包到手」只说明轮开了、
- * 活投出去了,不说明 consumer 已经在打上游。要判断它真的在干活,问假上游收到请求没有
- * (setUpstream hits)。
- */
 // 悬停页头那枚胶囊,开同步面板(FOL-32 后桌面 popover 走 hover)。
 //
 // 「开着」认触发器的 `aria-expanded="true"`(beUI PopoverTrigger 挂的,见 popover.tsx),
@@ -173,15 +161,48 @@ export async function hoverSyncPill(page: Page) {
   }).toPass({ timeout: 20_000 });
 }
 
+/**
+ * 点页头那枚同步胶囊 = 跑整轮同步(见 sync-status.tsx 的 StatusSegment onClick),
+ * 返回时 `POST /api/sync` 已经发出。
+ *
+ * 重复点不会多跑一轮 —— `useSyncRound` 的 `sync()` 在 disabled 时直接 return,而**开轮本身也是
+ * 幂等的**(ADR 0048):真发出去两次,第二次拿回的是同一轮。
+ *
+ * **只等请求发出,不等响应体**:这条请求开轮、投完队列消息即返(FOL-89),「回包到手」只说明轮开了、
+ * 活投出去了,不说明 consumer 已经在打上游。要判断它真的在干活,问假上游收到请求没有
+ * (setUpstream hits)。
+ */
 export async function clickSyncPill(page: Page) {
   const pill = page.getByRole("button", { name: /^(Synced|Needs attention|Syncing…)$/ });
+  // 为什么不是「点一下,3 秒内等 POST」(旧写法,挂过):那 3 秒是在**点之前**起算的,而 reload 之后
+  // 胶囊要等客户端渲染完才出现(壳是零数据的,见 check-shell-is-zero-data)—— dev server 上实测
+  // 2.6s 起步,开了 page.route 的用例更慢。超过 3 秒时 waitForRequest 在 click 还挂着的时候就 reject 了,
+  // 没人接 → unhandled rejection 直接判死整条测试,外面那层 toPass 根本没机会重试。
+  //
+  // 第二个坑是 hover 弹层:光标一进胶囊面板就开,而开场那一帧 morph 的裁剪区**正好是胶囊本身**
+  // (popover.tsx 的 insetForProgress,p=0 即 trigger 矩形),内容层 pointer-events 已经打开 ——
+  // mousedown 落在胶囊上、mouseup 落在面板上,click 事件发给了两者的公共祖先,sync() 根本没被调用。
+  // 所以:先 hover、等弹层开完(胶囊中心的命中元素重新是胶囊自己),再点。光标没挪,不会再触发一次打开。
+  await hoverSyncPill(page);
+  await expect
+    .poll(
+      () =>
+        pill.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return hit !== null && el.contains(hit);
+        }),
+      { message: "同步面板的开场动画一直盖着胶囊" },
+    )
+    .toBe(true);
   await expect(async () => {
-    const sent = page.waitForRequest(
-      (r) => r.url().includes("/api/sync") && r.method() === "POST",
-      { timeout: 3_000 },
-    );
-    await pill.click();
-    await sent;
+    // Promise.all 同时挂上两边:任何一边先失败都由这里接住、交给 toPass 重试,不留悬空的 promise。
+    await Promise.all([
+      page.waitForRequest((r) => r.url().includes("/api/sync") && r.method() === "POST", {
+        timeout: 3_000,
+      }),
+      pill.click(),
+    ]);
   }).toPass({ timeout: 30_000 });
 }
 
