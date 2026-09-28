@@ -44,9 +44,11 @@ import { ticketOf } from "./ticket";
 //
 // **例外只有两类,各写理由**:
 //   · 天生交互式的(`ALLOWED`):用户在选币 / 录入的那一刻要一个上游的答案,本地没有也不该有。
-//   · 手记账户的历史价(`MANUAL_HISTORY_FOL90`):手记账户不写快照,它的「过去某天值多少」
-//     是读的时候按账本 × 历史日价现算,日价缺了会去上游补。FOL-90 在把这件事挪到写路径 / cron;
-//     挪完之后这张表应当清空。只在「有手记账户」那个场景里放行,纯同步账户的场景一律不许。
+//   · 冷缓存按需填一次(`COLD_CACHE_FILL`):见那张表上面的注释;它也被反向钉住(必须真的还在出网)。
+//
+// 手记账户的历史价以前是第三类(读的时候按账本 × 历史日价现算,日价缺了去上游补)。FOL-90 把补日价
+// 挪进了队列的 `daily-prices` 活、读端点只读表,那张豁免表随之删掉 —— 下面「有手记账户」那个场景
+// 现在与纯同步账户同一个口径。
 
 const GET_SERVER_FNS = (() => {
   const sources = import.meta.glob("../../src/lib/server/**/index.ts", {
@@ -70,18 +72,18 @@ const ALLOWED: Record<string, string> = {
 };
 
 /**
- * **冷缓存按需填一次**(设计如此,不是本片改的):缓存没有时读接口自己去上游取一次、写进缓存,
- * 之后的读命中缓存。它们都不在首页 / 账户页 / 洞察页的数据路径上 —— 前两个是选币 / 选法币那两个
- * 下拉的目录,第三个只在展示币种不是 USD 时才会问汇率(`preferences/fx.ts` 的 `displayRate`)。
- * 本片只把它们记下来:要做到「读路径零出网」,得让 cron 预热这两份缓存(汇率表与市值前 N 名),
- * 读接口改成只读缓存 —— 那是 FOL-90 同一类活(把取数挪到写路径),留给它。
+ * **冷缓存按需填一次**:缓存没有时读接口自己去上游取一次、写进缓存,之后的读命中缓存。
+ * 汇率那两条(`listFiatOptions` / `getCurrencyPreference`)FOL-88 已改成只读缓存(队列的 `fx` 活
+ * 每小时暖),不在这里了。
+ *
+ * 剩下的 `listTokenCatalogue` **刻意留着**:选币下拉的默认列只有这一份数据,而暖它的 `catalogue` 活
+ * 每天才投一次(FOL-88)—— 改成只读缓存的话,新用户在第一次 cron 之前打开「添加手记持仓」会看到一个
+ * 空的默认列(搜索仍走上游)。它不在首页 / 账户页 / 洞察页的数据路径上,只在用户自己点开下拉时跑,
+ * 而且冷缓存那一取之后 `user_cache` 过期不删,一个用户一辈子只会冷一次。
  */
 const COLD_CACHE_FILL: Record<string, string> = {
   listTokenCatalogue:
     "选币目录(市值前 N 名):目录缓存 / 边缘缓存都冷时取一次 CoinGecko /coins/markets。",
-  listFiatOptions: "选法币的下拉:汇率缓存冷时取一次 CoinGecko /exchange_rates。",
-  getCurrencyPreference:
-    "展示币种的汇率(非 USD 时):汇率缓存冷时取一次 CoinGecko /exchange_rates;取不到就回退 USD。",
 };
 
 /** 不经 Effect 运行时、也碰不到任何上游,在这里跑不起来的(理由写清楚,不是漏测)。 */
@@ -90,15 +92,6 @@ const NOT_RUN_HERE: Record<string, string> = {
     "better-auth 读会话(cookie + D1),要一个真实请求的 headers;没有出网路径。由 require-auth 用例覆盖。",
   listConnectors: "内联在 connectors/index.ts,只读静态的 ConnectorRegistry.catalog。",
   getConnectorCredentialSpecs: "内联在 connectors/index.ts,只读静态的 ConnectorRegistry.specs。",
-};
-
-/** 手记账户历史价现算(FOL-90 接手),只在有手记账户的场景放行。 */
-const MANUAL_HISTORY_FOL90: Record<string, string> = {
-  "getSnapshots(prev)": "24 小时前那一端:手记账户按账本 × 历史日价现算,缺日价会去上游补(FOL-90)。",
-  "getPortfolioHistory(7d)": "曲线里手记账户那条序列:同上(FOL-90)。",
-  "getPortfolioHistory(30d)": "同上(FOL-90)。",
-  "getPortfolioHistory(1y)": "同上(FOL-90)。",
-  "getAccountHistory(manual)": "手记账户抽屉的曲线:同上(FOL-90)。",
 };
 
 type Run = () => Effect.Effect<unknown, AppError, UserServices>;
@@ -282,11 +275,19 @@ describe("GET server fn 不出网(FOL-92)", () => {
       ([name, urls]) => urls.length > 0 && !(name in COLD_CACHE_FILL),
     );
     expect(offenders).toEqual([]);
+    // 反过来也钉住:冷缓存豁免的每一条**现在确实还在出网**。哪天它改成只读缓存、不再出网,
+    // 这里会红 —— 那时把豁免删掉,别让它变成一个没人记得的洞。
+    const stillFetching = Object.keys(COLD_CACHE_FILL).filter(
+      (n) => (egress.get(n)?.length ?? 0) > 0,
+    );
+    expect(stillFetching.sort()).toEqual(Object.keys(COLD_CACHE_FILL).sort());
   }, 120_000);
 
-  it("再加一个手记账户:除 FOL-90 那几条(历史价现算)外一发都没有", async () => {
+  // 手记账户(FOL-90 起):24 小时前那一端、组合曲线 7d/30d/1y、手记账户抽屉的曲线都按账本 × 表里的
+  // 历史日价算,缺了就缺(队列的 `daily-prices` 活去补),读的时候不出网。
+  it("再加一个手记账户:同样一发都没有(历史日价只读表)", async () => {
     const f = await seedSynced();
-    // 选了币的手记持仓(带 CoinGecko 身份):它才有「上游历史价」可取,FOL-90 那条路才会被走到。
+    // 选了币的手记持仓(带 CoinGecko 身份):它才有「上游历史价」可取 —— FOL-90 之前那条路会在这里出网。
     const manual = await call(
       USER,
       createManualAccount(
@@ -307,15 +308,10 @@ describe("GET server fn 不出网(FOL-92)", () => {
     outbound.calls.length = 0;
     const egress = await egressByCase(outbound, { ...f, manualId: manual.id });
     const offenders = [...egress].filter(
-      ([name, urls]) =>
-        urls.length > 0 && !(name in MANUAL_HISTORY_FOL90) && !(name in COLD_CACHE_FILL),
+      ([name, urls]) => urls.length > 0 && !(name in COLD_CACHE_FILL),
     );
     expect(offenders).toEqual([]);
-    // 反过来也钉住:FOL-90 那张表里的每一条**现在确实还在出网**。FOL-90 做完、它们不再出网时
-    // 这里会红 —— 那时把豁免删掉,别让它变成一个没人记得的洞。
-    const stillFetching = Object.keys(MANUAL_HISTORY_FOL90).filter(
-      (n) => (egress.get(n)?.length ?? 0) > 0,
-    );
-    expect(stillFetching.sort()).toEqual(Object.keys(MANUAL_HISTORY_FOL90).sort());
+    // 手记那几条确实跑到了(没有手记账户时它们走的是另一条路,零出网不说明什么)。
+    expect(egress.has("getAccountHistory(manual)")).toBe(true);
   }, 120_000);
 });
