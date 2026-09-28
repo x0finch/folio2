@@ -167,6 +167,9 @@ export function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeToken
         return out;
       }),
 
+    getAll: () =>
+      Effect.sync(() => new Map([...rows].map(([id, row]) => [id, { ...row }] as const))),
+
     getById: (id) => Effect.sync(() => Option.fromNullable(rows.get(id)).pipe(Option.map(clone))),
 
     fillInfo: (tokenId, patch: TokenInfoPatch) =>
@@ -262,6 +265,13 @@ export function fakeTokenPriceStore(): FakeTokenPriceStore {
           // 过期不删,读出带 stale(SWR)。
           if (hit) out.set(id, { ...hit.price, stale: hit.expiresAt <= now });
         }
+        return out;
+      }),
+
+    getAll: () =>
+      Effect.map(Clock.currentTimeMillis, (now) => {
+        const out = new Map<string, TokenRecordPrice>();
+        for (const [id, hit] of current) out.set(id, { ...hit.price, stale: hit.expiresAt <= now });
         return out;
       }),
 

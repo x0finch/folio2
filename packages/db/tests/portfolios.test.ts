@@ -81,6 +81,26 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
     expect(memberships).toEqual([{ accountId: acc.id, portfolioId: pf.id }]);
   });
 
+  it("accounts.listWithPortfolio:一条查询给出账户 + 归属(无归属行 → null,只含本人)", async () => {
+    const acc = await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
+    const loose = await accounts(USER_A).create({ connectorId: "manual", label: "L", creds: "x" });
+    await accounts(USER_B).create({ connectorId: "manual", label: "B", creds: "x" });
+    const pf = await portfolios(USER_A).ensureDefault();
+    await env.DB.prepare("DELETE FROM portfolio_accounts WHERE account_id = ?")
+      .bind(loose.id)
+      .run();
+
+    const rows = await accounts(USER_A).listWithPortfolio();
+    expect(rows.map((r) => [r.id, r.portfolioId]).sort()).toEqual(
+      [
+        [acc.id, pf.id],
+        [loose.id, null],
+      ].sort(),
+    );
+    // 安全列:不带 creds。
+    expect(rows.every((r) => !("creds" in r))).toBe(true);
+  });
+
   it("importAccount(新建分支)也归属默认 Portfolio", async () => {
     const { id, created } = await transferOf(USER_A).importAccount({
       connectorId: "manual",

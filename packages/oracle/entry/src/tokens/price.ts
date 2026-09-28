@@ -30,6 +30,8 @@ import { degradeTo } from "./swr";
 export interface TokenReading {
   // 富化:按内部 id 批量读整行(info + 价合并)。输入**不再需要** symbol 或 tokenRef。
   enrich(ids: readonly string[]): Effect.Effect<Map<string, TokenRecord>, never, DbRequest>;
+  // 富化这个用户**知道的全部**代币(`enrich` 的整表版,FOL-92):不必先列出 id 再按 id 读回。
+  enrichAll(): Effect.Effect<Map<string, TokenRecord>, never, DbRequest>;
   // 按主键读一行的上游图 URL(logo 代理端点用):源给的优先,没有就用连接器自带那张。
   logoUrlById(id: string): Effect.Effect<Option.Option<string>, never, DbRequest>;
 }
@@ -55,6 +57,16 @@ export const makeReading = (store: TokenStore, prices: TokenPriceStore): TokenRe
       // 两个 store 各读自己那半,服务层合成整行 —— 这正是切开端口的用处。
       // 并发度写出来(以前是 `Promise.all` 的隐式「全都一起上」)。
       const [infos, priced] = yield* Effect.all([store.getByIds(ids), prices.getByIds(ids)], {
+        concurrency: 2,
+      });
+      const out = new Map<string, TokenRecord>();
+      for (const [id, info] of infos) out.set(id, { ...info, price: priced.get(id) });
+      return out;
+    }),
+
+  enrichAll: () =>
+    Effect.gen(function* () {
+      const [infos, priced] = yield* Effect.all([store.getAll(), prices.getAll()], {
         concurrency: 2,
       });
       const out = new Map<string, TokenRecord>();

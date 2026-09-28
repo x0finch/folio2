@@ -1,11 +1,10 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
-import type { AccountHistoryRaw } from "@/lib/core/history";
+import { type AccountHistoryRaw, minMaxDownsampleHistory } from "@/lib/core/history";
 import type { HistoryRange } from "@/lib/core/history-range";
 import { historyResolution } from "@/lib/core/history-range";
 import { MANUAL_CONNECTOR_ID } from "@/lib/core/manual";
-import { minMaxDownsampleHistory } from "@/lib/server/history/minmax";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "@/lib/server/manual/store";
 
 function downsampleManualRows(
@@ -29,10 +28,11 @@ export const loadAccountHistory = (input: {
     const resolution = historyResolution({ range: input.range, since: input.since });
     const longWindow = resolution === "sampled";
     if (input.connectorId !== MANUAL_CONNECTOR_ID) {
-      // 三档原料同组合曲线(FOL-91):≤ 7 天原始快照,更长读日汇总,1 年 / 全部再降采样。
+      // 三档原料同组合曲线(FOL-91):≤ 7 天原始快照,更长读日汇总;1 年 / 全部在 SQL 里按桶封顶
+      // (每账户 ≤ 400 点,FOL-92),min-max 降采样在浏览器做。
       const rows =
         resolution === "sampled"
-          ? yield* db.snapshots.listTotalsByAccountMinMax(input.accountId, input.since)
+          ? yield* db.snapshots.listSampledTotalsByAccount(input.accountId, input.since)
           : resolution === "daily"
             ? yield* db.snapshots.listDailyTotalsByAccount(input.accountId, input.since)
             : yield* db.snapshots.listTotalsByAccount(input.accountId, input.since);

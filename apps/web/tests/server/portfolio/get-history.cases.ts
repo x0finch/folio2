@@ -158,8 +158,11 @@ describe("portfolio/get-history", () => {
       const raw = await call(USER, handleGetPortfolioHistory({ range: "all" }));
 
       expect(raw.sampled).toBe(true);
-      expect(raw.rows.length).toBeLessThanOrEqual(80);
+      // 服务端只在 SQL 里按桶封顶(每账户 ≤ 200 行收盘,FOL-92);降采样在浏览器。
+      expect(raw.rows.length).toBeLessThanOrEqual(200);
       expect(raw.rows.length).toBeGreaterThan(10);
+      const curve = toPortfolioCurve(raw, { accountTotals: [] });
+      expect(curve.length).toBeLessThanOrEqual(82);
     }, 30_000);
 
     it("与老那条服务端算法对拍:同一份数据,曲线一个点都不差", async () => {

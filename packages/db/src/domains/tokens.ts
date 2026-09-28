@@ -171,6 +171,48 @@ export const makeUserTokenStore = (namer: string) => (client: DbClient, userId: 
       return out;
     });
 
+  // 本用户**全部** Token 的 info(`readInfos` 的整表版,FOL-92)。两条查询、都只按 user_id(+ namer)
+  // 过滤 —— 不必先把 id 攒出来、再按 90 个一块 `IN (…)` 绑回去。「给我这个用户知道的全部代币」
+  // 那条读(`getTokenEnrichment`,每次打开页面都跑)以前是先导出一遍全表拿 id、再按 id 逐块读回。
+  const readAllInfos = (): Effect.Effect<Map<string, TokenInfo>> =>
+    Effect.gen(function* () {
+      const [rows, refRows, now] = yield* Effect.all(
+        [
+          client.query(
+            (db): PromiseLike<InfoRow[]> =>
+              db
+                .select({
+                  id: tokens.id,
+                  symbol: tokens.symbol,
+                  name: tokens.name,
+                  logo: tokens.logo,
+                  providerLogo: tokens.providerLogo,
+                  infoExpiresAt: tokens.infoExpiresAt,
+                })
+                .from(tokens)
+                .where(eq(tokens.userId, userId)),
+          ),
+          client.query((db) =>
+            db
+              .select({ tokenId: tokenRefs.tokenId, localName: tokenRefs.localName })
+              .from(tokenRefs)
+              .where(and(eq(tokenRefs.userId, userId), eq(tokenRefs.namer, namer))),
+          ),
+          Clock.currentTimeMillis,
+        ],
+        { concurrency: 3 },
+      );
+      const refs = new Map<string, TokenRef>();
+      // 同 `upstreamRefs`:一个命名者下真出了两行也给一个确定答案(先到的那行)。
+      for (const r of refRows) {
+        if (!refs.has(r.tokenId))
+          refs.set(r.tokenId, formatTokenRef({ namer, localName: r.localName }));
+      }
+      const out = new Map<string, TokenInfo>();
+      for (const r of rows) out.set(r.id, toInfo(r, refs.get(r.id) ?? null, now));
+      return out;
+    });
+
   return {
     // mint 第一步:一批 tokenRef 里,哪些已经有 Token 了。绝大多数同步都停在这里。
     findByRefs: (input: readonly TokenRef[]): Effect.Effect<Map<TokenRef, TokenRefHit>> =>
@@ -368,6 +410,9 @@ export const makeUserTokenStore = (namer: string) => (client: DbClient, userId: 
 
     // **不门控 info TTL** —— 只要行在就给。门控了会渲染出 logo 代理 URL 却在端点上 404。
     getByIds: readInfos,
+
+    /** 本用户全部 Token 的 info(`getByIds` 的整表版,不按 id 分块)。 */
+    getAll: readAllInfos,
 
     // 单读回 `Option` 而不是 `A | undefined`:「没有这一行」是调用方必须分支的一档
     // (`priceSeries` / `logoUrlById` 都靠它早退),用 Option 就不会有人忘了那个分支。

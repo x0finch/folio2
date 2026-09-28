@@ -6,7 +6,7 @@ import { type HistoryRange, type PortfolioHistoryRaw, rangeSince } from "@/lib/c
 import { historyResolution } from "@/lib/core/history-range";
 import { isManual } from "@/lib/core/manual";
 import { loadManualHistoryRows } from "@/lib/server/manual/store";
-import { resolveScope } from "./scope";
+import { scopedMembership } from "./scope";
 
 export const PortfolioHistoryInput = z.object({
   portfolioId: z.string().optional(),
@@ -22,11 +22,12 @@ export const handleGetPortfolioHistory = Effect.fn("getPortfolioHistory")(functi
   const resolution = historyResolution({ range });
   const longWindow = resolution === "sampled";
   const db = yield* Database;
-  const { selectedId, defaultId } = yield* resolveScope(data.portfolioId);
-  const [allAccounts, memberships] = yield* Effect.all(
-    [db.accounts.list(), db.portfolios.listMemberships()],
-    { concurrency: 2 },
-  );
+  const {
+    selectedId,
+    defaultId,
+    accounts: allAccounts,
+    memberships,
+  } = yield* scopedMembership(data.portfolioId);
   const memberSet = accountIdsInView(
     allAccounts.map((a) => a.id),
     memberships,
@@ -37,10 +38,11 @@ export const handleGetPortfolioHistory = Effect.fn("getPortfolioHistory")(functi
   const snapAccountIds = memberAccounts.filter((a) => !isManual(a.connectorId)).map((a) => a.id);
 
   // 三档原料(FOL-91,见 `historyResolution`):≤ 7 天读原始快照;更长的窗口读日汇总 ——
-  // 30 天原样发日收盘(浏览器照旧重建),1 年 / 全部再在服务端做组合级 min-max 降采样。
+  // 30 天原样发日收盘;1 年 / 全部在 SQL 里按桶封顶(每账户 ≤ 200 行收盘,FOL-92)。重建与
+  // min-max 降采样都在浏览器(`toPortfolioCurve`)。
   const snapRows =
     resolution === "sampled"
-      ? yield* db.snapshots.listTotalsMinMax(snapAccountIds, since)
+      ? yield* db.snapshots.listSampledTotals(snapAccountIds, since)
       : resolution === "daily"
         ? yield* db.snapshots.listDailyTotals(snapAccountIds, since)
         : (yield* db.snapshots.listTotals(since)).filter((r) =>

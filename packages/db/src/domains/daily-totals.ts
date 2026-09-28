@@ -182,6 +182,28 @@ export async function queryDailyPointsByAccount(
     .from(accountDailyTotals)
     .where(and(eq(accountDailyTotals.accountId, accountId), ...windowConds(since)))
     .orderBy(asc(accountDailyTotals.day));
+  return expandDayPoints(rows, since);
+}
+
+interface DayPoints {
+  openUsd: number;
+  openAt: number;
+  minUsd: number;
+  minAt: number;
+  maxUsd: number;
+  maxAt: number;
+  closeUsd: number;
+  closeAt: number;
+}
+
+/**
+ * 一行「开 / 低 / 高 / 收」(一天,或长窗里合并过的一桶)→ 各在真实时刻的 ≤ 4 点,升序。
+ * 行须按时间升序给;同刻去重,早于 `since` 的不出窗口(收盘已由 WHERE 保证在窗口内)。
+ */
+export function expandDayPoints(
+  rows: readonly DayPoints[],
+  since?: number,
+): { takenAt: number; totalUsd: number }[] {
   const out: { takenAt: number; totalUsd: number }[] = [];
   for (const r of rows) {
     const day: [number, number][] = [

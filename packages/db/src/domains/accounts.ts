@@ -32,6 +32,9 @@ export interface CreateAccountInput {
 
 // 批量取该用户全部账户的原始 creds(server 端富化 listMyAccounts 用:算 needsCredentials + safeView)。
 // 返回含 secret 密文,只在服务端用、投影后才出网。
+/** 安全列 + 归属的 Portfolio(`listWithPortfolio`)。 */
+export type AccountWithPortfolio = AccountSafe & { portfolioId: string | null };
+
 export interface AccountRawCreds {
   id: string;
   creds: string | null;
@@ -90,6 +93,20 @@ export const makeAccountStore = (client: DbClient, userId: string) => {
     list: (): Effect.Effect<AccountSafe[]> =>
       client.query((db) =>
         db.select(accountSafeColumns).from(accounts).where(eq(accounts.userId, userId)),
+      ),
+
+    /**
+     * `list()` + 每个账户归属的 Portfolio(没有归属行 → `null`,读端按兜底规则算进默认组合),
+     * **一条查询**(FOL-92)。读路径的「组合作用域」以前是 `list()` + `listMemberships()` 两趟;
+     * 每趟 D1 查询在 Worker 里都有一份固定的 CPU(语句构造、驱动、Effect 那几层),合成一趟就少一份。
+     */
+    listWithPortfolio: (): Effect.Effect<AccountWithPortfolio[]> =>
+      client.query((db) =>
+        db
+          .select({ ...accountSafeColumns, portfolioId: portfolioAccounts.portfolioId })
+          .from(accounts)
+          .leftJoin(portfolioAccounts, eq(portfolioAccounts.accountId, accounts.id))
+          .where(eq(accounts.userId, userId)),
       ),
 
     getById: (id: string): Effect.Effect<AccountSafe | null> =>

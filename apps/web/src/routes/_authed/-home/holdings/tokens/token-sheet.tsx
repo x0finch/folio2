@@ -202,9 +202,8 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
   });
   // 曲线在浏览器里画(FOL-50):接口发窗口内该币的原样余额行,阶梯重建在这儿。
   const series = useMemo(
-    () =>
-      historyQuery.data == null ? [] : tokenValueHistoryFromRaw(historyQuery.data, holding.key),
-    [historyQuery.data, holding.key],
+    () => (historyQuery.data == null ? [] : tokenValueHistoryFromRaw(historyQuery.data)),
+    [historyQuery.data],
   );
 
   return (

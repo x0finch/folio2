@@ -14,11 +14,11 @@ import { type PortfolioScope, scopedMembership } from "@/lib/server/portfolio/sc
 export const handleListAccounts = Effect.fn("listAccounts")(function* (data: PortfolioScope = {}) {
   const { accounts: store } = yield* Database;
   const specsByType = (yield* ConnectorRegistry).specs;
-  const [scope, all, rawList] = yield* Effect.all(
-    [scopedMembership(data.portfolioId), store.list(), store.listRawCreds()],
-    { concurrency: 3 },
+  const [scope, rawList] = yield* Effect.all(
+    [scopedMembership(data.portfolioId), store.listRawCreds()],
+    { concurrency: 2 },
   );
-  const accounts = all.filter((a) => scope.has(a.id));
+  const accounts = scope.accounts.filter((a) => scope.has(a.id));
   const rawById = new Map(rawList.map((r) => [r.id, r.creds]));
   // 解不开的那些行:按「没凭据」渲染,并把 id 攒起来一次性 warn(#527 裁定 1)。以前这里是裸
   // `JSON.parse`,一行坏数据整页打不开 —— 而账户页恰恰是唯一能重填凭据、把它修好的地方。

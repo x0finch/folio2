@@ -13,11 +13,14 @@ export function rangeSince(range: HistoryRange, nowMs: number): number | undefin
   return range === "all" ? undefined : nowMs - RANGE_DAYS[range] * DAY_MS;
 }
 
-/** 长窗(1年/全部)服务端做 min-max 降采样(FOL-46);短窗发原料(7 天原始点、30 天日汇总,FOL-91)。 */
+/**
+ * 长窗(1年/全部)走 min-max 降采样(FOL-46;FOL-92 起服务端只在 SQL 里按桶封顶,降采样在浏览器);
+ * 短窗发原料(7 天原始点、30 天日汇总,FOL-91)。
+ */
 const isLongHistoryRange = (range: HistoryRange): boolean => range === "1y" || range === "all";
 
 /** 是否走 min-max 降采样:显式长窗,或省略 range 时窗口跨度 ≥ 1 年 / 不限(since 缺省)。 */
-export function shouldSampleHistory(opts: {
+function shouldSampleHistory(opts: {
   range?: HistoryRange;
   since?: number;
   nowMs?: number;
@@ -41,7 +44,7 @@ const DAILY_HISTORY_MIN_DAYS = 7;
  * 一条曲线读哪一档原料:
  *   · `hourly`  —— 窗口内的原始快照(≤ 7 天)。
  *   · `daily`   —— 日汇总,不降采样(> 7 天、< 1 年)。
- *   · `sampled` —— 日汇总再做 min-max 降采样(1 年 / 全部,见 `shouldSampleHistory`)。
+ *   · `sampled` —— 日汇总在 SQL 里按桶封顶,浏览器再 min-max 降采样(1 年 / 全部,见 `shouldSampleHistory`)。
  */
 export type HistoryResolution = "hourly" | "daily" | "sampled";
 

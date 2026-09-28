@@ -21,6 +21,7 @@ type StubOf<S> = Omit<S, "_tag">;
 const emptyTokens: StubOf<Oracle["tokens"]> = {
   mint: () => Effect.succeed(new Map()),
   enrich: () => Effect.succeed(new Map()),
+  enrichAll: () => Effect.succeed(new Map()),
   logoUrlById: () => Effect.succeed(Option.none()),
   pricesOf: () => Effect.succeed(new Map()),
   priceByRef: () => Effect.succeed(Option.none()),

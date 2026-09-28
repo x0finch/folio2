@@ -13,6 +13,7 @@ import {
   overviewChainIds,
   overviewFromSnapshotData,
 } from "@/lib/core/portfolio";
+import { snapshotsFromWire } from "@/lib/core/snapshot-wire";
 import { handleListAccounts } from "@/lib/server/accounts/list";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import type { AppError } from "@/lib/server/errors";
@@ -87,6 +88,13 @@ export const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
 
 // —— 读模型捷径(照抄前端 select / compose,不复刻业务逻辑)——
 
+/**
+ * `getSnapshots` + 浏览器那一步解码(FOL-92:接口发原样元组,`snapshotsFromWire` 在 queryFn 里解)。
+ * 读模型的用例断言的是解出来的那份 —— 与页面拿到的同一个形状。
+ */
+export const getSnapshotsDecoded = (data: Parameters<typeof handleGetSnapshots>[0]) =>
+  Effect.map(handleGetSnapshots(data), snapshotsFromWire);
+
 /** 快照原料 —— 原子读 + `assemblePortfolioSnapshotData`,与首页 `usePortfolioOverview` 同源。 */
 export const readSnapshotData = async (userId: string, data: PortfolioScope = {}) => {
   const anchor = floorToHour(Date.now());
@@ -105,10 +113,10 @@ export const readSnapshotData = async (userId: string, data: PortfolioScope = {}
     tagLinks,
   ] = await Promise.all([
     call(userId, handleListAccounts({ portfolioId })),
-    call(userId, handleGetSnapshots({ portfolioId, at: Date.now() })),
+    call(userId, getSnapshotsDecoded({ portfolioId, at: Date.now() })),
     call(
       userId,
-      handleGetSnapshots({
+      getSnapshotsDecoded({
         portfolioId,
         at: anchor - GAIN_WINDOW_MS,
         after: anchor - GAIN_START_FLOOR_MS,
@@ -173,10 +181,10 @@ const readAccountHoldingsRaw = async (userId: string, data: { portfolioId?: stri
   const anchor = floorToHour(Date.now());
   const [accounts, snapshotsNow, snapshotsPrev, settings, enrichment] = await Promise.all([
     call(userId, handleListAccounts({ portfolioId: data.portfolioId })),
-    call(userId, handleGetSnapshots({ portfolioId: data.portfolioId, at: Date.now() })),
+    call(userId, getSnapshotsDecoded({ portfolioId: data.portfolioId, at: Date.now() })),
     call(
       userId,
-      handleGetSnapshots({
+      getSnapshotsDecoded({
         portfolioId: data.portfolioId,
         at: anchor - GAIN_WINDOW_MS,
         after: anchor - GAIN_START_FLOOR_MS,

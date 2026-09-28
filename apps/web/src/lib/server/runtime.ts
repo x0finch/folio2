@@ -9,6 +9,7 @@ import {
 } from "@folio/db";
 import type { OracleServices } from "@folio/oracle";
 import { Effect, Layer, ManagedRuntime } from "effect";
+import type { JsonResponse } from "@/lib/core/json-response";
 import { ConnectorRegistry } from "./connectors/registry";
 import { logCategory, logTapeLogger } from "./effect-log";
 import { type AppError, toError } from "./errors";
@@ -199,6 +200,22 @@ export const runEffect =
     const name = handler.name || "anonymous";
     const effect = withServerFnTiming<A, E>(name)(handler(data));
     return runForUser(context.userId, effect);
+  };
+
+/**
+ * `runEffect` 的「原样 JSON」出口(FOL-92,理由见 `@/lib/core/json-response`):结果用引擎原生的
+ * `JSON.stringify` 写成一个 `Response`,不经 seroval 逐节点序列化。浏览器侧用 `readJson` 解。
+ *
+ * **只给返回纯 JSON 的读接口用。** 失败那条路与 `runEffect` 完全相同(还没走到造 Response 就抛了)。
+ * `cache-control` 不在这里写:入口的 `withDefaultNoStore` 对每个响应都补(`entry/cache-headers.ts`)。
+ */
+export const runEffectJson =
+  <D, A, E extends AppError>(handler: (data: D) => Effect.Effect<A, E, UserServices>) =>
+  async (ctx: { data: D; context: { userId: string } }): Promise<JsonResponse<A>> => {
+    const value = await runEffect(handler)(ctx);
+    return new Response(JSON.stringify(value), {
+      headers: { "content-type": "application/json" },
+    }) as JsonResponse<A>;
   };
 
 // —— 不带 user 的那半(cron)——

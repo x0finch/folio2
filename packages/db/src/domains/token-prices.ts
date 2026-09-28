@@ -94,6 +94,37 @@ export const makeUserTokenPriceStore = (namer: string) => (client: DbClient, use
     );
 
   return {
+    /** 本用户全部 Token 的价(`getByIds` 的整表版,FOL-92)。口径同下:尚无价的不出现、过期照给。 */
+    getAll: (): Effect.Effect<Map<string, TokenRecordPrice>> =>
+      Effect.gen(function* () {
+        const t = yield* Clock.currentTimeMillis;
+        const rows = yield* client.query((db) =>
+          db
+            .select({
+              id: tokens.id,
+              unitPrice: tokens.unitPrice,
+              change24h: tokens.change24h,
+              marketCapRank: tokens.marketCapRank,
+              priceAsOf: tokens.priceAsOf,
+              priceExpiresAt: tokens.priceExpiresAt,
+            })
+            .from(tokens)
+            .where(eq(tokens.userId, userId)),
+        );
+        const out = new Map<string, TokenRecordPrice>();
+        for (const r of rows) {
+          if (r.unitPrice == null || r.priceAsOf == null) continue; // 尚无价
+          out.set(r.id, {
+            unitPrice: r.unitPrice,
+            change24h: r.change24h ?? undefined,
+            marketCapRank: r.marketCapRank ?? undefined,
+            asOf: r.priceAsOf,
+            stale: (r.priceExpiresAt ?? 0) <= t,
+          });
+        }
+        return out;
+      }),
+
     // 过期不删,读出带 stale(SWR)。尚无价的行不出现在结果里。
     getByIds: (ids: readonly string[]): Effect.Effect<Map<string, TokenRecordPrice>> =>
       Effect.gen(function* () {

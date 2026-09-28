@@ -1,5 +1,6 @@
 import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import type { HistoryRange } from "@/lib/core/history-range";
+import { readJson } from "@/lib/core/json-response";
 import {
   computeHomeTabStrip,
   type HomeTabStripView,
@@ -60,6 +61,6 @@ export const fetchHomeTabStrip = async (
 export const portfolioHistoryQuery = (portfolioId: string, range: HistoryRange = "30d") =>
   queryOptions({
     queryKey: portfolioKeys.history(portfolioId, range),
-    queryFn: () => getPortfolioHistory({ data: { portfolioId, range } }),
+    queryFn: async () => readJson(await getPortfolioHistory({ data: { portfolioId, range } })),
     staleTime: STALE_TIME.live,
   });

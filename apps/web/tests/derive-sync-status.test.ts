@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { AccountSnapshotEntry as AccountSnapshot } from "@/lib/core/portfolio";
 import { deriveSyncStatus } from "@/lib/core/sync-summary";
 import type { AccountListItem } from "@/lib/queries/accounts";
-import type { AccountSnapshot } from "@/lib/server/portfolio/snapshots";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = 1_700_000_000_000;

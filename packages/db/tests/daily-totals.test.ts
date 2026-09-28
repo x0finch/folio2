@@ -338,9 +338,9 @@ describe("长窗读日汇总,不扫快照", () => {
       const now = D0 + historyDays * DAY;
       const since = now - WINDOW_DAYS * DAY;
       const portfolio = await recorded((s) => s.listDailyTotals(ids, since));
-      const sampled = await recorded((s) => s.listTotalsMinMax(ids, since));
+      const sampled = await recorded((s) => s.listSampledTotals(ids, since));
       const single = await recorded((s) => s.listDailyTotalsByAccount(ids[0], since));
-      const singleSampled = await recorded((s) => s.listTotalsByAccountMinMax(ids[0], since));
+      const singleSampled = await recorded((s) => s.listSampledTotalsByAccount(ids[0], since));
       const all = { portfolio, sampled, single, singleSampled };
       // 读数当场量:窗口只有下界,种了更多历史之后再量「小」那组就不是同一个窗口了。
       const reads = {} as Record<keyof typeof all, number>;
@@ -429,14 +429,14 @@ describe("对拍(golden):日汇总 vs 逐小时快照", () => {
     const rawSet = new Set(rawA.map((r) => `${r.takenAt}:${r.totalUsd}`));
     expect(dailyA.every((r) => rawSet.has(`${r.takenAt}:${r.totalUsd}`))).toBe(true);
 
-    // 单账户长窗(min-max 降采样):全局最高 / 最低与原始点相同,首末点相同。
-    const sampledA = await snapshotsOf(USER).listTotalsByAccountMinMax(a);
+    // 单账户长窗(SQL 按桶封顶,FOL-92):全局最高 / 最低与原始点相同,首末点相同。
+    const sampledA = await snapshotsOf(USER).listSampledTotalsByAccount(a);
     const allA = await snapshotsOf(USER).listTotalsByAccount(a);
     const vals = (rows: { totalUsd: number }[]) => rows.map((r) => r.totalUsd);
     expect(Math.max(...vals(sampledA))).toBe(Math.max(...vals(allA)));
     expect(Math.min(...vals(sampledA))).toBe(Math.min(...vals(allA)));
     expect(sampledA[0]).toEqual(allA[0]);
     expect(sampledA[sampledA.length - 1]).toEqual(allA[allA.length - 1]);
-    expect(sampledA.length).toBeLessThanOrEqual(80);
+    expect(sampledA.length).toBeLessThanOrEqual(400);
   }, 300_000);
 });

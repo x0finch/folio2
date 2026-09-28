@@ -61,7 +61,7 @@ export const openSyncRound = (input: {
   Effect.gen(function* () {
     const db = yield* Database;
     const scope = yield* scopedMembership(input.portfolioId);
-    const accounts = yield* db.accounts.list();
+    const accounts = scope.accounts;
     return yield* db.syncRounds.open({
       portfolioId: scope.selectedId,
       roundId: crypto.randomUUID(),

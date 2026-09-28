@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { PortfolioSelectInput } from "@/lib/server/portfolio/scope";
-import { runEffect, runTimedForUser } from "@/lib/server/runtime";
+import { runEffect, runEffectJson, runTimedForUser } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { ArchiveAccountInput, handleArchiveAccount } from "./archive";
 import { CreateAccountInput, handleCreateAccountFor } from "./create";
@@ -18,7 +18,7 @@ import { handleRenameAccount, RenameAccountInput } from "./rename";
 export const listAccounts = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioSelectInput)
-  .handler(runEffect(handleListAccounts));
+  .handler(runEffectJson(handleListAccounts));
 
 export const createAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
@@ -51,4 +51,4 @@ export const removeAccount = createServerFn({ method: "POST" })
 export const getAccountHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(AccountHistoryInput)
-  .handler(runEffect(handleGetAccountHistory));
+  .handler(runEffectJson(handleGetAccountHistory));

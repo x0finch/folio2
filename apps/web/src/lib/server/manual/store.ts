@@ -13,6 +13,7 @@ import { dayBucketOf, FIAT_NAMER, fiatCodeOf, tokenTicket } from "@folio/oracle-
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect } from "effect";
 import type { SnapshotTotalRow } from "@/lib/core/history";
+import { minMaxDownsampleHistory } from "@/lib/core/history";
 import type { CredsToken } from "@/lib/core/manual";
 import {
   buildManualAccountSeries,
@@ -27,7 +28,6 @@ import {
   tokenQuantityAt,
 } from "@/lib/core/manual";
 import type { BalanceLike } from "@/lib/core/token-model";
-import { minMaxDownsampleHistory } from "@/lib/server/history/minmax";
 import { NAMER } from "@/lib/server/oracle";
 import { type BatchDraft, planManualBatch, runningOk, type Token } from "./batch";
 import { buildManualSnapshot, manualUnitPrices } from "./snapshot";

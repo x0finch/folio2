@@ -12,13 +12,12 @@ import {
 import { handleListAccounts } from "@/lib/server/accounts/list";
 import { handleGetFiatRefs } from "@/lib/server/portfolio/fiat-refs";
 import { handleResolvePlatformMeta } from "@/lib/server/portfolio/platform-meta";
-import { handleGetSnapshots } from "@/lib/server/portfolio/snapshots";
 import { handleGetValuationSettings } from "@/lib/server/settings/valuation";
 import { handleGetTokenEnrichment } from "@/lib/server/tokens/enrichment";
 import { db } from "../_kit/db";
 import { realRegistry } from "../_kit/fakes";
 import { blockOutbound } from "../_kit/outbound";
-import { call, readAccountHoldingsView, readOverview } from "../_kit/run";
+import { call, getSnapshotsDecoded, readAccountHoldingsView, readOverview } from "../_kit/run";
 import { DAY, seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
@@ -46,7 +45,7 @@ describe("portfolio/snapshots", () => {
 
       const at = ago(DAY + HOUR);
       const after = ago(3 * DAY);
-      const rows = await call(USER, handleGetSnapshots({ at, after }));
+      const rows = await call(USER, getSnapshotsDecoded({ at, after }));
       expect(rows).toHaveLength(1);
       expect(rows[0]?.accountId).toBe(acc.id);
       expect(rows[0]?.totalUsd).toBe(50);
@@ -58,7 +57,7 @@ describe("portfolio/snapshots", () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, NOW + HOUR, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
-      const rows = await call(USER, handleGetSnapshots({ at: NOW }));
+      const rows = await call(USER, getSnapshotsDecoded({ at: NOW }));
       expect(rows).toHaveLength(1);
       expect(rows[0]?.accountId).toBe(acc.id);
       expect(rows[0]?.totalUsd).toBe(100);
@@ -70,7 +69,7 @@ describe("portfolio/snapshots", () => {
 
       const at = ago(DAY);
       const after = ago(7 * DAY);
-      const rows = await call(USER, handleGetSnapshots({ at, after }));
+      const rows = await call(USER, getSnapshotsDecoded({ at, after }));
       expect(rows).toEqual([]);
     });
 
@@ -81,7 +80,7 @@ describe("portfolio/snapshots", () => {
         amount: 2,
       });
 
-      const rows = await call(USER, handleGetSnapshots({ at: NOW }));
+      const rows = await call(USER, getSnapshotsDecoded({ at: NOW }));
       const row = rows.find((r) => r.accountId === acc.id);
       expect(row?.balances.length).toBeGreaterThan(0);
       expect(row?.balances[0]?.amount).toBe(2);
@@ -99,7 +98,7 @@ describe("portfolio/snapshots", () => {
         { tokenId: "token-eth", amount: 1, usdValue: 50 },
       ]);
 
-      const rows = await call(USER, handleGetSnapshots({ portfolioId: watch.id, at: NOW }));
+      const rows = await call(USER, getSnapshotsDecoded({ portfolioId: watch.id, at: NOW }));
       expect(rows.map((r) => r.accountId)).toEqual([watched.id]);
     });
   });
@@ -144,10 +143,10 @@ describe("portfolio/account-holdings-compose", () => {
     await seedSnapshot(USER, acc.id, now - DAY, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
     await seedSnapshot(USER, acc.id, now, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
     const [snapshotsNow, snapshotsPrev, settings, enrichment, accounts] = await Promise.all([
-      call(USER, handleGetSnapshots({ at: NOW })),
+      call(USER, getSnapshotsDecoded({ at: NOW })),
       call(
         USER,
-        handleGetSnapshots({ at: now - GAIN_WINDOW_MS, after: now - GAIN_START_FLOOR_MS }),
+        getSnapshotsDecoded({ at: now - GAIN_WINDOW_MS, after: now - GAIN_START_FLOOR_MS }),
       ),
       call(USER, handleGetValuationSettings()),
       call(USER, handleGetTokenEnrichment()),
@@ -203,10 +202,10 @@ describe("portfolio/overview-compose", () => {
     const [accounts, snapshotsNow, snapshotsPrev, settings, enrichment, fiatRefsData, registry] =
       await Promise.all([
         call(USER, handleListAccounts({})),
-        call(USER, handleGetSnapshots({ at: NOW })),
+        call(USER, getSnapshotsDecoded({ at: NOW })),
         call(
           USER,
-          handleGetSnapshots({
+          getSnapshotsDecoded({
             at: now - GAIN_WINDOW_MS,
             after: now - GAIN_START_FLOOR_MS,
           }),

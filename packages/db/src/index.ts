@@ -44,7 +44,11 @@ export {
 } from "./database";
 // 领域的类型**按文件逐个转出**(#504 T13)。以前它们走 `domains/index.ts` 那个桶,而领域服务
 // 反倒逐文件转 —— 同一个目录两套写法,「这个名字是哪个领域的」还得进桶里再找一次。
-export type { AccountRawCreds, CreateAccountInput } from "./domains/accounts";
+export type {
+  AccountRawCreds,
+  AccountWithPortfolio,
+  CreateAccountInput,
+} from "./domains/accounts";
 // 参考层那半的契约类型。**接口不再由 `@folio/oracle-basic` 定、db 顶上去实现** —— 它们就是
 // db 里那几份实现推导出来的类型,出包是因为 oracle 的几片把 store 当参数往下传,要个名字。
 export type { CacheEntry, CacheWrite } from "./domains/cache";
@@ -61,9 +65,12 @@ export type {
 export type { PortfolioMembership } from "./domains/portfolios";
 export type { UserSettingsView } from "./domains/settings";
 export type {
+  BalanceRawRow,
   SnapshotBalanceHistoryRow,
   SnapshotBalanceInput,
   SnapshotBalanceView,
+  SnapshotRawRow,
+  SnapshotRawRows,
   SnapshotTotal,
   SnapshotWithBalances,
   WriteSnapshotInput,

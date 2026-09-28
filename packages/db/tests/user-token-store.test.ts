@@ -89,6 +89,20 @@ describe("建行与幂等", () => {
     expect(info?.ref).toBe(USDC_UP);
   });
 
+  it("getAll / 价 getAll(整表版,FOL-92):与按 id 读逐项相同,只含本人", async () => {
+    const store = storeFor(USER_A);
+    const usdc = await store.create(seed("USDC", "USD Coin", "p.png"), [USDC_ETH, USDC_UP]);
+    const loose = await store.create(seed("FOO"), [USDC_ARB]);
+    await storeFor(USER_B).create(seed("USDC"), [USDC_UP]);
+    await priceStoreFor(USER_A).put([{ tokenId: usdc, unitPrice: 1, asOf: 900 }], 500);
+
+    expect(await store.getAll()).toEqual(await store.getByIds([usdc, loose]));
+    expect([...(await store.getAll()).keys()].sort()).toEqual([usdc, loose].sort());
+    const prices = priceStoreFor(USER_A);
+    expect(await prices.getAll()).toEqual(await prices.getByIds([usdc, loose]));
+    expect([...(await prices.getAll()).keys()]).toEqual([usdc]); // 尚无价的不出现
+  });
+
   it("只有 provider 那条 ref → 上游还没认出来,ref 为 null、linked 为 false", async () => {
     const store = storeFor(USER_A);
     const id = await store.create(seed("SCAM"), [USDC_ETH]);

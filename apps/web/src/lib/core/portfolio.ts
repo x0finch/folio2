@@ -23,6 +23,7 @@ import {
   buildPortfolioHistory,
   downsampleSeries,
   type HistoryPoint,
+  minMaxDownsampleHistory,
   type SnapshotTotalRow,
 } from "@/lib/core/history";
 import {
@@ -259,7 +260,7 @@ export interface Holding {
 }
 
 // 分组键 = `token_id`。没有 token_id 的行**各自成行**,键 = `账户 + 余额行 id`。
-// (只在本模块内用 —— buildCanonicalHoldings / buildTokenValueHistory;不再对外导出,#201 后无外部消费者。)
+// (只在本模块内用 —— buildCanonicalHoldings;不再对外导出,#201 后无外部消费者。)
 function groupKey(row: AggInput): string {
   return row.tokenId ?? `no-token:${row.account.id}:${row.id ?? norm(row.symbol)}`;
 }
@@ -354,64 +355,21 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
 
 //  —— 单币价值历史
 
-// 单币【持仓价值】历史:把历史余额行按 token_id 归属,按 (账户×快照) 汇总【冻结】价值,
-// 再复用 buildPortfolioHistory 跨账户阶梯式重建 —— 与主页 hero 同语义。
-// 归属用与聚合同一套 `groupKey` / `isEligible`,确保历史 ≡ 当前 Holding。
-export interface TokenHistRow extends AggInput {
-  takenAt: number; // 该行所属快照时刻(账户 = account.id)
-}
-
-export function buildTokenValueHistory(rows: readonly TokenHistRow[], key: string): HistoryPoint[] {
-  // 按 (账户, takenAt) 汇总匹配本 Holding 的 eligible 行的冻结 value → 喂阶梯重建。
-  const bySnap = new Map<string, SnapshotTotalRow>();
-  for (const row of rows) {
-    if (!isEligible(row) || groupKey(row) !== key) continue;
-    const k = `${row.account.id}|${row.takenAt}`;
-    const cur = bySnap.get(k);
-    if (cur) cur.totalUsd += row.value;
-    else bySnap.set(k, { accountId: row.account.id, takenAt: row.takenAt, totalUsd: row.value });
-  }
-  return buildPortfolioHistory([...bySnap.values()]);
-}
-
-// 单币价值历史接口下发的原料(FOL-50 + FOL-46):
-//   · 短窗:`rows` = 窗口内该币的原样余额行,浏览器 `buildTokenValueHistory` 重建 + 自适应降采样。
-//   · 长窗(1y/all):服务端已重建 + min-max 降采样 → `points`(与总览/账户曲线同一套降采样,
-//     payload 随窗口封顶不随历史膨胀);此时 `rows` 为空、`sampled` 为 true。
-export interface TokenValueHistoryRow {
-  accountId: string;
-  takenAt: number;
-  amount: number;
-  usdValue: number;
-  kind: string;
-  tokenId: string | null;
-  metaJson: string | null;
-}
+// 单币价值历史接口下发的原料(FOL-50 + FOL-46 + FOL-92):每账户、每桶一行的**现货价值合计**
+// (`SnapshotTotalRow` 形状,与组合曲线同一种)。归属(token_id)与入选口径(只数现货,
+// `viewKind === "spot"`)在 SQL 里判,合计也在那儿算 —— 浏览器拿到的已经是「某账户某时刻这个币值多少」。
+//   · 短窗(≤ 7 天每张快照一行 / 30 天每天一行):阶梯重建 + 自适应降采样。
+//   · 长窗(1y/all,`sampled`):每账户 ≤ 200 行(桶收盘),阶梯重建 + min-max 降采样。
 export interface TokenValueHistoryRaw {
-  rows: TokenValueHistoryRow[];
-  points?: HistoryPoint[];
+  rows: SnapshotTotalRow[];
   sampled?: boolean;
 }
 
-// 原样余额行 → buildTokenValueHistory 吃的 TokenHistRow(symbol/label/connectorId 不参与单币曲线,置空)。
-// 服务端(长窗重建)与浏览器(短窗重建)共用这一个映射。
-export function tokenHistRowsFromRaw(rows: readonly TokenValueHistoryRow[]): TokenHistRow[] {
-  return rows.map((r) => ({
-    symbol: "",
-    amount: r.amount,
-    value: r.usdValue,
-    kind: viewKind(r),
-    account: { id: r.accountId, label: "", connectorId: "" },
-    tokenId: r.tokenId,
-    takenAt: r.takenAt,
-  }));
-}
-
-// 原料 → 单币价值曲线。长窗直接用服务端降采样好的 `points`;短窗浏览器重建 + 自适应降采样
-// (与 buildAccountValueHistory 的 `sampled ? base : downsampleSeries(base)` 同一口径)。
-export function tokenValueHistoryFromRaw(raw: TokenValueHistoryRaw, key: string): HistoryPoint[] {
-  if (raw.sampled && raw.points) return raw.points;
-  return downsampleSeries(buildTokenValueHistory(tokenHistRowsFromRaw(raw.rows), key));
+// 原料 → 单币价值曲线:跨账户阶梯重建(与主页 hero 同语义),再按窗口降采样
+// (与 buildAccountValueHistory 的 `sampled ? minMax : downsampleSeries` 同一口径)。
+export function tokenValueHistoryFromRaw(raw: TokenValueHistoryRaw): HistoryPoint[] {
+  const series = buildPortfolioHistory(raw.rows);
+  return raw.sampled ? minMaxDownsampleHistory(series) : downsampleSeries(series);
 }
 
 //  —— 首页 tab 条(纯推导)

@@ -2,7 +2,6 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import { HISTORY_MINMAX_BUCKETS } from "../src/domains/history-minmax";
 import { user } from "../src/schema/auth";
 import { forDomain } from "./effect";
 
@@ -77,78 +76,68 @@ beforeEach(async () => {
   await resetUser(USER);
 });
 
-describe("history min-max (FOL-46)", () => {
-  it("listTotalsByAccountMinMax:响应行数与历史长度脱钩,全局极值保留", async () => {
+// 长窗原料(FOL-46 → FOL-92):服务端只在 SQL 里按桶封顶,降采样在浏览器做。这里钉的是
+// 「发多少行有上界」+「该在里面的真实观测在里面」—— 形状对不对由浏览器那侧的单测管。
+describe("history sampled (FOL-92)", () => {
+  it("listSampledTotalsByAccount:每桶 ≤ 4 点、行数与历史长度脱钩,全局极值与首末点保留", async () => {
     const acc = await accounts(USER).create({ connectorId: "binance", label: "B", creds: "x" });
     const start = 1_000_000;
     await seedManySnapshots(acc.id, 120, start, DAY, (i) => 100 + Math.sin(i / 3) * 50);
 
     const raw = await snapshotsOf(USER).listTotalsByAccount(acc.id);
-    const sampled = await snapshotsOf(USER).listTotalsByAccountMinMax(acc.id);
+    const sampled = await snapshotsOf(USER).listSampledTotalsByAccount(acc.id, undefined, 10);
 
     expect(raw).toHaveLength(120);
-    expect(sampled.length).toBeLessThanOrEqual(HISTORY_MINMAX_BUCKETS * 2);
+    expect(sampled.length).toBeLessThanOrEqual(10 * 4);
     expect(sampled.length).toBeGreaterThan(10);
 
-    const rawMin = Math.min(...raw.map((r) => r.totalUsd));
-    const rawMax = Math.max(...raw.map((r) => r.totalUsd));
-    const sampledValues = sampled.map((r) => r.totalUsd);
-    expect(Math.min(...sampledValues)).toBeCloseTo(rawMin, 6);
-    expect(Math.max(...sampledValues)).toBeCloseTo(rawMax, 6);
-    expect([...sampled.map((r) => r.takenAt)].sort((a, b) => a - b)).toEqual(
-      sampled.map((r) => r.takenAt),
-    );
+    const values = (rows: { totalUsd: number }[]) => rows.map((r) => r.totalUsd);
+    expect(Math.min(...values(sampled))).toBe(Math.min(...values(raw)));
+    expect(Math.max(...values(sampled))).toBe(Math.max(...values(raw)));
+    expect(sampled[0]).toEqual(raw[0]);
+    expect(sampled.at(-1)).toEqual(raw.at(-1));
+    // 每个点都是真实观测,且升序。
+    const rawSet = new Set(raw.map((r) => `${r.takenAt}:${r.totalUsd}`));
+    expect(sampled.every((r) => rawSet.has(`${r.takenAt}:${r.totalUsd}`))).toBe(true);
+    const ts = sampled.map((r) => r.takenAt);
+    expect([...ts].sort((a, b) => a - b)).toEqual(ts);
   }, 20_000);
 
   it("再加一倍快照,采样行数不再涨", async () => {
     const acc = await accounts(USER).create({ connectorId: "binance", label: "B", creds: "x" });
     const start = 2_000_000;
     await seedManySnapshots(acc.id, 80, start, DAY, (i) => i);
-    const first = await snapshotsOf(USER).listTotalsByAccountMinMax(acc.id);
+    const first = await snapshotsOf(USER).listSampledTotalsByAccount(acc.id, undefined, 10);
     await seedManySnapshots(acc.id, 80, start + 80 * DAY, DAY, (i) => 80 + i);
-    const second = await snapshotsOf(USER).listTotalsByAccountMinMax(acc.id);
+    const second = await snapshotsOf(USER).listSampledTotalsByAccount(acc.id, undefined, 10);
 
-    expect(first.length).toBeLessThanOrEqual(HISTORY_MINMAX_BUCKETS * 2);
-    expect(second.length).toBeLessThanOrEqual(HISTORY_MINMAX_BUCKETS * 2);
-    expect(Math.abs(second.length - first.length)).toBeLessThanOrEqual(4);
+    expect(first.length).toBeLessThanOrEqual(10 * 4);
+    expect(second.length).toBeLessThanOrEqual(10 * 4);
   }, 30_000);
 
-  it("listTotalsMinMax:按组合净值时间线降采样,保留组合级极值", async () => {
+  it("listSampledTotals:每账户每桶一行真实收盘,只含请求的账户;组合的最后一点是真值", async () => {
     const a1 = await accounts(USER).create({ connectorId: "binance", label: "A1", creds: "x" });
     const a2 = await accounts(USER).create({ connectorId: "binance", label: "A2", creds: "x" });
     const other = await accounts(USER).create({ connectorId: "binance", label: "X", creds: "x" });
     const start = 3_000_000;
-    // a1 全程 10;a2 前 50 天缺席,第 50 天起 +90 → 组合在 a2 入场时出现尖峰 100。
-    await seedManySnapshots(a1.id, 100, start, DAY, () => 10);
+    await seedManySnapshots(a1.id, 100, start, DAY, (i) => 10 + (i % 5));
     await seedManySnapshots(a2.id, 50, start + 50 * DAY, DAY, () => 90);
     await seedManySnapshots(other.id, 100, start, DAY, () => 999);
 
-    const rows = await snapshotsOf(USER).listTotalsMinMax([a1.id, a2.id]);
+    const raw = (await snapshotsOf(USER).listTotals()).filter((r) => r.accountId !== other.id);
+    const rows = await snapshotsOf(USER).listSampledTotals([a1.id, a2.id], undefined, 10);
     expect(rows.every((r) => r.accountId === a1.id || r.accountId === a2.id)).toBe(true);
-    expect(rows.length).toBeLessThanOrEqual(HISTORY_MINMAX_BUCKETS * 2 * 2);
-    expect(rows.length).toBeGreaterThan(4);
-
-    const portfolioSeries = buildPortfolioTimeline(rows);
-    expect(Math.max(...portfolioSeries.map((p) => p.total))).toBe(100);
-  }, 40_000);
-
-  it("listTotalsMinMax:重建后每个点都等于真实组合净值(交错时间戳不产生假凹口/尖峰)", async () => {
-    const a1 = await accounts(USER).create({ connectorId: "binance", label: "A1", creds: "x" });
-    const a2 = await accounts(USER).create({ connectorId: "binance", label: "A2", creds: "x" });
-    const start = 5_000_000;
-    // 两账户都在变、且 takenAt 交错半步 —— 正是 review 抓的场景:某账户的控制行时刻会成渲染点,
-    // 旧实现在那个时刻会把另一账户求和成更旧的值/漏掉。重盖到 kept 时刻后,每点必等于真值。
-    await seedManySnapshots(a1.id, 60, start, DAY, (i) => 100 + Math.sin(i / 2) * 40);
-    await seedManySnapshots(a2.id, 60, start + DAY / 2, DAY, (i) => 200 + Math.cos(i / 3) * 80);
-
-    const raw = await snapshotsOf(USER).listTotals(); // 全量原始行(仅 a1/a2,beforeEach 已清)
-    const sampled = await snapshotsOf(USER).listTotalsMinMax([a1.id, a2.id]);
-    const series = buildPortfolioTimeline(sampled);
-
-    expect(series.length).toBeGreaterThan(4);
-    for (const p of series) {
-      expect(p.total).toBeCloseTo(trueValueAt(raw, p.t), 6);
+    for (const id of [a1.id, a2.id]) {
+      expect(rows.filter((r) => r.accountId === id).length).toBeLessThanOrEqual(10);
     }
+    const rawSet = new Set(raw.map((r) => `${r.accountId}:${r.takenAt}:${r.totalUsd}`));
+    expect(rows.every((r) => rawSet.has(`${r.accountId}:${r.takenAt}:${r.totalUsd}`))).toBe(true);
+
+    const series = buildPortfolioTimeline(rows);
+    const last = series.at(-1);
+    expect(last?.total).toBe(trueValueAt(raw, last?.t ?? 0));
+    // a2 入场之后组合才有 +90 —— 这一段在曲线里。
+    expect(Math.max(...series.map((p) => p.total))).toBeGreaterThanOrEqual(100);
   }, 40_000);
 
   it("listTotals:裁窗口时补 carry-in(停更账户不从曲线消失)", async () => {
@@ -171,14 +160,14 @@ describe("history min-max (FOL-46)", () => {
     ).toEqual([500, 1000]);
   });
 
-  it("listTotalsMinMax:裁窗口时补 carry-in(停更账户不从曲线消失)", async () => {
+  it("listSampledTotals:裁窗口时补 carry-in(停更账户不从曲线消失)", async () => {
     const a = await accounts(USER).create({ connectorId: "binance", label: "A", creds: "x" });
     const cold = await accounts(USER).create({ connectorId: "binance", label: "C", creds: "x" });
     await snapshotsOf(USER).write(a.id, { takenAt: 100, totalUsd: 500, balances: [] });
     await snapshotsOf(USER).write(a.id, { takenAt: 1000, totalUsd: 500, balances: [] });
     await snapshotsOf(USER).write(cold.id, { takenAt: 50, totalUsd: 200, balances: [] });
 
-    const rows = await snapshotsOf(USER).listTotalsMinMax([a.id, cold.id], 500);
+    const rows = await snapshotsOf(USER).listSampledTotals([a.id, cold.id], 500);
     expect(rows.some((r) => r.accountId === cold.id)).toBe(true);
     // 组合净值全程含 cold 的 200(不再偏低)。
     const series = buildPortfolioTimeline(rows);

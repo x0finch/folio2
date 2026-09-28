@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { runEffect } from "@/lib/server/runtime";
+import { runEffect, runEffectJson } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleListTokenCatalogue } from "./catalogue";
 import { handleGetTokenEnrichment } from "./enrichment";
@@ -20,7 +20,7 @@ export const listTokenCatalogue = createServerFn({ method: "GET" })
 
 export const getTokenEnrichment = createServerFn({ method: "GET" })
   .middleware([requireAuth])
-  .handler(runEffect(handleGetTokenEnrichment));
+  .handler(runEffectJson(handleGetTokenEnrichment));
 
 // requireAuth 与其余选币端点一致(只在 authed 加账户模态里调)。
 export const listFiatOptions = createServerFn({ method: "GET" })
