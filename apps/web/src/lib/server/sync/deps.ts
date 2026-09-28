@@ -36,7 +36,7 @@ import {
   TokenOracle,
 } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
-import { Cause, Effect, Exit, Layer, type Stream } from "effect";
+import { Cause, Effect, Layer, type Stream } from "effect";
 import { userDisplayBalances } from "@/lib/core/token-model";
 import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";
@@ -54,7 +54,7 @@ import { isSyncableAccount } from "./status";
 // 数据访问经全局 db 门面;密钥/全局 key/tokens 走 cloudflare:workers 全局 env(fetch 与 scheduled 均可用)。
 
 // 同步后预热代币缓存:取该用户最新快照的全部余额 → warm(top-N + 逐 spot/manual 行懒解析)。
-// best-effort(warmTokens 内部吞错),让下次总览能 cache-only 富化出价/logo/涨跌。cron 与手动 sync 共用。
+// best-effort(warmTokens 内部吞错),让下次总览能 cache-only 富化出价/logo/涨跌。队列 `warm-user` 与手动 sync 共用。
 //
 // **整段是一个 effect,装配一次。** 以前这里 await 了四次 `runOracle`,即一趟预热建四套 store、
 // 跑四个互不相干的 fiber;现在四步共一份 context。Effect 官方那句「`run*` 尽量放在程序的边缘」
@@ -87,7 +87,7 @@ export const warmTokens: Effect.Effect<
   else syncLog.debug("held prices warmed", { ...report });
   // 平台元数据 + DeFi 协议图各自兜住(一个失败不拖垮另一个,也不拖垮下面的汇率与目录)。
   // 两者的错误通道都是 `never`,所以这里兜的是 **defect** —— 自家 bug 或 db 抛的东西。
-  // `catchAllCause` 而不是 `catchAll`:后者只接类型化失败,接不住 defect(见 warmAllUsers 的注释)。
+  // `catchAllCause` 而不是 `catchAll`:后者只接类型化失败,接不住 defect(见 round.ts `fanOutAllUsers` 的注释)。
   // 快照直接传给它 —— 它以前自己再读一遍(一次预热两趟同样的 D1 查询)。
   yield* warmPlatforms(snapshots).pipe(
     Effect.catchAllCause((cause) =>
@@ -111,40 +111,15 @@ export const warmTokens: Effect.Effect<
   syncLog.debug("catalogue warmed", { rows });
 });
 
-// 一个用户的预热,**装配好了但还没跑**。cron 用它(把 N 个用户拼进自己那一个 effect)。
-const warmTokensFor = (userId: string): Effect.Effect<void, Error> => forUser(userId, warmTokens);
-
-// sweep 收尾用:逐用户预热,**各自兜住**(#375 第 2 步 · 纵深防御)。预热是尽力而为(供次日总览
-// cache-only 富化),一个用户失败绝不该让后面的用户排不上队,更不该把整次 cron 拖成异常收尾。
-//
-// **为什么不是 `Effect.partition`。** 官方给的错误累积算子(`partition` / `validateAll`)内部都是
-// `Effect.either`,只累积**类型化失败**;defect(我们自己代码抛的 TypeError、db 抛的东西)照样
-// 炸穿整个 effect —— 那正是 #375 要兜的那一类。`Effect.exit` 收的是整个 `Cause`,两类都进来,
-// 才等价于原来那圈 try/catch。
-//
-// 串行(默认 concurrency)是有意的:与原来的 for-await 一致,且 cron 一次调用的子请求数有限。
-// 每条失败只记 `error`(不带 userId),与本文件其余 best-effort 一致(P6.7);「哪个用户」的
-// 可观测性交给返回的计数 + 调用方一条汇总日志。
-// `warmOne` 可注入,只为单测能让指定用户失败;生产路径用默认的 `warmTokensFor`。
-export const warmAllUsers = (
-  userIds: readonly string[],
-  warmOne: (userId: string) => Effect.Effect<void, Error> = warmTokensFor,
-): Effect.Effect<{ warmed: number; failed: number }> =>
-  Effect.gen(function* () {
-    const syncLog = getLogger(["folio", "web", "sync"]);
-    const exits = yield* Effect.forEach(userIds, (userId) => Effect.exit(warmOne(userId)));
-    let warmed = 0;
-    let failed = 0;
-    for (const exit of exits) {
-      if (Exit.isSuccess(exit)) {
-        warmed++;
-      } else {
-        failed++;
-        syncLog.warn("warmTokens failed, user skipped", { error: Cause.pretty(exit.cause) });
-      }
-    }
-    return { warmed, failed };
-  });
+/**
+ * 一个用户的预热,**装配好了但还没跑** —— 队列 `warm-user` 那条消息的全部活(FOL-86)。
+ *
+ * 以前 cron 在 sweep 收尾逐用户串行跑它(`warmAllUsers`,各自兜住),与同步挤在同一次调用里。
+ * 现在一个用户一条消息、一次调用:「一个用户失败不拖累其余」由队列天然给了(各是各的调用),
+ * 失败交给 consumer 记一行 + 队列重投。FOL-88 会再把它按件(价 / 汇率 / 平台 / 目录 / DeFi 图)拆开。
+ */
+export const warmTokensFor = (userId: string): Effect.Effect<void, Error> =>
+  forUser(userId, warmTokens);
 
 // 经 @folio/connectors 取余额。前置(缺凭据 / 校验 / 选 provider)走快回退。
 // #37d 起 account.connectorId 直接即 connector 的 id。
@@ -244,7 +219,7 @@ function createSeedCollector(): SeedCollector {
 // 读一次存进闭包就够 —— 那个 Map 连同它的分桶逻辑一起没了。
 // db 与参考层的错误通道都是 `never`(ADR:D1 挂了走 defect),而编排靠**类型化**的 `SyncDepError`
 // 做隔离 —— `account.ts` 的 `bestEffort`(认币/重估降级)与 `syncAccount` 末尾的 `catchAll`
-// (逐账户隔离)都只接类型化失败;逐用户隔离在 `round.ts` 的 `syncAllUsers`(那层兜的是 Cause)。
+// (逐账户隔离)都只接类型化失败;逐用户隔离在 `round.ts` 的 `fanOutAllUsers`(那层兜的是 Cause),逐账户的队列消息各是各的调用。
 //
 // 以前这道翻译是**免费**的:每个 dep 都经一次 `runPromise` 边界,defect 变成 promise rejection,
 // 再被 `tryPromise({ catch: depError })` 收成类型化失败。边界一拿掉,它就得显式补上。
@@ -269,20 +244,6 @@ export interface SyncScope {
    * 解析,就跟同步内核共用同一个 DbClient,不必另起一条根 fiber 建第二个连接)。
    */
   only: ReadonlySet<string> | Effect.Effect<ReadonlySet<string>, never, Database | DbRequest>;
-  /**
-   * 出网的闸。**它只盖得住同一次调用里的多轮**(cron 一次 scheduled 里那批):信号量是进程内
-   * 的对象,而手动 `POST /api/sync` 与 cron 的 scheduled 跑在**不同的 isolate 里** —— 跨 isolate
-   * 没有共享内存,这把闸递不过去。真要全局限并发得上 DO / D1 令牌桶,那是一整块新面积。
-   *
-   * **所以「手动撞上 cron」的窗口里,同一个用户最坏 2 × SYNC_CONCURRENCY 并发**(整点前后
-   * 几秒,手动轮 6 + cron 批 6)。收下这个:窗口窄(开轮幂等,同一组合撞不出两轮,只有
-   * 「手动 A 组合 + cron 其余组合」这种错开的才叠)、上游各家限频有余量、代价是零新基建。
-   * 不给 = 不设闸,那时唯一的上限是流自己那个 `SYNC_CONCURRENCY`。
-   *
-   * **闸在重试的内层**(CODING.md):`@folio/sync` 的重试包的是整次「取一次余额」,而这把闸
-   * 在它里面 —— 于是重跑一次就重新排一次队,语义自动正确,不必让包替调用方保证。
-   */
-  gate?: Effect.Semaphore;
 }
 
 export const makeSyncServicesLayer = (
@@ -364,11 +325,9 @@ export const makeSyncServicesLayer = (
                 new ConnectorFailure({ message: `no connector for connectorId ${cid}` }),
               );
             }
-            const fetched = fetchViaConnector(cid, manifest, account, stored, seeds);
-            // 闸(给了才有):见 `SyncScope.gate` —— 它管的是「这个用户同时在飞几发上游」,
-            // 而流那个 `SYNC_CONCURRENCY` 管的是「这一轮同时跑几个账户」。一个用户一轮时两者
-            // 等价,多轮时只有前者拦得住。
-            return scope?.gate ? scope.gate.withPermits(1)(fetched) : fetched;
+            // 「这个用户同时在飞几发上游」以前由 cron 递进来的一把闸管(多轮共用);FOL-86 起 cron 的
+            // 账户一条消息一次调用,闸递不过去,改由队列 consumer 的 `max_concurrency` 顶上(wrangler.jsonc)。
+            return fetchViaConnector(cid, manifest, account, stored, seeds);
           },
         }),
         Layer.effect(
@@ -436,7 +395,7 @@ export const makeSyncServicesLayer = (
 // 与用户)也透出去 —— 流式那条路的收尾(`warmTokens`)要的正是它,而这一轮的 `DbClient` 必须与
 // 同步内核是**同一次构建**出来的那一份(否则一个请求两个 `DbClient`)。服务图本身不在这一次构建里
 // 建(ADR 0054),这里新建的只有那两个值和四个同步能力。
-/** 不收口的那一份:cron 的全量 sweep 与单账户同步用它。 */
+/** 不收口的那一份:单账户同步(`syncAccount`)用它。队列那条路按账户收口,用 `makeSyncServicesLayer`。 */
 export const syncServicesLayer = makeSyncServicesLayer();
 
 const syncFor = (userId: string, scope?: SyncScope): Layer.Layer<SyncServices | UserServices> =>
@@ -458,7 +417,7 @@ const syncFor = (userId: string, scope?: SyncScope): Layer.Layer<SyncServices | 
  * defaultLogger,内层那条 `logInfo` 照样落在 Effect 自带的 console logger 上)。所以这一整趟
  * 同步 + 预热的 `Effect.log*` 想进 LogTape,只能由**它自己这次 provide** 带上。
  *
- * **只能挂在这里,不能挂进 `syncFor`**:cron 那条路是在外层 `runAtEdge` 里跑的,那儿已经有一个
+ * **只能挂在这里,不能挂进 `syncFor`**:队列 consumer 那条路是在外层 `runAtEdge` 里跑的,那儿已经有一个
  * `logTapeLogger` —— 再叠一层不会顶掉它,只会两个转发器同时在集合里、每条日志写两遍
  *(effect-log.ts 记着这个坑,实测过)。而 `syncRoundFor` 的调用方(`./round` 的 `runSyncRound`)
  * 每一次都是自己起的根 fiber。

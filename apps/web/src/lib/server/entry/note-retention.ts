@@ -37,12 +37,12 @@ const pruneNotesFor = (
   );
 
 /**
- * 逐用户剪掉保留期外的展示 note,**各自兜住**(与 `warmAllUsers` 同一形状):一个用户失败不该让
+ * 逐用户剪掉保留期外的展示 note,**各自兜住**(与 `fanOutAllUsers` 同一形状):一个用户失败不该让
  * 后面的用户排不上队,也不该把整次 cron 拖成异常收尾 —— 这是维护动作,不是正确性动作。
  *
  * **为什么不用 `Effect.partition`**:官方那几个错误累积算子内部是 `Effect.either`,只累积类型化
  * 失败,defect(我们自己抛的 TypeError、db 抛的东西)照样炸穿。`Effect.exit` 收整个 `Cause`,
- * 两类都进来。(同 `warmAllUsers` 的注释。)
+ * 两类都进来。(同 `fanOutAllUsers` 的注释。)
  *
  * 时间走 `Clock` 而不是 `Date.now()`:测试要能把时钟推到窗口两侧,而不是靠改保留天数去凑。
  *

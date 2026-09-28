@@ -142,7 +142,7 @@ const tracerOf = (c: Collector): Tracer.Tracer =>
  * 互不串,也不必操心跨请求的 Map 会不会漏。
  *
  * `emit` 可注入,只为单测能把树接出来看(生产路径用默认的那个 debug 日志)—— 与
- * `warmAllUsers` 的 `warmOne`、`pruneNotesAllUsers` 的 `pruneOne` 同一个理由。
+ * `fanOutAllUsers` 的 `fanOutOne`、`pruneNotesAllUsers` 的 `pruneOne` 同一个理由。
  */
 export const spanTracerTo = (emit: (tree: string) => void): Layer.Layer<never> =>
   Layer.unwrapEffect(Effect.sync(() => Layer.setTracer(tracerOf(makeCollector(emit)))));

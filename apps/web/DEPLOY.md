@@ -33,6 +33,12 @@ pnpm exec wrangler d1 create folio
 # 3. Apply migrations to the REMOTE D1 (local & remote are separate DBs)
 pnpm exec wrangler d1 migrations apply folio --remote
 
+# 3b. Create the background-job queues (FOL-86 / ADR 0055). The hourly cron only enqueues
+#     one message per account; the `queue()` consumer does the syncing. `wrangler deploy`
+#     FAILS if a queue named in wrangler.jsonc → queues doesn't exist yet. One-time only.
+pnpm exec wrangler queues create folio-jobs
+pnpm exec wrangler queues create folio-jobs-dlq
+
 # 4. Set secrets (each prompts for the value — never written to git)
 pnpm exec wrangler secret put SECRETS_KEY
 pnpm exec wrangler secret put BETTER_AUTH_SECRET
@@ -66,7 +72,9 @@ check which side you are on, look for `edge cache: hit` in `wrangler tail` — o
 1. Open the URL → **sign up** → you land on the overview.
 2. Add a **manual** account (symbol/amount/usd) → **Sync now** → it appears with a total.
 3. (Optional) add an on-chain wallet (EVM needs no key) → Sync.
-4. Logs: `pnpm exec wrangler tail` — structured JSON lines (`account synced` with `userId`/`accountId`/`type`, etc.). The daily cron (`0 0 * * *` UTC) auto-runs; trigger it manually from the dashboard (Workers → folio-web → Triggers / Cron) to see a `cron sweep done` line.
+4. Logs: `pnpm exec wrangler tail` — structured JSON lines (`account synced` with `userId`/`accountId`/`type`, etc.). The daily cron (`0 0 * * *` UTC) auto-runs; trigger it manually from the dashboard (Workers → folio-web → Triggers / Cron) to see a `cron sweep enqueued` line, followed (one queue-consumer invocation per account) by `account synced` lines and a `queued round done` line per portfolio. Dead-lettered jobs (rare: only when even the give-up step failed) sit in `folio-jobs-dlq` — inspect them under Queues in the dashboard.
+
+**Existing deployment upgrading past FOL-86:** run step 3b once before the next deploy.
 
 ## Updating later (manual)
 
@@ -176,6 +184,10 @@ cd apps/web
 # 1. Create the preview D1, then paste the printed database_id into
 #    wrangler.jsonc → env.preview.d1_databases[0].database_id (replacing the REPLACE_WITH_… placeholder)
 pnpm exec wrangler d1 create folio-preview
+
+# 1b. Create the preview's own queue pair (see step 3b above; preview has a consumer, no cron)
+pnpm exec wrangler queues create folio-preview-jobs
+pnpm exec wrangler queues create folio-preview-jobs-dlq
 
 # 2. Set the preview Worker's secrets. Use `--name folio-preview`, NOT `--env preview`:
 #    env.preview now sets its own `name`, so `--env preview` resolves to a non-existent

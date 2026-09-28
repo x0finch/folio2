@@ -1,19 +1,19 @@
 import { Effect, Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
-import { openSyncRound, syncAllUsers } from "@/lib/server/sync/round";
+import { type Enqueued, JobQueue } from "@/lib/server/jobs/queue";
+import { fanOutAllUsers, openSyncRound } from "@/lib/server/sync/round";
 import { db } from "../_kit/db";
-import { blockOutbound } from "../_kit/outbound";
+import { blockOutbound, type Outbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
 import { freshUser } from "../_kit/user";
 
-// cron 按**组合**分区开轮(ADR 0048)。以前它跑一个不收口的大 sweep,轮的状态还只在浏览器里,
-// 于是 cron 的成果对面板永远隐形。现在它开的轮与手动轮键形状完全一致 —— 面板照样读得到。
-//
-// 出网被掐掉,所以每个账户都会失败;这些用例要的不是「同步成功」,而是**分区、开轮、收官**
-// 这三件事的形状。
+// cron 按**组合**分区开轮(ADR 0048),**只开轮 + 投消息,不跑**(FOL-86)。真同步在队列 consumer 里
+// 一个账户一次调用(见 ../jobs/consume.cases.ts)。这里钉的是开轮的形状,以及「这一步一发上游都不打」。
 
-describe("sync/cron", () => {
+describe("sync/cron(fan-out)", () => {
   const USER = "h-sync-cron";
+  let outbound: Outbound;
+  let sent: Enqueued[];
 
   const cex = (label: string) =>
     db(USER).accounts.create({
@@ -27,8 +27,20 @@ describe("sync/cron", () => {
     return Option.getOrNull(got);
   };
 
+  const fanOut = () =>
+    Effect.runPromise(
+      fanOutAllUsers([USER]).pipe(
+        Effect.provideService(JobQueue, {
+          send: (batch) => Effect.sync(() => void sent.push(...batch)),
+        }),
+      ),
+    );
+
+  const syncJobs = () => sent.flatMap((m) => (m.job.kind === "sync-account" ? [m.job] : []));
+
   beforeEach(async () => {
-    blockOutbound();
+    outbound = blockOutbound();
+    sent = [];
     await freshUser(USER);
   });
 
@@ -39,7 +51,7 @@ describe("sync/cron", () => {
     const there = await cex("看单里的");
     await db(USER).portfolios.assignAccount(there.id, watch.id);
 
-    await Effect.runPromise(syncAllUsers([USER]));
+    await fanOut();
 
     const mine = await roundOf(def.id);
     const other = await roundOf(watch.id);
@@ -50,46 +62,76 @@ describe("sync/cron", () => {
     expect(other?.trigger).toBe("cron");
   });
 
-  it("跑完两个组合都收官,小计把两边加起来", async () => {
-    await db(USER).portfolios.ensureDefault();
+  it("一个账户一条 sync-account,指着它所在的那一轮;外加一条延后的 warm-user", async () => {
+    const def = await db(USER).portfolios.ensureDefault();
     const watch = await db(USER).portfolios.create({ name: "看单" });
-    await cex("默认组合里的");
+    const here = await cex("默认组合里的");
     const there = await cex("看单里的");
     await db(USER).portfolios.assignAccount(there.id, watch.id);
 
-    const result = await Effect.runPromise(syncAllUsers([USER]));
+    const result = await fanOut();
 
-    const def = await db(USER).portfolios.ensureDefault();
-    expect((await roundOf(def.id))?.finishedAt).not.toBeNull();
-    expect((await roundOf(watch.id))?.finishedAt).not.toBeNull();
-    // 出网掐掉 → 两个账户各失败一次,一个用户。
-    expect(result).toEqual({ users: 1, ok: 0, failed: 2, skipped: 0 });
+    const mine = await roundOf(def.id);
+    const other = await roundOf(watch.id);
+    expect(syncJobs().sort((a, b) => a.accountId.localeCompare(b.accountId))).toEqual(
+      [
+        {
+          kind: "sync-account",
+          userId: USER,
+          portfolioId: def.id,
+          roundId: mine?.roundId,
+          accountId: here.id,
+        },
+        {
+          kind: "sync-account",
+          userId: USER,
+          portfolioId: watch.id,
+          roundId: other?.roundId,
+          accountId: there.id,
+        },
+      ].sort((a, b) => a.accountId.localeCompare(b.accountId)),
+    );
+    const warm = sent.filter((m) => m.job.kind === "warm-user");
+    expect(warm).toHaveLength(1);
+    expect(warm[0]?.delaySeconds).toBeGreaterThan(0);
+    expect(result).toEqual({ users: 1, accounts: 2, failed: 0 });
+    // 轮开着、还没收官 —— 收官是最后一个 consumer 的事。
+    expect(mine?.finishedAt).toBeNull();
   });
 
-  // 用户正好在手动同步:开轮幂等会把那一轮原样还回来,cron 就该让开 —— 不然它会把手动那一轮
-  // 的明细当成自己的账本念,还会同时有两个 worker 对着同一批账户打上游。
-  it("活轮还在 → cron 不插一脚,那一轮仍是手动的", async () => {
+  // FOL-86 的全部意义:cron 那一次调用不再碰上游。
+  it("fan-out 一发上游都不打", async () => {
+    await db(USER).portfolios.ensureDefault();
+    await cex("a");
+    await cex("b");
+    await fanOut();
+    expect(syncJobs()).toHaveLength(2);
+    expect(outbound.calls).toEqual([]);
+  });
+
+  // 用户正好在手动同步:开轮幂等会把那一轮原样还回来,cron 就该让开 —— 不然会有两拨 worker
+  // 对着同一批账户打上游。
+  it("活轮还在 → cron 不插一脚,不投那一轮的消息", async () => {
     const def = await db(USER).portfolios.ensureDefault();
     await cex("Binance spot");
     const manualRound = await call(USER, openSyncRound({ trigger: "manual" }));
     if (manualRound.round == null) throw new Error("manual open returned no round");
 
-    await Effect.runPromise(syncAllUsers([USER]));
+    await fanOut();
 
     const back = await roundOf(def.id);
     expect(back?.roundId).toBe(manualRound.round.roundId);
     expect(back?.trigger).toBe("manual");
-    // cron 没跑它,所以它还没收官 —— 手动那条路自己会收。
-    expect(back?.finishedAt).toBeNull();
+    expect(syncJobs()).toEqual([]);
   });
 
-  // 开了轮就必须收官,空组合也不例外 —— 否则 120s 后那个组合的面板会挂着一句「中断」,
-  // 而它根本没事可做。
-  it("空组合那一轮立刻收官,不会挂成中断", async () => {
+  // 开了轮就必须收官,空组合也不例外 —— 没有消息会去收它,120s 后面板会挂着一句「中断」。
+  it("空组合那一轮当场收官,不投消息", async () => {
     const def = await db(USER).portfolios.ensureDefault();
-    await Effect.runPromise(syncAllUsers([USER]));
+    await fanOut();
     const back = await roundOf(def.id);
     expect(back?.accounts).toEqual({});
     expect(back?.finishedAt).not.toBeNull();
+    expect(syncJobs()).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@ import { syncAccount } from "./account";
 import { SYNC_CONCURRENCY } from "./constants";
 import type { SyncDepError } from "./errors";
 import { AccountStore, type SyncServices } from "./services";
-import type { AccountSyncResult, SweepResult, SyncResult } from "./types";
+import type { AccountSyncResult, SyncResult } from "./types";
 
 // 一个用户的一轮同步,**逐账户产出结果**。
 //
@@ -42,22 +42,4 @@ export const syncUser = (userId: string): Effect.Effect<SyncResult, SyncDepError
   syncUserStream(userId).pipe(
     Stream.runCollect,
     Effect.map((chunk) => ({ results: Chunk.toArray(chunk) })),
-  );
-
-// 一个用户这一轮的账户计数。cron 的小计从**收官后的轮记录**读回来(ADR 0048 —— 那份记录就是
-// 这一轮的账本),所以这里只剩形状与加法;`userTally`(从流现折计数)随之退场:它是「轮状态
-// 只活在内存里」那个年代的产物,留着就是第二本账。
-export type Tally = { readonly ok: number; readonly failed: number; readonly skipped: number };
-
-// 逐用户的小计加成一份。纯函数 —— 累加规则跟「怎么装配」无关,所以留在包里,
-// 装配那一方(壳,以及片 3 之后的 apps/web)只管把 tallies 递进来。
-export const sumTallies = (users: number, tallies: readonly Tally[]): SweepResult =>
-  tallies.reduce<SweepResult>(
-    (acc, t) => ({
-      users: acc.users,
-      ok: acc.ok + t.ok,
-      failed: acc.failed + t.failed,
-      skipped: acc.skipped + t.skipped,
-    }),
-    { users, ok: 0, failed: 0, skipped: 0 },
   );

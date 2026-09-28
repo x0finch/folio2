@@ -5,3 +5,4 @@
 import "./cron.cases";
 import "./round.cases";
 import "./run.cases";
+import "./consume.cases";

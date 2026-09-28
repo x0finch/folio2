@@ -53,10 +53,3 @@ export interface AccountSyncResult {
 export interface SyncResult {
   results: AccountSyncResult[];
 }
-
-export interface SweepResult {
-  users: number;
-  ok: number; // 成功账户数
-  failed: number; // 失败账户数
-  skipped: number; // 缺凭据跳过数(待补录,见 P6.6)
-}

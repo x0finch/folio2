@@ -1,74 +1,38 @@
 import { Effect } from "effect";
-import { describe, expect, it, vi } from "vitest";
-import { warmAllUsers } from "@/lib/server/sync/deps";
-import { syncAllUsers } from "@/lib/server/sync/round";
+import { describe, expect, it } from "vitest";
+import { type Enqueued, JobQueue } from "@/lib/server/jobs/queue";
+import { fanOutAllUsers } from "@/lib/server/sync/round";
 
-// #375 第 2 步 · 纵深防御:sweep 收尾逐用户预热,一个用户失败不该拖垮其余、也不该把整次 cron
-// 拖成异常收尾。`warmAllUsers` 收一个可注入的 `warmOne` 正是为了在这里让指定用户失败 ——
-// 生产路径用默认的 `warmTokens`(碰真 db/oracle),这一层的逻辑只有「兜住 + 计数」。
+// cron 的 fan-out(FOL-86):逐用户开轮 → 投消息,**逐用户串行、各自兜住**。
+// 以前这两条约束钉在 `syncAllUsers` / `warmAllUsers` 上;同步与预热搬进队列之后,cron 那一次调用里
+// 剩下的就是这一圈,钉子跟过来。`fanOutOne` 注入,本文件不碰 D1。
 //
-// 放在 tests/server/(workers pool):import sync-deps 会连带 `cloudflare:workers`,只有这个 pool 解析得了。
-// 但本用例不碰 D1 —— 全靠注入的假 `warmOne`。
-describe("warmAllUsers", () => {
-  it("某个用户失败:其余用户照样预热,整体不抛,计数分明", async () => {
-    const seen: string[] = [];
-    const warmOne = vi.fn((userId: string) =>
-      Effect.gen(function* () {
-        seen.push(userId);
-        if (userId === "b") {
-          return yield* Effect.fail(new Error("coingecko rate limited: /api/v3/simple/price"));
-        }
-      }),
-    );
+// 放在 tests/server/(workers pool):import round.ts 会连带 `cloudflare:workers`,只有这个 pool 解析得了。
 
-    const report = await Effect.runPromise(warmAllUsers(["a", "b", "c"], warmOne));
-
-    // b 失败了,但 c 仍被调用 —— 循环没有被一个用户的失败中断。
-    expect(seen).toEqual(["a", "b", "c"]);
-    expect(report).toEqual({ warmed: 2, failed: 1 });
-  });
-
-  // **这条是 `Effect.partition` 过不了的那条。** 官方的错误累积算子内部是 `Effect.either`,
-  // 只累积类型化失败;defect(自家 bug 抛的 TypeError 之类)会炸穿整个 effect,把 cron 带走。
-  // #375 要兜的恰恰包含这一类,所以 `warmAllUsers` 用的是 `Effect.exit`。
-  it("某个用户抛的是 defect(不是类型化失败):照样兜住,其余照跑", async () => {
-    const seen: string[] = [];
-    const warmOne = vi.fn((userId: string) =>
-      Effect.sync(() => {
-        seen.push(userId);
-        if (userId === "b") throw new TypeError("cannot read properties of undefined");
-      }),
-    );
-
-    const report = await Effect.runPromise(warmAllUsers(["a", "b", "c"], warmOne));
-
-    expect(seen).toEqual(["a", "b", "c"]);
-    expect(report).toEqual({ warmed: 2, failed: 1 });
-  });
-
-  it("全部成功", async () => {
-    const warmOne = vi.fn(() => Effect.void);
-    const report = await Effect.runPromise(warmAllUsers(["a", "b"], warmOne));
-    expect(report).toEqual({ warmed: 2, failed: 0 });
-  });
-
-  it("空名单:零调用、零计数", async () => {
-    const warmOne = vi.fn(() => Effect.void);
-    const report = await Effect.runPromise(warmAllUsers([], warmOne));
-    expect(warmOne).not.toHaveBeenCalled();
-    expect(report).toEqual({ warmed: 0, failed: 0 });
-  });
+const job = (userId: string, accountId: string): Enqueued => ({
+  job: { kind: "sync-account", userId, portfolioId: "pf", roundId: "r", accountId },
 });
 
-// cron 的 sweep 与预热是同一个形状:逐用户、串行、各自兜住。串行是**有意的**(cron 一次调用有
-// CPU / subrequest 预算),而这条约束原先由 `@folio/sync` 的一条用例钉着 —— 循环搬到 app 之后,
-// 那条钉的就成了包里自己那份复刻:**在这里加 concurrency 它照样绿**。所以钉子跟过来。
-describe("syncAllUsers", () => {
+const run = (
+  userIds: string[],
+  fanOutOne: (userId: string) => Effect.Effect<Enqueued[], Error>,
+) => {
+  const sent: Enqueued[] = [];
+  return Effect.runPromise(
+    fanOutAllUsers(userIds, fanOutOne).pipe(
+      Effect.provideService(JobQueue, {
+        send: (batch) => Effect.sync(() => void sent.push(...batch)),
+      }),
+    ),
+  ).then((result) => ({ result, sent }));
+};
+
+describe("fanOutAllUsers", () => {
   it("逐用户串行,不重叠", async () => {
     const events: string[] = [];
     let inFlight = 0;
     let maxInFlight = 0;
-    const syncOne = (userId: string) =>
+    const fanOutOne = (userId: string) =>
       Effect.promise(async () => {
         inFlight++;
         maxInFlight = Math.max(maxInFlight, inFlight);
@@ -77,30 +41,54 @@ describe("syncAllUsers", () => {
         await new Promise((r) => setTimeout(r, 1));
         inFlight--;
         events.push(`end:${userId}`);
-        return { ok: 1, failed: 0, skipped: 0 };
+        return [job(userId, `${userId}-acc`)];
       });
 
-    const result = await Effect.runPromise(syncAllUsers(["u1", "u2", "u3"], syncOne));
+    const { result } = await run(["u1", "u2", "u3"], fanOutOne);
 
     expect(maxInFlight).toBe(1);
     expect(events).toEqual(["start:u1", "end:u1", "start:u2", "end:u2", "start:u3", "end:u3"]);
-    expect(result).toEqual({ users: 3, ok: 3, failed: 0, skipped: 0 });
+    expect(result).toEqual({ users: 3, accounts: 3, failed: 0 });
+  });
+
+  it("每个用户在自己的同步消息之后补一条延后的 warm-user", async () => {
+    const { sent } = await run(["a", "b"], (userId) =>
+      Effect.succeed([job(userId, `${userId}-1`), job(userId, `${userId}-2`)]),
+    );
+    expect(sent.map((m) => `${m.job.kind}:${m.job.userId}`)).toEqual([
+      "sync-account:a",
+      "sync-account:a",
+      "warm-user:a",
+      "sync-account:b",
+      "sync-account:b",
+      "warm-user:b",
+    ]);
+    for (const m of sent) {
+      if (m.job.kind === "warm-user") expect(m.delaySeconds).toBeGreaterThan(0);
+      else expect(m.delaySeconds).toBeUndefined();
+    }
   });
 
   // 一个用户炸(defect —— db 挂了那种,不是类型化失败)不拖累后面的用户。没有这层隔离,
-  // 整点 cron 里排在坏用户后面的**所有人**这一小时都不同步 —— 与 warmAllUsers 同一条纵深防御。
-  it("某个用户 defect → 其余照跑,整体不抛,计一个 failed", async () => {
+  // 整点 cron 里排在坏用户后面的**所有人**这一小时都不同步。
+  it("某个用户 defect → 其余照投,整体不抛,计一个 failed、不投他的 warm-user", async () => {
     const seen: string[] = [];
-    const syncOne = (userId: string) =>
+    const { result, sent } = await run(["a", "b", "c"], (userId) =>
       Effect.sync(() => {
         seen.push(userId);
         if (userId === "b") throw new TypeError("cannot read properties of undefined");
-        return { ok: 1, failed: 0, skipped: 0 };
-      });
-
-    const result = await Effect.runPromise(syncAllUsers(["a", "b", "c"], syncOne));
+        return [job(userId, `${userId}-acc`)];
+      }),
+    );
 
     expect(seen).toEqual(["a", "b", "c"]);
-    expect(result).toEqual({ users: 3, ok: 2, failed: 1, skipped: 0 });
+    expect(result).toEqual({ users: 3, accounts: 2, failed: 1 });
+    expect(sent.some((m) => m.job.userId === "b")).toBe(false);
+  });
+
+  it("空名单:零调用、零投递", async () => {
+    const { result, sent } = await run([], () => Effect.succeed([]));
+    expect(result).toEqual({ users: 0, accounts: 0, failed: 0 });
+    expect(sent).toEqual([]);
   });
 });
