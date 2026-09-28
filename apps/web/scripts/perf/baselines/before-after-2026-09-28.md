@@ -278,3 +278,85 @@ AFTER 第 2 轮(load1 0.47 → 0.21):
 - jobs 每次调用都重起 worker(模拟整点落在冷 isolate),所以两个 cron 本体的数含首调初始化;同一 isolate 里接着跑的 consumer 调用是半热的。
 - 逐 kind 的队列数按日志时间窗拆,consumer 并发时可能配错到相邻一次;整个窗口的总数是准的。
 - `proc` 含本地 D1 与采样器自身;jobs 表里 AFTER 的 proc(2 万多 ms)主要是两分多钟窗口里采样器空转,不要拿它和 BEFORE 的 proc 直接比。
+
+---
+
+# 第二轮(FOL-83 round 2,同日)
+
+- **AFTER r2** = 本分支 `e546d55..a6e4049`(接在 `6c9ac75` 之后)。**BEFORE / AFTER r1** 两列照抄上面第 1、3 节(同一台机器、同一份 harness 口径)。
+- 同一台 4 核机器;每张表注明开跑时的 load1。另一个会话在同机跑 e2e,所以我只在 load1 < 2 时开跑,较忙的那轮单独标出。
+- 第二轮给 harness 加了三样(只影响测量):每份 profile 旁存每次调用的时间窗(`*.slots.json`)与那次构建的 region 表,`perf:cpu:analyze` 据此出**函数级**的 self / inclusive / 调用树;`--warm`(同一 isolate 连着跑);`--cron-only`(只量 `scheduled()`,worker 不带 consumer —— 默认口径下 cron 那一格的起止靠日志估,consumer 的开头常被算进 cron,**比 cron 本体看 `--cron-only` 那两行**)。另外修了假上游:`exchange_rates` 原来只有 6 种法币,`fx.warm()` 每次都判「缺」而回源,所以第一轮表里的 `fx`(1 发、14–22ms)量的是「每小时真刷一次」,生产上是 6h TTL 内的缓存命中。
+
+## 1. profile 说了什么(函数级)
+
+- **冷 isolate 上最大的一块是建服务图本身。** 每天那个 cron 本体 57ms 里约 45ms 落在 `runAtEdge → ManagedRuntime` 的构建上(timeline:前 45ms 是 `synchronizedRef`/memo 表/`fiberRefs` 与各服务构造,第一条 D1 查询在 45ms 之后才出现);`--warm` 下同一件事只要约 7ms。Node 冷进程对照:`ManagedRuntime.make(Layer.mergeAll(两张 db 门票 + 日志))` 20ms,手搭 `Runtime.make` 4.5ms;参考层那半单独经 Layer 建 35–40ms。**钱在 Layer 的构建机器上,不在服务上。**
+- **`prices`**:`tokenPrices.put` 一币一条 drizzle `UPDATE`,拼语句(`entity.is` 10ms self、`buildQueryFromSourceParams`、`buildUpdateSet`)约 20ms。
+- **`catalogue`**:为了判「一周内新不新」把 1000 行目录整份过 Schema:解码约 9ms + GC 约 7ms。
+- **交易所 `sync-account`**:币安那一次里 `fmtAmount`(`toLocaleString`)约 15–19ms —— 其实是 **ICU 在 isolate 里第一次初始化数字格式**(Node 冷进程:第一次 `new Intl.NumberFormat` 15ms,之后六次 0.07ms)。
+- **`sync-account` 其余**:平均 ~50ms 里能认出来的块是上游响应的 Schema 解码(~7–8ms,大头是 `NullOr`/`optional` 的 union 分支)、drizzle 拼语句 + D1 驱动(~8–10ms)、每条消息一遍的五层 `Layer.mergeAll`(`makeSyncServicesLayer`)与单账户也走的 `Stream` 机器;**剩下一半以上是 Effect 运行时本身**(`runLoop` / `fiberRefs` / `Equal` / span),摊在几百个小 effect 上,没有单个热点。
+- 读端点没有新热点:~4–5ms 是 TanStack Start + better-auth 的每请求底座,Effect ~1.5–2.5ms,其余是 D1 行转换与业务。
+
+## 2. 杠杆与各自的量(本机)
+
+| 提交 | 改了什么 | 量到的 |
+|---|---|---|
+| `7a2000c` | 服务图不经 `ManagedRuntime`/Layer 建:db 门票 + 日志直接 `Runtime.make`(cron / 剪 note / 边缘只用它);参考层一次 `runSync(buildWithScope)` 补上 | `--cron-only`:每天 cron 本体 53.7 → 17.7ms,每小时 72.2 → 38.5ms |
+| `20a39e2` | 一批价一条 `UPDATE tokens … FROM json_each(?)` | `prices` 66.1 → 38.9ms |
+| `abbadf9` | `sync-account`:服务造成 `Context` 直接给(不经 Layer)、`Sweep.syncOne` 不经 Stream、mint 已认出的行不再各起一段 `Effect.gen` | 连同 Intl 那条:sync-account p50 40.0 → 35.5ms,整点窗口 615 → 555ms |
+| `34a6f80` → `b2beac0` | note 数字格式:先是复用 formatter(几乎没省,第一版判断错了),再改成不碰 Intl 的纯函数(与 `toLocaleString` 逐字相同,3000 个随机数 + 边界对照测) | 省掉每个 isolate 第一次交易所同步的 ICU 初始化(≈15ms,只在冷 isolate 上出现,均值里被摊薄) |
+| `34f3d8c` | `catalogue` 先看 blob 自己的 `asOf`,够新就不解码整份目录 | 每天那一窗(cron + 两条消息)86.3 → 75.9ms |
+
+## 3. 后台:每次调用的 CPU(mean / max,ms)
+
+AFTER r2 = `final1`(`perf:cpu:jobs` 默认口径,sweep 5 次 + daily 3 次,每次新起 worker;开跑 load1 1.16 → 结束 0.48)。`--cron-only` 两行另跑(第二轮:load1 0.90 与 1.73 两轮;第一轮代码:0.22)。
+
+| 调用 | BEFORE | AFTER r1 | AFTER r2 | 超 10ms? |
+|---|---|---|---|---|
+| cron `30 * * * *` 本体,`--cron-only` | (一次调用干完全部:744 / 759) | 72.2 / 76.7 | **38.5 / 41.2**(另一轮 38.4 / 42.8) | 超 |
+| cron `0 23 * * *` 本体,`--cron-only` | (干完全部:456 / 465) | 53.7 / 60.2 | **17.7 / 21.2**(另一轮 14.9 / 18.8) | 超 |
+| cron 整点,默认口径(含 consumer 溢进来的开头) | 744 / 759 | 104.2 / 113.7 | 68.6 / 87.9 | 超 |
+| cron 每天,默认口径 | 456 / 465 | 60.9 / 63.3 | 22.2 / 23.6 | 超 |
+| queue `sync-account`(40 次) | — | 50.5 / 149.2 | 49.2 / 175.7(p50 42.8 → 39.9) | 超 |
+| queue `prices` | — | 67.2 / 75.7 | **39.9 / 58.0** | 超 |
+| queue `fx` | — | 21.7 / 32.5(假上游缺币种,每次真刷) | 14.2 / 19.8(0 发) | 超(见下) |
+| queue `daily-prices` | — | 4.1 / 18.1 | 0.9 / 4.0 | 否 |
+| queue `platforms` | — | 2.5 / 6.7 | 4.5 / 13.6 | 偶发 |
+| queue `defi-logos` | — | 0.2 / 0.9 | 1.9 / 5.7 | 否 |
+| queue `prune-notes` | — | 27.4 / 28.3 | 20.2 / 21.4 | 超 |
+| queue `catalogue` | — | 0.0 / 0.0(拆分错配,见下) | 29.3 / 30.2 | 超 |
+| **整点一窗合计**(cron + 13 次 consumer) | 744 | 603.5 | **523.8** / 538.6 | — |
+| **每天一窗合计**(cron + 2 次 consumer) | 456 | 88.3 | **71.7** / 72.3 | — |
+
+逐 kind 的数按日志时间窗拆,consumer 串行时相邻两次会互相配错(第一轮 `catalogue` 0.0 / `prune-notes` 27 就是这样:目录解码那 20ms 被记到了 `prune-notes` 头上),**两个「一窗合计」是准的**。第二轮之后参考层那半的冷构建(本机约 20ms)落在 isolate 里第一条要它的消息上 —— 整点那一窗是第一条 `sync-account`(max 175.7 就是它),每天那一窗是 `catalogue`(29.3 里大半是它)。
+
+## 4. 读端点(默认数据集,30 发 / 端点,mean ms)
+
+AFTER r2 = `read1`(load1 0.43,开跑在第一条杠杆之后,后面几条不碰读路径);括号里是 `read2`(全部提交之后,load1 1.43)。
+
+| endpoint | BEFORE | AFTER r1 | AFTER r2 |
+|---|---:|---:|---:|
+| fn-listAccounts | 15.3 | 9.7 | 10.1 (9.4) |
+| fn-getSnapshots-now | 23.2 | 13.0 | 11.8 (13.1) |
+| fn-getSnapshots-prev | 16.4 | 14.4 | 11.1 (13.2) |
+| fn-getTokenEnrichment | 18.3 | 10.9 | 11.5 (12.5) |
+| fn-getPortfolioHistory-30d | 51.5 | 12.4 | 10.3 (11.5) |
+| fn-getPortfolioHistory-1y | 28.4 | 13.0 | 10.9 (12.2) |
+| fn-listTags | 8.9 | 10.1 | 9.5 (8.5) |
+| fn-listAccountTags | 10.8 | 8.9 | 9.1 (9.0) |
+| fn-getFiatRefs | 12.1 | 7.8 | 8.6 (7.8) |
+| 其余(getValuationSettings / getDataVersion / listPortfolios / getSyncRound / tabPins / listConnectors / getSession / auth) | 4–10 | 4.6–7.7 | 3.8–7.8 |
+
+读路径第二轮没有专门的杠杆:它早已跑在热的 isolate 运行时上,新的构建方式只影响冷的第一发。差值在两轮之间的噪声以内(`read2` 那轮机器更忙)。
+
+## 5. 仍超 10ms 的,以及为什么
+
+**直说:目标(每种后台调用本机 mean < 10ms)没有达到。** 达到的只有 `daily-prices` / `defi-logos` / 多数次的 `platforms`,以及读端点里原本就不超的那些。
+
+1. **`sync-account`(~40–50ms,次数最多)**:一个账户的同步是「取余额(1–3 发上游)→ 校验响应 → 认币 → 重估 → 写一张 ~50 行的快照 + 日汇总」,十几条 D1 语句、几百个小 effect。能认出来的块(上游 Schema 解码 ~7ms、drizzle + D1 驱动 ~10ms)各自都比 10ms 小,**剩下一半以上是 Effect 运行时本身**,分散、没有单个热点(profile 见 `perf:cpu:analyze --kind sync-account`)。再往下要么把同步内核从 Effect 里拿出来,要么把一个账户拆成几条消息 —— 两者都是架构决定,不在本轮。
+2. **cron 本体(每天 ~15–18ms、整点 ~38ms,`--cron-only`)**:服务图的构建已经从 ~45ms 降到 ~4ms,剩下的是冷 isolate 上**第一次**跑 Effect / drizzle / LogTape 的代价(整点那条要 8 条不同形状的 D1 语句,每一种第一次拼都是冷代码;`--warm` 下每天那条只要 ~7ms)。
+3. **`prices`(~40ms)**:写价已经是一条语句;剩下的是读最新快照(8 账户 × ~50 行 → JS 对象)、按持仓算 id、两次 store 读、两发上游的解码,外加这一 isolate 里可能是第一次用到的参考层代码。
+4. **`catalogue` / `prune-notes`(~20–30ms)**:本身的活已经很小(目录够新就只看 `asOf`;剪 note 是四条语句),数字里主要是冷 isolate 的首跑与参考层那 ~20ms 的构建(`catalogue` 是这一窗里第一条要参考层的消息)。
+5. **`fx`(~14ms,0 发)**:一次批量缓存读、判新鲜、返回;数字大半是冷的首跑,且与相邻调用的拆分有误差。
+6. **读端点 getSnapshots / getTokenEnrichment / history(~10–13ms)**:其中 ~4–5ms 是每请求的框架底座(TanStack Start 的 server-fn 解析 + better-auth 认 cookie),Effect ~2ms,其余是 D1 行转换与序列化;本轮没有找到不改行为就能去掉的块。
+
+**还没试、但量上最大的一条**:把 isolate 那张图挪到模块顶层建(Workers 的启动 CPU 另算预算)。它是把钱挪去启动预算而不是省掉,且与「模块加载期什么都不跑」的约定冲突,记在 ADR 0054 第二轮补记的「否决」里,留给以后决定。
