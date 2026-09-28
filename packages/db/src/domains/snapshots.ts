@@ -21,8 +21,15 @@ import type { NotFound } from "../errors";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
 import {
+  queryDailyPointsByAccount,
+  recomputeDailyTotal,
+  upsertDailyTotal,
+  utcDay,
+} from "./daily-totals";
+import {
   HISTORY_MINMAX_BUCKETS,
   queryCarryInTotals,
+  queryDailyTotalsInScope,
   queryMinMaxTotalsByAccount,
   queryMinMaxTotalsInScope,
 } from "./history-minmax";
@@ -274,6 +281,13 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
               note: input.note && input.note.length > 0 ? JSON.stringify(input.note) : null,
             }),
             ...balanceInserts,
+            // 日汇总(FOL-91)跟着同一个 batch 走:快照与它的日汇总要么一起落、要么一起不落。
+            //   · 折叠过 → 被删的那张可能正是当天的极值 / 开盘,只能整日重算(子查询读的是本 batch
+            //     删完、插完之后的那一天;钟点 ⊂ 日,所以只动这一天)。
+            //   · 纯追加 → 值只会并进来,和已有行逐项比即可,不回头读快照。
+            opts?.collapseSameHour
+              ? recomputeDailyTotal(db, accountId, utcDay(input.takenAt))
+              : upsertDailyTotal(db, accountId, input.takenAt, input.totalUsd),
           ];
         });
         return snapshotId;
@@ -318,6 +332,19 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
         );
       }),
 
+    /**
+     * 单账户中窗(> 7 天、< 1 年)的数据源(FOL-91):日汇总的 open/min/max/close 点,不降采样 ——
+     * 每天 ≤ 4 点,30 天 ≤ 120 行;浏览器照旧按跨度选桶(30 天跨度落在日桶,取的正是收盘)。
+     */
+    listDailyTotalsByAccount: (
+      accountId: string,
+      since?: number,
+    ): Effect.Effect<{ takenAt: number; totalUsd: number }[], NotFound> =>
+      Effect.gen(function* () {
+        yield* assertAccountOwned(client, userId, accountId);
+        return yield* client.query((db) => queryDailyPointsByAccount(db, accountId, since));
+      }),
+
     listTotalsByAccountMinMax: (
       accountId: string,
       since?: number,
@@ -329,6 +356,16 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
           queryMinMaxTotalsByAccount(db, accountId, since, buckets),
         );
       }),
+
+    /**
+     * 组合中窗(> 7 天、< 1 年)的数据源(FOL-91):carry-in + 每账户每天一行收盘,不降采样。
+     * 形状与 `listTotals` 相同(浏览器原样重建),行数 ≤ 账户数 × (天数 + 1),与同步频率无关。
+     */
+    listDailyTotals: (
+      accountIds: readonly string[],
+      since?: number,
+    ): Effect.Effect<SnapshotTotal[]> =>
+      client.query((db) => queryDailyTotalsInScope(db, userId, accountIds, since)),
 
     listTotalsMinMax: (
       accountIds: readonly string[],

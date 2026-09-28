@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import type { AccountHistoryRaw } from "@/lib/core/history";
 import type { HistoryRange } from "@/lib/core/history-range";
-import { shouldSampleHistory } from "@/lib/core/history-range";
+import { historyResolution } from "@/lib/core/history-range";
 import { MANUAL_CONNECTOR_ID } from "@/lib/core/manual";
 import { minMaxDownsampleHistory } from "@/lib/server/history/minmax";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "@/lib/server/manual/store";
@@ -26,11 +26,16 @@ export const loadAccountHistory = (input: {
 }) =>
   Effect.gen(function* () {
     const db = yield* Database;
-    const longWindow = shouldSampleHistory({ range: input.range, since: input.since });
+    const resolution = historyResolution({ range: input.range, since: input.since });
+    const longWindow = resolution === "sampled";
     if (input.connectorId !== MANUAL_CONNECTOR_ID) {
-      const rows = longWindow
-        ? yield* db.snapshots.listTotalsByAccountMinMax(input.accountId, input.since)
-        : yield* db.snapshots.listTotalsByAccount(input.accountId, input.since);
+      // 三档原料同组合曲线(FOL-91):≤ 7 天原始快照,更长读日汇总,1 年 / 全部再降采样。
+      const rows =
+        resolution === "sampled"
+          ? yield* db.snapshots.listTotalsByAccountMinMax(input.accountId, input.since)
+          : resolution === "daily"
+            ? yield* db.snapshots.listDailyTotalsByAccount(input.accountId, input.since)
+            : yield* db.snapshots.listTotalsByAccount(input.accountId, input.since);
       return { rows, live: null, sampled: longWindow } satisfies AccountHistoryRaw;
     }
     const account = yield* db.accounts.getById(input.accountId);

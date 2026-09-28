@@ -12,6 +12,9 @@ export const WEB_ROOT = fileURLToPath(new URL("../../", import.meta.url));
  */
 export const PERF_STATE_DIR = join(WEB_ROOT, ".wrangler", "perf-state");
 
+/** D1 迁移目录(与 wrangler.jsonc 的 `migrations_dir` 同一处)。 */
+export const MIGRATIONS_DIR = join(WEB_ROOT, "..", "..", "packages", "db", "drizzle");
+
 /** 构建产物:`vite build` 写出来的、`wrangler deploy` 原样发出去的那一份。 */
 export const DIST_SERVER_DIR = join(WEB_ROOT, "dist", "server");
 

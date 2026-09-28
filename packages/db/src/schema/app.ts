@@ -224,6 +224,37 @@ export const snapshotBalances = sqliteTable(
   (t) => [index("snapshot_balances_snapshot_id_idx").on(t.snapshotId)],
 );
 
+// 快照总额的**日汇总**(FOL-91):每账户每个 UTC 日一行,由 `SnapshotStore.write` 在同一个 batch
+// 里维护(迁移 0009 从存量快照回填一次)。长窗曲线(> 7 天)读它,不再逐行扫快照 —— 一年逐小时
+// 快照是每账户 8760 行,这里是 365 行。
+//
+// **它是派生数据,不是事实**:事实永远是 `snapshots`,这张表可以随时从那边整表重算(迁移里的
+// 回填语句就是那条重算)。所以导出不带它,导入经 `write` 自然重建。
+//
+// 用户隔离同快照:没有 user_id 列,经 `account_id → accounts.user_id` 限定(读侧必 join accounts);
+// 删账户 → 级联删。
+//
+// 四个点都记**值 + 时刻**:open/close 按 taken_at 取首末,min/max 取极值(并列取最早,与
+// min-max 降采样同一条规则)。单账户曲线要把日内极值画在它真实的时刻上,所以时刻也得存。
+export const accountDailyTotals = sqliteTable(
+  "account_daily_totals",
+  {
+    accountId: text("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    day: integer("day").notNull(), // 该 UTC 日零点的 epoch ms
+    openUsd: real("open_usd").notNull(),
+    openAt: integer("open_at").notNull(),
+    minUsd: real("min_usd").notNull(),
+    minAt: integer("min_at").notNull(),
+    maxUsd: real("max_usd").notNull(),
+    maxAt: integer("max_at").notNull(),
+    closeUsd: real("close_usd").notNull(),
+    closeAt: integer("close_at").notNull(), // 当日最后一张快照的 taken_at
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.day] })],
+);
+
 // —— 代币参考层(canonical-token-aggregation P1)——
 // 全局参考数据,**无 userId**(原则 #6 受控例外,同 listUserIdsWithAccounts)。
 // 代币表 = 系统认识的每个代币一行(CGK 收录币或 provider 孤儿);索引表 = 纯指针(symbol 候选 / tokenRef)。

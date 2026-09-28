@@ -42,7 +42,9 @@ describe("portfolio/get-history", () => {
   });
 
   /** 页面那两行:曲线接口给原料,总览按账户那张表凑出末点。 */
-  const curve = async (data: { portfolioId?: string } = {}) => {
+  const curve = async (
+    data: { portfolioId?: string; range?: "7d" | "30d" | "1y" | "all" } = {},
+  ) => {
     const raw = await call(USER, handleGetPortfolioHistory(data));
     // 两边各自演进后的合流:读走预计算那条(这一支的形状),末点防呆收整份总览(底座那一支的形状)。
     const overview = await readOverview(USER, data);
@@ -179,8 +181,11 @@ describe("portfolio/get-history", () => {
       await db(USER).accounts.setArchived(gone.id, true);
       vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
 
-      const legacy = await call(USER, legacyPortfolioHistory({ range: "30d" }));
-      const served = await curve();
+      // **按 7 天窗口对拍**(FOL-91):逐点相同只在「读原始快照」那一档成立;超过 7 天的窗口改读
+      // 日汇总,日内的点按设计合并掉了 —— 那一档在「日」粒度上的对拍在 packages/db 的
+      // daily-totals.test.ts。夹具只跨 5 天,7 天窗口盖得住全部。
+      const legacy = await call(USER, legacyPortfolioHistory({ range: "7d" }));
+      const served = await curve({ range: "7d" });
 
       expect(served).toEqual(legacy.series);
       // 夹具没有绕过被测代码:真有一条像样的曲线,而且末点真的被实时总额顶替过
@@ -191,7 +196,7 @@ describe("portfolio/get-history", () => {
       // 正好多出它那 70,封存之前的点一个字不变。
       const sealedAt = ago(2 * DAY);
       await db(USER).accounts.setArchived(gone.id, false);
-      const unsealed = await curve();
+      const unsealed = await curve({ range: "7d" });
       expect(unsealed.map((p) => p.t)).toEqual(served.map((p) => p.t));
       expect(unsealed.filter((p) => p.t >= sealedAt).length).toBeGreaterThan(1);
       for (const [i, p] of unsealed.entries()) {

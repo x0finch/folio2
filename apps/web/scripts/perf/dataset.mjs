@@ -9,7 +9,7 @@
 // **刻意不造 manual 账户**:有它在,每次 getSnapshots / getPortfolioHistory 都会去 CoinGecko 取
 // 今日价(今日桶永不缓存),沙箱里出网被挡,一发 36s —— 测出来的是网络,不是 CPU。
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -17,6 +17,7 @@ import {
   DAILY_PRICE_TOKENS,
   DAY_MS,
   HOUR_MS,
+  MIGRATIONS_DIR,
   PERF_STATE_DIR,
 } from "./constants.mjs";
 
@@ -342,6 +343,25 @@ function seedSnapshots(db, accounts, tokens, hours, now) {
   return { nSnap, nBal };
 }
 
+// 快照的日汇总(FOL-91)。生产上它由写快照那个 batch 维护、存量由迁移回填;这里快照是直写
+// SQLite 灌的,绕过了写侧 —— 不补的话长窗曲线读到一张空表,量出来的是「没数据」有多快。
+// **跑的就是迁移里那条回填语句**(从迁移文件里取,不另抄一份):灌完快照后重算一遍,与存量
+// 用户升级那一刻的结果相同。
+const DAILY_TOTALS_TABLE = "account_daily_totals";
+
+function seedDailyTotals(db) {
+  const file = readdirSync(MIGRATIONS_DIR).find(
+    (f) => f.endsWith(".sql") && f.includes(DAILY_TOTALS_TABLE),
+  );
+  if (!file) throw new Error(`no ${DAILY_TOTALS_TABLE} migration under ${MIGRATIONS_DIR}`);
+  const backfill = readFileSync(join(MIGRATIONS_DIR, file), "utf8")
+    .split("--> statement-breakpoint")
+    .find((stmt) => stmt.includes(`INSERT OR REPLACE INTO \`${DAILY_TOTALS_TABLE}\``));
+  if (!backfill) throw new Error(`no backfill statement in ${file}`);
+  db.exec(backfill);
+  return db.prepare(`select count(*) as n from ${DAILY_TOTALS_TABLE}`).get().n;
+}
+
 function seedDailyPrices(db, tokens, now) {
   const ins = db.prepare(
     "insert or replace into token_daily_prices (token_ref,day_bucket,unit_price) values (?,?,?)",
@@ -382,6 +402,7 @@ export function seedDataset({ userId, accounts: nAccounts, tokens: nTokens, days
     seedTags(db, userId, portfolioId, accounts, now);
     seedCache(db, userId, accounts, now);
     const { nSnap, nBal } = seedSnapshots(db, accounts, tokens, days * 24, now);
+    const nDailyTotals = seedDailyTotals(db);
     const nDaily = seedDailyPrices(db, tokens, now);
     db.exec("COMMIT");
     open = false;
@@ -391,6 +412,7 @@ export function seedDataset({ userId, accounts: nAccounts, tokens: nTokens, days
       tokens: tokens.length,
       snapshots: nSnap,
       snapshotBalances: nBal,
+      dailyTotals: nDailyTotals,
       dailyPrices: nDaily,
     };
   } catch (err) {

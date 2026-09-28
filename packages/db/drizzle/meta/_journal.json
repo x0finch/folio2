@@ -64,6 +64,13 @@
       "when": 1788477012084,
       "tag": "0008_steep_nighthawk",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790578254984,
+      "tag": "0009_account_daily_totals",
+      "breakpoints": true
     }
   ]
 }
