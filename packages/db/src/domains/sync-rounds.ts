@@ -260,5 +260,41 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
             .where(and(mine(input.portfolioId), sameRound(input.roundId))),
         );
       }),
+
+    /**
+     * **「最后一个落账的人收官」**(FOL-86:队列一条消息一个账户,没有一条任务从头跑到尾)。
+     *
+     * 只在「这一轮还没收官 ∧ 明细里一个 `pending` 都不剩」时落 `finishedAt` —— **一条**条件
+     * UPDATE,判据与写入在同一句里,所以并发的两个 consumer 各自 settle 完再各调一次,也只有
+     * 一个抢得到(`finishedAt is null` 那一句),而最后落账的那一个一定看得到零个 `pending`。
+     * 先读再判再写会把这两条保证都丢掉。
+     *
+     * 抢到了回收官后的那一轮(调用方要念小计),没抢到 / 还有没落账的 → `none`。
+     */
+    finishIfSettled: (input: FinishSyncRoundInput): Effect.Effect<Option.Option<SyncRoundRecord>> =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const rows = yield* client.query((db) =>
+          db
+            .update(userCache)
+            .set({
+              v:
+                input.error === undefined
+                  ? sql`json_set(${userCache.v}, '$.finishedAt', ${now})`
+                  : sql`json_set(${userCache.v}, '$.finishedAt', ${now}, '$.error', ${input.error})`,
+              expiresAt: now + input.retentionMs,
+            })
+            .where(
+              and(
+                mine(input.portfolioId),
+                sameRound(input.roundId),
+                sql`json_extract(${asJson}, '$.finishedAt') is null`,
+                sql`not exists (select 1 from json_each(${asJson}, '$.accounts') where json_extract(value, '$.status') = 'pending')`,
+              ),
+            )
+            .returning({ v: userCache.v, expiresAt: userCache.expiresAt }),
+        );
+        return Option.fromNullable(rows[0] ? decode(rows[0]) : undefined);
+      }),
   };
 };

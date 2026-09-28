@@ -313,3 +313,53 @@ describe("收官", () => {
     expect((await read(USER_A)).finishedAt).toBeNull();
   });
 });
+
+// 队列那条路(FOL-86):一条消息一个账户,**没有一条任务从头跑到尾**,所以「最后一个落账的人收官」。
+describe("落完即收官(finishIfSettled)", () => {
+  const settle = (accountId: string, at: number) =>
+    rounds(USER_A, at).settle({
+      portfolioId: PF,
+      roundId: "r1",
+      accountId,
+      status: "synced",
+      ttlMs: TTL,
+    });
+  const finishIfSettled = (at: number, roundId = "r1") =>
+    rounds(USER_A, at).finishIfSettled({ portfolioId: PF, roundId, retentionMs: RETENTION });
+
+  it("还有 pending → 不收官", async () => {
+    await open(USER_A, "r1");
+    await settle("acc-1", NOW + 1);
+    expect(Option.isNone(await finishIfSettled(NOW + 2))).toBe(true);
+    expect((await read(USER_A)).finishedAt).toBeNull();
+  });
+
+  it("最后一个落账 → 收官、改长保留,并交回收官后的轮", async () => {
+    await open(USER_A, "r1");
+    await settle("acc-1", NOW + 1);
+    await settle("acc-2", NOW + 2);
+    const got = await finishIfSettled(NOW + 3);
+    expect(Option.getOrNull(got)?.finishedAt).toBe(NOW + 3);
+    const round = await read(USER_A);
+    expect(round.finishedAt).toBe(NOW + 3);
+    expect(round.expiresAt).toBe(NOW + 3 + RETENTION);
+  });
+
+  // 两个 consumer 各自落完账各调一次:只有一个抢得到,收官时刻不被第二次改写。
+  it("已收官 → 第二次落空", async () => {
+    await open(USER_A, "r1");
+    await settle("acc-1", NOW + 1);
+    await settle("acc-2", NOW + 2);
+    await finishIfSettled(NOW + 3);
+    expect(Option.isNone(await finishIfSettled(NOW + 4))).toBe(true);
+    expect((await read(USER_A)).finishedAt).toBe(NOW + 3);
+  });
+
+  it("轮 id 对不上 → 落空", async () => {
+    await open(USER_A, "r1");
+    await settle("acc-1", NOW + 1);
+    await settle("acc-2", NOW + 2);
+    expect(Option.isNone(await finishIfSettled(NOW + 3, "STALE"))).toBe(true);
+    expect((await read(USER_A)).finishedAt).toBeNull();
+  });
+});
