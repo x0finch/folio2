@@ -1,5 +1,6 @@
 import type { Note, PerpEquity, PerpPosition, Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import { formatAmount } from "../note-format";
 import { MARGIN_ASSET, PROVIDER_ID, QUOTE_ASSET, QUOTE_SUFFIXES, STABLECOINS } from "./constants";
 
 // 【binance 的适配层:上游形状 → folio 的 `Balance`】——**纯函数,一个都不出网**(ADR 0036)。
@@ -28,7 +29,7 @@ interface BinanceAccount {
 }
 
 // 原币数量展示格式化(最多 8 位小数 + 千分位)。仅 note 文案用。
-const fmtAmount = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 8 });
+const fmtAmount = formatAmount;
 
 // 场馆命名者 = connectorId(与 manifest 的 `id` 同源,不许两处各写一遍)。
 

@@ -8,6 +8,7 @@ import type {
   OkxValuationResponse,
 } from "@folio/okx-client";
 import { tokenRef } from "@folio/oracle-ref";
+import { formatAmount, formatWhole } from "../note-format";
 import { EARN_RESIDUAL_MIN_USD, OKX_EARN_LOGO, PROVIDER_ID, STABLECOINS } from "./constants";
 
 // 【okx 的适配层:上游形状 → folio 的 `Balance`】——**纯函数,一个都不出网**(ADR 0036)。
@@ -21,7 +22,7 @@ import { EARN_RESIDUAL_MIN_USD, OKX_EARN_LOGO, PROVIDER_ID, STABLECOINS } from "
 // `Frozen` 段(icon warning;content 一行内联文案 `${冻结数量} ${币种} · ${占该币总持有的百分比}`,
 // 如 `0.5 ETH · 25%`,原币口径)。无冻结 → 无 note。
 // 展示数量格式化(千分位,最多 8 位小数)。balance 级 Note 文案用。
-const fmtAmount = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 8 });
+const fmtAmount = formatAmount;
 
 export function parseBalances(details: OkxDetail[]): Spot[] {
   const out: Spot[] = [];
@@ -152,8 +153,7 @@ export function parseStaking(orders: OkxStakingOrder[], hint: PriceHint): Spot[]
 
 // 合约持仓探测 /account/positions —— 本轮不解析 perp,只看非空即挂兜底 Note(见 ADR 0031 perp 缓做)。
 // 展示金额格式化($ + 千分位,整数)。account 级 Note 文案用。
-const fmtUsd = (n: number): string =>
-  `$${Math.round(n).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+const fmtUsd = (n: number): string => `$${formatWhole(Math.round(n))}`;
 
 // earn 桶残差 → **计进净值的合成聚合行**(用户决策:金额已知就该进净值)。
 // asset-valuation 的 earn 桶给权威美元,减去已细分的 earn 子项(savings+staking)= 未细分额 —— 这是

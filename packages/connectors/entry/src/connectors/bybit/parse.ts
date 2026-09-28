@@ -1,6 +1,7 @@
 import type { BybitCoin, BybitEarnPosition, BybitFundingCoin } from "@folio/bybit-client";
 import type { Note, Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import { formatAmount, formatCents } from "../note-format";
 import { PROVIDER_ID, STABLECOINS } from "./constants";
 
 // 【bybit 的适配层:上游形状 → folio 的 `Balance`】——**纯函数,一个都不出网**(ADR 0036)。
@@ -12,7 +13,7 @@ import { PROVIDER_ID, STABLECOINS } from "./constants";
 // locked>0 的币在【它自己那笔 balance】挂一个 `Locked` 段(icon warning;`${锁定量} ${币种} · ${占比}`,
 // 原币口径),计入持有、不当异常(探测账户里 USD1 全额锁定)。无锁定 → 无 note。
 // 展示数量格式化(千分位,最多 8 位小数)。balance 级 Note 文案用。
-const fmtAmount = (n: number): string => n.toLocaleString("en-US", { maximumFractionDigits: 8 });
+const fmtAmount = formatAmount;
 
 export function parseUnified(coins: BybitCoin[]): Spot[] {
   const out: Spot[] = [];
@@ -118,8 +119,7 @@ export function parseEarn(positions: BybitEarnPosition[], label: string, hint: P
 
 // 拉的赚币类目 → 展示类目标签。FlexibleSaving = 活期出借、OnChain = 链上赚币。
 // 展示金额格式化(带符号 + $ + 千分位,2 位小数)。account 级 Note 文案用。
-const fmtSignedUsd = (n: number): string =>
-  `${n < 0 ? "-" : "+"}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+const fmtSignedUsd = (n: number): string => `${n < 0 ? "-" : "+"}$${formatCents(Math.abs(n))}`;
 
 // **这条 Note 只会因「等也没用」的失败出现**(FOL-31):瞬时故障已在 `bestEffortVerdict` 那层
 // 升级成整账户失败、交给重试,到不了这里。两句提示分别对应剩下的两种:权限没勾、上游变了形状。
