@@ -1,5 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LOGO_EDGE_TTL_S, logoCacheKey } from "@/lib/server/logos/edge-cache";
 import { serveLogo } from "@/lib/server/logos/serve";
+
+// `waitUntil` 来自 workerd 的虚拟模块,node 里没有 —— 收下交给它的 promise,用例里再 await 掉
+// (等价于「这次调用结束前写缓存那半跑完了」)。
+const deferred = vi.hoisted(() => [] as Promise<unknown>[]);
+vi.mock("cloudflare:workers", () => ({
+  waitUntil: (p: Promise<unknown>) => {
+    deferred.push(p);
+  },
+}));
+const settle = () => Promise.all(deferred.splice(0));
 
 // serveLogo 只收一个"解析上游 URL"的 thunk(cache-only)+ spy 全局 fetch。
 // 断言状态/缓存头/透传/Cache-Tag,不测 Workers Cache 本身。kind/id 仅用于 Cache-Tag 命名。
@@ -10,7 +21,11 @@ const img = () =>
     headers: { "content-type": "image/png" },
   });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  deferred.length = 0;
+});
 
 describe("serveLogo", () => {
   it("有上游图 → 200 + 透传 + 命中缓存头 + Cache-Tag + nosniff", async () => {
@@ -140,5 +155,128 @@ describe("serveLogo", () => {
   it("data: base64 坏 payload → 404 负缓存(解码失败当没图)", async () => {
     const res = await serveLogo(resolving("data:image/png;base64,@@@@"), "token", "z");
     expect(res.status).toBe(404);
+  });
+});
+
+// 上游字节的边缘缓存(FOL-93)。假 Cache API:按 key 的 URL 存一份,记下每次 put 的 key 请求本身。
+describe("serveLogo 边缘缓存(按上游 URL)", () => {
+  let store: Map<string, Response>;
+  let putKeys: Request[];
+  let putValues: Response[];
+
+  beforeEach(() => {
+    store = new Map();
+    putKeys = [];
+    putValues = [];
+    const cache = {
+      match: async (req: Request) => store.get(req.url)?.clone(),
+      put: async (req: Request, res: Response) => {
+        putKeys.push(req);
+        putValues.push(res.clone());
+        // 与真 Cache API 一样把 body 读完再存。
+        store.set(req.url, new Response(await res.arrayBuffer(), { headers: res.headers }));
+      },
+    };
+    vi.stubGlobal("caches", { open: async () => cache });
+  });
+
+  it("同一张图第二次请求 → 边缘命中,不再打上游;字节与头都对", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => img());
+    const first = await serveLogo(resolving("https://cgk/usdc.png"), "token", "a", {
+      private: true,
+    });
+    expect(new Uint8Array(await first.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    await settle();
+
+    const second = await serveLogo(resolving("https://cgk/usdc.png"), "token", "b", {
+      private: true,
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(second.status).toBe(200);
+    expect(new Uint8Array(await second.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    expect(second.headers.get("content-type")).toBe("image/png");
+    expect(second.headers.get("x-content-type-options")).toBe("nosniff");
+    // 头按这次请求重建:private 照旧、Cache-Tag 是这次的 id,缓存副本的 public max-age 不外泄。
+    expect(second.headers.get("cache-control")).toBe(
+      "private, max-age=86400, stale-while-revalidate=2592000",
+    );
+    expect(second.headers.get("cache-tag")).toBe("logo:token:b");
+  });
+
+  it("缓存键只由上游 URL 派生:不含 userId / Cookie / 会话,键请求不带任何头", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => img());
+    await serveLogo(resolving("https://cgk/usdc.png?size=large"), "token", "user-row-id-123", {
+      private: true,
+    });
+    await settle();
+
+    expect(putKeys).toHaveLength(1);
+    const key = putKeys[0];
+    expect(key.url).toBe(logoCacheKey("https://cgk/usdc.png?size=large").url);
+    expect(key.url).not.toContain("user-row-id-123");
+    expect([...key.headers.keys()]).toEqual([]);
+    // 存进去的副本只有 content-type + 存多久,没有别的。
+    expect(Object.fromEntries(putValues[0].headers)).toEqual({
+      "content-type": "image/png",
+      "cache-control": `public, max-age=${LOGO_EDGE_TTL_S}`,
+    });
+  });
+
+  it("没命中 → 回源、照常 200 流给客户端,并写回缓存", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => img());
+    const res = await serveLogo(resolving("https://cgk/eth.png"), "platform", "evm:1");
+    expect(res.status).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    await settle();
+    expect(store.has(logoCacheKey("https://cgk/eth.png").url)).toBe(true);
+  });
+
+  it("上游 404 / 5xx / 网络故障 → 不进缓存,下一次照样回源", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockRejectedValueOnce(new Error("network"))
+      .mockImplementation(async () => img());
+    for (const status of [404, 502, 502]) {
+      const res = await serveLogo(resolving("https://cgk/x.png"), "token", "x");
+      expect(res.status).toBe(status);
+    }
+    await settle();
+    expect(putKeys).toHaveLength(0);
+
+    const ok = await serveLogo(resolving("https://cgk/x.png"), "token", "x");
+    expect(ok.status).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(4);
+  });
+
+  it("上游 200 但不是栅格图(svg)→ 照旧降级透传,但不进缓存", async () => {
+    const svg = () =>
+      new Response(new Uint8Array([1]), {
+        status: 200,
+        headers: { "content-type": "image/svg+xml" },
+      });
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => svg());
+    const res = await serveLogo(resolving("https://cgk/x.svg"), "token", "x");
+    expect(res.headers.get("content-type")).toBe("application/octet-stream");
+    await settle();
+    expect(putKeys).toHaveLength(0);
+    await serveLogo(resolving("https://cgk/x.svg"), "token", "x");
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("缓存读写抛错 → 不阻断,退化成回源", async () => {
+    vi.stubGlobal("caches", {
+      open: async () => {
+        throw new Error("cache down");
+      },
+    });
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => img());
+    const res = await serveLogo(resolving("https://cgk/usdc.png"), "token", "a");
+    expect(res.status).toBe(200);
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    await settle();
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });
