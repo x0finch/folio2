@@ -21,12 +21,22 @@ export const coinstatsAccountCreds = [
 
 // —— provider 级 creds(PC):CoinStats API Key —— DEFAULT provider key,值由 app 从 env 注入,
 // 用户自配留后续 phase。secret(仅声明形状;本包不加密、不见 SECRETS_KEY)。
+//
+// 外加一个 base URL 覆盖(FOL-84):与 binance / okx / bybit 的 #264 同一个开关、同一条注入路。
+// **生产不设** → 直连官方;设了的只有本地 perf 压测(`scripts/perf/fake-upstream.mjs`)。
+const COINSTATS_BASE_KEY = "COINSTATS_API_BASE";
 const providerCreds = [
   {
     key: COINSTATS_API_KEY,
     type: "secret",
     validator: z.string().min(1),
     label: "CoinStats API Key",
+  },
+  {
+    key: COINSTATS_BASE_KEY,
+    type: "public",
+    validator: z.string().trim().url(),
+    label: "CoinStats API base URL",
   },
 ] as const satisfies readonly CredField[];
 
@@ -36,8 +46,13 @@ type CoinstatsCtx = FetchContext<{ address: string }, Record<string, string>>;
 // 队的身份是 **key 的名字**(模块级游标),不是 client 实例:三条链、三个 connector、
 // 每次调用各建一个 client,花的仍然是同一份额度、排的仍然是同一个队。这正是要的。
 const withClient = <A, E>(
+  creds: Record<string, unknown>,
   use: (client: CoinstatsClientApi) => Effect.Effect<A, E, ProviderNeeds>,
-): Effect.Effect<A, E, ProviderNeeds> => Effect.scoped(Effect.flatMap(makeCoinstatsClient(), use));
+): Effect.Effect<A, E, ProviderNeeds> => {
+  const v = creds[COINSTATS_BASE_KEY];
+  const apiBase = typeof v === "string" && v.trim() ? v.trim() : undefined;
+  return Effect.scoped(Effect.flatMap(makeCoinstatsClient({ apiBase }), use));
+};
 
 // provider key 由 app 从 env 注入(非用户输入),但**仍然自查** —— 没配就是没配,
 // 归「凭据问题」(重试改变不了),不该让它变成一发打不通的请求。
@@ -54,7 +69,7 @@ const balanceOf = (
 ): Effect.Effect<Row[], ConnectorError, ProviderNeeds> =>
   apiKeyOf(ctx).pipe(
     Effect.flatMap((apiKey) =>
-      withClient((client) =>
+      withClient(ctx.creds, (client) =>
         asConnector(client.balance({ connectionId, address: ctx.account.creds.address, apiKey })),
       ),
     ),

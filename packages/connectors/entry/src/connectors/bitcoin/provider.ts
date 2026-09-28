@@ -43,11 +43,30 @@ export const bitcoinAccountCreds = [
   },
 ] as const satisfies readonly CredField[];
 
-// —— provider 级 creds(PC):空 —— Blockbook 公共实例免 key,开箱即用。
-const providerCreds = [] as const satisfies readonly CredField[];
+// —— provider 级 creds(PC):只有一个节点覆盖 —— Blockbook 公共实例免 key,开箱即用。
+// 与 binance / okx / bybit 的 #264 同一个开关、同一条注入路(key 即 env 变量名,app 从 env 灌进
+// `ctx.creds`,不进 UI 表单)。**生产不设** → 轮询内置的四个公共节点;设了就只打这一个
+// (自托管节点,或本地 perf 压测的假上游 `scripts/perf/fake-upstream.mjs`,FOL-84)。
+const BLOCKBOOK_BASE_KEY = "BLOCKBOOK_API_BASE";
+const providerCreds = [
+  {
+    key: BLOCKBOOK_BASE_KEY,
+    type: "public",
+    label: "Blockbook API base URL",
+    validator: z.string().trim().url(),
+  },
+] as const satisfies readonly CredField[];
 
 // **构造是纯的**(这家上游没有闸 —— 它的「重试」是换下一个公共节点,轮询在 client 里)。
-const client: BlockbookClientApi = makeBlockbookClient();
+// 默认那份建一次;有覆盖才现建。
+const defaultClient: BlockbookClientApi = makeBlockbookClient();
+
+const clientFor = (creds: Record<string, unknown>): BlockbookClientApi => {
+  const v = creds[BLOCKBOOK_BASE_KEY];
+  return typeof v === "string" && v.trim()
+    ? makeBlockbookClient({ bases: [v.trim()] })
+    : defaultClient;
+};
 
 // 请求层错误 → connector 错误。**比 `asConnector` 多一条本上游的判据**:
 //
@@ -80,6 +99,7 @@ const derivationIsCredentials = <A, R>(
 
 // xpub 模式:一发拿回整簇地址的汇总 + 各地址明细(details=tokenBalances&tokens=used)。
 const fromXpub = (
+  client: BlockbookClientApi,
   ext: string,
   scriptType: string | undefined,
 ): Effect.Effect<{ balances: Spot[]; note: Note[] }, ConnectorError, ProviderNeeds> =>
@@ -98,6 +118,7 @@ const fromXpub = (
   });
 
 const fromAddress = (
+  client: BlockbookClientApi,
   address: string,
 ): Effect.Effect<{ balances: Spot[]; note: Note[] }, ConnectorError, ProviderNeeds> =>
   asBitcoin(client.address(address)).pipe(
@@ -121,8 +142,11 @@ export const blockbookProvider: BalanceProvider<
 
   fetchBalances: (ctx) => {
     const id = ctx.account.creds.addressOrXpub;
+    const client = clientFor(ctx.creds);
     return derivationIsCredentials(
-      isExtendedPubkey(id) ? fromXpub(id, ctx.account.creds.scriptType) : fromAddress(id),
+      isExtendedPubkey(id)
+        ? fromXpub(client, id, ctx.account.creds.scriptType)
+        : fromAddress(client, id),
     );
   },
 
@@ -132,6 +156,7 @@ export const blockbookProvider: BalanceProvider<
   // **`details: "basic"`** —— 探活不需要各地址明细,少拉一大坨。
   validateAccount: (ctx) => {
     const id = ctx.account.creds.addressOrXpub;
+    const client = clientFor(ctx.creds);
     const probe = Effect.suspend(() =>
       isExtendedPubkey(id)
         ? asBitcoin(

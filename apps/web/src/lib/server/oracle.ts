@@ -23,7 +23,15 @@ import { Layer } from "effect";
 // **isolate 建一次就读这一次**:`env` 是部署级的(同一个 isolate 里每个请求看到的是同一份),
 // 所以把 key 冻进 isolate 级的 client 不会让哪个请求读到别人的值。换 key 要重新部署,那本来就
 // 起一批新 isolate。
-const cgConfig = () => ({ apiKey: env.COINGECKO_API_KEY || undefined });
+//
+// `COINGECKO_API_BASE`(FOL-84):base URL 覆盖,**生产不设** → 按有没有 key 选官方免费 / pro 基址。
+// 设了的只有本地 perf 压测(`scripts/perf/fake-upstream.mjs` 指到本机假上游)。它不在 wrangler 生成的
+// `Env` 类型里(那份按 .dev.vars 现场生成),所以按名字读,与 sync 的 provider 凭据注入同款。
+export const coinGeckoConfigOf = (vars: Record<string, string | undefined>) => ({
+  apiKey: vars.COINGECKO_API_KEY || undefined,
+  baseUrl: vars.COINGECKO_API_BASE?.trim() || undefined,
+});
+const cgConfig = () => coinGeckoConfigOf(env as unknown as Record<string, string | undefined>);
 
 // 当前上游的命名者。db 层不预设任何厂商(表名列名零 vendor 字样,#199),所以凡是要按命名者
 // 点查 `token_refs` 的读(如手记持仓的「用户选了哪个币」)都由 app 把它传进去。

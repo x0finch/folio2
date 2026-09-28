@@ -35,10 +35,10 @@ function upstream(routes: Record<string, () => Response> = {}): HttpStub {
 }
 
 type Ctx = Parameters<typeof rabbyProvider.fetchBalances>[0];
-const ctx = (address = ADDR): Ctx =>
+const ctx = (address = ADDR, providerCreds: Record<string, string> = {}): Ctx =>
   ({
     account: { id: "a1", label: "EVM", connectorId: "evm", creds: { address } },
-    creds: {},
+    creds: providerCreds,
   }) as unknown as Ctx;
 
 // **rabby 有闸(limit=1)**,所以多发请求时要推虚拟时钟,否则第二发永远在等。
@@ -92,9 +92,23 @@ describe("fetchBalances", () => {
     expect(paths.some((p) => p.includes("chain/list"))).toBe(false);
   });
 
-  it("不要 provider key —— PC 是空的(这正是它当默认源的理由)", () => {
+  it("不要 provider key —— PC 只有一个 public 的 base 覆盖(这正是它当默认源的理由)", () => {
     expect(rabbyProvider.id).toBe("rabby");
-    expect(rabbyProvider.creds).toEqual([]);
+    expect(rabbyProvider.creds.map((f) => f.key)).toEqual(["RABBY_API_BASE"]);
+    expect(rabbyProvider.creds.every((f) => f.type === "public")).toBe(true);
+  });
+
+  it("base 覆盖生效,默认 host 一个不留", async () => {
+    const stub = upstream();
+    await run(
+      stub,
+      rabbyProvider.fetchBalances(
+        ctx(`0x${"2".repeat(40)}`, { RABBY_API_BASE: "http://127.0.0.1:3399/rabby" }),
+      ),
+    );
+    const urls = stub.calls.map((c) => c.request.url.href);
+    expect(urls.length).toBeGreaterThan(0);
+    expect(urls.every((u) => u.startsWith("http://127.0.0.1:3399/rabby/v1/"))).toBe(true);
   });
 
   it("429 → 限流(可重试)", async () => {
