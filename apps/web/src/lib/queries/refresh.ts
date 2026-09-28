@@ -21,17 +21,16 @@ import { accountKeys, portfolioKeys, settingsKeys, syncKeys, tagKeys, tokenKeys 
 // 不再刷已删除的胖读键(`overview` / `holdings`)。
 export const REFRESH_MAP = {
   /**
-   * 一轮同步跑完。**失败也算**:同步本身可能仍在队列里跑,
+   * 一轮同步前进了一格 / 跑完了。**失败也算**:同步本身可能仍在队列里跑,
    * 而且部分账户的快照可能已经落库了。
    *
-   * 刷:同步轮次、快照原料、账户列表(页头摘要与「立即同步」账户集)、富化现价。
+   * 刷:快照原料、账户列表(页头摘要与「立即同步」账户集)、富化现价。
+   *
+   * **不刷同步域本身。** 这个事件是轮查询自己读到新进度时发的(`useSyncRound`),轮就是此刻刚读到的
+   * 那一份 —— 再把它标旧,等于每前进一格立刻多一发 `getSyncRound`;发起回包刚落进缓存(那是更新的
+   * 一份)时,紧跟着的那发 GET 还会把它换掉。轮还在跑,轮询自己会接着读。
    */
-  "sync.round": [
-    syncKeys.all,
-    portfolioKeys.snapshotsPrefix(),
-    accountKeys.all,
-    tokenKeys.enrichment(),
-  ],
+  "sync.round": [portfolioKeys.snapshotsPrefix(), accountKeys.all, tokenKeys.enrichment()],
 
   /** 抽屉里的「单独同步」。改的东西和一轮同步一样,只是范围小 —— 前缀是同一批。 */
   "account.sync": [

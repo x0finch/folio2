@@ -140,6 +140,47 @@ describe("useSyncRound", () => {
       });
       await waitFor(() => expect(invalidate).toHaveBeenCalled());
     });
+
+    // 刷的是**数据域**,不是轮本身:这个事件就是轮查询自己读到新进度时发的,再把它标旧只会立刻
+    // 重读一遍刚读到的东西 —— 每前进一格多一发 `getSyncRound`,而且会把发起回包刚落进缓存的那一轮
+    // 换成这一刻 GET 读到的那一份(两者本该一致,不一致时回包那份是更新的)。
+    it("进度前进一格 → 不重读轮本身", async () => {
+      getSyncRound.mockResolvedValue(view({ settled: 1 }));
+      const { api, client } = mountHook();
+      await waitFor(() => expect(api.current.round?.settled).toBe(1));
+      const invalidate = vi.spyOn(client, "invalidateQueries");
+      const readsBefore = getSyncRound.mock.calls.length;
+      getSyncRound.mockResolvedValue(view({ settled: 2, synced: 2 }));
+      await act(async () => {
+        await client.refetchQueries();
+      });
+      await waitFor(() => expect(invalidate).toHaveBeenCalled());
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      // 只有带来新进度的那一发;没有紧跟着的第二发。
+      expect(getSyncRound.mock.calls.length).toBe(readsBefore + 1);
+    });
+
+    it("发起回包是一轮已收官的新轮 → 面板读的就是它,不被 GET 读回的旧轮盖掉", async () => {
+      getSyncRound.mockResolvedValue(view({ roundId: "r-old", state: "done", finishedAt: 1 }));
+      const fresh = view({ roundId: "r-new", state: "done", finishedAt: 2, settled: 3 });
+      global.fetch = vi.fn(
+        async () => new Response(JSON.stringify(fresh), { status: 200 }),
+      ) as unknown as typeof fetch;
+      const { api } = mountHook();
+      await waitFor(() => expect(api.current.round?.roundId).toBe("r-old"));
+      const readsBefore = getSyncRound.mock.calls.length;
+
+      act(() => api.current.sync());
+      await waitFor(() => expect(api.current.round?.roundId).toBe("r-new"));
+      // 给一次失效 → 重读留出落地的时间,再确认它没发生。
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      expect(api.current.round?.roundId).toBe("r-new");
+      expect(getSyncRound.mock.calls.length).toBe(readsBefore);
+    });
   });
 });
 

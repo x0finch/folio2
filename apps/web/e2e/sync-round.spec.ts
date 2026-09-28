@@ -205,6 +205,12 @@ test.describe("同步一轮", () => {
 //
 // 收官/中断的轮不会再触发轮询(`refetchInterval` 只在「在跑」时开),所以造出来的这一份就是
 // 面板一直读的那一份,不必再去拦 server fn 的地址(那是编译期产物,认不出是哪一个)。
+//
+// **这条成立还要一个前提:没有别的东西去重读这一轮。** FOL-89 起创建后那次后台同步也是一轮,
+// 所以点同步之前这里已经有一份真轮 —— 回包换进来算「进度前进一格」。那一格刷的是数据域、不是轮
+// 本身(`REFRESH_MAP["sync.round"]`);它若把轮也标旧,紧跟着的 GET 就会把回包换回那份真轮,
+// 面板显示「All synced」—— 这正是那条规则的 e2e 钉子。剩下能重读轮的只有数据版本号(FOL-94,
+// 回到页面 / 每分钟),这几条用例里都碰不到。
 test.describe("面板读轮", () => {
   // 有类型标注:面板真按 `SyncRoundView` 的字段读,fixture 走形(字段改名 / 新增必填)要在
   // 编译期红,不是在浏览器里静默显示成空面板。
@@ -240,6 +246,14 @@ test.describe("面板读轮", () => {
     await dismissPasskeyPrompt(page);
     await page.goto("/accounts");
     await addBinanceAccount(page, "Spot A");
+    // 等创建后那次后台同步落完(FOL-89 起它是这个组合的一轮,见 addBinanceAccount 的注释)。
+    // 不等的话,reload 时那一轮可能还在跑:胶囊转着圈、点了不发 POST,下面的回包替换无从谈起。
+    await waitForSnapshot(
+      page,
+      await accountIdByLabel(page, "Spot A"),
+      () => true,
+      "创建后的首轮同步没落库",
+    );
   };
 
   test("缺凭据的账户算「需要凭据」,不算失败", async ({ page, request }) => {

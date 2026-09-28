@@ -50,6 +50,15 @@ describe("刷新映射表", () => {
     expect(isInvalidated(settingsKeys.valuation())).toBe(false);
   });
 
+  // 这条事件是轮查询自己读到新进度时发的 —— 把轮本身也标旧就是每前进一格重读一遍刚读到的东西。
+  it("sync.round 不刷轮本身", async () => {
+    seed(syncKeys.round(PF));
+
+    await invalidateFor(queryClient, "sync.round");
+
+    expect(isInvalidated(syncKeys.round(PF))).toBe(false);
+  });
+
   it("sync.round 盖住不同组合的快照键", async () => {
     const def = portfolioKeys.snapshots("pf-default", SNAPSHOT_AT);
     const other = portfolioKeys.snapshots("pf-other", SNAPSHOT_AT);
