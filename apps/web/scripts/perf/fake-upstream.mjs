@@ -269,6 +269,9 @@ function marketRow(c, nowIso) {
   };
 }
 
+// **覆盖全部 `SUPPORTED_CURRENCIES`**(真 CoinGecko 的 `exchange_rates` 都有):少一个,`fx.warm()`
+// 每次都判「有币种缺」而回源,量到的 `fx` 活就成了「每小时真刷一次」,而生产上 6h TTL 内它是零出网的
+// 缓存命中(第二轮之前这里只有六种,`fx` 那一行因此一直偏高)。
 const FX_PER_BTC = {
   usd: 64000,
   eur: 59000,
@@ -276,7 +279,12 @@ const FX_PER_BTC = {
   cny: 457000,
   jpy: 9_550_000,
   hkd: 500_000,
+  krw: 88_000_000,
+  cad: 87_000,
+  aud: 97_000,
+  chf: 56_000,
 };
+const CRYPTO_PER_BTC = { eth: 25 };
 
 function coingecko(u, path, q) {
   const nowIso = new Date().toISOString();
@@ -313,6 +321,9 @@ function coingecko(u, path, q) {
     const rates = { btc: { name: "Bitcoin", unit: "BTC", value: 1, type: "crypto" } };
     for (const [code, value] of Object.entries(FX_PER_BTC)) {
       rates[code] = { name: code.toUpperCase(), unit: code.toUpperCase(), value, type: "fiat" };
+    }
+    for (const [code, value] of Object.entries(CRYPTO_PER_BTC)) {
+      rates[code] = { name: code.toUpperCase(), unit: code.toUpperCase(), value, type: "crypto" };
     }
     return { body: { rates } };
   }
