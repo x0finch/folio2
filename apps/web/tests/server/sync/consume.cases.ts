@@ -1,3 +1,4 @@
+import { Oracle } from "@folio/oracle";
 import { Effect, Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { JOB_MAX_RETRIES } from "@/lib/server/jobs/constants";
@@ -7,6 +8,7 @@ import { type Enqueued, JobQueue } from "@/lib/server/jobs/queue";
 import { fanOutAllUsers } from "@/lib/server/sync/round";
 import { db } from "../_kit/db";
 import { blockOutbound, json, stubOutbound } from "../_kit/outbound";
+import { call } from "../_kit/run";
 import { freshUser } from "../_kit/user";
 
 // 队列 consumer(FOL-86):一条 `sync-account` = 同步恰好那一个账户、落账、最后一个收官。
@@ -116,6 +118,53 @@ describe("jobs/consume", () => {
     expect(latest.map((s) => s.snapshot.accountId)).toEqual([acc.id]);
     expect(outbound.calls.length).toBeGreaterThan(0);
     expect(outbound.calls.length).toBeLessThanOrEqual(FREE_PLAN_SUBREQUESTS);
+    // FOL-87:估值只读价表,**一发 CoinGecko 都不打**(价归队列的 `prices` 活)。
+    expect(outbound.calls.filter((u) => u.includes("coingecko"))).toEqual([]);
+  });
+
+  // FOL-87:重估用价表里的价(哪怕是 stale 的),不回源。
+  it("估值用价表里已有的价,零 CoinGecko 请求", async () => {
+    await db(USER).accounts.create({
+      connectorId: "bitcoin",
+      label: "cold",
+      creds: JSON.stringify({ addressOrXpub: BTC_ADDRESS }),
+    });
+    const [job] = await fanOut();
+    if (!job) throw new Error("no job enqueued");
+    // 先让价表里有 BTC 的价:mint 出那一行,再经真的刷价路径写进去。
+    const ids = await call(
+      USER,
+      Effect.flatMap(Oracle, (o) =>
+        o.tokens.mint([{ ref: "bitcoin/native", seed: { symbol: "BTC" } }]),
+      ),
+    );
+    const btc = ids.get("bitcoin/native");
+    if (!btc) throw new Error("BTC not minted");
+    stubOutbound([
+      ["/simple/price", () => json({ bitcoin: { usd: 40_000, last_updated_at: 1_700_000_000 } })],
+      ["/coins/markets", () => json([])],
+    ]);
+    await call(
+      USER,
+      Effect.flatMap(Oracle, (o) => o.tokens.refreshStale([btc])),
+    );
+    const priced = await call(
+      USER,
+      Effect.flatMap(Oracle, (o) => o.tokens.pricesOf([btc])),
+    );
+    expect(priced.get(btc)?.unitPrice).toBe(40_000);
+
+    const outbound = stubOutbound([
+      [
+        "/api/v2/address/",
+        () => json({ address: BTC_ADDRESS, balance: "150000000", unconfirmedBalance: "0" }),
+      ],
+    ]);
+    expect(await consume(job)).toEqual({ acked: true, retried: false });
+
+    expect(outbound.calls.filter((u) => u.includes("coingecko"))).toEqual([]);
+    const [latest] = await db(USER).snapshots.latest();
+    expect(latest?.snapshot.totalUsd).toBe(60_000); // 1.5 BTC × 表里的 40k
   });
 
   // 最坏情形:上游整个够不到,内核的重试全用满。仍是一次调用的预算。

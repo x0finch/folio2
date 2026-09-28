@@ -210,7 +210,7 @@ describe("buildOverview", () => {
   });
 
   // #245 Part 2:dust(几乎 $0 的空投/貔貅币)刷价那侧会被跳过,故这侧也不能标脏 —— 否则
-  // pricesStale 永清不掉、客户端每次进页空转刷新(与 refreshStalePrices 同用 refreshableTokenIds)。
+  // pricesStale 永清不掉(与队列 `prices` 活同用 refreshableTokenIds)。
   it("dust(值 < 阈值)且无价 → 不标 stale(刷价那侧会跳过它)", async () => {
     const accounts = [account("a1", "W")];
     // 无价的 fake tokens(record 不带 price → stale=true 的口径)。

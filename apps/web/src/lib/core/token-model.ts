@@ -50,13 +50,12 @@ export function perpTokenId(b: BalanceLike): string | null {
   return b.tokenId ?? null;
 }
 
-// **展示富化的统一门**(同质 ∪ defi ∪ 永续仓位)。enrich / refreshStalePrices / warm 三处必须同门:
-// enrich 标了 stale 而 refresh 够不到的行会让 pricesStale 永远清不掉、客户端每次加载空转一次刷新
-// (code review #2)。估值现推(liveValue)不走此门,仍只认 fungibleTokenId 的同质行。
+// **展示富化的统一门**(同质 ∪ defi ∪ 永续仓位)。enrich 与刷价(队列的 `prices` 活 / 手动同步收尾,
+// FOL-87)必须同门:enrich 标了 stale 而刷价够不到的行,价就永远旧着(code review #2)。估值现推(liveValue)不走此门,仍只认 fungibleTokenId 的同质行。
 //
 // **三门同源是靠这一个函数保证的,别在调用点各自加门**:`refreshableTokenIds` 也是按它筛的,
 // 所以这里放进来一类,富化 / 刷价 / 预热三处同时放进来 —— 而永续的图正是靠「刷」那一半取回来的
-// (连接器不报 logo,logo/正名的权威源是上游,见 token-enrich 的 `warmHeldPrices` 注释)。
+// (连接器不报 logo,logo/正名的权威源是上游,见 `prices/job.ts` 的 `refreshPricesOf`)。
 export function displayTokenId(b: BalanceLike): string | null {
   return fungibleTokenId(b) ?? defiTokenId(b) ?? perpTokenId(b);
 }
@@ -79,7 +78,7 @@ export function displayTokenIds(rows: readonly BalanceLike[]): string[] {
 //   · 语义:同一个 token 可能既有现货(+)又有 defi 借款腿(−,rabby 负债腿 amount 取负 → value 为负,
 //     且 ref 与现货同源 → 同 tokenId)。对冲/循环贷仓位净值可能≈0,但两条腿都**需要**这个价,
 //     绝不能因净值抵消就当它不值钱、不刷。
-//   · 无 spin:标脏侧(overview 只喂 eligible,不含 defi)喂的是刷价侧(prices/refresh-stale.ts 喂全量)的**子集**。
+//   · 无 spin:标脏侧(overview 只喂 eligible,不含 defi)喂的是刷价侧(prices/job.ts 喂全量)的**子集**。
 //     `Σ|v|` 对「加行」单调不减 → 子集和 ≤ 全集和 → 标脏(子集越阈值)必蕴含刷价侧也越阈值 →
 //     绝不会「标了脏却刷不到」。换成 `|Σ v|`:标脏侧只见 +500 → 标脏,刷价侧见 +500−500=0 → 跳过 →
 //     客户端每次进页空转(见 token-enrich 的「三门同源」)。这正是 code-review 抓到的坑。
@@ -157,10 +156,10 @@ export interface TokenOption {
 // 用户当下「可展示余额」全集(纯逻辑,无 server import → 可单测):各账户最新快照的余额 ∪ manual 账户的
 // 合成余额(manual 已退出快照,ADR 0018)。
 //
-// **三门同源收口**:enrich(经 injectManualSnapshots 进 byAccount)、warm(warmTokensForUser)、
-// refresh(refreshStalePrices)必须喂**同一集合** —— 否则 enrich 标了 stale 的 manual 行 warm/refresh 够不到,
-// pricesStale 永清不掉、客户端每次加载空转刷新(见 lib/tokens.ts 同门注)。warm 与 refresh 都经本函数,
-// 保证两者结构一致,而非各自手拼(手拼正是 T2 首版漏掉 refresh 的成因)。
+// **同源收口**:enrich(经 injectManualSnapshots 进 byAccount)与刷价(`prices/job.ts` 的
+// `heldTokenIdsOf`,队列 `prices` 活与手动同步收尾共用)必须喂**同一集合** —— 否则 enrich 标了 stale 的
+// manual 行刷价够不到,价永远旧着(见 lib/tokens.ts 同门注)。都经本函数,保证结构一致,而非各自手拼
+// (手拼正是 T2 首版漏掉 refresh 的成因)。
 export function userDisplayBalances(
   snapshots: SnapshotWithBalances[],
   manualBalances: BalanceLike[],

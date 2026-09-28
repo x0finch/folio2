@@ -191,24 +191,6 @@ describe("刷新映射表", () => {
     expect(keys.map(isInvalidated)).toEqual([true, true, true, true, true, true]);
   });
 
-  it("prices.refreshed 只刷富化字典", async () => {
-    seed(tokenKeys.enrichment());
-    seed(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT));
-    seed(syncKeys.round(PF));
-    seed(settingsKeys.valuation());
-
-    await invalidateFor(queryClient, "prices.refreshed");
-
-    expect(isInvalidated(tokenKeys.enrichment())).toBe(true);
-    expect(
-      [
-        portfolioKeys.snapshots("pf-1", SNAPSHOT_AT),
-        syncKeys.round(PF),
-        settingsKeys.valuation(),
-      ].map(isInvalidated),
-    ).toEqual([false, false, false]);
-  });
-
   it("表里每条前缀都落在已知的域前缀上", () => {
     const domains: readonly (readonly string[])[] = [
       syncKeys.all,

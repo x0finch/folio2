@@ -18,7 +18,7 @@ import { makeStaleRefresh, type RefreshStaleReport, type TokenStaleRefresh } fro
 // **为什么拆成这些文件。** 判据是**「谁在问、问的是什么」**,每片自带接口片段与那一片的判据:
 //
 //   `./mint`       写   tokenRef → token_id,身份在此定死。**全程不出网**(那条红线在文件里)
-//   `./price`      读   整行富化 + 现价(按「有没有内部 id」分两档)
+//   `./price`      读   整行富化 + 现价(按「有没有内部 id」分两档;有 id 的那档只读表)
 //   `./history`    读   历史日价 —— 过去日不可变落库、今日桶恒现取
 //   `./stale`      写   唯一覆盖写既有行的地方(价 + 元信息各一条上游端点)
 //   `./catalogue`  读   世上有哪些币(公开目录,与用户无关)—— 一个 store 都不碰
@@ -79,7 +79,7 @@ export class TokenService extends Effect.Service<TokenService>()("oracle/TokenSe
     return {
       ...makeMinting({ store, globalRefIndex, candidates, namer }),
       ...makeReading(store, prices),
-      ...makePricing(store, prices, upstream),
+      ...makePricing(prices, upstream),
       ...makeHistory(store, prices, upstream),
       ...makeStaleRefresh(store, prices, upstream),
       ...makeCatalogue(cache, upstream),

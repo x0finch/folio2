@@ -11,8 +11,19 @@ import { Effect, Option } from "effect";
 //     都无 → 保留 provider 原值。
 // 「是否盯市」由 connector 的 manifest.valuation 决定,调用方(sync-deps)解析后以 `markToMarket` 布尔注入
 //(不再靠 app 侧硬编码名单;第三方 connector 自带该语义 —— 见 @folio/connectors-basic ConnectorValuation)。
-// 源价仅在需要时取(self-first 且无自带价 / source-first 恒取)—— self-first 下 CEX 有自带价即不回源,
-// 与旧行为同开销、同结果。只依赖 tokens 实例(无 db/cloudflare)→ 可纯测。mode 由调用方按 per-user 设置注入,缺省 self-first。
+// 源价仅在需要时取(self-first 且无自带价 / source-first 恒取)—— self-first 下 CEX 有自带价即不查价。
+// 只依赖 tokens 实例(无 db/cloudflare)→ 可纯测。mode 由调用方按 per-user 设置注入,缺省 self-first。
+//
+// **源价只读价表,不出网**(FOL-87)。以前每笔要源价的持仓调一次 `priceOf`(SWR:stale 就当场回源),
+// 并发无上限、不成批 —— 价 TTL 30 分钟、同步每小时一次,所以几乎每次同步都是「每个币一发 CoinGecko」,
+// 一条 `sync-account` 消息的 50 发预算被持仓数直接吃穿。现在:要源价的 id 先收齐,`pricesOf` 一次批读
+// 价表;表里的价由队列的 `prices` 活每小时整批刷(见 `jobs/prices.ts`)。
+//
+// **代价(收下的)**:同一小时里 `prices` 与 `sync-account` 并发投、谁先跑不定,所以这一轮的快照可能
+// 用的是上一轮刷的价 —— 最多约一小时旧(stale 的也照用,不回退)。不按顺序排(比如让同步延后投)是因为
+// 延后的是用户看得见的同步进度;而价旧一小时只影响写进快照的那一格 value,展示层本来就按价表现价重算。
+// 表里连旧价都没有(新币第一次出现)→ 退回自带价 / provider 原值(`valuate` 的规则),下一轮 `prices`
+// 会把它补上。
 //
 // **身份从 `idByRef` 来,不在这里解析**(#202)。以前这里调 `tokens.resolve({symbol, tokenRef})` ——
 // 那是读时解析的最后一处残留:同一笔持仓的身份在写路径上被算了两遍(revalue 一次、写快照一次),
@@ -23,8 +34,7 @@ import { Effect, Option } from "effect";
 // 由调用方那一次装配供上 —— 这个函数自己不建任何门面。
 // 汇率缺失(非美元且缓存冷)→ 保留 provider 原值(best-effort,不抛)。
 //
-// **并发度按原样保留成 `unbounded`**:迁移前是 `Promise.all`,也就是「全都一起上」。
-// 收紧它是另一件事(要先量一次同步里 `priceOf` 的真实条数),这一站不顺手改语义。
+// 逐笔那一步现在只剩法币的 `fx.resolve`(读缓存)与纯计算,并发度仍是 `unbounded`。
 export const revalue = (
   markToMarket: boolean,
   balances: Balance[],
@@ -33,6 +43,25 @@ export const revalue = (
 ): Effect.Effect<Balance[], never, Oracle | DbRequest> =>
   Effect.gen(function* () {
     const { tokens, fx } = yield* Oracle;
+
+    // 盯市类型无权威自带价 → selfPrice = undefined(恒用源价);否则自带单价 = price ?? value/amount。
+    const selfPriceOf = (b: Balance): number | undefined =>
+      markToMarket
+        ? undefined
+        : (b.price ?? (b.amount > 0 && b.value > 0 ? b.value / b.amount : undefined));
+    // 这笔要不要源价、要的话是哪个 token_id(认不出来的币 mint 没给 id → 拿不到源价,不猜)。
+    const sourceIdOf = (b: Balance): string | undefined => {
+      if (b.kind === "perp_position" || b.kind === "perp_equity") return undefined;
+      if (b.tokenRef && fiatCodeOf(b.tokenRef)) return undefined;
+      // self-first 且已有自带价 → 无需源价(CEX 不查价);否则要。
+      if (mode !== "source-first" && selfPriceOf(b) != null) return undefined;
+      return b.tokenRef ? idByRef.get(b.tokenRef) : undefined;
+    };
+
+    // **一次批读**,不是逐笔点查。
+    const wanted = [...new Set(balances.map(sourceIdOf).filter((id) => id !== undefined))];
+    const sourcePrices = yield* tokens.pricesOf(wanted);
+
     return yield* Effect.forEach(
       balances,
       (b) =>
@@ -54,20 +83,9 @@ export const revalue = (
             };
           }
 
-          const selfPrice = markToMarket
-            ? undefined
-            : (b.price ?? (b.amount > 0 && b.value > 0 ? b.value / b.amount : undefined));
-          // self-first 且已有自带价 → 无需源价(与旧行为同:CEX 不回源);否则取源价。
-          const needSource = mode === "source-first" || selfPrice == null;
-          let sourcePrice: number | undefined;
-          if (needSource) {
-            // 认不出来的币(mint 没给出 id)拿不到源价 —— 退回自带价 / provider 原值,不猜。
-            const tokenId = b.tokenRef ? idByRef.get(b.tokenRef) : undefined;
-            if (tokenId) {
-              const hit = yield* tokens.priceOf(tokenId);
-              sourcePrice = Option.getOrUndefined(hit)?.unitPrice;
-            }
-          }
+          const selfPrice = selfPriceOf(b);
+          const sourceId = sourceIdOf(b);
+          const sourcePrice = sourceId ? sourcePrices.get(sourceId)?.unitPrice : undefined;
           const v = valuate(b.amount, selfPrice, sourcePrice, mode);
           return v ? { ...b, selfPrice, price: v.unitPrice, value: v.value } : { ...b, selfPrice };
         }),

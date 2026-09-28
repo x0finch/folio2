@@ -152,7 +152,7 @@ async function refRows(tokenId: string) {
   return results;
 }
 
-// 让参考层「刷过一轮」。**驱动真的刷新路径**(`refreshStalePrices` + `refreshStaleInfo`),
+// 让参考层「刷过一轮」。**驱动真的刷新路径**(`refreshStale` 的价与元信息两半),
 // 只把 CoinGecko 的 HTTP 响应打桩 —— 不手写 `putInfo` 直塞。
 //
 // 这一条是有代价换来的:第一版就是手写直塞,结果把 `refreshStaleInfo` 整个绕开了,

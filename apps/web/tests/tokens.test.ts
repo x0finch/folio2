@@ -68,8 +68,8 @@ describe("perpTokenId(只喂展示富化,不喂估值)", () => {
 });
 
 describe("displayTokenId / displayTokenIds(展示富化的统一门)", () => {
-  // enrich 与 refreshStalePrices 必须同门:enrich 标了 stale 而 refresh 够不到的行,
-  // 会让 pricesStale 永远清不掉、客户端每次加载空转一次刷新(code review #2)。
+  // enrich 与刷价(队列 `prices` 活)必须同门:enrich 标了 stale 而刷价够不到的行,
+  // 价就永远旧着(code review #2)。
   it("同质 ∪ defi ∪ 永续仓位都算展示门内", () => {
     expect(displayTokenId({ kind: "spot", tokenId: "tk-1" })).toBe("tk-1");
     expect(displayTokenId({ kind: "defi", tokenId: "tk-2" })).toBe("tk-2");
@@ -142,7 +142,7 @@ describe("refreshableTokenIds(刷前跳过 dust)", () => {
   });
 
   // **这条钉的是三门同源**(#133):展示门放进永续仓位之后,刷价那侧必须跟着放进来 ——
-  // 富化标了脏而刷价够不到的行会让 pricesStale 永远清不掉、客户端每次进页空转一次刷新。
+  // 富化标了脏而刷价够不到的行,价就永远旧着。
   // 两侧都是按 `displayTokenId` 筛的,所以这件事是结构上成立的,这条只是别让它悄悄退回去。
   it("永续仓位跟着展示门一起进刷价集合(权益行不进)", () => {
     expect(

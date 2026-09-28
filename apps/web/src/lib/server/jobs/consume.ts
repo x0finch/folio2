@@ -1,6 +1,7 @@
 import { getLogger } from "@logtape/logtape";
 import { Cause, Effect, Either, Exit } from "effect";
-import { warmTokensFor } from "@/lib/server/sync/deps";
+import { runPricesJob } from "@/lib/server/prices/job";
+import { warmReferenceFor } from "@/lib/server/sync/deps";
 import { giveUpQueuedAccount, syncQueuedAccount } from "@/lib/server/sync/round";
 import { JOB_MAX_RETRIES } from "./constants";
 import { decodeJob, type Job } from "./message";
@@ -14,19 +15,22 @@ const runJob = (job: Job): Effect.Effect<void, Error> => {
     case "sync-account":
       return syncQueuedAccount(job);
     case "warm-user":
-      return warmTokensFor(job.userId);
+      return warmReferenceFor(job.userId);
+    case "prices":
+      return runPricesJob(job);
   }
 };
 
 /**
  * 最后一次投递也失败了,ack 之前还要做什么。**只有会让别处挂着的那种活才需要**:`sync-account` 不收尾,
- * 轮里那个账户永远 pending;预热失败了就是这一小时没暖上,没有谁在等它。
+ * 轮里那个账户永远 pending;预热 / 刷价失败了就是这一小时没暖上(下一小时的 cron 再投),没有谁在等它。
  */
 const giveUp = (job: Job, reason: string): Effect.Effect<void, Error> => {
   switch (job.kind) {
     case "sync-account":
       return giveUpQueuedAccount(job, reason);
     case "warm-user":
+    case "prices":
       return Effect.void;
   }
 };

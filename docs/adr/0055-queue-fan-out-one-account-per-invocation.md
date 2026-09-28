@@ -11,8 +11,8 @@
 **cron 只投活,活在队列 consumer 里一条消息一次调用地跑。**
 
 - **一个队列 `JOBS`**(`folio-jobs`,死信 `folio-jobs-dlq`;preview 一对自己的,test 只在本地),`max_batch_size: 1`、`max_retries: 3`、`retry_delay: 30`、`max_concurrency: 6`。
-- **消息是判别联合**(`apps/web/src/lib/server/jobs/message.ts`,Effect Schema):今天两种 —— `sync-account { userId, portfolioId, roundId, accountId }`、`warm-user { userId }`。消息只装找得到活的 id,不装数据。后续(FOL-88)按件加 `prices` / `fx` / `platforms` / `catalogue` / `defi-logos` / `prune-notes` / `daily-prices`:加一个 struct 进 union,`consume.ts` 的两个 `switch` 各接一支(穷尽检查,忘了接编译不过)。
-- **cron(`fanOutAllUsers`)**:逐用户开轮(与以前同一段分区逻辑)→ 每个账户一条 `sync-account` → 每个用户一条延后 120s 的 `warm-user` → `sendBatch`。**不出网**(测试钉着)。空组合的轮当场收官。
+- **消息是判别联合**(`apps/web/src/lib/server/jobs/message.ts`,Effect Schema):今天三种 —— `sync-account { userId, portfolioId, roundId, accountId }`、`warm-user { userId }`、`prices { userId, tokenIds? }`(FOL-87,见文末补记)。消息只装找得到活的 id,不装数据。后续(FOL-88)按件加 `fx` / `platforms` / `catalogue` / `defi-logos` / `prune-notes` / `daily-prices`:加一个 struct 进 union,`consume.ts` 的两个 `switch` 各接一支(穷尽检查,忘了接编译不过)。
+- **cron(`fanOutAllUsers`)**:逐用户开轮(与以前同一段分区逻辑)→ 每个账户一条 `sync-account` → 每个用户一条 `prices`(不延后,FOL-87)+ 一条延后 120s 的 `warm-user` → `sendBatch`。**不出网**(测试钉着)。空组合的轮当场收官。
 - **consumer(`server.ts` 的 `queue()` → `consumeMessage`)**:每条一次 `runAtEdge`,跑在同一个 isolate 运行时上(ADR 0054,不另起服务图)。`sync-account` 用**同一个同步内核**(`Sweep.syncUserStream` + `makeSyncServicesLayer`,`only` 收成那一个账户)→ `settle` → `finishIfSettled`。
 - **「最后一个落账的收官」**:`@folio/db` 新增 `syncRounds.finishIfSettled` —— 一条条件 UPDATE(未收官 ∧ `json_each` 里零个 `pending`),并发的 consumer 只有一个抢得到,最后落账的那个必看得到零个 pending。
 - **ack / retry 只在一处决定**:解不开 → ack + warn(重投也解不开);成功 → ack;失败且还有机会 → `retry()`;**最后一次仍失败 → 把账户记成 failed、够了就收官、ack**,只有连这一步都失败才进死信。`JOB_MAX_RETRIES` 与 wrangler 的 `max_retries` 由 `tests/queue-config.test.ts` 锁成一致。
@@ -32,8 +32,19 @@
 - **队列操作计数**:每条消息约 3 次操作(写 / 读 / 删),免费计划一天 10k。每小时 (账户数 + 1) 条 × 24。
 - **部署多一步**:`wrangler queues create` 一次(DEPLOY.md 3b);不建,`wrangler deploy` 直接失败。
 
+## 补记:持仓价拆成 `prices` 活,同步只读价表(FOL-87)
+
+上面那条 `sync-account` 消息的预算里藏着一个随持仓数线性长的东西:同步的重估对每笔要源价的持仓调一次 `tokens.priceOf`(SWR:stale 就当场回源),并发无上限、不成批。价 TTL 30 分钟、同步每小时一次,所以几乎每次同步都是「每个币一发 CoinGecko」。另有首页 / 账户页挂载时自动调的 `refreshStalePrices` server fn —— 一个读页面顺手打上游、写库。
+
+- **新 kind `prices { userId, tokenIds? }`**(`apps/web/src/lib/server/prices/job.ts`)。cron 每用户投一条不带 id 的(**不延后**,与 `sync-account` 同批)。consumer 跑的那一刻读最新快照 + 手记合成余额算持仓 id(`heldTokenIdsOf`,与展示同一道 dust 门),切成每块 ≤ `PRICES_IDS_PER_MESSAGE`(1000)个:自己刷第一块,其余每块投一条带 `tokenIds` 的。刷用既有的 `tokens.refreshStale`(价 + 元信息两条端点,adapter 按 100 个一批)。1000 = 每端点 ≤ 10 发 × 2 端点 × 2 次尝试 = 最坏 40 发 ≤ 50。块上限写进 schema(`maxItems`),超了解码就拒。**先刷后投**:刷幂等、投不是。
+- **重估只读表**:参考层 `tokens.priceOf`(SWR、会回源)换成 `tokens.pricesOf(ids)` —— 一次批读价表、零网络、不判新鲜度。`revalue` 先收齐要源价的 id,读一次,再逐笔 `valuate`;表里没有 → 自带价 / provider 原值。
+- **`warm-user` 不再刷价**(`warmReferenceFor`:平台 / DeFi 图 / 汇率 / 目录)。手动同步的收尾(`warmTokens`)仍在自己那次 HTTP 调用里连价一起刷、不切块 —— FOL-89 把它们转成投队列时改投一条 `prices`。
+- **`refreshStalePrices` server fn、`useStalePriceRefresh` hook、`prices.refreshed` 失效事件删了。** 前端的 `pricesStale` 仍算,只是没人再因为它发请求。
+
+**代价(收下的)**:`prices` 与 `sync-account` 并发、谁先跑不定,所以这一轮快照里冻的 value 可能用上一轮刷的价(最多约一小时旧;展示层按价表现价重算,不受影响)。这一轮新出现的币要到下一轮 `prices` 才有价,在那之前按自带价 / provider 原值估。不让同步等价(延后投同步)是因为延后的是用户看得见的同步进度。页面上的价最旧约 1.5 小时(cron 间隔 + TTL),以前打开页面会顺手刷。
+
 ## 没做的(各有票)
 
 - `/api/sync` 与 `syncAccount` 仍在 HTTP 调用里 `waitUntil` 跑整轮(FOL-89 转成投队列)。
-- `warm-user` 仍是整段 `warmTokens`(FOL-88 按件拆)。
+- `warm-user` 剩下的四件(汇率 / 平台 / 目录 / DeFi 图)仍是一条(FOL-88 按件拆)。汇率的 `fx.resolve` 在重估里仍是 SWR(6h TTL,预热每小时暖,几乎不回源),没一起改。
 - 每天那个 cron(剪 note + 刷全局映射表)不动。

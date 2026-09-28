@@ -9,22 +9,27 @@ import { runWithOracle } from "./oracle-stub";
 // `packages/oracle/entry/tests/mint.test.ts`。revalue 只剩三件事:按 mode 定 value、捕获 selfPrice、
 // 法币走 FX(ADR 0025)。
 //
-// 于是假件塌成一个 `priceOf`。**记调用次数**:「有自带价就不回源」是一条性能承诺
-//(self-first 下 CEX 不该为每个币问一次价),不数次数就测不到。
+// 于是假件塌成一个 `pricesOf`(只读价表的批读,FOL-87)。**记问过哪些 id、问了几次**:
+// 「有自带价就不查价」是一条性能承诺(self-first 下 CEX 不该为每个币查一次价),
+// 「一次同步只批读一次」是另一条 —— 不数就测不到。
 function fakeTokens(prices: Record<string, number>) {
   const asked: string[] = [];
-  // revalue 只碰 priceOf;其余能力由共用桩(oracle-stub)填空。
+  const batches: string[][] = [];
+  // revalue 只碰 pricesOf;其余能力由共用桩(oracle-stub)填空。
   const tokens = {
-    priceOf: (tokenId: string) =>
+    pricesOf: (tokenIds: readonly string[]) =>
       Effect.sync(() => {
-        asked.push(tokenId);
-        const unitPrice = prices[tokenId];
-        return Option.fromNullable(
-          unitPrice === undefined ? undefined : { unitPrice, asOf: 0, stale: false },
-        );
+        batches.push([...tokenIds]);
+        asked.push(...tokenIds);
+        const out = new Map<string, { unitPrice: number; asOf: number; stale: boolean }>();
+        for (const id of tokenIds) {
+          const unitPrice = prices[id];
+          if (unitPrice !== undefined) out.set(id, { unitPrice, asOf: 0, stale: false });
+        }
+        return out;
       }),
   };
-  return { tokens, asked };
+  return { tokens, asked, batches };
 }
 
 // 假 FX:USD 恒 1(与真 FxRates.resolve 同口径);其余按注入表,缺失 → undefined(降级触发点)。
@@ -69,6 +74,30 @@ describe("revalue —— 盯市类型(无权威自带价,恒用源价)", () => {
       ),
     );
     expect(out[0].value).toBe(32500); // 0.5 × 65000
+  });
+
+  // FOL-87:以前逐笔 `priceOf`(stale 就回源),一次同步 = 每个币一发上游。现在一次批读价表。
+  it("多笔持仓 → 价表只批读一次,同一个 id 只问一遍", async () => {
+    const { tokens, batches } = fakeTokens(PRICES);
+    const out = await runWithOracle(
+      { tokens, fx: NO_FX },
+      revalue(
+        true,
+        [
+          spot({ symbol: "BTC", amount: 1, value: 0, tokenRef: "bitcoin/native" }),
+          spot({ symbol: "BTC", amount: 2, value: 0, tokenRef: "coingecko/issued:bitcoin" }),
+          spot({
+            symbol: "TON",
+            amount: 10,
+            value: 0,
+            tokenRef: "coingecko/issued:the-open-network",
+          }),
+        ],
+        IDS,
+      ),
+    );
+    expect(out.map((b) => b.value)).toEqual([65000, 130000, 50]);
+    expect(batches).toEqual([["tk_btc", "tk_ton"]]);
   });
 
   it("bitcoin:provider 只给 amount(value=0)→ 按市价算出来", async () => {
@@ -242,7 +271,7 @@ describe("revalue —— 法币走 FX", () => {
     expect(out[0].selfPrice).toBeUndefined();
   });
 
-  it("不问代币价:法币不走 priceOf(它没有上游价)", async () => {
+  it("不问代币价:法币不走 pricesOf(它没有上游价)", async () => {
     const { tokens, asked } = fakeTokens(PRICES);
     await runWithOracle(
       { tokens, fx: fakeFx({ EUR: 1.1 }).fx },

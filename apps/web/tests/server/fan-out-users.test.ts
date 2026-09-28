@@ -51,16 +51,19 @@ describe("fanOutAllUsers", () => {
     expect(result).toEqual({ users: 3, accounts: 3, failed: 0 });
   });
 
-  it("每个用户在自己的同步消息之后补一条延后的 warm-user", async () => {
+  // `prices` 不延后(FOL-87):同步只读价表,两者不排先后。
+  it("每个用户在自己的同步消息之后补一条 prices(不延后)与一条延后的 warm-user", async () => {
     const { sent } = await run(["a", "b"], (userId) =>
       Effect.succeed([job(userId, `${userId}-1`), job(userId, `${userId}-2`)]),
     );
     expect(sent.map((m) => `${m.job.kind}:${m.job.userId}`)).toEqual([
       "sync-account:a",
       "sync-account:a",
+      "prices:a",
       "warm-user:a",
       "sync-account:b",
       "sync-account:b",
+      "prices:b",
       "warm-user:b",
     ]);
     for (const m of sent) {
@@ -71,7 +74,7 @@ describe("fanOutAllUsers", () => {
 
   // 一个用户炸(defect —— db 挂了那种,不是类型化失败)不拖累后面的用户。没有这层隔离,
   // 整点 cron 里排在坏用户后面的**所有人**这一小时都不同步。
-  it("某个用户 defect → 其余照投,整体不抛,计一个 failed、不投他的 warm-user", async () => {
+  it("某个用户 defect → 其余照投,整体不抛,计一个 failed、不投他的 prices / warm-user", async () => {
     const seen: string[] = [];
     const { result, sent } = await run(["a", "b", "c"], (userId) =>
       Effect.sync(() => {

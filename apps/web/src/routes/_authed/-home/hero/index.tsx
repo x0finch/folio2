@@ -3,7 +3,6 @@ import { useMemo } from "react";
 import { QueryBoundary } from "@/components/query-boundary";
 import { toPortfolioCurve } from "@/lib/core/history";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
-import { useStalePriceRefresh } from "@/lib/hooks/use-stale-price-refresh";
 import { portfolioKeys } from "@/lib/queries/keys";
 import { type PortfolioOverview, portfolioHistoryQuery } from "@/lib/queries/portfolio";
 import { usePortfolioOverview } from "@/lib/queries/portfolio-overview-compose";
@@ -74,7 +73,6 @@ function HeroReady({
   // 屏幕上那个大数字与曲线最右端必须是同一个数,而它已经算过一遍了,不该为曲线再算一次。
   // 记忆化不是为了这一次:hero 里划动读数会一路重渲,重建曲线不该跟着每帧跑一遍。
   const series = useMemo(() => toPortfolioCurve(history.data, overview), [history.data, overview]);
-  useStalePriceRefresh(overview.pricesStale, true);
   return (
     <PortfolioHero
       series={series}

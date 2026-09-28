@@ -286,7 +286,13 @@ export interface FanOutResult {
 }
 
 /**
- * cron 的全量 sweep:**逐用户串行**开轮、投消息,再补一条延后的 `warm-user`。
+ * cron 的全量 sweep:**逐用户串行**开轮、投消息,再补一条 `prices`(不延后)与一条延后的 `warm-user`。
+ *
+ * **`prices` 与 `sync-account` 同时投,不排先后**(FOL-87)。同步的重估只读价表,所以这一轮的快照
+ * 可能用上一轮刷的价(最多约一小时旧,展示层照样按价表现价重算,影响的只是快照里冻的那一格 value)。
+ * 反过来让同步等价刷完(同步延后投)也做得到,但延后的是用户看得见的同步进度,换来的只是
+ * 快照 value 新一点 —— 不值。`prices` 读的持仓 id 也来自最新快照:这一轮新出现的币下一轮才刷上价,
+ * 在那之前按自带价 / provider 原值估(`revalue` 的回退)。
  *
  * **串行不是遗漏**:这一趟现在只剩 D1 读写与投递,但它仍是一次调用、仍有一份预算 —— 用户多了
  * 该拆的是「投一条 per-user 的开轮消息」,不是在这里并发。
@@ -306,10 +312,14 @@ export const fanOutAllUsers = (
       // 统一逐用户预热,那一步现在是它自己的消息、自己的预算(FOL-88 再按件拆细)。
       Effect.map((jobs): Enqueued[] => [
         ...jobs,
+        { job: { kind: "prices", userId } },
         { job: { kind: "warm-user", userId }, delaySeconds: WARM_AFTER_SYNC_DELAY_SECONDS },
       ]),
       Effect.tap(enqueue),
-      Effect.map((batch) => ({ accounts: batch.length - 1, failed: 0 })),
+      Effect.map((batch) => ({
+        accounts: batch.filter((m) => m.job.kind === "sync-account").length,
+        failed: 0,
+      })),
       Effect.catchAllCause((cause) =>
         Effect.sync(() => {
           getLogger(["folio", "cron"]).warn("user fan-out failed, user skipped", {

@@ -14,7 +14,6 @@ import { isManual } from "@/lib/core/manual";
 import { type AccountSyncStatus, accountSyncStatus } from "@/lib/core/sync-status";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
-import { useStalePriceRefresh } from "@/lib/hooks/use-stale-price-refresh";
 import { useAccountHoldingsView } from "@/lib/queries/account-holdings-compose";
 import { accountListQuery } from "@/lib/queries/accounts";
 import { accountKeys, portfolioKeys } from "@/lib/queries/keys";
@@ -186,7 +185,6 @@ function AccountsListBody({
     () => buildAccountRows({ accounts, holdings, allTags, tagLinks }),
     [accounts, holdings, allTags, tagLinks],
   );
-  useStalePriceRefresh(holdings?.pricesStale, true);
 
   const allRows = rows;
   const activeUnsorted = rows.filter((r) => r.archivedAt == null);

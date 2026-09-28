@@ -129,9 +129,6 @@ export const REFRESH_MAP = {
     tagKeys.all,
     tokenKeys.enrichment(),
   ],
-
-  /** 过期价格后台刷完(SWR 的第二拍):富化字典里的现价变了,浏览器合并后金额跟着变。 */
-  "prices.refreshed": [tokenKeys.enrichment()],
 } satisfies Record<string, readonly QueryKey[]>;
 
 export type RefreshEvent = keyof typeof REFRESH_MAP;

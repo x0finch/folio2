@@ -168,8 +168,8 @@ export const manualFiatRefs = (
 // (UI 对 manual 显「实时」)。
 //
 // **缓存冷 → 回退用户自填价**:enrich 是 cache-only,新 mint 的行「有身份、无价」→ prices 为
-// undefined → buildManualSnapshot 回退 `unitPrice`;价在同步的 warmHeldPrices / 前端 refreshStalePrices
-// 里补上,补上后展示即市价。**用户自填价不被市价盖**(#223 / #227):没选币的币其 token 行 `ref`
+// undefined → buildManualSnapshot 回退 `unitPrice`;价由队列的 `prices` 活(每小时)/ 手动同步收尾
+// 补上,补上后展示即市价。**用户自填价不被市价盖**(#223 / #227):没选币的币其 token 行 `ref`
 // 为空、从不链 CGK,永远回不出市价,自填价恒赢。
 // 法币持仓的展示价走 FX(ADR 0025 / #270 / #272):现算不冻价,取不到汇率照旧回退自填价。
 // **法币身份按 tokenId 从 `fiatRefs` 判**,不靠 `CredsToken.ref`(那是 CGK 档、法币恒 null,#272)。

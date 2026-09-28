@@ -81,7 +81,7 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
   });
 
   // 给已 mint 的 per-user token(coingecko ref = `issued:<coinId>`)灌一个市价 —— 模拟同步的
-  // warmHeldPrices / 前端 refreshStalePrices 之后、缓存里有价的状态。新参考层价 facet 就在
+  // 队列 `prices` 活 / 手动同步收尾刷过价之后、缓存里有价的状态。新参考层价 facet 就在
   // 该用户 `tokens` 行上(#199),读路径 enrich 从这里取(cache-only,零网络)。
   async function warmUserPrice(coinId: string, unitPrice: number): Promise<void> {
     const row = await env.DB.prepare(
@@ -157,7 +157,7 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
   });
 });
 
-// 预热/刷价共用的合成余额收集器(warmTokensForUser 与 refreshStalePrices 同门,与 injector enrich 门同源)。
+// 刷价用的合成余额收集器(`prices/job.ts` 的 heldTokenIdsOf,与 injector enrich 门同源)。
 describe("manualBalancesForWarm", () => {
   it("返回活跃 manual 账户的合成余额,排除归档", async () => {
     await createManualAccount(

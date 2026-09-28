@@ -1,5 +1,5 @@
 import { dayBucketOf, MS_PER_DAY, PRICE_TTL_MS, type TokenInfo } from "@folio/oracle-basic";
-import { Duration, Effect, Option, TestClock } from "effect";
+import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
 import { TokenService } from "../src/tokens";
 import { harness, now0, upstreamDown } from "./fakes";
@@ -79,66 +79,29 @@ describe("富化 —— 两个 store 各读自己那半,服务层合成整行", 
   });
 });
 
-describe("取价 —— 走同一个 SWR 编排", () => {
-  it("新鲜 → 直接回,不碰上游", async () => {
-    const h = setup([info({ id: "tk_1" })]);
+describe("取价(有 id 的那档)—— 只读价表,一批一次,零网络(FOL-87)", () => {
+  it("新鲜的与 stale 的都原样给出,stale 标志带着;表里没有的不在结果里", async () => {
+    const h = setup([info({ id: "tk_1" }), info({ id: "tk_2", ref: "src/issued:ethereum" })]);
     await h.run(
       Effect.gen(function* () {
         const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: NOW }], PRICE_TTL_MS);
-        expect(yield* tokens.priceOf("tk_1")).toEqual(
-          Option.some(expect.objectContaining({ unitPrice: 60000, stale: false })),
-        );
-        expect(h.upstream.calls).toEqual([]);
-      }),
-    );
-  });
-
-  it("stale → 回源 → 写回(长尾币按需取价走这条)", async () => {
-    const h = setup([info({ id: "tk_1" })]);
-    await h.run(
-      Effect.gen(function* () {
-        const tokens = yield* TokenService;
-        yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: 0 }], PRICE_TTL_MS);
-        yield* TestClock.adjust(Duration.millis(PRICE_TTL_MS + 1));
+        yield* h.prices.put([{ tokenId: "tk_2", unitPrice: 3000, asOf: 0 }], 0);
         h.upstream.prices.set(SRC_BTC, { unitPrice: 61000, asOf: NOW });
 
-        expect(Option.getOrThrow(yield* tokens.priceOf("tk_1"))).toMatchObject({
-          unitPrice: 61000,
-        });
-        expect(h.upstream.calls).toEqual([`fetchPrices:${SRC_BTC}`]);
-        expect(h.prices.current.get("tk_1")?.price.unitPrice).toBe(61000); // 写回了
-      }),
-    );
-  });
-
-  it("上游还没认出的币取不了价 —— 不问上游,把旧值原样给出去", async () => {
-    const h = setup([info({ id: "tk_1", ref: null })]);
-    await h.run(
-      Effect.gen(function* () {
-        const tokens = yield* TokenService;
-        yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 42, asOf: 0 }], 0);
-        expect(Option.getOrThrow(yield* tokens.priceOf("tk_1"))).toMatchObject({
-          unitPrice: 42,
-          stale: true,
-        });
+        const got = yield* tokens.pricesOf(["tk_1", "tk_2", "tk_missing"]);
+        expect(got.get("tk_1")).toMatchObject({ unitPrice: 60000, stale: false });
+        expect(got.get("tk_2")).toMatchObject({ unitPrice: 3000, stale: true });
+        expect(got.has("tk_missing")).toBe(false);
+        // stale 也不回源 —— 回源只归 `refreshStale`(队列的 prices 活)。
         expect(h.upstream.calls).toEqual([]);
       }),
     );
   });
 
-  it("上游也没有 → 保留旧值(过期不删)", async () => {
-    const h = setup([info({ id: "tk_1" })]);
-    await h.run(
-      Effect.gen(function* () {
-        const tokens = yield* TokenService;
-        yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: 0 }], 0);
-        expect(Option.getOrThrow(yield* tokens.priceOf("tk_1"))).toMatchObject({
-          unitPrice: 60000,
-        });
-        expect(h.prices.current.get("tk_1")?.price.unitPrice).toBe(60000);
-      }),
-    );
+  it("空输入 → 空 Map", async () => {
+    const h = setup();
+    expect(await h.run(Effect.flatMap(TokenService, (t) => t.pricesOf([])))).toEqual(new Map());
   });
 });
 
