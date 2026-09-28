@@ -45,7 +45,7 @@
 
 ## 没做的(各有票)
 
-- `/api/sync` 与 `syncAccount` 仍在 HTTP 调用里 `waitUntil` 跑整轮(FOL-89 转成投队列)。
+- ~~`/api/sync` 与 `syncAccount` 仍在 HTTP 调用里 `waitUntil` 跑整轮~~ —— FOL-89 已转成投队列,见文末补记。
 - ~~`warm-user` 剩下的四件仍是一条~~ —— FOL-88 已拆,见文末补记。
 - 每天那个 cron 刷全局映射表那半不动(FOL-85 挪到 GitHub Actions);剪 note 那半 FOL-88 已改成投消息。
 
@@ -60,3 +60,15 @@
 - **读端点不出网**:`getCurrencyPreference`(`displayRate`)与 `listFiatOptions` 不再冷缓存就 `fx.warm`,只读缓存;没有汇率 → 前者整体回退 USD(原有形状),后者那一项不带价(原有形状)。切换器在「选了 EUR 却回退 USD」时提示一句(汇率一小时内会暖上)。同步重估里的 `fx.resolve` **本来就只读缓存**(软过期、不回源)—— FOL-87 补记里说它是 SWR 是写错了;现在有测试钉着它零出网。
 
 **代价(收下的)**:新用户在第一个整点 cron 之前切展示币种只能看美元(以前冷缓存会当场拉)。`refreshTokenPrices`(选币下拉的批量刷价,本来就是一个为回源存在的用户触发端点)仍会顺手 `fx.warm` 法币 —— 没动。升级那一刻队列里还没消费的 `warm-user` 解不开,按既有规则 ack + warn 丢掉,下一小时的 cron 补上。手动同步的收尾(`warmTokens`)仍在自己那次 HTTP 调用里连做价 + 这四件(FOL-89 转成投消息)。
+
+## 补记:手动同步与单账户同步也只投活(FOL-89)
+
+免费计划的 10ms 把 `waitUntil` 里的活一起算进那次请求。`POST /api/sync` 开完轮把整轮(`runSyncRound`)交给 `waitUntil`,`syncAccount` 在请求里同步一个账户再 `warmTokens`(价 + 参考层四件)—— 按钮上复刻了旧 cron 的超预算。
+
+- **`POST /api/sync`(`round.ts` 的 `startSyncRound`)**:开轮(不变,开轮幂等)→ 自动轮先在请求里做 `planFreshSkips`(只有 D1,不出网)→ 每个没被跳过的账户一条 `sync-account` + `hourlyUserJobs`(与 cron 同一份、同一套延后)→ 回轮的此刻样子。**活轮还在就一条都不投**。没有消息要投(空组合、自动轮里全都新鲜)→ 当场 `finishIfSettled`,参考层那几条也不投(没写新快照,整点 cron 照投)。投递炸了 → 带一句话收官再失败,面板说「没跑起来」而不是干等 120s。`waitUntil` 从这条路上消失,`drive.ts`(keepalive + 流驱动)、`syncRoundFor`、`userLayer`、`warmTokens`、`warmReferenceOf` 一并删除。
+- **`syncAccount`(`run.ts` + `round.ts` 的 `startAccountRound`)**:当场答得出的不排队 —— 手记 / 已归档 / **凭据没填完**(同 `needsCredentials` 的判据)直接回结果;其余把账户排进**它所属组合**的一轮:没有活轮就开一轮只装它一个的;有活轮就 **`syncRounds.enlist`**(新 db op:一条条件 UPDATE,只对未收官 ∧ 未过期的那一轮生效,名单外的加进来、已落账的记回 `pending`、续心跳),不覆盖别人的轮;enlist 落空(活轮恰在两句之间收官 / 过期)再开一次。投一条 `sync-account` + `hourlyUserJobs`,回 `{ queued, portfolioId, roundId, round }`。
+- **前端等轮,不等请求**:`SyncRoundView` 多一个 `statuses`(accountId → 下场)。`lib/queries/account-sync.ts` 的 `syncAccountAndWait` 发起后把回包落进 `syncKeys.round` 缓存(页头胶囊立刻转),再按 `POLL_INTERVAL.syncRound` 读 `getSyncRound`,直到**这个账户**落账,念成以前内联结果的形状(`ok` / `skipped` / `skipReason` / `error`)。详情侧栏的 mutation 与加账户 / 补凭据后的后台同步都走它;加账户那条现在会把同步失败 toast 出来(以前静默)。
+- **幂等**:同一个账户的两条消息(连点、手动撞 cron、enlist 已 pending 的)—— consumer 的「这一轮里它还 pending 吗」让后到的那条空跑(测试按出网数钉着);同钟点快照折叠(#461)兜住其余。
+
+**代价(收下的)**:单账户同步开的轮是那个组合的「最近一轮」,面板的「本轮」会报「1 个已同步」直到下一次全量 / cron 覆盖它。手动轮也不再有 keepalive(与 cron 的轮同待遇,见上文「代价」)。**本地开发**:`@cloudflare/vite-plugin` 的 Miniflare 带本地队列(生产者 + consumer 同一个 worker,支持 `delaySeconds` 与重试),`pnpm dev` 照样能同步,但它**串行**消费(一批跑完才派下一批,不认 `max_concurrency`),所以本地一轮 N 个账户是顺序跑的,参考层那几条(打真 CoinGecko)也排在同一条队里。
+

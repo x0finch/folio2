@@ -76,7 +76,7 @@ export function useSyncRound(
       await queryClient.cancelQueries({ queryKey: syncKeys.round(portfolioId) });
       queryClient.setQueryData(syncKeys.round(portfolioId), view);
     },
-    // 响应丢了 ≠ 轮没开:服务端可能已经抢下这一轮、waitUntil 已经在跑,而轮询只在读到
+    // 响应丢了 ≠ 轮没开:服务端可能已经抢下这一轮、消息已经投进队列,而轮询只在读到
     // running 时自转 —— 什么都不做,面板就对着旧数据坐到天荒地老。补一发 refetch:
     // 真开了会读到 running、轮询恢复;真没开也只是多读一次空键。
     onError: () => queryClient.invalidateQueries({ queryKey: syncKeys.round(portfolioId) }),

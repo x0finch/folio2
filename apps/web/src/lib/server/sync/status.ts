@@ -51,6 +51,11 @@ export interface SyncRoundView {
   unresolved: number;
   /** 整轮没跑起来那一句(取账户 / 取凭据挂了)。逐账户的失败不在这里。 */
   error: string | null;
+  /**
+   * 逐账户的下场(FOL-89)。面板不读它 —— 它给**单账户同步**用:点了「同步」的那个账户排进了一轮
+   * (可能是别人开的、名单更长的那一轮),前端要认出**它自己**什么时候落了账、落成哪一档。
+   */
+  statuses: Record<string, SyncRoundAccountStatus>;
 }
 
 // 失败但上游一句话都没留下时的兜底。面板那一行右边是空的话,读的人只会以为界面坏了。
@@ -74,9 +79,11 @@ export function syncRoundView(round: SyncRoundRecord, now: number): SyncRoundVie
     skipped: 0,
   };
   const failed: SyncRoundFailure[] = [];
+  const statuses: Record<string, SyncRoundAccountStatus> = {};
   let current: string | null = null;
   for (const [accountId, a] of entries) {
     tally[a.status] += 1;
+    statuses[accountId] = a.status;
     if (a.status === "pending") current ??= a.label;
     if (a.status === "failed") {
       failed.push({ accountId, label: a.label, error: a.error || UNKNOWN_FAILURE });
@@ -104,5 +111,6 @@ export function syncRoundView(round: SyncRoundRecord, now: number): SyncRoundVie
     skipped: tally.skipped,
     current,
     error: round.error ?? null,
+    statuses,
   };
 }

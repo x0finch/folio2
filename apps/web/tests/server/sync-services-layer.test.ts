@@ -6,10 +6,10 @@ import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppError } from "@/lib/server/errors";
 import { runForUser, type UserServices } from "@/lib/server/runtime";
-import { makeSyncServicesLayer, syncServicesLayer } from "@/lib/server/sync/deps";
+import { makeSyncServicesLayer } from "@/lib/server/sync/deps";
 import { dbFor } from "./db-effect";
 
-// `syncServicesLayer` —— app 侧对 `@folio/sync` 那四个能力的接线(#403 片 2)。
+// `makeSyncServicesLayer()` —— app 侧对 `@folio/sync` 那四个能力的接线(#403 片 2)。
 //
 // 为什么单独有这个文件:别处的用例测的是**编排**(mint 认得对不对、重试退避、失败隔离),
 // 它们把「取余额」以外的东西当背景。而这一层本身才是 app 这边的活儿 —— 四个 Tag 的接线、
@@ -46,7 +46,7 @@ beforeEach(async () => {
 });
 
 // 假的「取余额」:其余三个能力仍是真接线。`Effect.provide` 由内往外解析,所以这一层先满足
-// `BalanceSource`,`syncServicesLayer` 里那份就轮不到。
+// `BalanceSource`,`makeSyncServicesLayer()` 里那份就轮不到。
 //
 // **按真类型写**,不用 `as never` 绕过去 —— 第一版就是那么写的,于是漏了 `tokenRef`,
 // 而 `toSnapshotRows` 拿它去算 platform,运行期才炸。强转就是这么吃掉真错误的。
@@ -62,7 +62,7 @@ const fakeBalances = (rows: Balance[]) =>
 
 const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 
-describe("syncServicesLayer 的接线", () => {
+describe("makeSyncServicesLayer() 的接线", () => {
   it("同步一个账户 → 快照落库,总额与身份都对", async () => {
     const account = await dbFor(USER).accounts.create({
       connectorId: "evm",
@@ -78,7 +78,7 @@ describe("syncServicesLayer 的接线", () => {
             { symbol: "USDC", amount: 2, value: 50, kind: "spot", tokenRef: USDC_ETH },
           ]),
         ),
-        Effect.provide(syncServicesLayer),
+        Effect.provide(makeSyncServicesLayer()),
       ),
     );
 
@@ -113,7 +113,7 @@ describe("syncServicesLayer 的接线", () => {
           Effect.provide(
             fakeBalances([{ symbol: "USDC", amount: 2, value, kind: "spot", tokenRef: USDC_ETH }]),
           ),
-          Effect.provide(syncServicesLayer),
+          Effect.provide(makeSyncServicesLayer()),
         ),
       );
     };
@@ -137,7 +137,7 @@ describe("syncServicesLayer 的接线", () => {
     const exit = await run(
       USER,
       Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(
-        Effect.provide(syncServicesLayer),
+        Effect.provide(makeSyncServicesLayer()),
         // 打一个会 die 的 db 聚合进去(真 D1 挂不了,所以直接换掉那一层)。
         // 只有 `accounts.list` 会被这条用例走到,其余字段不必造。
         Effect.provide(
@@ -169,7 +169,9 @@ describe("syncServicesLayer 的接线", () => {
 
     const listed = await run(
       USER,
-      Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(Effect.provide(syncServicesLayer)),
+      Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(
+        Effect.provide(makeSyncServicesLayer()),
+      ),
     );
 
     expect(listed.map((a) => a.id)).toEqual([live.id]);
@@ -204,10 +206,12 @@ describe("syncServicesLayer 的接线", () => {
 
     expect((await listOf(new Set([watched.id]))).map((a) => a.id)).toEqual([watched.id]);
     expect((await listOf(new Set([mine.id]))).map((a) => a.id)).toEqual([mine.id]);
-    // 不给名单的那一份才是全量 —— 抽屉里的单账户同步走它。
+    // 不给名单的那一份才是全量。
     const all = await run(
       USER,
-      Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(Effect.provide(syncServicesLayer)),
+      Effect.flatMap(SyncAccountStore, (s) => s.list()).pipe(
+        Effect.provide(makeSyncServicesLayer()),
+      ),
     );
     expect(all.map((a) => a.id).sort()).toEqual([mine.id, watched.id].sort());
   });

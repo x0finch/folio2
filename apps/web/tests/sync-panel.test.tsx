@@ -53,6 +53,7 @@ const round = (over: Partial<SyncRoundView> = {}): SyncRoundView => ({
   current: null,
   unresolved: 0,
   error: null,
+  statuses: {},
   ...over,
 });
 

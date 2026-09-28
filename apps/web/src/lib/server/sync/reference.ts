@@ -1,7 +1,7 @@
 import { Database, type DbRequest, type SnapshotWithBalances } from "@folio/db";
 import { Oracle } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
-import { Cause, Effect } from "effect";
+import { Effect } from "effect";
 import type { ReferenceJob } from "@/lib/server/jobs/message";
 import { forUser } from "@/lib/server/runtime";
 import { recordDefiLogosOf } from "./defi-logos";
@@ -10,11 +10,9 @@ import { warmPlatforms } from "./platforms";
 // 参考层预热里**不是持仓价**的那四件:汇率、平台元数据、目录、DeFi 协议图。best-effort,
 // 让读路径(总览 / 选币 / 展示币种)能 cache-only 富化出汇率 / logo / 名。
 //
-// **两个调用方**:
-//   · 队列(FOL-88)—— 一件一条消息(`runReferenceJob`),各自一份 10ms / 50 发的预算。以前是一条
-//     `warm-user` 包下四件,出网与 CPU 叠在一次调用里。
-//   · 手动同步的收尾(`warmReferenceOf`,经 `./deps` 的 `warmTokens`)—— 仍在那次 HTTP 调用里
-//     四件连做(FOL-89 把它改成投队列时,这里换成投这四条消息)。
+// **只有队列这一个调用方**(FOL-88):一件一条消息(`runReferenceJob`),各自一份 10ms / 50 发的预算。
+// 以前是一条 `warm-user` 包下四件,出网与 CPU 叠在一次调用里;手动同步的收尾(`warmTokens`)也曾在
+// 自己那次 HTTP 调用里四件连做 —— FOL-89 起它也只是投这几条消息(`jobs/schedule` 的 `hourlyUserJobs`)。
 //
 // 四件的出网全在参考层里,各自按 TTL 门控、上游挂了各自降级(错误面都是 `never`),所以每件都幂等:
 // 刚跑过再跑一遍,零出网(DeFi 图本来就不出网,重跑是同值覆盖写)。最坏出网数见
@@ -36,7 +34,7 @@ const refreshCatalogue: Work = Effect.flatMap(Oracle, (o) => o.tokens.refreshCat
   Effect.flatMap((rows) => Effect.sync(() => log.debug("catalogue warmed", { rows }))),
 );
 
-/** 读最新快照的那两件共用:快照由调用方给(手动收尾那条已经读过一遍),队列那条自己读。 */
+/** 读最新快照的那两件共用:跑的那一刻读一次。 */
 const withLatest = (work: (snapshots: SnapshotWithBalances[]) => Work): Work =>
   Effect.flatMap(
     Effect.flatMap(Database, (db) => db.snapshots.latest()),
@@ -63,27 +61,3 @@ const workOf = (kind: ReferenceJob["kind"]): Work => {
  */
 export const runReferenceJob = (job: ReferenceJob): Effect.Effect<void, Error> =>
   forUser(job.userId, workOf(job.kind));
-
-/**
- * 手动同步的收尾:四件连做,**各自兜住** —— 一件的 defect 不拖垮其余三件,也不让收尾整个失败
- * (收尾是 best-effort,同步本身已经落库了)。`catchAllCause` 而不是 `catchAll`:后者只接类型化
- * 失败,接不住 defect(见 `./round` 的 `fanOutAllUsers`)。快照由调用方给,不再读第二遍。
- */
-export const warmReferenceOf = (snapshots: SnapshotWithBalances[]): Work =>
-  Effect.forEach(
-    [
-      ["fx", refreshFx],
-      ["platforms", warmPlatforms(snapshots)],
-      ["catalogue", refreshCatalogue],
-      ["defi-logos", recordDefiLogosOf(snapshots)],
-    ] as const,
-    ([kind, work]) =>
-      work.pipe(
-        Effect.catchAllCause((cause) =>
-          Effect.sync(() =>
-            log.warn("reference warm failed", { kind, error: Cause.pretty(cause) }),
-          ),
-        ),
-      ),
-    { discard: true },
-  );

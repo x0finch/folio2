@@ -14,17 +14,17 @@ import { forUser } from "@/lib/server/runtime";
 // 打 CoinGecko 再写库)。现在:cron 每小时给每个用户投一条 `prices`,consumer 在这里按 100 个一批
 // 回源、写回价表;重估与展示一律只读表。
 //
-// 手动同步(`/api/sync`、`syncAccount`)收尾的 `warmTokens` 仍在 HTTP 调用里刷一遍价(同样经
-// `refreshPricesOf`)。FOL-89 把那两条改成投队列时,它们改投一条 `prices` 即可。
+// 手动同步(`/api/sync`、`syncAccount`)也不在请求里刷价了(FOL-89):它们与 cron 一样投一条 `prices`
+// (`jobs/schedule` 的 `hourlyUserJobs`)。
 
 const log = getLogger(["folio", "jobs", "prices"]);
 
 /**
  * 这个用户此刻「在看的币」:最新快照 + 手记合成余额,过同一道 dust 门(`refreshableTokenIds`)。
  * **三门同源**:展示侧标 stale 的集合必须是这里的子集,否则标了 stale 的币永远刷不到。
- * 快照由调用方给 —— 预热那条路手上已经有一份,不再读第二遍。
+ * 快照由调用方给(`runPricesJob` 跑的那一刻读一次)。
  */
-export const heldTokenIdsOf = (
+const heldTokenIdsOf = (
   snapshots: SnapshotWithBalances[],
 ): Effect.Effect<string[], NotFound, Database | DbRequest> =>
   Effect.gen(function* () {
@@ -39,7 +39,7 @@ export const heldTokenIdsOf = (
  * 一批)。**调用方负责把批控制在一条消息的预算内**(`PRICES_IDS_PER_MESSAGE`)。
  * 暖不上要喊一声(#375):连着几天都这样该有人发现。
  */
-export const refreshPricesOf = (
+const refreshPricesOf = (
   ids: readonly string[],
 ): Effect.Effect<RefreshStaleReport, never, Oracle | DbRequest> =>
   Effect.tap(

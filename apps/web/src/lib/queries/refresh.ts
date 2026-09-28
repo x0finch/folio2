@@ -21,7 +21,7 @@ import { accountKeys, portfolioKeys, settingsKeys, syncKeys, tagKeys, tokenKeys 
 // 不再刷已删除的胖读键(`overview` / `holdings`)。
 export const REFRESH_MAP = {
   /**
-   * 一轮同步跑完。**失败也算**:同步本身可能仍在服务端跑(waitUntil),
+   * 一轮同步跑完。**失败也算**:同步本身可能仍在队列里跑,
    * 而且部分账户的快照可能已经落库了。
    *
    * 刷:同步轮次、快照原料、账户列表(页头摘要与「立即同步」账户集)、富化现价。

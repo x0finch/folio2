@@ -231,7 +231,7 @@ export const sealManualAccount = (
     return true;
   });
 
-// 预热用:该用户全部 manual 账户的合成余额(供 warmTokens 把其代币现价取进缓存)。manual 已退出 snapshot,
+// 预热用:该用户全部 manual 账户的合成余额(供 `prices` 活把其代币现价刷进价表)。manual 已退出 snapshot,
 // 故预热不能只从快照收集币 —— 否则纯 manual 用户的币永远暖不到、拿不到实时价(ADR 0018 T2 实施细化)。
 export const manualBalancesForWarm = (
   accounts: AccountSafe[],

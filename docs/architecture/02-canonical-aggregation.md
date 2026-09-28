@@ -100,9 +100,9 @@ D1 没有交互式事务,mint 必须先查后写 → 它与写快照注定是两
 
 ## ④ 预热 —— 顺手把价和平台名图取好
 
-📍 **地点**:`apps/web/src/lib/server/sync/deps.ts` `warmTokensForUser`
+📍 **地点**:队列活(ADR 0055 / FOL-87 / FOL-88 / FOL-89)—— `apps/web/src/lib/server/prices/job.ts`(`prices`)、`apps/web/src/lib/server/sync/reference.ts`(`fx` / `platforms` / `catalogue` / `defi-logos`);谁投、多久投一次在 `apps/web/src/lib/server/jobs/schedule.ts`
 
-🔧 **做了什么**:同步后台顺手刷该用户持仓币的价、汇率、链与场馆的名图,写进 per-user 缓存。
+🔧 **做了什么**:每轮同步(cron、手动、单账户)投的那几条消息各自刷该用户持仓币的价、汇率、链与场馆的名图,写进 per-user 缓存。
 **这一步让后面的「读」可以零网络富化。**
 
 还有一件只有它做的事(#216):**把 ② 用的那份目录刷上**,一周一次。写路径按设计永不刷,
@@ -208,7 +208,7 @@ Holding {
 | ① 产生 | `packages/connectors/providers/zerion/src/index.ts`(文法 `packages/oracle/ref/src/token-ref.ts`) |
 | ② 认币 | `packages/oracle/entry/src/tokens/mint.ts` · 编排 `apps/web/src/lib/server/sync/deps.ts` |
 | ③ 入库 | `apps/web/src/lib/server/sync/index.ts` → `packages/db/src/queries/snapshots.ts` `writeSnapshot` |
-| ④ 预热 | `apps/web/src/lib/server/sync/deps.ts` `warmTokensForUser` |
+| ④ 预热 | 队列活:`apps/web/src/lib/server/prices/job.ts` · `apps/web/src/lib/server/sync/reference.ts`(投递见 `jobs/schedule.ts`) |
 | ⑤ 读出 | `apps/web/src/lib/server/portfolio/index.ts` → `packages/db/src/queries/snapshots.ts` `getLatestSnapshotByUser` |
 | ⑥ 富化 | `apps/web/src/lib/server/portfolio/overview-model.ts` · `packages/oracle/entry/src/tokens/price.ts` `enrich` |
 | ⑦ 组装 | `apps/web/src/lib/server/portfolio/overview-model.ts` |

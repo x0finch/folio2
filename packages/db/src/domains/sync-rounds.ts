@@ -81,6 +81,13 @@ export interface SettleSyncRoundInput {
   ttlMs: number;
 }
 
+export interface EnlistSyncRoundInput {
+  portfolioId: string;
+  roundId: string;
+  account: { id: string; label: string };
+  ttlMs: number;
+}
+
 export interface TouchSyncRoundInput {
   portfolioId: string;
   roundId: string;
@@ -219,6 +226,41 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
               ),
             ),
         );
+      }),
+
+    /**
+     * 把一个账户**拉进一轮还活着的轮**(记成 `pending`),顺带续心跳(FOL-89)。
+     *
+     * 单账户同步(`syncAccount`)撞上同组合正在跑的一轮时用它:开轮幂等会把活轮原样还回来,而那一轮
+     * 的名单里可能没有这个账户(刚建的),或者它已经落过账了(刚同步过又点一次)。两种都记回 `pending`,
+     * 由调用方投一条 `sync-account` 去跑 —— 于是它的结果落在同一轮里,`finishIfSettled` 也要等它。
+     *
+     * **只对活轮生效**(未收官 ∧ 未过期,判据与开轮的覆盖条件互为反面):落空 → `none`,调用方该回去
+     * 重开一轮(那时必开得动)。已经 `pending` 的账户再拉一次是同值覆盖写 —— 顶多多投一条消息,
+     * consumer 的「还 pending 吗」检查会让第二条空跑。
+     */
+    enlist: (input: EnlistSyncRoundInput): Effect.Effect<Option.Option<SyncRoundRecord>> =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const path = sql`'$.accounts.' || json_quote(${input.account.id})`;
+        const rows = yield* client.query((db) =>
+          db
+            .update(userCache)
+            .set({
+              v: sql`json_set(${userCache.v}, ${path}, json_object('label', ${input.account.label}, 'status', 'pending'))`,
+              expiresAt: now + input.ttlMs,
+            })
+            .where(
+              and(
+                mine(input.portfolioId),
+                sameRound(input.roundId),
+                sql`json_extract(${asJson}, '$.finishedAt') is null`,
+                sql`${userCache.expiresAt} > ${now}`,
+              ),
+            )
+            .returning({ v: userCache.v, expiresAt: userCache.expiresAt }),
+        );
+        return Option.fromNullable(rows[0] ? decode(rows[0]) : undefined);
       }),
 
     /**

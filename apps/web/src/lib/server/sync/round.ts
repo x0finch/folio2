@@ -16,8 +16,7 @@ import { type Enqueued, enqueue } from "@/lib/server/jobs/queue";
 import { hourlyUserJobs } from "@/lib/server/jobs/schedule";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { forUser } from "@/lib/server/runtime";
-import { makeSyncServicesLayer, type SyncScope, syncRoundFor } from "./deps";
-import { driveRound } from "./drive";
+import { makeSyncServicesLayer } from "./deps";
 import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 
 // 一轮同步的**服务端事实**(ADR 0048):开轮、读进度,前端与 cron 共用这两个方法。
@@ -27,23 +26,17 @@ import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 /**
  * 心跳时长 —— **超时这件事只有这一个旋钮**。
  *
- * 「活着 = 不过期」,而续期有两条路:跑轮的任务每 `ROUND_KEEPALIVE_MS` 主动续一次(keepalive,
- * 这是手动轮的主保证 —— **与排队无关**),每个账户完成顺手也续。worker 真死了,两条路一起停,
- * 120s 后那一轮自然过期,下一次点同步开得动新轮。
+ * 「活着 = 不过期」,续期只有一条路:**每个账户落账顺手续一次**。FOL-86 起 cron 的轮、FOL-89 起手动
+ * 与单账户的轮都走队列(一个账户一条消息一次调用),没有一条任务从头跑到尾,也就没有 keepalive。
+ * 队列积压到两次落账之间超过 120s,面板会先说「中断」;晚到的落账仍带着同一个轮 id,照样落得上、
+ * 照样续期、最后一个照样收官,只是那段时间里再点一次同步可以覆盖它。收下这个:单用户、个位数账户、
+ * `max_concurrency` 6 的队列,正常延迟是秒级。worker 真死了(消息进了死信),120s 后那一轮自然过期,
+ * 下一次点同步开得动新轮。
  *
- * **队列跑的轮(cron,FOL-86)只有第二条路**:没有一条任务从头跑到尾,也就没有 keepalive —— 续期全靠
- * 每个 consumer 落账那一下。队列积压到两次落账之间超过 120s,面板会先说「中断」;晚到的落账仍带着
- * 同一个轮 id,照样落得上、照样续期、最后一个照样收官,只是那段时间里一次手动同步可以覆盖它。
- * 收下这个:单用户、个位数账户、`max_concurrency` 6 的队列,正常延迟是秒级。
- *
- * 120s 取的是「keepalive 间隔的两倍」——容得下丢一拍;它同时也盖得住单账户的最坏情形
- * (3 次尝试 × 20s 超时 + 退避 ≈ 70s)。**刻意不随名单大小变**:让它跟名单挂钩就等于
- * 每加一个账户都放宽一次「多久算死」。
+ * 120s 盖得住单账户的最坏情形(3 次尝试 × 20s 超时 + 退避 ≈ 70s)。**刻意不随名单大小变**:
+ * 让它跟名单挂钩就等于每加一个账户都放宽一次「多久算死」。
  */
 export const ROUND_HEARTBEAT_MS = 120_000;
-
-/** keepalive 间隔 = 心跳的一半:丢一拍还有下一拍兜着,不至于擦着到期线。 */
-const ROUND_KEEPALIVE_MS = ROUND_HEARTBEAT_MS / 2;
 
 /**
  * 收官后的保留期。一轮收官之后它就只是「上一轮的报告」,而**下一轮开轮即覆盖** ——
@@ -94,10 +87,8 @@ const statusOf = (r: AccountSyncResult): Exclude<SyncRoundAccountStatus, "pendin
 // 自动轮的「按新鲜度跳过」(FOL-18 子票 4)。把最新快照还**新鲜**(`dataFreshness === "fresh"`)的
 // 账户当 `skipped` 直接收掉,返回这一轮**真正要问上游**的名单。手动轮不调它 —— 强制全量。
 //
-// **作为 `only` 的 Effect 形态交给装配层**(见 `SyncScope.only`):在同步轮那**同一次装配**里解析,
-// 与同步内核共用一个 DbClient(红线:一次请求一个 DbClient),不另起一条根 fiber 建第二个连接。
-// 解析时读一次 latest 快照,逐个 settle('skipped');被收掉的账户不进返回的名单,于是 Sweep 那条流
-// 根本不 emit 它们,它们的 settle 这里已经写过,total 与 settled 仍对得上。
+// 跑在 `/api/sync` 那次请求里(FOL-89):读一次 latest 快照,逐个 settle('skipped') —— 只有 D1,
+// 不出网。被收掉的账户不投消息,它们的 settle 这里已经写过,total 与 settled 仍对得上。
 const planFreshSkips = (
   round: SyncRoundRecord,
 ): Effect.Effect<Set<string>, never, Database | DbRequest> =>
@@ -127,79 +118,141 @@ const planFreshSkips = (
     return toRun;
   });
 
-export interface RunSyncRoundOptions {
-  /**
-   * 自动轮(进首页补的那种,FOL-18 子票 4):先把数据还新的账户当 `skipped` 收掉,只问其余的上游。
-   * 手动点同步不传 → 强制全量。两个标签页同时进首页仍只打一遍上游那件事由开轮幂等保证,这条管的是
-   * 「一个自动轮内部,刚同步过的账户不再白问一遍」。
-   */
-  skipFresh?: boolean;
-}
+/** 一轮里一个账户一条 `sync-account` —— cron、手动、单账户三条路投的是同一个形状。 */
+const syncJobOf = (
+  userId: string,
+  round: Pick<SyncRoundRecord, "portfolioId" | "roundId">,
+  accountId: string,
+): SyncAccountJob => ({
+  kind: "sync-account",
+  userId,
+  portfolioId: round.portfolioId,
+  roundId: round.roundId,
+  accountId,
+});
+
+const syncJobsOf = (
+  userId: string,
+  round: Pick<SyncRoundRecord, "portfolioId" | "roundId">,
+  accountIds: Iterable<string>,
+): Enqueued[] => Array.from(accountIds, (id) => ({ job: syncJobOf(userId, round, id) }));
+
+// 投递没投出去时写进轮里的那一句 —— 面板上「整轮没跑起来」/ 那个账户的失败原因。
+const ENQUEUE_FAILED = "could not queue the sync";
 
 /**
- * 把开好的一轮真跑完 —— **调用方把返回的 Promise 交给 `waitUntil`**,它与任何连接都无关。
+ * **手动 / 自动那一轮(`POST /api/sync`):开轮、投消息、返回 —— 这次请求里一发上游都不打**(FOL-89)。
  *
- * 跑的名单直接取自那一轮记录(`Object.keys(round.accounts)`),不在这里按组合再算一遍:
- * 两份名单之间任何一点漂移都会让面板的 `x / N` 与真跑的条数对不上,而那种对不上是不报错的。
+ * 以前这里开完轮把整轮 `runSyncRound` 交给请求的 `waitUntil` —— 免费计划的 10ms CPU 连 waitUntil
+ * 一起算,于是它和旧的 cron 一样把全部账户挤在一次调用里。现在与 cron(`fanOutUserRounds`)同形:
+ * 一个账户一条 `sync-account`,外加 `hourlyUserJobs` 那几条(价 / 汇率不延后,读快照的延后到同步落库
+ * 之后)—— 以前手动同步的收尾 `warmTokens` 在请求里做的那几件,现在各是一条消息。
  *
- * 每个账户跑完写一次(顺带续心跳),整轮结束收一次官。**中途没人在看也照样跑完** ——
- * 这正是把状态搬到服务端换来的:以前「看」断了进度就没了,现在断的只是轮询。
+ * **只投「这一轮是我开的」**:开轮幂等,活轮还在(另一个设备 / cron 正在跑)就把它原样还回来,
+ * 不再投第二拨消息。
+ *
+ * `auto`(进首页数据过期时补的那一轮,FOL-18 子票 4):先把数据还新的账户当 `skipped` 收掉,只投其余的。
+ * 规划只会以 defect 收场,真炸了记一行、退回全量:跳过是优化,不能因它让一轮跑不成。
+ *
+ * **没有消息要投就当场收官**(空组合、自动轮里全都还新)—— 没有 consumer 会去收它,少了这一步
+ * 120s 后面板会挂一句「中断」。一条都不投时连参考层那几条也不投:这一轮没写新快照,没什么可暖的,
+ * 整点 cron 照常会投。投递本身炸了 → 把这一轮带着一句话收官再让它炸,面板说「没跑起来」而不是干等 120s。
+ *
+ * 返回的轮是**此刻的样子**(规划 settle 过的、当场收官的都已反映进去),路由直接回给前端落缓存。
  */
-export const runSyncRound = async (
+export const startSyncRound = (
   userId: string,
-  round: SyncRoundRecord,
-  opts: RunSyncRoundOptions = {},
-): Promise<void> => {
-  const syncLog = getLogger(["folio", "web", "sync"]);
-  // 自动轮按新鲜度跳过(FOL-18 子票 4):把 `planFreshSkips` 作为 `only` 的 **Effect 形态**交给装配层,
-  // 在同步轮那**同一次装配**里解析(见 `SyncScope.only`)—— 与同步内核共用一个 DbClient,不再像从前
-  // 那样另起一条 `runPromise` + `provide(userLayer)` 建第二个连接。规划只会以 defect 收场(错误面是
-  // `never`),真炸了记一行、退回全量:跳过是优化,不能因它让一轮跑不成。手动轮直接全量,不走这一趟。
-  const allIds = () => new Set(Object.keys(round.accounts));
-  const only: SyncScope["only"] = opts.skipFresh
-    ? planFreshSkips(round).pipe(
-        Effect.catchAllCause((cause) =>
-          Effect.logWarning(
-            "skip-fresh planning failed; running full round",
-            Cause.pretty(cause),
-          ).pipe(Effect.as<ReadonlySet<string>>(allIds())),
+  input: { portfolioId?: string; auto: boolean },
+): Effect.Effect<OpenSyncRoundResult, never, Database | DbRequest> =>
+  Effect.gen(function* () {
+    const out = yield* openSyncRound({ portfolioId: input.portfolioId, trigger: "manual" });
+    if (!out.opened) return out;
+    const db = yield* Database;
+    const round = out.round;
+    const head = { portfolioId: round.portfolioId, roundId: round.roundId };
+    const allIds = new Set(Object.keys(round.accounts));
+    const toRun: ReadonlySet<string> = input.auto
+      ? yield* planFreshSkips(round).pipe(
+          Effect.catchAllCause((cause) =>
+            Effect.logWarning(
+              "skip-fresh planning failed; running full round",
+              Cause.pretty(cause),
+            ).pipe(Effect.as(allIds)),
+          ),
+        )
+      : allIds;
+    if (toRun.size === 0) {
+      yield* db.syncRounds.finishIfSettled({ ...head, retentionMs: ROUND_RETENTION_MS });
+    } else {
+      yield* enqueue([...syncJobsOf(userId, round, toRun), ...hourlyUserJobs(userId)]).pipe(
+        Effect.tapErrorCause(() =>
+          db.syncRounds.finish({ ...head, error: ENQUEUE_FAILED, retentionMs: ROUND_RETENTION_MS }),
         ),
-      )
-    : allIds();
-  const { results, afterRound, layer } = syncRoundFor(userId, { only });
-  const head = { portfolioId: round.portfolioId, roundId: round.roundId };
-  return driveRound(results, {
-    layer,
-    afterRound: Effect.exit(afterRound),
-    // 轮活着期间定时续心跳 —— settle 顺带的续期只在「一直有账在落」时才成立,排队时靠这条。
-    keepalive: {
-      intervalMs: ROUND_KEEPALIVE_MS,
-      run: Effect.flatMap(Database, (db) =>
-        db.syncRounds.touch({ ...head, ttlMs: ROUND_HEARTBEAT_MS }),
+      );
+    }
+    // 规划 settle 过、或当场收了官 → 回读一次,回包才是此刻的事实;全量那条不必多读一次。
+    if (!input.auto && toRun.size > 0) return out;
+    const now = yield* db.syncRounds.get(round.portfolioId);
+    return {
+      opened: true as const,
+      round: Option.getOrElse(
+        Option.filter(now, (r) => r.roundId === round.roundId),
+        () => round,
       ),
-    },
-    onResult: (r) =>
-      Effect.flatMap(Database, (db) =>
-        db.syncRounds.settle({
-          ...head,
-          accountId: r.accountId,
-          status: statusOf(r),
-          // 上游的原话只在真失败时留 —— 跳过的那些没有错误可言。
-          error: r.ok || r.skipped ? undefined : r.error,
-          ttlMs: ROUND_HEARTBEAT_MS,
-        }),
-      ),
-    onDone: (error) =>
-      Effect.flatMap(Database, (db) =>
-        db.syncRounds.finish({
-          ...head,
-          error: error ?? undefined,
-          retentionMs: ROUND_RETENTION_MS,
-        }),
-      ),
-    onFatal: (error) => syncLog.error("sync round failed", { userId, error }),
+    };
   });
-};
+
+/**
+ * **单账户同步(`syncAccount` server fn):把这一个账户排进它所属组合的一轮、投一条消息、返回**(FOL-89)。
+ *
+ * 复用轮的全部机制,所以前端等它的方式就是等一轮 —— 轮询 `getSyncRound`,看**这个账户**在轮里落成哪一档
+ * (`SyncRoundView.statuses`),页头那枚同步胶囊顺带转起来。三种现场:
+ *
+ *   · 那个组合没有活轮 → 开一轮**只装它一个**的轮。
+ *   · 有活轮(另一个设备、cron、刚点过的全量)→ 不覆盖它,把这个账户**拉进**那一轮(`enlist`:
+ *     名单外的加进来、已落账的记回 pending)。两拨消息投给同一个账户也没事:consumer 先看
+ *     「还 pending 吗」,先到的那条跑完落账,后到的空跑。
+ *   · 拉的那一下落空(活轮恰好在两句之间收官 / 过期)→ 再开一次,那时必开得动。
+ *
+ * 外加 `hourlyUserJobs` 那几条 —— 以前单账户同步成功后在请求里跑的 `warmTokens`。它们在 consumer 里
+ * 各按 TTL 门控,连点几下同步不会连打上游(#527 发现 3 担心的那件事)。
+ * 投递炸了 → 把这个账户记成 failed(够了就收官)再让它炸,前端等到的是一句失败,不是 120s 的中断。
+ */
+export const startAccountRound = (
+  userId: string,
+  account: { id: string; label: string },
+): Effect.Effect<SyncRoundRecord, Error, Database | DbRequest> =>
+  Effect.gen(function* () {
+    const db = yield* Database;
+    const portfolioId = (yield* scopedMembership(undefined)).portfolioIdOf(account.id);
+    const joinOrOpen = Effect.gen(function* () {
+      const out = yield* db.syncRounds.open({
+        portfolioId,
+        roundId: crypto.randomUUID(),
+        trigger: "manual",
+        accounts: [account],
+        ttlMs: ROUND_HEARTBEAT_MS,
+      });
+      if (out.opened) return Option.some(out.round);
+      if (out.round == null) return Option.none<SyncRoundRecord>();
+      return yield* db.syncRounds.enlist({
+        portfolioId,
+        roundId: out.round.roundId,
+        account,
+        ttlMs: ROUND_HEARTBEAT_MS,
+      });
+    });
+    const first = yield* joinOrOpen;
+    const round = Option.isSome(first) ? first : yield* joinOrOpen;
+    if (Option.isNone(round)) return yield* Effect.fail(new Error("could not start a sync round"));
+    const syncJob = syncJobOf(userId, round.value, account.id);
+    yield* enqueue([{ job: syncJob }, ...hourlyUserJobs(userId)]).pipe(
+      Effect.tapErrorCause(() =>
+        settleQueued(syncJob, { status: "failed", error: ENQUEUE_FAILED }),
+      ),
+    );
+    return round.value;
+  });
 
 /**
  * cron 扫到一个用户时干的事:**按组合分区,一个组合一轮**(ADR 0048),**只开轮,不跑**(FOL-86)。
@@ -261,17 +314,7 @@ const fanOutUserRounds = (userId: string): Effect.Effect<Enqueued[], Error> =>
         });
         continue;
       }
-      for (const accountId of ids) {
-        jobs.push({
-          job: {
-            kind: "sync-account",
-            userId,
-            portfolioId: round.portfolioId,
-            roundId: round.roundId,
-            accountId,
-          },
-        });
-      }
+      jobs.push(...syncJobsOf(userId, round, ids));
     }
     return jobs;
   }).pipe((work) => forUser(userId, work));

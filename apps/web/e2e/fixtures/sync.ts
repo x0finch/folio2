@@ -46,8 +46,9 @@ export async function upstream(request: APIRequestContext): Promise<UpstreamStat
  * 拼它等于把一个随构建变的内部细节钉进测试。而「加账户」本身就是个有 UI 的用户动作,点一遍顺带把
  * 创建流覆盖了。
  *
- * **注意**:创建成功后 add-account-modal 会自己在后台补一次 `syncAccount`(见其 handleDone),
- * 所以本函数返回时账户可能已经有一张快照。要量「点下去这一轮」的测试必须先把那次等掉。
+ * **注意**:创建成功后 add-account-modal 会自己在后台补一次 `syncAccount`(见其 handleDone)——
+ * FOL-89 起它只把账户排进一轮、投一条队列消息,真同步由本地(Miniflare)的队列 consumer 跑,
+ * 所以本函数返回之后账户随时可能出一张快照。要量「点下去这一轮」的测试必须先把那次等掉。
  */
 export async function addBinanceAccount(page: Page, label: string) {
   // 点到 modal 真开为止。**不是为了等一段时间** —— 账户页刚 goto 完时 React 可能还没挂上 handler,
@@ -121,10 +122,11 @@ export async function addBinanceAccount(page: Page, label: string) {
 /**
  * 屏蔽「创建账户之后那次后台同步」——只在一次性造很多账户时用。
  *
- * 为什么要屏蔽:`add-account-modal` 的 handleDone 会 `void syncAccount(...)`,而那个 server fn 是
- * **await 完 `warmTokensForUser` 才返回**的 —— 预热要打真实的价格 / 汇率 / logo 上游。连着造八个账户
- * 时这些请求堆在一起把 worker 堵住,后一个账户的创建从两秒涨到十几秒(实测)。造账户不是被测对象,
- * 没必要为它付这个钱;而且屏蔽之后这些账户在被测那一轮之前**一张快照都没有**,断言反而更干净。
+ * 为什么要屏蔽:`add-account-modal` 的 handleDone 会 `void syncAccount(...)`。FOL-89 起那个 server fn
+ * 只排队、即返,但每一次仍往队列里投一条 `sync-account` 外加价 / 汇率 / 平台那几条(它们打真实的
+ * CoinGecko)—— 而**本地 Miniflare 的队列是串行消费的**(一批跑完才派下一批,不认 `max_concurrency`),
+ * 连着造八个账户时这几十条消息会排在被测那一轮前面。造账户不是被测对象,没必要为它付这个钱;
+ * 而且屏蔽之后这些账户在被测那一轮之前**一张快照都没有**,断言反而更干净。
  *
  * 按请求体分辨而不是按 URL:server fn 的地址带编译期散列,认不出是哪一个。而 `syncAccount` 的入参
  * 只有 accountId,`createAccount` 带的是 connectorId/label/values —— 这就够分了。
@@ -149,8 +151,8 @@ export async function unblockPostCreateSync(page: Page) {
  * 重复点不会多跑一轮 —— `useSyncRound` 的 `sync()` 在 disabled 时直接 return,而**开轮本身也是
  * 幂等的**(ADR 0048):真发出去两次,第二次拿回的是同一轮。
  *
- * **只等请求发出,不等响应体**:这条请求现在开轮即返(不再是攒完才发的 NDJSON 流),但「回包
- * 到手」仍然只说明轮开了,不说明服务端已经在打上游。要判断它真的在干活,问假上游收到请求没有
+ * **只等请求发出,不等响应体**:这条请求开轮、投完队列消息即返(FOL-89),「回包到手」只说明轮开了、
+ * 活投出去了,不说明 consumer 已经在打上游。要判断它真的在干活,问假上游收到请求没有
  * (setUpstream hits)。
  */
 // 悬停页头那枚胶囊,开同步面板(FOL-32 后桌面 popover 走 hover)。

@@ -9,7 +9,7 @@ import {
   provideDbClient,
 } from "@folio/db";
 import type { GlobalRefIndexService, OracleServices } from "@folio/oracle";
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Effect, Layer, ManagedRuntime } from "effect";
 import { ConnectorRegistry } from "./connectors/registry";
 import { logCategory, logTapeLogger } from "./effect-log";
 import { type AppError, toError } from "./errors";
@@ -118,23 +118,6 @@ const asUser =
   (userId: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     effect.pipe(provideCurrentUser(userId), provideDbClient(env));
-
-/**
- * **流那条路要的 layer 形状**(#504 T12):`/api/sync` 的后台任务另起一条根 fiber、经
- * `Stream` + `Effect.provide(layer)` 跑(`./sync/drive.ts`),拿不到 effect 形状的包装。
- *
- * 它**不重建服务图**:服务取自那个已经建好的 isolate 运行时(`runtimeEffect` 第一次之后就是
- * 缓存值),这一次构建里新建的只有请求的那两样 —— 与 `asUser` 同一个给法,所以这趟流、落账与
- * 收尾共用一个 `DbClient`(它们在同一次 provide 里)。
- */
-export const userLayer = (userId: string): Layer.Layer<UserServices> =>
-  Layer.effectContext(
-    Effect.flatMap(isolateRuntime().runtimeEffect, (rt) =>
-      Effect.map(asUser(userId)(Effect.context<DbRequest>()), (request) =>
-        Context.merge(rt.context, request),
-      ),
-    ),
-  );
 
 // 一个用户的活:给这个用户的两样、错误映射、挂上下文。**顺序是有讲究的** —— 注解挂在给值的
 // **外面**,所以连那一步本身打的日志也带得上;挂在里面就只覆盖被包住那段。

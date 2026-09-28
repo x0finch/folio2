@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { FolioHttpClient, type UpstreamError } from "@folio/client-core";
+import { FolioHttpClient } from "@folio/client-core";
 import {
   type ConnectorManifest,
   registry as connectorRegistry,
@@ -14,62 +14,28 @@ import {
   fromProviderError,
   type ProviderNeeds,
 } from "@folio/connectors-basic";
-import {
-  type AccountSafe,
-  Database,
-  type DbRequest,
-  type NotFound,
-  type WriteSnapshotInput,
-} from "@folio/db";
+import { type AccountSafe, Database, type DbRequest, type WriteSnapshotInput } from "@folio/db";
 import { Oracle, type OracleServices } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
 import {
-  type AccountSyncResult,
   BalanceSource,
   depError,
   type FetchOutcome,
-  Sweep,
   AccountStore as SyncAccountStore,
   type SyncDepError,
   type SyncServices,
   SnapshotStore as SyncSnapshotStore,
   TokenOracle,
 } from "@folio/sync";
-import { Effect, Layer, type Stream } from "effect";
+import { Effect, Layer } from "effect";
 import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";
-import { logTapeLogger } from "@/lib/server/effect-log";
-import { heldTokenIdsOf, refreshPricesOf } from "@/lib/server/prices/job";
-import { type UserServices, userLayer } from "@/lib/server/runtime";
-import { warmReferenceOf } from "./reference";
 import { revalue } from "./revalue";
 import { isSyncableAccount } from "./status";
 
 // server-only 编排装配(引 cloudflare:workers)。独立于 sync.ts —— triggerSync(server fn,被客户端 import)
 // 只在其 handler 内引用本模块,handler 被剥离后客户端不会拉进 cloudflare:workers。cron(server.ts)直接引本模块。
 // 数据访问经全局 db 门面;密钥/全局 key/tokens 走 cloudflare:workers 全局 env(fetch 与 scheduled 均可用)。
-
-// **手动同步的收尾**(`/api/sync` 流式那条、`syncAccount` 单账户那条):持仓价 + 参考层那四件
-// (`./reference`),在同一次调用里。读一次快照,两半共用。
-//
-// **它自己不装配**(#394 T5 改):导出的是没接依赖的那一半,userId 由调用方装的那层给。
-// 这样单账户同步(`syncAccount` server fn)能把「读账户 → 同步 → 预热」拼进**自己那一次**装配里,
-// 而不是在同一个请求里再建一套 store。
-//
-// 价在这里**不切块**(不按 `PRICES_IDS_PER_MESSAGE` 分消息):这两条还跑在 HTTP 调用的 waitUntil 里,
-// 没有队列可投。FOL-89 把它们改成投队列时,这里的价那半换成投一条 `prices`。
-export const warmTokens: Effect.Effect<
-  void,
-  UpstreamError | NotFound,
-  // = `UserServices` 去掉 connector 那张。写开是为了别让这个签名读起来像「预热要整个
-  // handler 面」—— 它要的就是这两样:自己的数据(含那片 DeFi 协议图缓存)、参考层
-  // (外加一次请求的连接与用户,`DbRequest`)。
-  Database | OracleServices | DbRequest
-> = Effect.gen(function* () {
-  const snapshots = yield* (yield* Database).snapshots.latest();
-  yield* refreshPricesOf(yield* heldTokenIdsOf(snapshots));
-  yield* warmReferenceOf(snapshots);
-});
 
 // 经 @folio/connectors 取余额。前置(缺凭据 / 校验 / 选 provider)走快回退。
 // #37d 起 account.connectorId 直接即 connector 的 id。
@@ -130,7 +96,7 @@ const fetchViaConnector = (
 // `SnapshotBalanceInput` 里没有 name/logo。但 mint 建代币行时要用它们(不然新币只剩 symbol、没图)。
 //
 // 所以在**取到余额那一刻**顺手收一份 seed(与 totalUsd 同一处、同一批数据),
-// 写快照那一步按 tokenRef 取回。存活范围 = 一次 `syncServicesLayer` 装配 = 一轮 sync,不跨请求。
+// 写快照那一步按 tokenRef 取回。存活范围 = 一次 `makeSyncServicesLayer` 装配 = 一轮 sync,不跨请求。
 // 这样 `@folio/sync` 与 `Balance` 契约都不用动 —— 平台字段那次的教训:派生出来的东西不该让
 // provider 再报一遍(#193)。
 interface SeedCollector {
@@ -162,7 +128,7 @@ function createSeedCollector(): SeedCollector {
 // —— `SyncServices` 的 app 侧实现(#403 片 2)——
 //
 // **一次装配 = 一个用户的一轮同步。** 四个能力的方法签名里没有 userId —— 它由外面那次
-// 装配点那一次(`userLayer(userId)`)供上的 db / 参考层服务吃掉了(ADR 0037)。
+// 装配点(`forUser` / `runForUser`)供上的 db / 参考层服务吃掉了(ADR 0037)。
 //
 // `seeds` 与估值模式都建在**这一层**:它们的存活范围恰好是「一轮同步」,与 layer 的生命周期同长。
 // 以前那个 Promise 形状的 deps 得按 userId 分桶缓存估值模式(一份 deps 跨多用户),现在一个用户一层,
@@ -181,19 +147,11 @@ const asDep =
 /**
  * app 侧对 `@folio/sync` 那四个能力的接线。
  *
- * `only` 给的时候,这一轮**只跑名单里那些账户**。名单由开轮那一步算好递进来(ADR 0048)——
- * 不是在这里再按组合算一遍:那样会有两份名单,而它们之间任何一点漂移都会让面板的 `x / N`
- * 与真跑的条数对不上。不给 = 不收口(抽屉里的单账户同步走的是那一条)。
+ * `only` 给的时候,这一轮**只跑名单里那些账户** —— 队列 consumer 一条消息一个账户,收口成那一个
+ * (名单由开轮那一步定死,ADR 0048;这里不按组合再算一遍)。不给 = 不收口。
  */
-export interface SyncScope {
-  /**
-   * 这一轮跑哪些账户 —— 开轮那一步定下来的名单。
-   *
-   * 给**静态集合**(cron / 手动全量:名单在开轮时就定死),或给一个**在装配内解析的 Effect**
-   *(自动轮的按新鲜度跳过 FOL-18:规划要读快照、settle 掉新鲜账户 —— 让它在同步轮这次装配里
-   * 解析,就跟同步内核共用同一个 DbClient,不必另起一条根 fiber 建第二个连接)。
-   */
-  only: ReadonlySet<string> | Effect.Effect<ReadonlySet<string>, never, Database | DbRequest>;
+interface SyncScope {
+  only: ReadonlySet<string>;
 }
 
 export const makeSyncServicesLayer = (
@@ -223,14 +181,9 @@ export const makeSyncServicesLayer = (
             // `R` 是 `never` —— 所以在建这一层(= 这一轮)的时候抓一份,每个方法出口 provide 进去。
             // 一轮一层,抓的就是这一轮的那一份,不会串到别的请求。
             const request = yield* Effect.context<DbRequest>();
-            // **这一轮跑哪些账户,开轮那一步已经定死了**(ADR 0048):`only` 就是那一轮记录里
-            // 的名单,所以面板上的 `x / N` 与这里真跑的条数是同一份名单,不可能对不上。
-            //
-            // 静态集合直接用;Effect 形态(自动轮的按新鲜度跳过)**在这次装配里解析** —— 于是那趟
-            // 规划(读快照、settle 掉新鲜账户)与同步内核共用同一个 DbClient,不另起第二个连接。
-            const scopeOnly = scope?.only;
-            const only =
-              scopeOnly == null ? null : Effect.isEffect(scopeOnly) ? yield* scopeOnly : scopeOnly;
+            // **这一轮跑哪些账户,开轮那一步已经定死了**(ADR 0048):队列那条路收口成消息里的
+            // 那一个账户,不给就不收口。
+            const only = scope?.only ?? null;
             return {
               // 归档账户跳过同步(不产生新快照);manual 不是同步源(ADR 0018:当下值由 creds 现造,
               // 不写快照)→ 一并过滤。编排只见活跃的可同步账户(判别走纯 isSyncableAccount)。
@@ -338,47 +291,3 @@ export const makeSyncServicesLayer = (
       );
     }),
   );
-
-// 一个用户的一轮同步,**装配好了但还没跑**。流式端点与 cron 各取所需。
-//
-// `provideMerge` 而不是 `provide`:底下那层(`userLayer`:isolate 里现成的服务图 + 这一轮的连接
-// 与用户)也透出去 —— 流式那条路的收尾(`warmTokens`)要的正是它,而这一轮的 `DbClient` 必须与
-// 同步内核是**同一次构建**出来的那一份(否则一个请求两个 `DbClient`)。服务图本身不在这一次构建里
-// 建(ADR 0054),这里新建的只有那两个值和四个同步能力。
-/** 不收口的那一份:单账户同步(`syncAccount`)用它。队列那条路按账户收口,用 `makeSyncServicesLayer`。 */
-export const syncServicesLayer = makeSyncServicesLayer();
-
-const syncFor = (userId: string, scope?: SyncScope): Layer.Layer<SyncServices | UserServices> =>
-  Layer.provideMerge(makeSyncServicesLayer(scope), userLayer(userId));
-
-/**
- * 一轮同步:**流、收尾,和它们共用的那一次装配** —— 三件一起出去,不在这里 provide。
- *
- * 以前这里出的是「已经 provide 好的流」,而收尾(`warmTokensForUser`)自己在另一个 `runAtEdge`
- * 里再装一次 —— 同一个请求两个 `DbClient`。**Layer memoisation 的作用域是一次构建**,所以光传
- * 同一个 layer 引用没用,必须是同一次 provide;要做到这一点,provide 那一下就得挪到「同时看得见
- * 两半」的地方,也就是 `driveRound` 里(#504 T12)。
- *
- * `syncFor` 因此改用 `provideMerge`:同步内核要的 `SyncServices` 与收尾要的 `UserServices`
- * 都得在场,而且必须是同一次构建出来的那一份。
- *
- * **日志层也在这张 layer 里,这条是有来由的**:`driveRound` 里那句 `runPromise` 是**另起的一条根
- * fiber**(`Effect.runPromise`),而根 fiber **不继承外层的 `Effect.provide`**(实测:外层换掉
- * defaultLogger,内层那条 `logInfo` 照样落在 Effect 自带的 console logger 上)。所以这一整趟
- * 同步 + 预热的 `Effect.log*` 想进 LogTape,只能由**它自己这次 provide** 带上。
- *
- * **只能挂在这里,不能挂进 `syncFor`**:队列 consumer 那条路是在外层 `runAtEdge` 里跑的,那儿已经有一个
- * `logTapeLogger` —— 再叠一层不会顶掉它,只会两个转发器同时在集合里、每条日志写两遍
- *(effect-log.ts 记着这个坑,实测过)。而 `syncRoundFor` 的调用方(`./round` 的 `runSyncRound`)
- * 每一次都是自己起的根 fiber。
- */
-export const syncRoundFor = (userId: string, scope: SyncScope) => ({
-  results: Sweep.syncUserStream(userId) as Stream.Stream<
-    AccountSyncResult,
-    SyncDepError,
-    SyncServices | UserServices
-  >,
-  // 同步完预热代币缓存(best-effort),让下次总览能 cache-only 富化新价。
-  afterRound: warmTokens,
-  layer: Layer.merge(syncFor(userId, scope), logTapeLogger),
-});

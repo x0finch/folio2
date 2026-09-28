@@ -363,3 +363,70 @@ describe("落完即收官(finishIfSettled)", () => {
     expect((await read(USER_A)).finishedAt).toBeNull();
   });
 });
+
+// 单账户同步撞上活轮(FOL-89):把那个账户拉进这一轮,而不是另开一轮覆盖它。
+describe("拉进活轮(enlist)", () => {
+  const enlist = (at: number, id: string, roundId = "r1") =>
+    rounds(USER_A, at).enlist({
+      portfolioId: PF,
+      roundId,
+      account: { id, label: `label ${id}` },
+      ttlMs: TTL,
+    });
+
+  it("名单外的账户 → 记成 pending 加进来,续心跳;finishIfSettled 要等它", async () => {
+    await open(USER_A, "r1");
+    const got = await enlist(NOW + 5, "acc-3");
+    expect(Option.getOrNull(got)?.accounts["acc-3"]).toEqual({
+      label: "label acc-3",
+      status: "pending",
+    });
+    const round = await read(USER_A);
+    expect(round.expiresAt).toBe(NOW + 5 + TTL);
+    for (const id of ["acc-1", "acc-2"]) {
+      await rounds(USER_A, NOW + 6).settle({
+        portfolioId: PF,
+        roundId: "r1",
+        accountId: id,
+        status: "synced",
+        ttlMs: TTL,
+      });
+    }
+    const fin = await rounds(USER_A, NOW + 7).finishIfSettled({
+      portfolioId: PF,
+      roundId: "r1",
+      retentionMs: RETENTION,
+    });
+    expect(Option.isNone(fin)).toBe(true);
+  });
+
+  it("已落账的账户 → 记回 pending(再同步一次)", async () => {
+    await open(USER_A, "r1");
+    await rounds(USER_A, NOW + 1).settle({
+      portfolioId: PF,
+      roundId: "r1",
+      accountId: "acc-1",
+      status: "failed",
+      error: "boom",
+      ttlMs: TTL,
+    });
+    await enlist(NOW + 2, "acc-1");
+    expect((await read(USER_A)).accounts["acc-1"]).toEqual({
+      label: "label acc-1",
+      status: "pending",
+    });
+  });
+
+  it("已收官 / 已过期 / 轮 id 对不上 → 落空,一个字都不写", async () => {
+    await open(USER_A, "r1");
+    expect(Option.isNone(await enlist(NOW + 1, "acc-3", "STALE"))).toBe(true);
+    expect(Option.isNone(await enlist(NOW + TTL, "acc-3"))).toBe(true);
+    await rounds(USER_A, NOW + 2).finish({
+      portfolioId: PF,
+      roundId: "r1",
+      retentionMs: RETENTION,
+    });
+    expect(Option.isNone(await enlist(NOW + 3, "acc-3"))).toBe(true);
+    expect((await read(USER_A)).accounts["acc-3"]).toBeUndefined();
+  });
+});

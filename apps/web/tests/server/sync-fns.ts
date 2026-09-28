@@ -3,7 +3,8 @@ import type { AccountSafe } from "@folio/db";
 import { Account, type AccountSyncResult, BalanceSource } from "@folio/sync";
 import { Effect, Layer } from "effect";
 import { runForUser } from "@/lib/server/runtime";
-import { syncServicesLayer, warmTokens } from "@/lib/server/sync/deps";
+import { makeSyncServicesLayer } from "@/lib/server/sync/deps";
+import { runReferenceJob } from "@/lib/server/sync/reference";
 
 // 同步的测试把手(#403 片 3)。`SyncDeps` 与 `buildSyncDeps` 没了 —— 编排现在从 `SyncServices`
 // 取能力,所以测试要换掉的不再是「deps 对象上的一个字段」,而是**一层**。
@@ -48,7 +49,7 @@ export const syncRound = (userId: string, jobs: SyncJob[]): Promise<AccountSyncR
       Account.syncAccount(userId, job.account, job.rawCreds ?? null).pipe(
         Effect.provide(sourceFor(job)),
       ),
-    ).pipe(Effect.provide(syncServicesLayer)),
+    ).pipe(Effect.provide(makeSyncServicesLayer())),
   );
 
 /** 一轮里就一个账户 —— 最常用的那一种。 */
@@ -58,10 +59,8 @@ export const syncOne = async (userId: string, job: SyncJob): Promise<AccountSync
 };
 
 /**
- * 一个用户的预热,跑成 Promise。
- *
- * 生产里没有这个形状了(#504 T12):流式那条路把预热当**收尾 effect** 交给 `ndjsonRound`,
- * 与同步流共用同一次装配 —— 单独出一个「自己装一次再跑」的出口,正是那条路上曾经多建一个
- * `DbClient` 的原因。用例要的只是「跑一次预热看结果」,所以把手留在测试这边。
+ * 跑一条 `catalogue` 活(FOL-88 的参考层那一件),跑成 Promise。以前手动同步的收尾(`warmTokens`)
+ * 在请求里连做这一件;FOL-89 起它只是一条队列消息,生产里由 consumer 跑 —— 用例直接调同一个 consumer。
  */
-export const warmTokensForUser = (userId: string): Promise<void> => runForUser(userId, warmTokens);
+export const refreshCatalogueFor = (userId: string): Promise<void> =>
+  Effect.runPromise(runReferenceJob({ kind: "catalogue", userId }));

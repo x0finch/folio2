@@ -157,7 +157,7 @@ export interface TokenOption {
 // 合成余额(manual 已退出快照,ADR 0018)。
 //
 // **同源收口**:enrich(经 injectManualSnapshots 进 byAccount)与刷价(`prices/job.ts` 的
-// `heldTokenIdsOf`,队列 `prices` 活与手动同步收尾共用)必须喂**同一集合** —— 否则 enrich 标了 stale 的
+// `heldTokenIdsOf`,队列 `prices` 活用它)必须喂**同一集合** —— 否则 enrich 标了 stale 的
 // manual 行刷价够不到,价永远旧着(见 lib/tokens.ts 同门注)。都经本函数,保证结构一致,而非各自手拼
 // (手拼正是 T2 首版漏掉 refresh 的成因)。
 export function userDisplayBalances(
