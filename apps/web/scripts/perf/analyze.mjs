@@ -14,7 +14,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { NON_CPU_FRAMES, ownerOf, useRegions } from "./owners.mjs";
+import { loadRegions, NON_CPU_FRAMES, ownerOf } from "./owners.mjs";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -43,7 +43,7 @@ if (!dir) {
 const TOP = Number(values.top);
 // profile 的行号只对产出它的那次构建有效:输出目录里有 region 表就用它,没有(老的输出)才读当前 `dist/`。
 if (existsSync(join(dir, "regions.json")))
-  useRegions(JSON.parse(readFileSync(join(dir, "regions.json"), "utf8")));
+  loadRegions(JSON.parse(readFileSync(join(dir, "regions.json"), "utf8")));
 else console.error("no regions.json in the run dir — mapping frames against the current dist/");
 const COLLAPSE = new RegExp(values.collapse);
 const MIN_US = Number(values["min-ms"]) * 1000;

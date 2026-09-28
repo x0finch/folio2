@@ -112,7 +112,7 @@ export function snapshotRegions() {
 }
 
 /** 用存下来的 region 表代替当前 `dist/`(见 `snapshotRegions`)。 */
-export function useRegions(snapshot) {
+export function loadRegions(snapshot) {
   regionCache.clear();
   for (const [url, regions] of Object.entries(snapshot)) regionCache.set(url, regions);
 }
