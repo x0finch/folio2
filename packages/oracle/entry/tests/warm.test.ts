@@ -3,7 +3,12 @@ import { PRICE_TTL_MS, WARM_TTL_MS } from "@folio/oracle-basic";
 import { Duration, Effect, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import { candidatesBySymbol, warmCatalogue } from "../src/tokens/candidates";
-import { refreshWarmCatalogue, topByRank, warmMarkets } from "../src/tokens/catalogue";
+import {
+  makeCatalogue,
+  refreshWarmCatalogue,
+  topByRank,
+  warmMarkets,
+} from "../src/tokens/catalogue";
 import { pickByConfidence } from "../src/tokens/mint";
 import { WARM_KEY } from "../src/tokens/warm";
 import { harness, now0, upstreamDown } from "./fakes";
@@ -184,6 +189,42 @@ describe("后台预热:目录旧了才刷", () => {
         yield* TestClock.adjust(Duration.millis(WARM_TTL_MS + 1));
         h.upstream.fail = upstreamDown();
         expect(yield* refreshWarmCatalogue(h.cache, h.upstream, 50)).toHaveLength(1);
+      }),
+    );
+  });
+});
+
+// 队列那条 `catalogue` 活走的是 `makeCatalogue(...).refreshCatalogue()`:先看一眼 `asOf`,够新就
+// 不解码整份目录(FOL-83 第二轮)。判据必须与上面那组对得上。
+describe("refreshCatalogue():够新就只看 asOf", () => {
+  const refresh = (h: ReturnType<typeof setup>) =>
+    makeCatalogue(h.cache, h.upstream).refreshCatalogue();
+
+  it("一周之内零请求,返回按 ref 去重后的条数;超过一周整份刷一次", async () => {
+    const h = setup([coin("bitcoin", "BTC", 1), coin("bitcoin", "BTC", 1), coin("eth", "ETH", 2)]);
+    await h.run(
+      Effect.gen(function* () {
+        expect(yield* refresh(h)).toBe(2); // 冷 → 回源,写回的那份去重后 2 条
+        yield* TestClock.adjust(Duration.millis(WARM_TTL_MS));
+        expect(yield* refresh(h)).toBe(2); // 恰好一周:仍算够新(与 `> WARM_TTL_MS` 同口径)
+        expect(h.upstream.calls).toHaveLength(1);
+        yield* TestClock.adjust(Duration.millis(1));
+        h.upstream.markets = [coin("bitcoin", "BTC", 1)];
+        expect(yield* refresh(h)).toBe(1);
+        expect(h.upstream.calls).toHaveLength(2);
+      }),
+    );
+  });
+
+  it("asOf 不是数 / rows 不是数组 → 当 miss,走完整那条路重拉", async () => {
+    const h = setup([coin("bitcoin", "BTC", 1)]);
+    await h.run(
+      Effect.gen(function* () {
+        yield* h.cache.put(WARM_KEY, { asOf: "yesterday", rows: [] }, WARM_TTL_MS);
+        expect(yield* refresh(h)).toBe(1);
+        yield* h.cache.put(WARM_KEY, { asOf: now0, rows: "nope" }, WARM_TTL_MS);
+        expect(yield* refresh(h)).toBe(1);
+        expect(h.upstream.calls).toHaveLength(2);
       }),
     );
   });
