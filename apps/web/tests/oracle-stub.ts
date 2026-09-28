@@ -28,6 +28,7 @@ const emptyTokens: StubOf<Oracle["tokens"]> = {
   refreshStale: () => Effect.succeed({ prices: 0, infos: 0, degraded: false }),
   priceSeries: () => Effect.succeed([]),
   priceAt: () => Effect.succeed(Option.none()),
+  fillDaily: () => Effect.succeed({ calls: 0, done: true, failed: false }),
   topTokens: () => Effect.succeed([]),
   search: () => Effect.succeed([]),
   refreshCatalogue: () => Effect.succeed(0),
@@ -37,6 +38,7 @@ const emptyFx: StubOf<Oracle["fx"]> = {
   resolve: () => Effect.succeed(Option.none()),
   warm: () => Effect.void,
   rateSeries: () => Effect.succeed([]),
+  fillDaily: () => Effect.succeed({ calls: 0, done: true, failed: false }),
 };
 
 const emptyPlatforms: StubOf<Oracle["platforms"]> = {

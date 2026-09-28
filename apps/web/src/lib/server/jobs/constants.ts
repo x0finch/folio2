@@ -58,3 +58,22 @@ export const REFERENCE_JOB_UPSTREAM_CALLS = {
  * 它们变了这里要跟着算一遍 —— `tests/server/sync/prices.cases.ts` 按真出网数钉着「≤ 50」。
  */
 export const PRICES_IDS_PER_MESSAGE = 1000;
+
+/**
+ * 一条 `daily-prices` 消息(FOL-90)最多发几发**区间请求**(`/coins/{id}/market_chart/range`,
+ * 一发覆盖 ≤ `DAILY_FILL_DAYS_PER_CALL`(365)天)。**由出网预算倒推**:每发至多
+ * `UPSTREAM_ATTEMPTS`(2)次尝试 → 最坏 8 × 2 = 16 发,远在 50 之内。
+ *
+ * 没取到 25(= 50 / 2)是因为另一道闸 —— 10ms CPU —— 先到:一发一年就是 365 个点要解析、
+ * 365 行要写(多行 INSERT,见 db 的 `writeDaily`)。8 发 ≈ 3k 行,是按「宁可多一条后续消息」
+ * 拍的保守值,**没实测过**;FOL-84 的本地 profile 可以校准它。法币一窗两条腿(BTC 该币 + BTC
+ * 美元),按 2 发记账。三年的回填一个币是 3 发,几个币一条消息装得下;装不下的由 consumer
+ * 投一条带剩余 id 的后续消息接着补。`tests/server/sync/daily-prices.cases.ts` 按真 fetch 数钉着。
+ */
+export const DAILY_PRICES_CALLS_PER_MESSAGE = 8;
+
+/** 一条 `daily-prices` 消息体最多带几个 token id(只是消息体上限,出网预算由上面那个管)。 */
+export const DAILY_PRICES_IDS_PER_MESSAGE = 1000;
+
+/** `DAILY_PRICES_CALLS_PER_MESSAGE` 的最坏出网数(含重试),测试按它断言。 */
+export const DAILY_PRICES_UPSTREAM_CALLS = DAILY_PRICES_CALLS_PER_MESSAGE * UPSTREAM_ATTEMPTS;

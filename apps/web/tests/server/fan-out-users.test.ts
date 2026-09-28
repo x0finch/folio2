@@ -53,7 +53,7 @@ describe("fanOutAllUsers", () => {
 
   // `prices` 不延后(FOL-87):同步只读价表,两者不排先后。
   // FOL-88:参考层按件拆开,一件一条;读快照的两件延后到同步落库之后。
-  it("每个用户在自己的同步消息之后补 prices / fx(不延后)与 platforms / defi-logos(延后)", async () => {
+  it("每个用户在自己的同步消息之后补 prices / daily-prices / fx(不延后)与 platforms / defi-logos(延后)", async () => {
     const { sent } = await run(["a", "b"], (userId) =>
       Effect.succeed([job(userId, `${userId}-1`), job(userId, `${userId}-2`)]),
     );
@@ -61,12 +61,14 @@ describe("fanOutAllUsers", () => {
       "sync-account:a",
       "sync-account:a",
       "prices:a",
+      "daily-prices:a",
       "fx:a",
       "platforms:a",
       "defi-logos:a",
       "sync-account:b",
       "sync-account:b",
       "prices:b",
+      "daily-prices:b",
       "fx:b",
       "platforms:b",
       "defi-logos:b",

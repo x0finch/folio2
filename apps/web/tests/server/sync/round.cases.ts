@@ -175,6 +175,7 @@ describe("sync/round", () => {
           .map((m) => [m.job.kind, m.delaySeconds !== undefined]),
       ).toEqual([
         ["prices", false],
+        ["daily-prices", false],
         ["fx", false],
         ["platforms", true],
         ["defi-logos", true],

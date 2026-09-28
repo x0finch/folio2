@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { PortfolioSelectInput } from "@/lib/server/portfolio/scope";
-import { runEffect } from "@/lib/server/runtime";
+import { runEffect, runTimedForUser } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { ArchiveAccountInput, handleArchiveAccount } from "./archive";
-import { CreateAccountInput, handleCreateAccount } from "./create";
+import { CreateAccountInput, handleCreateAccountFor } from "./create";
 import { handleReplaceAccountCredentials, ReplaceCredentialsInput } from "./credentials";
 import { AccountHistoryInput, handleGetAccountHistory } from "./history";
 import { handleListAccounts } from "./list";
@@ -23,7 +23,10 @@ export const listAccounts = createServerFn({ method: "GET" })
 export const createAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(CreateAccountInput)
-  .handler(runEffect(handleCreateAccount));
+  // 不走 `runEffect`:建手记账户之后要投一条带 userId 的 `daily-prices`(FOL-90,见 ./create)。
+  .handler(({ data, context }) =>
+    runTimedForUser(context.userId, "createAccount", handleCreateAccountFor(context.userId, data)),
+  );
 
 export const replaceAccountCredentials = createServerFn({ method: "POST" })
   .middleware([requireAuth])

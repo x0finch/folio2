@@ -1,10 +1,10 @@
 import { Either, ParseResult, Schema } from "effect";
-import { PRICES_IDS_PER_MESSAGE } from "./constants";
+import { DAILY_PRICES_IDS_PER_MESSAGE, PRICES_IDS_PER_MESSAGE } from "./constants";
 
 // **队列里一条消息长什么样**(FOL-86,ADR 0055)。
 //
 // 判别在 `kind` 上 —— consumer 的分派(`./consume` 的 `runJob`)按它 `switch`,TS 保证穷尽:加一个
-// kind 忘了接,编译不过。**加新 kind 的路**(下一个是 FOL-90 的 `daily-prices`):在这里加一个
+// kind 忘了接,编译不过。**加新 kind 的路**(最近一个是 FOL-90 的 `daily-prices`):在这里加一个
 // `Schema.Struct` 并进 `Job` 的 union,再在 `runJob` / `giveUp` 里各接一支,并在 `./schedule`
 // 决定谁投、多久投一次。消息体只装**找得到活的那几个 id**,不装数据 —— 数据在
 // 跑的那一刻从库里读,排队期间它可能已经变了。
@@ -75,9 +75,29 @@ export const PricesJob = Schema.Struct({
 });
 export type PricesJob = typeof PricesJob.Type;
 
+/**
+ * 补一个用户手记账户的历史日价 / 日汇率(FOL-90),读图表的那一侧因此只读表。
+ *
+ *   · 不带 `tokenIds` → 每小时 cron 投的那条:跑的那一刻读手记账户,算出所有会画出来的币。
+ *   · 带 `tokenIds` → 只补这几个:手记写完之后定向投的(新币的曲线尽快补上),或上一条预算用完
+ *     之后接着补的后续那条。
+ *
+ * 一条消息的出网预算是 `DAILY_PRICES_CALLS_PER_MESSAGE`,由 consumer 记账,**不由 id 个数决定**
+ * (一个币要补几窗取决于它的历史有多长、补过多少),所以这里的 `maxItems` 只是消息体的上限。
+ */
+export const DailyPricesJob = Schema.Struct({
+  kind: Schema.Literal("daily-prices"),
+  userId: Schema.NonEmptyString,
+  tokenIds: Schema.optional(
+    Schema.Array(Schema.NonEmptyString).pipe(Schema.maxItems(DAILY_PRICES_IDS_PER_MESSAGE)),
+  ),
+});
+export type DailyPricesJob = typeof DailyPricesJob.Type;
+
 export const Job = Schema.Union(
   SyncAccountJob,
   PricesJob,
+  DailyPricesJob,
   FxJob,
   PlatformsJob,
   CatalogueJob,

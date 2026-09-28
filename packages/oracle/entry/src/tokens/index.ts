@@ -19,7 +19,7 @@ import { makeStaleRefresh, type RefreshStaleReport, type TokenStaleRefresh } fro
 //
 //   `./mint`       写   tokenRef → token_id,身份在此定死。**全程不出网**(那条红线在文件里)
 //   `./price`      读   整行富化 + 现价(按「有没有内部 id」分两档;有 id 的那档只读表)
-//   `./history`    读   历史日价 —— 过去日不可变落库、今日桶恒现取
+//   `./history`    读 + 补 历史日价 —— 读只读表(今天读现价);补只在 `daily-prices` 活里(FOL-90)
 //   `./stale`      写   唯一覆盖写既有行的地方(价 + 元信息各一条上游端点)
 //   `./catalogue`  读   世上有哪些币(公开目录,与用户无关)—— 一个 store 都不碰
 //
@@ -80,7 +80,7 @@ export class TokenService extends Effect.Service<TokenService>()("oracle/TokenSe
       ...makeMinting({ store, globalRefIndex, candidates, namer }),
       ...makeReading(store, prices),
       ...makePricing(prices, upstream),
-      ...makeHistory(store, prices, upstream),
+      ...makeHistory(store, prices, cache, upstream),
       ...makeStaleRefresh(store, prices, upstream),
       ...makeCatalogue(cache, upstream),
     } satisfies TokenServiceShape;

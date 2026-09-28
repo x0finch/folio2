@@ -97,6 +97,7 @@ describe("sync/cron(fan-out)", () => {
       .map((m) => [m.job.kind, m.delaySeconds !== undefined] as const);
     expect(perUser).toEqual([
       ["prices", false],
+      ["daily-prices", false],
       ["fx", false],
       ["platforms", true],
       ["defi-logos", true],

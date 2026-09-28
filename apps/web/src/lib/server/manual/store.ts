@@ -398,9 +398,17 @@ const accountFiatRefs = (
     return out;
   });
 
-// 异步 oracle 历史价 → 同步注入闭包(ADR 0019)。按 token 区间一次预取 priceSeries(内部缓存过去日),
-// 建 Map<tokenId, Map<dayBucket, unitPrice>>,再包成 buildManualAccountSeries 要的同步 (tokenId, t) 查询。
-// 每个币一次网络(之后全缓存命中);取不到的日 → 闭包返 undefined → 纯层降级链落 ②③。
+// 异步 oracle 历史价 → 同步注入闭包(ADR 0019)。按 token 区间一次读 priceSeries / rateSeries,
+// 建 Map<tokenId, 逐日价>,再包成 buildManualAccountSeries 要的同步 (tokenId, t) 查询。
+//
+// **只读缓存,零网络**(FOL-90)。以前这两个读法会为缺的过去日与「今天」当场回源 —— 手记账户的每一次
+// 图表读都是每币一发 CoinGecko(法币两发)。现在补日价是队列 `daily-prices` 活的事(`prices/daily`),
+// 这里读到什么用什么:
+//   · 过去日:`token_daily_prices` 里有的。
+//   · 今天:价表的现价 / 汇率缓存的现汇率(每小时的 `prices` / `fx` 活在刷它们)。
+//   · **缺的日子前向填充**:沿用它之前最近一个有价的日子(还没补上的昨天、上游断档的那几天)。
+//     第一个有价的日子之前(币刚加、活还没跑)→ 闭包返 undefined → 纯层降级链落账本价②/③,
+//     与以前「上游没给」同一条路。前向填充不落库:表里只装上游给过的事实。
 const buildHistoricalPriceAt = (
   tokens: HistoryToken[],
   now: number,
@@ -412,25 +420,79 @@ const buildHistoricalPriceAt = (
       tokens,
       (tk) =>
         Effect.gen(function* () {
-          // 上游没认出来的币不问历史价(问了也没有)。
+          // 上游没认出来的币不问历史价(表里也不会有)。
           if (!tk.recognized || tk.activities.length === 0 || byIdentifier.has(tk.id)) return;
           const from = Math.min(...tk.activities.map((a) => a.occurredAt));
-          const daily = new Map<number, number>();
-          // 法币:历史价 = **当天汇率**(ADR 0026),从 fx-history 取而不是币价历史(法币无币价)。
-          // 其余:按 token_id 取币价历史(#203,priceSeries 收内部 id)。两条都灌进同一个 priceAt 闭包,
+          // 法币:历史价 = **当天汇率**(ADR 0026),读日汇率而不是币价历史(法币无币价)。
+          // 其余:按 token_id 读币价历史(#203)。两条都灌进同一个 priceAt 闭包,
           // 纯层 tokenPriceAt 的第 ① 档对法币照常生效(它只看 recognized,不认识 fiat)。
           const series = tk.fiatCode
             ? yield* fx.rateSeries(tk.fiatCode as string, from, now)
             : yield* tokenService.priceSeries(tk.id, from, now);
-          for (const pt of series) daily.set(dayBucketOf(pt.atMs), pt.unitPrice);
-          byIdentifier.set(tk.id, daily);
+          byIdentifier.set(tk.id, forwardFilled(series, dayBucketOf(now)));
         }),
-      // 每个币一次取数,**顺序跑**(迁移前是 `Promise.all` 的隐式全并发)—— 一个 manual 账户
-      // 的币数是个位数,而它们共用同一把限频额度,并发只会把突发额度更快抽干。
+      // 纯读库,顺序跑即可(一个 manual 账户的币数是个位数)。
       { concurrency: 1, discard: true },
     );
     return (tokenId: string, t: number) => byIdentifier.get(tokenId)?.get(dayBucketOf(t));
   });
+
+// 升序的日价点 → 从第一个有价的日子起到 `throughB` 逐日有值(缺的沿用前一日)。
+const forwardFilled = (
+  series: readonly { atMs: number; unitPrice: number }[],
+  throughB: number,
+): Map<number, number> => {
+  const known = new Map<number, number>();
+  for (const pt of series) known.set(dayBucketOf(pt.atMs), pt.unitPrice);
+  const out = new Map<number, number>();
+  const first = series[0];
+  if (!first) return out;
+  let last: number | undefined;
+  for (let b = dayBucketOf(first.atMs); b <= throughB; b++) {
+    last = known.get(b) ?? last;
+    if (last !== undefined) out.set(b, last);
+  }
+  return out;
+};
+
+/** 一个要补日价的目标(FOL-90 `daily-prices` 活):哪个币、是不是法币、从哪天起。 */
+export interface DailyPriceTarget {
+  readonly tokenId: string;
+  /** 法币 → 补日汇率(`fx.fillDaily`);否则补币价(`tokens.fillDaily`)。 */
+  readonly fiatCode?: string;
+  /** 这个用户所有手记账户里,这个币最早那笔活动。 */
+  readonly fromMs: number;
+}
+
+/**
+ * 这个用户的手记账户**会画出来的**每个币,各从最早一笔活动起 —— 就是历史曲线会问
+ * `priceSeries` / `rateSeries` 的那一批(同一个 `loadHistoryTokens`、同一道 recognized 门)。
+ * **含归档**:历史曲线含归档账户的过去贡献(见 `loadManualHistoryRows`)。同一个币在几个账户里 →
+ * 取最早的那天。
+ */
+export const manualDailyPriceTargets = (
+  accounts: AccountSafe[],
+): Effect.Effect<DailyPriceTarget[], NotFound, Database | DbRequest> =>
+  Effect.gen(function* () {
+    const byId = new Map<string, DailyPriceTarget>();
+    for (const account of accounts.filter((a) => isManual(a.connectorId))) {
+      for (const tk of yield* loadHistoryTokens(account.id)) {
+        if (!tk.recognized || tk.activities.length === 0) continue;
+        const fromMs = Math.min(...tk.activities.map((a) => a.occurredAt));
+        const seen = byId.get(tk.id);
+        if (!seen || fromMs < seen.fromMs) {
+          byId.set(tk.id, { tokenId: tk.id, fiatCode: tk.fiatCode, fromMs });
+        }
+      }
+    }
+    return [...byId.values()];
+  });
+
+/** 一个手记账户此刻挂着的币(写完之后定向投 `daily-prices` 用)。 */
+export const manualAccountTokenIds = (
+  accountId: string,
+): Effect.Effect<string[], NotFound, Database | DbRequest> =>
+  Effect.map(loadTokensWithActivities(accountId), (perToken) => perToken.map((t) => t.token.id));
 
 // 单 manual 账户的账本价值序列(抽屉头部 chart 用;getAccountValueHistory 对 manual 走此)。
 // ADR 0019:日网格采样 + 注入 oracle 历史价(priceAt);取不到者降级链落账本价②/unitPrice③。
@@ -664,7 +726,7 @@ export const injectManualPrevSnapshots = (
             balances,
           });
         }),
-      // 每账户一次取数,顺序跑 —— 与 loadManualHistoryRows 同一个理由(共用限频额度)。
+      // 每账户一次读,顺序跑。
       { concurrency: 1, discard: true },
     );
   });

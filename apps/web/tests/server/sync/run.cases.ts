@@ -153,6 +153,7 @@ describe("sync/run", () => {
       expect(queue.sent.map((m) => m.job.kind)).toEqual([
         "sync-account",
         "prices",
+        "daily-prices",
         "fx",
         "platforms",
         "defi-logos",

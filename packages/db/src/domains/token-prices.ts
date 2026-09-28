@@ -1,6 +1,6 @@
 import type { TokenPriceWrite, TokenRecordPrice, TokenRef } from "@folio/oracle-basic";
 import { formatTokenRef } from "@folio/oracle-ref";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { Clock, Effect, Option } from "effect";
 import { chunk, type DbClient } from "../client";
 import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
@@ -15,6 +15,9 @@ import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
 // `token_daily_prices`(全局键 = tokenRef,过去日不可变 → 永久存、无 TTL,#199/ADR 0022 的受控例外)。
 //
 // **时间走 `Clock`**(以前是 `opts.now`);`env` 不再出现在签名里(见 ../client.ts)。
+
+// 一条多行 INSERT 装几行日价:3 个绑定 / 行 × 30 = 90,在 D1 ~100 参数上限内。
+const DAILY_ROWS_PER_STATEMENT = 30;
 
 export const makeUserTokenPriceStore = (namer: string) => (client: DbClient, userId: string) => {
   // tokenId → 它在当前上游那里的 tokenRef(历史日价的键)。没有那一档的 ref 行 → `none`。
@@ -67,20 +70,27 @@ export const makeUserTokenPriceStore = (namer: string) => (client: DbClient, use
     });
 
   // 按 ref 写一批日桶:upsert(撞主键改价)。同样是两个 put 共用的那一份。
+  // **多行 INSERT**(FOL-90):补日价那条活一窗就是一年 365 行,一行一条语句的话光拼语句就要吃掉
+  // 免费计划 10ms CPU 的一大块。每行 3 个绑定 → 一条语句 `DAILY_ROWS_PER_STATEMENT` 行,
+  // 稳在 D1 ~100 参数上限内;几条语句一个 batch(一次往返、原子)。
   const writeDaily = (
     ref: string,
     prices: readonly { dayBucket: number; unitPrice: number }[],
   ): Effect.Effect<void> =>
     client.batch((db) =>
-      prices.map((p) =>
-        db
-          .insert(tokenDailyPrices)
-          .values({ tokenRef: ref, dayBucket: p.dayBucket, unitPrice: p.unitPrice })
-          .onConflictDoUpdate({
-            target: [tokenDailyPrices.tokenRef, tokenDailyPrices.dayBucket],
-            set: { unitPrice: p.unitPrice },
-          }),
-      ),
+      chunk(prices, DAILY_ROWS_PER_STATEMENT)
+        .filter((part) => part.length > 0)
+        .map((part) =>
+          db
+            .insert(tokenDailyPrices)
+            .values(
+              part.map((p) => ({ tokenRef: ref, dayBucket: p.dayBucket, unitPrice: p.unitPrice })),
+            )
+            .onConflictDoUpdate({
+              target: [tokenDailyPrices.tokenRef, tokenDailyPrices.dayBucket],
+              set: { unitPrice: sql`excluded.unit_price` },
+            }),
+        ),
     );
 
   return {

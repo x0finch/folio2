@@ -11,7 +11,8 @@ import { type Enqueued, enqueue } from "./queue";
 // 对 cron 的 CPU 更省。
 //
 // 频率按「数据多快会变」挑,不按 TTL:
-//   · 每小时(跟着同步):`prices`(FOL-87)、`fx`、`platforms` / `defi-logos`(读最新快照,所以
+//   · 每小时(跟着同步):`prices`(FOL-87)、`daily-prices`(FOL-90:过了零点「昨天」一小时内
+//     进表;补齐之后每次是几次缓存读、零出网)、`fx`、`platforms` / `defi-logos`(读最新快照,所以
 //     延后到同步落库之后)。汇率 TTL 6h、每小时投一次 → 最旧约 7h;平台 / DeFi 图要跟上这一轮
 //     新出现的链与协议。
 //   · 每天:`catalogue`(一周 TTL —— 每小时投一次是 167 条空跑换一次真刷,每天投一次最多晚一天刷)、
@@ -20,6 +21,7 @@ import { type Enqueued, enqueue } from "./queue";
 /** 每小时 cron 给一个用户补的那几条(排在他的 `sync-account` 之后)。 */
 export const hourlyUserJobs = (userId: string): Enqueued[] => [
   { job: { kind: "prices", userId } },
+  { job: { kind: "daily-prices", userId } },
   { job: { kind: "fx", userId } },
   { job: { kind: "platforms", userId }, delaySeconds: AFTER_SYNC_DELAY_SECONDS },
   { job: { kind: "defi-logos", userId }, delaySeconds: AFTER_SYNC_DELAY_SECONDS },

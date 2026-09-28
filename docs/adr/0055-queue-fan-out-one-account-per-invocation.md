@@ -11,7 +11,7 @@
 **cron 只投活,活在队列 consumer 里一条消息一次调用地跑。**
 
 - **一个队列 `JOBS`**(`folio-jobs`,死信 `folio-jobs-dlq`;preview 一对自己的,test 只在本地),`max_batch_size: 1`、`max_retries: 3`、`retry_delay: 30`、`max_concurrency: 6`。
-- **消息是判别联合**(`apps/web/src/lib/server/jobs/message.ts`,Effect Schema):今天七种 —— `sync-account { userId, portfolioId, roundId, accountId }`、`prices { userId, tokenIds? }`(FOL-87)、`fx` / `platforms` / `catalogue` / `defi-logos` / `prune-notes`(都是 `{ userId }`,FOL-88;原来的 `warm-user` 已拆掉),见文末两段补记。消息只装找得到活的 id,不装数据。后续(FOL-90 的 `daily-prices`):加一个 struct 进 union,`consume.ts` 的两个 `switch` 各接一支(穷尽检查,忘了接编译不过)。
+- **消息是判别联合**(`apps/web/src/lib/server/jobs/message.ts`,Effect Schema):今天八种 —— `sync-account { userId, portfolioId, roundId, accountId }`、`prices { userId, tokenIds? }`(FOL-87)、`daily-prices { userId, tokenIds? }`(FOL-90)、`fx` / `platforms` / `catalogue` / `defi-logos` / `prune-notes`(都是 `{ userId }`,FOL-88;原来的 `warm-user` 已拆掉),见文末两段补记。消息只装找得到活的 id,不装数据。加新 kind 的路(FOL-90 的 `daily-prices` 就是这么加的):加一个 struct 进 union,`consume.ts` 的两个 `switch` 各接一支(穷尽检查,忘了接编译不过)。
 - **cron(`fanOutAllUsers`)**:逐用户开轮(与以前同一段分区逻辑)→ 每个账户一条 `sync-account` → 每个用户补 `prices` / `fx`(不延后)+ `platforms` / `defi-logos`(延后 120s,FOL-88)→ `sendBatch`。**不出网**(测试钉着)。空组合的轮当场收官。
 - **consumer(`server.ts` 的 `queue()` → `consumeMessage`)**:每条一次 `runAtEdge`,跑在同一个 isolate 运行时上(ADR 0054,不另起服务图)。`sync-account` 用**同一个同步内核**(`Sweep.syncUserStream` + `makeSyncServicesLayer`,`only` 收成那一个账户)→ `settle` → `finishIfSettled`。
 - **「最后一个落账的收官」**:`@folio/db` 新增 `syncRounds.finishIfSettled` —— 一条条件 UPDATE(未收官 ∧ `json_each` 里零个 `pending`),并发的 consumer 只有一个抢得到,最后落账的那个必看得到零个 pending。
@@ -72,3 +72,16 @@
 
 **代价(收下的)**:单账户同步开的轮是那个组合的「最近一轮」,面板的「本轮」会报「1 个已同步」直到下一次全量 / cron 覆盖它。手动轮也不再有 keepalive(与 cron 的轮同待遇,见上文「代价」)。**本地开发**:`@cloudflare/vite-plugin` 的 Miniflare 带本地队列(生产者 + consumer 同一个 worker,支持 `delaySeconds` 与重试),`pnpm dev` 照样能同步,但它**串行**消费(一批跑完才派下一批,不认 `max_concurrency`),所以本地一轮 N 个账户是顺序跑的,参考层那几条(打真 CoinGecko)也排在同一条队里。
 
+
+## 补记:手记曲线的历史日价拆成 `daily-prices` 活,读图表只读表(FOL-90)
+
+手记账户不写快照(ADR 0018),曲线由账本 × 每日价现算。那份每日价以前在**读**的时候补:`getPortfolioHistory` / `getAccountHistory` / 带 `after` 的 `getSnapshots` 经 `buildHistoricalPriceAt` 调 `tokens.priceSeries` / `fx.rateSeries`,而这两个是 SWR —— 「今天」永远算没缓存,所以**每看一次图表**每个认得出来的币一发 `coinsMarketChartRange`(法币两发),缺的过去日还要再补。
+
+- **新 kind `daily-prices { userId, tokenIds? }`**(`apps/web/src/lib/server/prices/daily.ts`)。目标 = 用户所有手记账户(含归档)里会画出来的币(`manualDailyPriceTargets`:与曲线同一个 `loadHistoryTokens`、同一道 recognized 门),各从最早一笔活动那天起;法币补日汇率(`fx.fillDaily`,BTC 两腿反算,落 `fiat/issued:<CODE>`),其余补币价(`tokens.fillDaily`)。两者共用 `packages/oracle/entry/src/daily-fill.ts`。
+- **只补过去日**,补到昨天为止。一发区间请求覆盖 ≤ `DAILY_FILL_DAYS_PER_CALL`(365)天(长于三个月上游按日给点,解析便宜)。**「试过哪一段」记在 per-user 缓存**(`daily-cover:<目标>` → `{ lo, hi }`,连续闭区间):只看表的话,上游**就是没有点**的日子(币还没上线、断档)每小时都算「缺」、每小时白打一发。先往后补(`hi` 之后到昨天,升序),再往前补(降序);表里已有整窗的(别的用户补过、FOL-90 之前读路径落过的)直接算试过、不出网。
+- **预算**:一条消息 ≤ `DAILY_PRICES_CALLS_PER_MESSAGE`(8)发区间请求,法币一窗按 2 发记账;× 2 次尝试 = 最坏 16 发 ≤ 50。没取到 25 是因为 10ms CPU 先到(一发一年 = 365 个点解析 + 365 行写;日价写入顺手改成多行 INSERT,30 行一条语句)。8 是**没实测**的保守值,FOL-84 的本地 profile 可以校准。预算用完还有没补完的 → 投**一条**带剩余 id 的后续消息(串行接力,同一个目标的区间不会被两条消息同时推);一发都没花出去(全失败)就不投,等下一个整点。测试按真 fetch 数钉着:三年 × 3 币 + 欧元 → 多条消息、每条 ≤ 16 发,补完重跑零出网。
+- **谁投**:每小时 cron(`hourlyUserJobs`,不延后)—— 过了零点那一小时补一窗「昨天」,其余时候几次缓存读、零出网。外加手记写完之后定向投一条带**这个账户的币 id** 的:加活动(`createManualActivities`)、改活动(`updateManualActivity`,改日期可能把首笔挪早)、建手记账户(`createAccount`)。这三个 server fn 因此与 `syncAccount` 一样走 `runTimedForUser`(`runEffect` 不把 userId 交给 handler);投递失败只记一行,不让已落库的写失败。
+- **读路径只读表**:`priceSeries` / `rateSeries` 零网络 —— 过去日读 `token_daily_prices`;**今天读现价**(代币价表 / 汇率缓存,每小时的 `prices` / `fx` 活在刷)。**不往日价表写今天**:明天它就成了一个「不可变的过去日」,而那其实是某个钟点的价。回源只剩 `fillDaily`。
+- **缺的日子前向填充**(`buildHistoricalPriceAt`,不落库):沿用之前最近一个有价的日子(还没补上的昨天、今天还没现价、上游断档)。第一个有价的日子之前(新币、活还没跑)→ 纯层降级链落账本价②/③,与以前「上游没给」同一条路。
+
+**代价(收下的)**:每用户每小时多一条消息(FOL-88 补记里的「账户数 + 4」成了「+ 5」)。新加的币在它那条定向消息跑完之前(通常秒级)曲线按账本价画。某一窗永久失败(上游不给那么老的数据,如 CoinGecko 免费档一年以前)→ 每小时为它再白打一发(往后那段先补,挡不住「昨天」进表)。cron 的那条与定向 / 后续那条可能并发补同一个币:最坏多打几发、区间写回谁后到听谁的(可能缩回去,下一次再补一遍已有的窗 —— 表里有整窗就不出网)。升级那一刻已有的日价没有「试过」区间,第一次跑按窗读表判定,整窗都在的不出网。

@@ -1,6 +1,7 @@
 import { getLogger } from "@logtape/logtape";
 import { Cause, Effect, Either, Exit } from "effect";
 import { runPruneNotesJob } from "@/lib/server/entry/note-retention";
+import { runDailyPricesJob } from "@/lib/server/prices/daily";
 import { runPricesJob } from "@/lib/server/prices/job";
 import { runReferenceJob } from "@/lib/server/sync/reference";
 import { giveUpQueuedAccount, syncQueuedAccount } from "@/lib/server/sync/round";
@@ -17,6 +18,8 @@ const runJob = (job: Job): Effect.Effect<void, Error> => {
       return syncQueuedAccount(job);
     case "prices":
       return runPricesJob(job);
+    case "daily-prices":
+      return runDailyPricesJob(job);
     case "fx":
     case "platforms":
     case "catalogue":
@@ -37,6 +40,7 @@ const giveUp = (job: Job, reason: string): Effect.Effect<void, Error> => {
     case "sync-account":
       return giveUpQueuedAccount(job, reason);
     case "prices":
+    case "daily-prices":
     case "fx":
     case "platforms":
     case "catalogue":
