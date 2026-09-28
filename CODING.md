@@ -176,10 +176,12 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 
 ### CF Workers 上的状态
 
-- **两种 layer,活得不一样长**(ADR 0054)。app 的 `runtime.ts` 里有一个惰性的 isolate 级
-  `ManagedRuntime`:进它的 layer **跨请求活**(建一次,isolate 回收才没);每请求 `Effect.provide`
+- **两种 layer,活得不一样长**(ADR 0054)。app 的 `runtime.ts` 里有惰性的 isolate 级运行时
+  (手搭的 `Runtime`,见 ADR 0054 第二轮补记 —— 冷 isolate 上 `ManagedRuntime` + Layer 的构建机器
+  本身就是几十毫秒):进它的服务 **跨请求活**(建一次,isolate 回收才没);每请求 `Effect.provide`
   的 layer 仍是 **per-run** 的,每请求重置。跨请求要活、又不该绑在服务图上的东西(限频游标)照旧
-  在模块级。
+  在模块级。**热路径上每次调用都要装的东西别用 Layer 拼**:能直接造成 `Context` 就直接造
+  (`makeSyncServices`),Layer 留给真有依赖图、建一次的地方。
 - **所以官方那些「状态绑 Scope」的组合子要先问它落在哪一种里。** `RateLimiter`(semaphore + 后台
   refill fiber)、`Cache` / `cachedWithTTL`:放在每请求那一侧,每请求一份新的,等于没有;放进
   isolate 运行时,就是一条**跨请求活着的 fiber / timer** —— 下一条。用之前先问:**它的状态活在哪?**

@@ -85,3 +85,7 @@
 - **缺的日子前向填充**(`buildHistoricalPriceAt`,不落库):沿用之前最近一个有价的日子(还没补上的昨天、今天还没现价、上游断档)。第一个有价的日子之前(新币、活还没跑)→ 纯层降级链落账本价②/③,与以前「上游没给」同一条路。
 
 **代价(收下的)**:每用户每小时多一条消息(FOL-88 补记里的「账户数 + 4」成了「+ 5」)。新加的币在它那条定向消息跑完之前(通常秒级)曲线按账本价画。某一窗永久失败(上游不给那么老的数据,如 CoinGecko 免费档一年以前)→ 每小时为它再白打一发(往后那段先补,挡不住「昨天」进表)。cron 的那条与定向 / 后续那条可能并发补同一个币:最坏多打几发、区间写回谁后到听谁的(可能缩回去,下一次再补一遍已有的窗 —— 表里有整窗就不出网)。升级那一刻已有的日价没有「试过」区间,第一次跑按窗读表判定,整窗都在的不出网。
+
+## 补记:`sync-account` 不再经 Layer 与 Stream(FOL-83 第二轮)
+
+上文「`sync-account` 用同一个同步内核(`Sweep.syncUserStream` + `makeSyncServicesLayer`)」改成:**`Sweep.syncOne(userId, accountId)` + `makeSyncServices({ only })`**。内核仍是同一个 —— `syncOne` 做的是 `syncUserStream` 同样的两次读(账户、凭据)、调同一个 `Account.syncAccount`,只是一个账户不走有界并发的流;`makeSyncServices` 是同一份接线造成一份 `Context`,`makeSyncServicesLayer` 就是它外面一层 `Layer.effectContext`(测试照旧用 layer)。省掉的是每条消息一遍的五层 `Layer.mergeAll` 与 Stream 的机器。同一轮还做了:刷价那一批改成一条 `UPDATE … FROM json_each(?)`(`prices` 本机 66 → 39ms)、目录那条活先看 `asOf` 再决定要不要解码整份目录、交易所 note 的数字格式不再拉起 ICU(一个 isolate 里第一次用 Intl 数字格式 ≈15ms)。数字与仍超 10ms 的原因见 `apps/web/scripts/perf/baselines/before-after-2026-09-28.md` 的「第二轮」。
