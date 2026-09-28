@@ -21,7 +21,15 @@
 //
 // 为什么要它、怎么读输出:见 scripts/perf/README.md。
 import { execFile } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { parseArgs, promisify } from "node:util";
 import {
@@ -74,7 +82,7 @@ const SCENARIOS = [
     beforeEach: () => {},
     resultOf: (logs, settled) => {
       const done = logEvent(logs, "daily jobs enqueued");
-      if (!done) return { ok: false, text: "no enqueued log" };
+      if (!done) return legacyDailyResult(logs);
       const drained = drainedResult(settled);
       return {
         ok: drained.ok,
@@ -96,7 +104,7 @@ const SCENARIOS = [
     beforeEach: ({ userId }) => expirePrices(userId),
     resultOf: (logs, settled) => {
       const done = logEvent(logs, "cron sweep enqueued");
-      if (!done) return { ok: false, text: "no enqueued log" };
+      if (!done) return legacySweepResult(logs);
       const rounds = logEvents(logs, "queued round done");
       const total = rounds.reduce((n, r) => n + r.total, 0);
       const synced = rounds.reduce((n, r) => n + r.synced, 0);
@@ -109,6 +117,31 @@ const SCENARIOS = [
     },
   },
 ];
+
+/**
+ * 队列扇出之前(FOL-86 / FOL-88 之前)的代码没有「enqueued」那行:cron 自己把活干完,收尾各打一行。
+ * 留着它们,是为了拿同一个 harness 量改动前的那份代码做前后对比(那时每天那条还在 Worker 里刷映射表)。
+ */
+function legacyDailyResult(logs) {
+  const done = logEvent(logs, "global ref index refresh done");
+  if (!done) return { ok: false, text: "no enqueued log" };
+  return {
+    ok: true,
+    text: `legacy: ref index rows ${done.rows} +${done.inserted}/~${done.updated}/-${done.deleted}`,
+    detail: done,
+  };
+}
+
+function legacySweepResult(logs) {
+  const done = logEvent(logs, "cron sweep done");
+  if (!done) return { ok: false, text: "no enqueued log" };
+  const total = done.ok + done.failed + done.skipped;
+  return {
+    ok: done.failed === 0 && done.skipped === 0,
+    text: `legacy: synced ${done.ok}/${total}`,
+    detail: done,
+  };
+}
 
 /** 队列那半干成没有:投的每一条都收尾了、没有一条放弃 / 进死信 / 解不开。没有队列 → 不判。 */
 function drainedResult(settled) {
@@ -366,6 +399,7 @@ async function settleQueue(queue, readLog, scenario) {
 }
 
 const execFileAsync = promisify(execFile);
+const REF_INDEX_SCRIPT = join(WEB_ROOT, "scripts", "ref-index", "refresh.ts");
 
 /**
  * 用 GitHub Actions 里跑的那个脚本灌 perf 库的映射表(FOL-85)。**必须异步起子进程**:假上游就在本进程里,
@@ -376,12 +410,7 @@ async function refreshRefIndex(coingeckoBase) {
   const t0 = Date.now();
   const { stdout } = await execFileAsync(
     join(WEB_ROOT, "node_modules", ".bin", "tsx"),
-    [
-      "--disable-warning=ExperimentalWarning",
-      join(WEB_ROOT, "scripts", "ref-index", "refresh.ts"),
-      "--local",
-      PERF_STATE_DIR,
-    ],
+    ["--disable-warning=ExperimentalWarning", REF_INDEX_SCRIPT, "--local", PERF_STATE_DIR],
     { env: { ...process.env, COINGECKO_API_BASE: coingeckoBase }, encoding: "utf8" },
   );
   const summary = stdout.trim().split("\n").join(", ");
@@ -620,7 +649,13 @@ async function main() {
 
     // sweep 要全局映射表(链上的币靠它认)。表是空的(刚灌过数据)就先刷一次 —— 用生产那个脚本
     // (`scripts/ref-index/refresh.ts --local`,FOL-85),对着 perf 库、指到假上游。worker 此刻是停着的。
-    if (refIndexRowCount() === 0) {
+    // 没有那个脚本 = 被测的是 FOL-85 之前的代码:映射表由每天那条 cron 在 Worker 里刷,
+    // cron-daily 排在 sweep 前面,它的第一次就把表灌满了。
+    if (refIndexRowCount() === 0 && !existsSync(REF_INDEX_SCRIPT)) {
+      log(
+        "global ref index is empty and scripts/ref-index is absent — cron-daily fills it (legacy)",
+      );
+    } else if (refIndexRowCount() === 0) {
       log(
         "global ref index is empty — refreshing it once with scripts/ref-index (not a Worker job)",
       );

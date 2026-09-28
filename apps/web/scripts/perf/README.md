@@ -223,3 +223,14 @@ Metadata Read-Only);个人 token 加 Workers Observability 权限也读不了日
   `withServerFnTiming` 打的「server fn」那行(带 `handler`)与同一个 requestId 的调用日志对上,
   而事件接口按自适应采样只回一部分。`n` 就是样本数,别拿它算总量。
 - 默认只看**当前线上版本**:换过版本后旧数字不代表现在。新版本刚上线、还没有请求时表是空的。
+
+## perf:requests —— 开一次页面发多少请求
+
+```sh
+PLAYWRIGHT_BROWSERS_PATH=… pnpm --filter @folio/web perf:requests --no-build
+```
+
+同一个构建产物 + perf 库 + 假上游,Playwright 的 Chromium 登录后冷开 `/`,等网络静下来,再 `reload()`
+(数据没变)。按类数 `/_serverFn/*`、`/api/*`、`/api/logo/*`:`server` 那一栏取自 wrangler dev 的请求日志
+(真进了 Worker 的),浏览器侧计数与逐 server fn 的明细在 `summary.json`(`.wrangler/perf-state/runs/requests-<时间戳>/`)。
+冷开时 app 会自己再加载一次文档(SW 安装后),所以冷开数是两次页面加载的和 —— 看 `navigations`。

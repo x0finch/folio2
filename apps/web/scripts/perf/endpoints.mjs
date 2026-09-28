@@ -29,7 +29,7 @@ const MANIFEST_ENTRY =
   /"([0-9a-f]{64})":\s*\{\s*functionName: "([A-Za-z0-9_$]+)_createServerFn_handler"/g;
 
 /** 构建产物里的 handler 名 → server fn id。 */
-function serverFnIds() {
+export function serverFnIds() {
   const file = readdirSync(ASSETS_DIR).find((f) => f.startsWith(RESOLVER_PREFIX));
   if (!file) throw new Error(`no server-fn resolver manifest in ${ASSETS_DIR} — build first`);
   const src = readFileSync(join(ASSETS_DIR, file), "utf8");

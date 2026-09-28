@@ -353,7 +353,8 @@ function seedDailyTotals(db) {
   const file = readdirSync(MIGRATIONS_DIR).find(
     (f) => f.endsWith(".sql") && f.includes(DAILY_TOTALS_TABLE),
   );
-  if (!file) throw new Error(`no ${DAILY_TOTALS_TABLE} migration under ${MIGRATIONS_DIR}`);
+  // 没有这条迁移 = 被测的是 FOL-91 之前的代码(前后对比时的 BEFORE 那份),那时没有这张表 —— 跳过。
+  if (!file) return null;
   const backfill = readFileSync(join(MIGRATIONS_DIR, file), "utf8")
     .split("--> statement-breakpoint")
     .find((stmt) => stmt.includes(`INSERT OR REPLACE INTO \`${DAILY_TOTALS_TABLE}\``));
