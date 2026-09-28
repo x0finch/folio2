@@ -27,7 +27,7 @@ import {
   SnapshotStore as SyncSnapshotStore,
   TokenOracle,
 } from "@folio/sync";
-import { Effect, Layer } from "effect";
+import { Context, Effect, Layer } from "effect";
 import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";
 import { revalue } from "./revalue";
@@ -154,140 +154,130 @@ interface SyncScope {
   only: ReadonlySet<string>;
 }
 
-export const makeSyncServicesLayer = (
+/**
+ * 同一份接线,**造成一份 context 而不是一张 Layer**(FOL-83 第二轮)。队列 consumer 每条
+ * `sync-account` 消息装一次:以前是 `Layer.mergeAll` 五张子 layer(并行合并时每张 fork 一条 fiber、
+ * 一张 memo 表、一个 scope),在一条总共该 10ms 的消息里是实打实的几毫秒;四个能力本身只是闭包。
+ * 出网那一格(`FolioHttpClient`)仍经它自己的 layer 建 —— 那是 `@effect/platform` 的东西,
+ * 这里不去拆它。`makeSyncServicesLayer` 就是这一份外面包一层,两条路逐字同一套接线。
+ */
+export const makeSyncServices = (
   scope?: SyncScope,
-): Layer.Layer<
-  SyncServices,
+): Effect.Effect<
+  Context.Context<SyncServices>,
   never,
   // 端口那八个不在这里(#504 T17):`mint` / `revalue` 自 T12 起都经聚合 `Oracle`。
-  // `DbRequest`:这一轮是谁的、那一个 D1 句柄 —— 建这一层时各服务抓一份(见下),
+  // `DbRequest`:这一轮是谁的、那一个 D1 句柄 —— 建的时候各服务抓一份(见下),
   // 于是 `@folio/sync` 那四个能力的 `R` 仍是 `never`。
   Database | OracleServices | DbRequest
 > =>
-  Layer.unwrapEffect(
-    Effect.sync(() => {
-      // 一轮 sync 共一份 seed 收集器:取余额那头收,写快照那头取(见 SeedCollector 的定义)。
-      // 建在 `unwrapEffect` 里而不是各子 layer 里 —— 两个能力要共用同一份,而 `Layer.mergeAll`
-      // 的成员之间传不了值。
-      const seeds = createSeedCollector();
-      return Layer.mergeAll(
-        // 出网:provider 声明「我要出网」,这里满足它。
-        FolioHttpClient,
-        Layer.effect(
-          SyncAccountStore,
-          Effect.gen(function* () {
-            const { accounts } = yield* Database;
-            // 这一轮的连接与用户(ADR 0054):db 的 op 在跑的那一刻才取它们,而编排那头的能力
-            // `R` 是 `never` —— 所以在建这一层(= 这一轮)的时候抓一份,每个方法出口 provide 进去。
-            // 一轮一层,抓的就是这一轮的那一份,不会串到别的请求。
-            const request = yield* Effect.context<DbRequest>();
-            // **这一轮跑哪些账户,开轮那一步已经定死了**(ADR 0048):队列那条路收口成消息里的
-            // 那一个账户,不给就不收口。
-            const only = scope?.only ?? null;
-            return {
-              // 归档账户跳过同步(不产生新快照);manual 不是同步源(ADR 0018:当下值由 creds 现造,
-              // 不写快照)→ 一并过滤。编排只见活跃的可同步账户(判别走纯 isSyncableAccount)。
-              list: () =>
-                Effect.map(accounts.list(), (rows) =>
-                  rows.filter(isSyncableAccount).filter((a) => only == null || only.has(a.id)),
-                ).pipe(Effect.provide(request), asDep("listAccounts")),
-              // 批量取全用户 creds(消 syncAccount 的 N+1)
-              rawCreds: () =>
-                accounts.listRawCreds().pipe(Effect.provide(request), asDep("listRawCreds")),
-            };
+  Effect.gen(function* () {
+    // 一轮 sync 共一份 seed 收集器:取余额那头收,写快照那头取(见 SeedCollector 的定义)。
+    const seeds = createSeedCollector();
+    const { accounts, snapshots, settings } = yield* Database;
+    // 这一轮的连接与用户(ADR 0054):db 的 op 在跑的那一刻才取它们,而编排那头的能力
+    // `R` 是 `never` —— 所以在建这一份(= 这一轮)的时候抓一份,每个方法出口 provide 进去。
+    // 一轮一份,抓的就是这一轮的那一份,不会串到别的请求。
+    const request = yield* Effect.context<DbRequest>();
+    // 参考层那几个服务已经在外面那次装配里装好了 —— 抓住 context,别让它们
+    // 漏进本服务的 `R`(CODING.md:服务对外的 `R` 恒是 `never`)。
+    // **抓的是服务不是端口**(#504 T17):`mint` / `revalue` 现在都经聚合 `Oracle`,
+    // 端口那八个本来就不该出现在这一层。连这一轮的连接与用户一起抓(同上面 `request`)。
+    const oracle = yield* Effect.context<OracleServices | DbRequest>();
+    // 出网:provider 声明「我要出网」,这里满足它。
+    const http = yield* Effect.provide(Effect.context<ProviderNeeds>(), FolioHttpClient);
+    // **这一轮跑哪些账户,开轮那一步已经定死了**(ADR 0048):队列那条路收口成消息里的
+    // 那一个账户,不给就不收口。
+    const only = scope?.only ?? null;
+    // 估值模式一轮读一次,**惰性**:纯链上的一轮同步压根不重估,不该为此白发一次 D1 查询。
+    // 以前得按 userId 分桶缓存(一份 deps 跨多用户),现在一个用户一份,一个闭包变量就够。
+    let mode: ValuationMode | undefined;
+    const modeOnce = Effect.suspend(() =>
+      mode !== undefined
+        ? Effect.succeed(mode)
+        : Effect.map(settings.get().pipe(Effect.provide(request)), (row) => {
+            mode = row.valuationMode;
+            return row.valuationMode;
           }),
-        ),
-        Layer.effect(
-          SyncSnapshotStore,
-          Effect.map(
-            Effect.zip(Database, Effect.context<DbRequest>()),
-            ([{ snapshots }, request]) => ({
-              // **同步落的快照按钟点折叠**(#461):同账户、同一个钟点里已有的那份被这次覆盖。
-              // 同步写的是「此刻的状态」,而读侧的趋势图本来就只画每个钟点的最后一个点 —— 同钟点里
-              // 更早的那些份存了也看不到。开关默认是关的(默认追加),导入那条路要的正是默认值:
-              // 它恢复的是历史事实,不能折叠。判据与理由见 `SnapshotStore.write` 的文档注释。
-              // `orDie` 在 `asDep` 之前:`write` 会 fail `NotFound`(账户归属断言),而这条路的
-              // accountId 来自本用户自己的账户列表 —— 到这一步还找不到就是 bug。`orDie` 把它变回
-              // defect,`asDep` 再照旧收成 `SyncDepError`,与改造前逐字一致。
-              write: (accountId: string, input: WriteSnapshotInput) =>
-                snapshots
-                  .write(accountId, input, { collapseSameHour: true })
-                  .pipe(Effect.provide(request), Effect.orDie, asDep("writeSnapshot")),
-            }),
-          ),
-        ),
-        Layer.succeed(BalanceSource, {
-          // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/
-          // 取数在其内);SECRETS_KEY 只在本层(app)见。无 manifest 视为数据错误(由 syncAccount
-          // 逐账户隔离,不阻断其余)。
-          fetch: (account, stored) => {
-            const cid = account.connectorId;
-            const manifest = getConnector(connectorRegistry, cid);
-            if (!manifest) {
-              return Effect.fail(
-                new ConnectorFailure({ message: `no connector for connectorId ${cid}` }),
-              );
-            }
-            // 「这个用户同时在飞几发上游」以前由 cron 递进来的一把闸管(多轮共用);FOL-86 起 cron 的
-            // 账户一条消息一次调用,闸递不过去,改由队列 consumer 的 `max_concurrency` 顶上(wrangler.jsonc)。
-            return fetchViaConnector(cid, manifest, account, stored, seeds);
-          },
-        }),
-        Layer.effect(
-          TokenOracle,
-          Effect.gen(function* () {
-            const settings = (yield* Database).settings;
-            // 参考层那几个服务已经在外面那次装配里装好了 —— 抓住 context,别让它们
-            // 漏进本服务的 `R`(CODING.md:服务对外的 `R` 恒是 `never`)。
-            // **抓的是服务不是端口**(#504 T17):`mint` / `revalue` 现在都经聚合 `Oracle`,
-            // 端口那八个本来就不该出现在这一层。连这一轮的连接与用户一起抓(同上面 `request`)。
-            const oracle = yield* Effect.context<OracleServices | DbRequest>();
-            // 估值模式一轮读一次,**惰性**:纯链上的一轮同步压根不重估,不该为此白发一次 D1 查询。
-            // 以前得按 userId 分桶缓存(一份 deps 跨多用户),现在一个用户一层,一个闭包变量就够。
-            let mode: ValuationMode | undefined;
-            const modeOnce = Effect.suspend(() =>
-              mode !== undefined
-                ? Effect.succeed(mode)
-                : Effect.map(settings.get().pipe(Effect.provide(oracle)), (row) => {
-                    mode = row.valuationMode;
-                    return row.valuationMode;
-                  }),
+    );
+    return Context.make(SyncAccountStore, {
+      // 归档账户跳过同步(不产生新快照);manual 不是同步源(ADR 0018:当下值由 creds 现造,
+      // 不写快照)→ 一并过滤。编排只见活跃的可同步账户(判别走纯 isSyncableAccount)。
+      list: () =>
+        Effect.map(accounts.list(), (rows) =>
+          rows.filter(isSyncableAccount).filter((a) => only == null || only.has(a.id)),
+        ).pipe(Effect.provide(request), asDep("listAccounts")),
+      // 批量取全用户 creds(消 syncAccount 的 N+1)
+      rawCreds: () => accounts.listRawCreds().pipe(Effect.provide(request), asDep("listRawCreds")),
+    }).pipe(
+      Context.add(SyncSnapshotStore, {
+        // **同步落的快照按钟点折叠**(#461):同账户、同一个钟点里已有的那份被这次覆盖。
+        // 同步写的是「此刻的状态」,而读侧的趋势图本来就只画每个钟点的最后一个点 —— 同钟点里
+        // 更早的那些份存了也看不到。开关默认是关的(默认追加),导入那条路要的正是默认值:
+        // 它恢复的是历史事实,不能折叠。判据与理由见 `SnapshotStore.write` 的文档注释。
+        // `orDie` 在 `asDep` 之前:`write` 会 fail `NotFound`(账户归属断言),而这条路的
+        // accountId 来自本用户自己的账户列表 —— 到这一步还找不到就是 bug。`orDie` 把它变回
+        // defect,`asDep` 再照旧收成 `SyncDepError`,与改造前逐字一致。
+        write: (accountId: string, input: WriteSnapshotInput) =>
+          snapshots
+            .write(accountId, input, { collapseSameHour: true })
+            .pipe(Effect.provide(request), Effect.orDie, asDep("writeSnapshot")),
+      }),
+      Context.add(BalanceSource, {
+        // 取余额:account.connectorId → connector manifest → fetchViaConnector(缺凭据/解密/校验/
+        // 取数在其内);SECRETS_KEY 只在本层(app)见。无 manifest 视为数据错误(由 syncAccount
+        // 逐账户隔离,不阻断其余)。
+        fetch: (account, stored) => {
+          const cid = account.connectorId;
+          const manifest = getConnector(connectorRegistry, cid);
+          if (!manifest) {
+            return Effect.fail(
+              new ConnectorFailure({ message: `no connector for connectorId ${cid}` }),
             );
-            return {
-              // 认币:每笔余额的 tokenRef 换成 token_id,认定就此冻进快照(ADR 0021 / #200)。
-              // 上游失败归 `SyncDepError` —— 编排把 mint / revalue 各当一个 best-effort 降级点
-              // (见 account.ts 的 bestEffort),**不能让它变成 defect**,否则整个账户这轮就没了。
-              mint: (rows) => {
-                const refs = rows.flatMap((b) =>
-                  b.tokenRef ? [{ ref: b.tokenRef, seed: seeds.of(b.tokenRef, b.symbol) }] : [],
-                );
-                if (refs.length === 0) {
-                  return Effect.succeed(new Map<string, string>() as ReadonlyMap<string, string>);
-                }
-                return Effect.flatMap(Oracle, (o) => o.tokens.mint(refs)).pipe(
-                  Effect.provide(oracle),
-                  Effect.mapError((e) => depError("mint", e)),
-                  asDep("mint"),
-                );
-              },
-              // 写快照前重估(oracle 多源 Phase 3):按 mode 定 value + 非盯市类型捕获 selfPrice。
-              // 盯市语义由 connector 的 manifest.valuation 声明(不靠 app 硬编码名单)。
-              revalue: (connectorId, rows, idByRef) =>
-                Effect.flatMap(modeOnce, (valuation) =>
-                  revalue(
-                    getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
-                    rows,
-                    idByRef,
-                    valuation,
-                  ),
-                ).pipe(
-                  Effect.provide(oracle),
-                  Effect.mapError((e) => depError("revalue", e)),
-                  asDep("revalue"),
-                ),
-            };
-          }),
-        ),
-      );
-    }),
-  );
+          }
+          // 「这个用户同时在飞几发上游」以前由 cron 递进来的一把闸管(多轮共用);FOL-86 起 cron 的
+          // 账户一条消息一次调用,闸递不过去,改由队列 consumer 的 `max_concurrency` 顶上(wrangler.jsonc)。
+          return fetchViaConnector(cid, manifest, account, stored, seeds);
+        },
+      }),
+      Context.add(TokenOracle, {
+        // 认币:每笔余额的 tokenRef 换成 token_id,认定就此冻进快照(ADR 0021 / #200)。
+        // 上游失败归 `SyncDepError` —— 编排把 mint / revalue 各当一个 best-effort 降级点
+        // (见 account.ts 的 bestEffort),**不能让它变成 defect**,否则整个账户这轮就没了。
+        mint: (rows) => {
+          const refs = rows.flatMap((b) =>
+            b.tokenRef ? [{ ref: b.tokenRef, seed: seeds.of(b.tokenRef, b.symbol) }] : [],
+          );
+          if (refs.length === 0) {
+            return Effect.succeed(new Map<string, string>() as ReadonlyMap<string, string>);
+          }
+          return Effect.flatMap(Oracle, (o) => o.tokens.mint(refs)).pipe(
+            Effect.provide(oracle),
+            Effect.mapError((e) => depError("mint", e)),
+            asDep("mint"),
+          );
+        },
+        // 写快照前重估(oracle 多源 Phase 3):按 mode 定 value + 非盯市类型捕获 selfPrice。
+        // 盯市语义由 connector 的 manifest.valuation 声明(不靠 app 硬编码名单)。
+        revalue: (connectorId, rows, idByRef) =>
+          Effect.flatMap(modeOnce, (valuation) =>
+            revalue(
+              getConnector(connectorRegistry, connectorId)?.valuation === "mark-to-market",
+              rows,
+              idByRef,
+              valuation,
+            ),
+          ).pipe(
+            Effect.provide(oracle),
+            Effect.mapError((e) => depError("revalue", e)),
+            asDep("revalue"),
+          ),
+      }),
+      Context.merge(http),
+    );
+  });
+
+export const makeSyncServicesLayer = (
+  scope?: SyncScope,
+): Layer.Layer<SyncServices, never, Database | OracleServices | DbRequest> =>
+  Layer.effectContext(makeSyncServices(scope));

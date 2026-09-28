@@ -7,7 +7,7 @@ import {
   ConnectorUnavailableError,
 } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
-import { Duration, Effect, Fiber, type Layer, TestClock, TestContext } from "effect";
+import { Duration, Effect, Fiber, type Layer, Option, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import { depError, type FetchOutcome, Sweep, type SyncLogger, type SyncServices } from "../src";
 // Effect 版不对外导出(公开出口只有 Promise 那套)—— 包内测试直接摸内部模块、自己 provide 服务。
@@ -170,6 +170,42 @@ describe("syncUser — 缺凭据跳过 / 失败隔离", () => {
     expect(byId.bad.error).toContain("boom");
     expect(writes).toHaveLength(1);
     expect(writes[0].accountId).toBe("good");
+  });
+});
+
+// 队列 consumer 那条路(一条消息一个账户):不经 Stream,但必须与 `syncUser` 跑同一个
+// `syncAccount`、拿到同一份凭据 —— 这一组钉「只跑它一个」「名单外 → none」「凭据按 id 对上」。
+describe("syncOne — 只同步名单里的那一个账户", () => {
+  it("只跑指定的那个,凭据按 id 递给它;别的账户不取数、不写快照", async () => {
+    const seen: Array<{ id: string; stored: Record<string, string> }> = [];
+    const { layer, writes } = makeServices([account({ id: "x" }), account({ id: "y" })], {
+      rawCreds: [
+        { id: "x", creds: JSON.stringify({ k: "for-x" }) },
+        { id: "y", creds: JSON.stringify({ k: "for-y" }) },
+      ],
+      fetch: (acc, stored) => {
+        seen.push({ id: acc.id, stored });
+        return Effect.succeed(ok([bal("BTC", 5)]));
+      },
+    });
+    const result = await Effect.runPromise(Sweep.syncOne("u1", "y").pipe(Effect.provide(layer)));
+    expect(Option.getOrThrow(result)).toMatchObject({ accountId: "y", ok: true, totalUsd: 5 });
+    expect(seen).toEqual([{ id: "y", stored: { k: "for-y" } }]);
+    expect(writes.map((w) => w.accountId)).toEqual(["y"]);
+  });
+
+  it("名单里没有它 → none,一发都不取", async () => {
+    let fetched = 0;
+    const { layer, writes } = makeServices([account({ id: "x" })], {
+      fetch: () => {
+        fetched++;
+        return Effect.succeed(ok([]));
+      },
+    });
+    const result = await Effect.runPromise(Sweep.syncOne("u1", "gone").pipe(Effect.provide(layer)));
+    expect(Option.isNone(result)).toBe(true);
+    expect(fetched).toBe(0);
+    expect(writes).toHaveLength(0);
   });
 });
 

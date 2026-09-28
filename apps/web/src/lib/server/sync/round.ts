@@ -8,7 +8,7 @@ import {
 } from "@folio/db";
 import { type AccountSyncResult, Sweep } from "@folio/sync";
 import { getLogger } from "@logtape/logtape";
-import { Cause, Chunk, Clock, Effect, Option, Stream } from "effect";
+import { Cause, Clock, Effect, Option } from "effect";
 import { z } from "zod";
 import { dataFreshness } from "@/lib/core/sync-status";
 import type { SyncAccountJob } from "@/lib/server/jobs/message";
@@ -16,7 +16,7 @@ import { type Enqueued, enqueue } from "@/lib/server/jobs/queue";
 import { hourlyUserJobs } from "@/lib/server/jobs/schedule";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { forUser, forUserDb } from "@/lib/server/runtime";
-import { makeSyncServicesLayer } from "./deps";
+import { makeSyncServices } from "./deps";
 import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 
 // 一轮同步的**服务端事实**(ADR 0048):开轮、读进度,前端与 cron 共用这两个方法。
@@ -433,8 +433,8 @@ const settleQueued = (
 /**
  * `sync-account` 的 consumer:**同步恰好这一个账户**,落账,够了就收官。
  *
- * 同步走的是**同一个内核**(`Sweep.syncUserStream` + `makeSyncServicesLayer`,`only` 收口成这一个
- * 账户)—— 取余额 / 重试 / 认币 / 重估 / 写快照与手动轮逐字相同,不另写一条单账户的路。
+ * 同步走的是**同一个内核**(`Sweep.syncOne` —— 与 `syncUserStream` 同一个 `syncAccount` —— +
+ * `makeSyncServices`,`only` 收口成这一个账户)—— 取余额 / 重试 / 认币 / 重估 / 写快照与手动轮逐字相同,不另写一条单账户的路。
  * 名单里没它了(两次投递之间被归档 / 删掉)→ 记成 `skipped`:它不是失败,只是这一轮没事可做。
  *
  * 逐账户的失败(上游挂了、缺凭据)在内核里已经收成 `failed` / `needs-keys`,**不走队列重试**。
@@ -447,13 +447,13 @@ export const syncQueuedAccount = (job: SyncAccountJob): Effect.Effect<void, Erro
       getLogger(["folio", "jobs"]).info("stale sync job skipped", { accountId: job.accountId });
       return;
     }
-    const results = yield* Sweep.syncUserStream(job.userId).pipe(
-      Stream.runCollect,
-      Effect.provide(makeSyncServicesLayer({ only: new Set([job.accountId]) })),
-    );
+    // 服务造成一份 context 直接给(不经 Layer)、单账户不经 Stream —— 同一套接线、同一个
+    // `syncAccount`,只是省掉每条消息一遍的 Layer 构建与流机器(FOL-83 第二轮)。
+    const services = yield* makeSyncServices({ only: new Set([job.accountId]) });
+    const result = yield* Sweep.syncOne(job.userId, job.accountId).pipe(Effect.provide(services));
     yield* settleQueued(
       job,
-      Option.match(Chunk.head(results), {
+      Option.match(result, {
         onNone: () => ({ status: "skipped" as const }),
         onSome: (r) => ({
           status: statusOf(r),

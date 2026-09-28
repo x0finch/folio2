@@ -1,4 +1,4 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Chunk, Effect, Option, Stream } from "effect";
 import { syncAccount } from "./account";
 import { SYNC_CONCURRENCY } from "./constants";
 import type { SyncDepError } from "./errors";
@@ -43,3 +43,22 @@ export const syncUser = (userId: string): Effect.Effect<SyncResult, SyncDepError
     Stream.runCollect,
     Effect.map((chunk) => ({ results: Chunk.toArray(chunk) })),
   );
+
+// **只同步一个账户**(队列 consumer 一条消息一个账户,FOL-86)。与 `syncUserStream` 同样的两次读、
+// 同一个 `syncAccount`,只是不经 Stream:一个账户用不着有界并发的流(`Stream.unwrap` + `mapEffect`
+// 的队列、子 fiber、分块),而那套机器在一条总共该 10ms 的消息里是实打实的开销(FOL-83 第二轮)。
+// 名单里没有它(两次投递之间被归档 / 删了,或不是可同步账户)→ `none`,与流的「一个都没产出」同义。
+export const syncOne = (
+  userId: string,
+  accountId: string,
+): Effect.Effect<Option.Option<AccountSyncResult>, SyncDepError, SyncServices> =>
+  Effect.gen(function* () {
+    const store = yield* AccountStore;
+    const [accounts, rawList] = yield* Effect.all([store.list(), store.rawCreds()], {
+      concurrency: 2,
+    });
+    const account = accounts.find((a) => a.id === accountId);
+    if (!account) return Option.none();
+    const creds = rawList.find((r) => r.id === accountId)?.creds ?? null;
+    return Option.some(yield* syncAccount(userId, account, creds));
+  });
