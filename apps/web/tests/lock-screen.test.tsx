@@ -19,6 +19,23 @@ vi.mock("@/lib/core/auth-client", () => ({
   signIn: { passkey: vi.fn(), email: vi.fn() },
   signOut: signOutSpy,
 }));
+// 查询缓存那两个出口(FOL-94)包一层 spy,**实现照旧是真的**:锁屏 / 登出要真的把内存里的查询清掉。
+// 真实现底下是 IndexedDB,jsdom 没有 —— 它自己吞掉那个错误(持久化是锦上添花),不影响断言。
+const { lockSpy, forgetSpy } = vi.hoisted(() => ({ lockSpy: vi.fn(), forgetSpy: vi.fn() }));
+vi.mock("@/lib/queries/persist", async (orig) => {
+  const real = await orig<typeof import("@/lib/queries/persist")>();
+  return {
+    ...real,
+    lockQueryCache: (qc: QueryClient) => {
+      lockSpy(qc);
+      return real.lockQueryCache(qc);
+    },
+    forgetQueryCache: (qc: QueryClient) => {
+      forgetSpy(qc);
+      return real.forgetQueryCache(qc);
+    },
+  };
+});
 vi.mock("@tanstack/react-router", async (orig) => ({
   ...(await orig<object>()),
   useNavigate: () => navigateSpy,
@@ -77,9 +94,11 @@ describe("LockScreen 第一道门:开关关着不挂闲置机制", () => {
     armDevice();
     const spy = vi.spyOn(window, "addEventListener");
     render(
-      <LockScreen>
-        <span>hi</span>
-      </LockScreen>,
+      withIntl(
+        <LockScreen>
+          <span>hi</span>
+        </LockScreen>,
+      ),
     );
     expect(spy.mock.calls.map((c) => c[0])).toContain("mousemove");
   });
@@ -96,9 +115,11 @@ describe("LockScreen 没有本机凭据记录也照锁", () => {
     armSwitch(); // 故意不 armDevice()
     const spy = vi.spyOn(window, "addEventListener");
     render(
-      <LockScreen>
-        <span>hi</span>
-      </LockScreen>,
+      withIntl(
+        <LockScreen>
+          <span>hi</span>
+        </LockScreen>,
+      ),
     );
     expect(spy.mock.calls.map((c) => c[0])).toContain("mousemove");
   });
@@ -276,5 +297,51 @@ describe("LockScreen 锁定时可登出", () => {
       ),
     );
     expect(queryByText("secret-content")).not.toBeNull(); // 内容可见 = 没被锁
+  });
+});
+
+// FOL-94:查询缓存存进了 IndexedDB,锁屏与登出都得把它清掉 —— 否则「锁着」只是 DOM 上锁着。
+describe("LockScreen 清查询缓存", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    lockSpy.mockClear();
+    forgetSpy.mockClear();
+    navigateSpy.mockClear();
+  });
+
+  const renderLockedWith = (client: QueryClient) => {
+    localStorage.setItem("folio_lock_timeout", "1");
+    armDevice();
+    armSwitch();
+    localStorage.setItem("folio_lock_locked", "1");
+    return render(
+      <QueryClientProvider client={client}>
+        <IntlProvider locale="en" messages={messages.en}>
+          <LockScreen>
+            <span>secret-content</span>
+          </LockScreen>
+        </IntlProvider>
+      </QueryClientProvider>,
+    );
+  };
+
+  it("锁上 → 清盘,内存里没人挂着的查询一并扔掉", async () => {
+    const client = new QueryClient();
+    client.setQueryData(["accounts", "list", "pf"], [{ id: "a1" }]);
+    renderLockedWith(client);
+
+    await waitFor(() => expect(lockSpy).toHaveBeenCalledWith(client));
+    expect(client.getQueryData(["accounts", "list", "pf"])).toBeUndefined();
+  });
+
+  it("锁屏上登出 → 清盘 + 清空内存", async () => {
+    const client = new QueryClient();
+    const { getByRole } = renderLockedWith(client);
+    client.setQueryData(["settings", "valuation"], { hideBalances: true });
+
+    fireEvent.click(getByRole("button", { name: /sign out/i }));
+    await waitFor(() => expect(navigateSpy).toHaveBeenCalledWith({ to: "/login" }));
+    expect(forgetSpy).toHaveBeenCalledWith(client);
+    expect(client.getQueryCache().getAll()).toHaveLength(0);
   });
 });

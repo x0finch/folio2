@@ -16,6 +16,7 @@ import { handleListPortfolios } from "@/lib/server/portfolios/list";
 import { handleGetCurrencyPreference } from "@/lib/server/preferences/currency";
 import type { UserServices } from "@/lib/server/runtime";
 import { handleGetDataStats } from "@/lib/server/settings/data-stats";
+import { handleGetDataVersion } from "@/lib/server/settings/data-version";
 import { handleGetProviderKeyStatus } from "@/lib/server/settings/provider-keys";
 import { handleGetValuationSettings } from "@/lib/server/settings/valuation";
 import { handleGetSyncRound } from "@/lib/server/sync/round";
@@ -141,6 +142,7 @@ const cases = (f: Fixture): { name: string; fn: string; run: Run }[] => [
     run: () => handleGetPortfolioHistory({ range: "1y" }),
   },
   { name: "getDataStats", fn: "getDataStats", run: () => handleGetDataStats() },
+  { name: "getDataVersion", fn: "getDataVersion", run: () => handleGetDataVersion() },
   {
     name: "getValuationSettings",
     fn: "getValuationSettings",

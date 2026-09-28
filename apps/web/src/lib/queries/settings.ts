@@ -1,7 +1,13 @@
 import { queryOptions } from "@tanstack/react-query";
-import { getDataStats, getProviderKeyStatus, getValuationSettings } from "@/lib/server/settings";
-import { STALE_TIME } from "./constants";
-import { settingsKeys } from "./keys";
+import {
+  getDataStats,
+  getDataVersion,
+  getProviderKeyStatus,
+  getValuationSettings,
+} from "@/lib/server/settings";
+import { POLL_INTERVAL, STALE_TIME } from "./constants";
+import type { DataVersionOptions } from "./data-version";
+import { dataVersionKeys, settingsKeys } from "./keys";
 
 // 设置域的读取入口 —— 与 `lib/server/settings` 的三个读取型 server fn 对应。
 
@@ -28,3 +34,12 @@ export const dataStatsQuery = () =>
     queryFn: () => getDataStats(),
     staleTime: STALE_TIME.settings,
   });
+
+// 数据版本号(FOL-94,判据与比较在 `data-version.ts`)。`staleTime: 0`:它就是用来「每次都问」的 ——
+// 回到页面(`refetchOnWindowFocus` 缺省开)与可见时每分钟一次。
+export const dataVersionQuery = (): DataVersionOptions => ({
+  queryKey: dataVersionKeys.all,
+  queryFn: () => getDataVersion(),
+  staleTime: 0,
+  refetchInterval: POLL_INTERVAL.dataVersion,
+});

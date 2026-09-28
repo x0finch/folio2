@@ -60,6 +60,7 @@ const ENDPOINTS = [
   { key: "auth-get-session", label: "GET /api/auth/get-session", path: "/api/auth/get-session" },
   { key: "fn-getSession", fn: "getSession" },
   { key: "fn-getValuationSettings", fn: "getValuationSettings" },
+  { key: "fn-getDataVersion", fn: "getDataVersion" },
   { key: "fn-listPortfolios", fn: "listPortfolios" },
   { key: "fn-listAccounts", fn: "listAccounts", data: ({ portfolioId }) => ({ portfolioId }) },
   {

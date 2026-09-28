@@ -8,11 +8,12 @@ import { signIn, signOut } from "@/lib/core/auth-client";
 import { clearIdleLockState, useIdleLock } from "@/lib/hooks/use-idle-lock";
 import { useIdleTimeout } from "@/lib/hooks/use-idle-timeout";
 import { useLockDevice } from "@/lib/hooks/use-lock-device";
+import { forgetQueryCache, lockQueryCache, queryPersistence } from "@/lib/queries/persist";
 import { AuthShell } from "@/routes/-login/auth-shell";
 
 // 应用层闲置锁屏(ADR 0029 / #291）。父组件包裹 —— 锁定时**卸载 children**(不只是遮罩盖住):
 // DOM 里不留内容,懂开发的人删掉遮罩也看不到底下数据。代价 = 组件本地态(滚动 / 展开 / 半填表单)丢失;
-// 数据本身由更外层 QueryClient 缓存,重挂从缓存出、不重拉。防不住直接打 server fn / 读本机 D1(那层要
+// 锁上时查询缓存也清掉(内存里没挂着的 + IndexedDB 那份,FOL-94),解锁重挂时重拉。防不住直接打 server fn / 读本机 D1(那层要
 // 服务端锁),此层只封前端 DOM。逻辑在 useIdleLock hook;这里只管样子 + 解锁(复用 signIn,会话不销毁)。
 //
 // **解锁只认 passkey**(#353)。曾经还收账户密码,并特意为密码管理器代填做了隐藏 username +
@@ -37,8 +38,17 @@ export function LockScreen({ children }: { children: ReactNode }) {
 // 卸载本组件、清掉监听与定时器 —— 无需在 hook 里对 null 层层设防。
 function ActiveLockScreen({ timeoutMs, children }: { timeoutMs: number; children: ReactNode }) {
   const { locked, unlock } = useIdleLock(timeoutMs);
+  const queryClient = useQueryClient();
+  // 锁上 → 清掉存进 IndexedDB 的查询缓存、停写,内存里没人挂着的查询一并扔掉(FOL-94):
+  // 锁屏防的是「顺手打开这台机器的人」,那份缓存就是整个组合,留在盘上等于没锁。
+  // 解锁(或本组件卸载)→ 接着写;页面重挂时数据重新拉。
+  useEffect(() => {
+    if (!locked) return;
+    void lockQueryCache(queryClient);
+    return () => queryPersistence().resume(queryClient);
+  }, [locked, queryClient]);
   // 锁定 → 用锁屏**替换** children(卸载,不叠加):DOM 里不留内容,删遮罩也看不到底下数据。
-  // 解锁重挂,数据从更外层 QueryClient 缓存出,不重拉;丢的只是组件本地态(滚动/展开/半填表单)。
+  // 解锁重挂,数据重新拉(锁上时缓存已清,见上);另丢组件本地态(滚动/展开/半填表单)。
   return locked ? <LockOverlay onUnlock={unlock} /> : children;
 }
 
@@ -92,7 +102,8 @@ function LockOverlay({ onUnlock }: { onUnlock: () => void }) {
   async function onSignOut() {
     setBusy(true);
     clearIdleLockState();
-    queryClient.clear();
+    // 内存与 IndexedDB 里的查询缓存一起清(FOL-94),并且忘掉是谁 —— 之后卸载时的 `resume` 不再写。
+    await forgetQueryCache(queryClient);
     try {
       await signOut();
     } finally {

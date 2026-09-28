@@ -448,3 +448,28 @@ export const manualActivity = sqliteTable(
     index("manual_activity_token_id_occurred_at_idx").on(t.tokenId, t.occurredAt),
   ],
 );
+
+// 每个用户一行的**数据版本号**(FOL-94):这个用户任何一处看得见的数据变了,它就 +1。
+// 浏览器把查询缓存存进 IndexedDB,回到页面 / 重开时只问这一个数(`getDataVersion`),变了才重拉。
+//
+// **不靠各个写 op 记得去抬它 —— 靠触发器**(迁移 0010 手写,drizzle-kit 不管触发器)。每张装着
+// 「谁的」可见数据的表各挂 AFTER INSERT/UPDATE/DELETE,在**同一条语句**里 upsert 这一行:与写本身
+// 同一个隐式事务,写回滚它就回滚,而且没有哪个 op(包括将来新加的)能忘。覆盖面由
+// `data-version.test.ts` 按 sqlite_master 数着 —— 新加一张带 user_id / account_id 的表而没决定
+// 它抬不抬版本号,那条用例当场红。
+//
+// **刻意不挂的**(写了也不改用户看见的东西,或者已经有同批的主表写替它抬过):
+//   · `snapshot_balances` / `account_daily_totals` —— 与 `snapshots` 同一个 batch 写,主表那条就够;
+//     每条余额行各抬一次只是白花 D1 的写行数(免费档 10 万行/天)
+//   · `user_cache` —— 参考层缓存 + 同步轮心跳(后者前端另有轮询盯着)
+//   · `token_refs` 与 `tokens` 的价格 / 信息刷新 —— 参考层自己的 SWR,前端有 `prices.refreshed`
+//     那条定向刷新;`tokens` 只在用户能改的三列(symbol / name / self_price)**真的变了**时抬
+//
+// 删用户时各表级联删,触发器里的 `EXISTS (SELECT 1 FROM user …)` 让这些级联不再往回插版本行
+// (否则撞本表的外键,整次删用户失败)。
+export const userDataVersion = sqliteTable("user_data_version", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  version: integer("version").notNull().default(0),
+});

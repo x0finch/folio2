@@ -3,6 +3,7 @@ import { DbClient } from "./client";
 import { CurrentUser } from "./current-user";
 import { makeAccountStore, makeGlobalAccountStore } from "./domains/accounts";
 import { makeUserCacheStore } from "./domains/cache";
+import { makeDataVersionStore } from "./domains/data-version";
 import { makeGlobalRefIndexStore } from "./domains/global-ref-index";
 import { makeManualStore } from "./domains/manual";
 import { makePortfolioStore } from "./domains/portfolios";
@@ -122,6 +123,8 @@ export class Database extends Effect.Service<Database>()("db/Database", {
   sync: () =>
     perUser({
       accounts: makeAccountStore,
+      // 数据版本号(FOL-94):只读;抬它的是触发器(见 `domains/data-version.ts`)。
+      dataVersion: makeDataVersionStore,
       manual: makeManualStore,
       portfolios: makePortfolioStore,
       settings: makeSettingsStore,

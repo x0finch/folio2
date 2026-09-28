@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { runEffect } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleGetDataStats } from "./data-stats";
+import { handleGetDataVersion } from "./data-version";
 import { handleUpdatePrivacySettings, PrivacyInput } from "./privacy";
 import { handleGetProviderKeyStatus } from "./provider-keys";
 import {
@@ -19,6 +20,11 @@ export const getProviderKeyStatus = createServerFn({ method: "GET" })
 export const getDataStats = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(runEffect(handleGetDataStats));
+
+// 数据版本号(FOL-94):浏览器据它决定缓存里那批数据查询要不要重拉 —— 回到页面、定时都只问它。
+export const getDataVersion = createServerFn({ method: "GET" })
+  .middleware([requireAuth])
+  .handler(runEffect(handleGetDataVersion));
 
 export const getValuationSettings = createServerFn({ method: "GET" })
   .middleware([requireAuth])

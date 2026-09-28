@@ -18,6 +18,7 @@ import { signOut } from "@/lib/core/auth-client";
 import { clearIdleLockState } from "@/lib/hooks/use-idle-lock";
 import { checkForUpdate, showUpdateToast, UPDATE_TOAST_ID } from "@/lib/pwa/service-worker";
 import { RUNNING_VERSION, stripBuildHash } from "@/lib/pwa/version";
+import { forgetQueryCache } from "@/lib/queries/persist";
 import { SettingRow } from "./setting-row";
 
 // 刷新图标最短旋转时长(ms):让它转一圈,别检查太快时一闪而过。
@@ -59,9 +60,10 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
       const res = await signOut();
       if (res?.error) throw new Error(res.error.message ?? t("signOutFailed"));
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       clearIdleLockState();
-      queryClient.clear();
+      // 内存与 IndexedDB 里的查询缓存一起清(FOL-94)。
+      await forgetQueryCache(queryClient);
       navigate({ to: "/login" });
     },
     onError: (err) => {

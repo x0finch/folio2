@@ -129,6 +129,20 @@ export const REFRESH_MAP = {
     tagKeys.all,
     tokenKeys.enrichment(),
   ],
+
+  /**
+   * **服务端的数据版本号变了**(FOL-94):别的标签页 / 设备 / 后台同步写过了,而本页不知道写的是什么。
+   * 所以和导入一样什么都可能变 —— 前缀与 `settings.data` 同一批。本页自己的写照旧走上面各条
+   * 定向刷新;版本号那一路随后也会看到号变了、再刷一次(见 `data-version.ts` 的取舍)。
+   */
+  "data.changed": [
+    settingsKeys.all,
+    syncKeys.all,
+    portfolioKeys.all,
+    accountKeys.all,
+    tagKeys.all,
+    tokenKeys.enrichment(),
+  ],
 } satisfies Record<string, readonly QueryKey[]>;
 
 export type RefreshEvent = keyof typeof REFRESH_MAP;

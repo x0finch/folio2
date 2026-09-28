@@ -142,3 +142,11 @@ export const tokenKeys = {
   /** 用户全部已知代币的展示富化(name/price/logo/change24h,FOL-54)。 */
   enrichment: () => [...tokenKeys.all, "enrichment"] as const,
 };
+
+export const dataVersionKeys = {
+  /**
+   * 这个用户的数据版本号(FOL-94)。**不在任何数据域前缀之下** —— 号一变就要失效那批数据查询
+   * (`REFRESH_MAP["data.changed"]`),它自己若在那批里面,就会把刚问回来的号一并标旧、再问一遍。
+   */
+  all: ["data-version"] as const,
+};
