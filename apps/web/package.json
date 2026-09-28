@@ -24,6 +24,7 @@
     "upload:preview": "CLOUDFLARE_ENV=preview pnpm run build && wrangler versions upload --env preview --preview-alias \"$PREVIEW_ALIAS\"",
     "gen:icons": "node scripts/gen-icons.mjs",
     "perf:cpu": "node --disable-warning=ExperimentalWarning scripts/perf/cpu.mjs",
+    "perf:cpu:online": "node scripts/perf/online.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },

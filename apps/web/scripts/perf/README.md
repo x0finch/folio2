@@ -106,3 +106,21 @@ Cloudflare Workers 免费档每个请求只有 **10ms CPU**。做性能的活,�
 在 `endpoints.mjs` 的 `ENDPOINTS` 里加一行:server fn 写 `fn: "<handler 名>"`(只支持 GET,id 从
 构建出的 manifest 按名字反查)+ 需要的话 `data: (ctx) => ({ … })`;文档或普通路由写 `path`。
 非 200 的期望状态写 `expect`。
+
+## 线上:`perf:cpu:online`
+
+```sh
+CLOUDFLARE_OBSERVABILITY_TOKEN=… pnpm --filter @folio/web perf:cpu:online            # 当前线上版本,最近 7 天
+pnpm --filter @folio/web perf:cpu:online --version all --days 1 --token-env MY_VAR  # 所有版本
+```
+
+读 Workers Logs 里 Cloudflare 计量的 `cpuTimeMs` —— 线上真值,本地那张表的数字只能拿来比形状。
+需要一把**账户级** API token(Manage Account › Account API Tokens,Worker 选 `folio`,角色
+Metadata Read-Only);个人 token 加 Workers Observability 权限也读不了日志接口(2026-09 实测)。
+`account_id` 与 Worker 名从 `wrangler.jsonc` 读。
+
+- **按调用类型 / cron 的两张表是全量统计**:`exceededCpu` 的次数可以直接引用。
+- **按 server fn 的那张是抽样的**:TanStack 的路径在日志里是 `REDACTED`,只能把
+  `withServerFnTiming` 打的「server fn」那行(带 `handler`)与同一个 requestId 的调用日志对上,
+  而事件接口按自适应采样只回一部分。`n` 就是样本数,别拿它算总量。
+- 默认只看**当前线上版本**:换过版本后旧数字不代表现在。新版本刚上线、还没有请求时表是空的。
