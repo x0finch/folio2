@@ -2,15 +2,21 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// 两个定时任务的约束(ADR 0022 / #199 / #446)。它们是**配置**,没有别的地方会验 ——
-// 而配置写错的代价很实:两个重活撞在同一分钟触发,Workers 各起一次 scheduled 调用,
-// 正是当初拆成两个 trigger 想避开的事,而且只会在生产的某一天 23:00 才表现出来。
+// 两个定时任务的约束(ADR 0022 / #199 / #446 / FOL-85)。它们是**配置**,没有别的地方会验 ——
+// 而配置写错的代价很实:两条撞在同一分钟触发,Workers 各起一次 scheduled 调用、各自投一遍队列,
+// 而且只会在生产的某一天 23:00 才表现出来。
 //
-// `src/server.ts` 的分支是**字符串比对** `controller.cron === GLOBAL_REF_INDEX_CRON`,
-// 所以刷表那条表达式在两个文件里必须逐字一致 —— 改一处忘另一处,刷表会被当成 sweep 跑。
+// `src/server.ts` 的分支是**字符串比对** `controller.cron === DAILY_CRON`,
+// 所以每天那条表达式在两个文件里必须逐字一致 —— 改一处忘另一处,每天的活会被当成 sweep 跑。
+//
+// 全局映射表**不在这两条里刷了**(FOL-85,ADR 0056):它在 GitHub Actions 里跑,约束在文件末尾那组。
 
 const WRANGLER = join(import.meta.dirname, "../wrangler.jsonc");
 const SERVER = join(import.meta.dirname, "../src/server.ts");
+const REF_INDEX_WORKFLOW = join(
+  import.meta.dirname,
+  "../../../.github/workflows/ref-index-refresh.yml",
+);
 
 function crons(): string[] {
   const text = readFileSync(WRANGLER, "utf8");
@@ -39,37 +45,49 @@ function fireTimes(expr: string): string[] {
 }
 
 describe("定时任务", () => {
-  it("恰好两条:刷映射表 + 全量 sweep", () => {
+  it("恰好两条:每天投活 + 全量 sweep", () => {
     expect(crons()).toHaveLength(2);
   });
 
-  it("**两条永远不在同一分钟触发** —— 撞上就是两个重活并发", () => {
+  it("**两条永远不在同一分钟触发** —— 撞上就是两次调用并发投活", () => {
     const [a, b] = crons().map(fireTimes);
     const overlap = a.filter((t) => b.includes(t));
     expect(overlap, `这些时刻两条会同时触发: ${overlap.join(", ")}`).toEqual([]);
   });
 
   it("sweep 每小时一次(#446)—— 24h 盈亏的切口密度靠它", () => {
-    // 刷表那条是每天一次;另一条就是 sweep。
+    // 每天那条一天一次;另一条就是 sweep。
     const sweep = crons().find((c) => fireTimes(c).length > 1);
     expect(sweep, "找不到高频那条").toBeDefined();
     expect(fireTimes(sweep as string)).toHaveLength(24);
   });
 
-  it("刷表那条落在 sweep 之前的那半小时里 —— 当天就能用上新映射", () => {
-    const refresh = crons().find((c) => fireTimes(c).length === 1) as string;
-    const sweep = crons().find((c) => fireTimes(c).length > 1) as string;
-    const [refreshMin] = refresh.split(" ").map(Number);
-    const [sweepMin] = sweep.split(" ").map(Number);
-    // 刷表在整点、sweep 在半点 → 刷完半小时后那次 sweep 就带上新数据
-    expect(sweepMin).toBeGreaterThan(refreshMin);
+  it("每天那条表达式与 server.ts 里的常量逐字一致 —— 不一致会让每天的活被当成 sweep 跑", () => {
+    const daily = crons().find((c) => fireTimes(c).length === 1);
+    const server = readFileSync(SERVER, "utf8");
+    const declared = server.match(/DAILY_CRON\s*=\s*"([^"]+)"/);
+    expect(declared?.[1]).toBe(daily);
+  });
+});
+
+// 刷全局映射表那个 workflow(FOL-85)。它不在 wrangler.jsonc 里,所以另起一组看住:定时 + 手动两个入口
+// 都在、跑的是那个脚本、用的是部署那把 token —— 少了任何一样,表就静默地不再更新(新币认不出来,
+// 而没有任何报错)。
+describe("刷全局映射表(GitHub Actions)", () => {
+  const workflow = () => readFileSync(REF_INDEX_WORKFLOW, "utf8");
+
+  it("每天定时一次,也能手动触发", () => {
+    const text = workflow();
+    const schedule = text.match(/-\s*cron:\s*"([^"]+)"/);
+    expect(schedule, "找不到 schedule.cron").not.toBeNull();
+    expect(fireTimes((schedule as RegExpMatchArray)[1])).toHaveLength(1);
+    expect(text).toMatch(/^\s*workflow_dispatch:/m);
   });
 
-  it("刷表那条表达式与 server.ts 里的常量逐字一致 —— 不一致会让刷表被当成 sweep 跑", () => {
-    const refresh = crons().find((c) => fireTimes(c).length === 1);
-    const server = readFileSync(SERVER, "utf8");
-    const declared = server.match(/GLOBAL_REF_INDEX_CRON\s*=\s*"([^"]+)"/);
-    expect(declared?.[1]).toBe(refresh);
+  it("跑的是 ref-index:refresh,token 来自仓库 secret", () => {
+    const text = workflow();
+    expect(text).toContain("ref-index:refresh");
+    expect(text).toContain("secrets.CLOUDFLARE_API_TOKEN");
   });
 });
 

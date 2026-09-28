@@ -19,21 +19,23 @@
 // (当前代码)→ 这一截整个跳过。
 //
 // 为什么要它、怎么读输出:见 scripts/perf/README.md。
+import { execFile } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseArgs } from "node:util";
+import { parseArgs, promisify } from "node:util";
 import {
   DEFAULT_ACCOUNTS,
   DEFAULT_BUDGET_MS,
+  DEFAULT_DAILY_REPS,
   DEFAULT_DAYS,
   DEFAULT_FAKE_UPSTREAM_PORT,
   DEFAULT_INSPECTOR_PORT,
   DEFAULT_PORT,
-  DEFAULT_REF_INDEX_REPS,
   DEFAULT_SAMPLING_US,
   DEFAULT_SWEEP_REPS,
   DEFAULT_TOKENS,
   PERF_STATE_DIR,
+  WEB_ROOT,
 } from "./constants.mjs";
 import { expirePrices, refIndexRowCount } from "./dataset.mjs";
 import { startFakeUpstream } from "./fake-upstream.mjs";
@@ -56,20 +58,19 @@ import {
  * `resultOf`:从这次调用的日志里读出「它干成了什么」—— 量到的若是报错路径,数字作废。
  */
 const SCENARIOS = [
+  // 每天那条只投活(prune-notes / catalogue,FOL-88)。**全局映射表不在这里刷了**(FOL-85):它挪到了
+  // GitHub Actions 里的 Node 脚本,不再吃 Worker 的预算,所以这里没有 `cron-ref-index` 那一格了。
+  // 那个脚本的耗时见下面 `refreshRefIndex`(sweep 要一张非空的表,灌数据后先跑它一次)。
   {
-    key: "cron-ref-index",
+    key: "cron-daily",
     cron: "0 23 * * *",
-    label: "daily: prune notes + refresh global ref index",
-    reps: DEFAULT_REF_INDEX_REPS,
+    label: "daily: enqueue prune-notes + catalogue",
+    reps: DEFAULT_DAILY_REPS,
     beforeEach: () => {},
     resultOf: (logs) => {
-      const done = logEvent(logs, "global ref index refresh done");
-      if (!done) return { ok: false, text: "no done log" };
-      return {
-        ok: true,
-        text: `rows ${done.rows} +${done.inserted}/~${done.updated}/-${done.deleted}`,
-        detail: done,
-      };
+      const done = logEvent(logs, "daily jobs enqueued");
+      if (!done) return { ok: false, text: "no enqueued log" };
+      return { ok: true, text: `users ${done.users}`, detail: done };
     },
   },
   {
@@ -111,7 +112,7 @@ const USAGE = `usage: perf:cpu:jobs [options]
   --only a,b             scenarios to run (see --list)
   --list                 print scenario keys and exit
   --reps N               invocations per scenario after the first
-                         (default: cron-sweep ${DEFAULT_SWEEP_REPS}, cron-ref-index ${DEFAULT_REF_INDEX_REPS})
+                         (default: cron-sweep ${DEFAULT_SWEEP_REPS}, cron-daily ${DEFAULT_DAILY_REPS})
   --sampling-us N        V8 sampling interval in µs (default ${DEFAULT_SAMPLING_US})
   --budget-ms N          per-invocation CPU budget (default ${DEFAULT_BUDGET_MS})
   --accounts N           seeded accounts (default ${DEFAULT_ACCOUNTS})
@@ -260,6 +261,29 @@ async function settleQueue(queue, readLog, cpuNs) {
   }
   invocations.sort((a, b) => a.startUs - b.startUs);
   return { invocations, queueLines: invocations.length };
+}
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * 用 GitHub Actions 里跑的那个脚本灌 perf 库的映射表(FOL-85)。**必须异步起子进程**:假上游就在本进程里,
+ * 同步等子进程会把事件循环堵死,子进程的请求永远等不到答复。它的 CPU 不进任何一行表 —— 它不在
+ * Worker 里跑了,免费计划的 10ms 管不到它;这里只把墙钟与计数打出来,方便对照。
+ */
+async function refreshRefIndex(coingeckoBase) {
+  const t0 = Date.now();
+  const { stdout } = await execFileAsync(
+    join(WEB_ROOT, "node_modules", ".bin", "tsx"),
+    [
+      "--disable-warning=ExperimentalWarning",
+      join(WEB_ROOT, "scripts", "ref-index", "refresh.ts"),
+      "--local",
+      PERF_STATE_DIR,
+    ],
+    { env: { ...process.env, COINGECKO_API_BASE: coingeckoBase }, encoding: "utf8" },
+  );
+  const summary = stdout.trim().split("\n").join(", ");
+  log(`  ref index: ${summary} (${((Date.now() - t0) / 1000).toFixed(1)}s wall, Node)`);
 }
 
 /** 一次触发:scheduled 那一发的状态码与往返时间。`format=json` → 200/500 对应 outcome ok/失败。 */
@@ -479,13 +503,13 @@ async function main() {
     );
     const ctx = { opts, workerOpts, fake, queue, userId };
 
-    // sweep 要全局映射表(链上的币靠它认):只量 sweep 又刚灌过数据时,先不计时地刷一次。
-    const refIndex = SCENARIOS.find((s) => s.key === "cron-ref-index");
-    if (!scenarios.includes(refIndex) && refIndexRowCount() === 0) {
+    // sweep 要全局映射表(链上的币靠它认)。表是空的(刚灌过数据)就先刷一次 —— 用生产那个脚本
+    // (`scripts/ref-index/refresh.ts --local`,FOL-85),对着 perf 库、指到假上游。worker 此刻是停着的。
+    if (refIndexRowCount() === 0) {
       log(
-        "global ref index is empty — refreshing it once (not measured) so the sweep can resolve tokens",
+        "global ref index is empty — refreshing it once with scripts/ref-index (not a Worker job)",
       );
-      await measureOnce(ctx, refIndex, "setup");
+      await refreshRefIndex(fake.vars.COINGECKO_API_BASE);
     }
 
     const loadBefore = hostLoad();

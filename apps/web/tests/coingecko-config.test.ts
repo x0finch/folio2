@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coinGeckoConfigOf } from "@/lib/server/oracle";
+import { coinGeckoConfigOf } from "@/lib/server/coingecko-config";
 
 // CoinGecko 的 base 覆盖(FOL-84):不设就是生产那条路(client 按有没有 key 选官方基址)。
 describe("coinGeckoConfigOf", () => {

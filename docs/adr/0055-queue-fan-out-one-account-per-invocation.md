@@ -47,7 +47,7 @@
 
 - ~~`/api/sync` 与 `syncAccount` 仍在 HTTP 调用里 `waitUntil` 跑整轮~~ —— FOL-89 已转成投队列,见文末补记。
 - ~~`warm-user` 剩下的四件仍是一条~~ —— FOL-88 已拆,见文末补记。
-- 每天那个 cron 刷全局映射表那半不动(FOL-85 挪到 GitHub Actions);剪 note 那半 FOL-88 已改成投消息。
+- 每天那个 cron 刷全局映射表那半不动(FOL-85 挪到 GitHub Actions —— 已做,见 [ADR 0056](0056-ref-index-refresh-runs-in-github-actions.md));剪 note 那半 FOL-88 已改成投消息。
 
 ## 补记:参考层拆成一件一条,读端点只读缓存(FOL-88)
 
@@ -55,7 +55,7 @@
 
 - **五个 kind,都只带 `userId`**(汇率 / 平台 / 目录 / DeFi 图都住 per-user 的 `user_cache`,note 在用户的快照上,没有一件是全局的)。consumer 在 `sync/reference.ts`(前四件)与 `entry/note-retention.ts`(剪 note)。每件最坏出网数在 `jobs/constants.ts` 的 `REFERENCE_JOB_UPSTREAM_CALLS` 里逐件推导:`fx` 2、`platforms` 2、`catalogue` 8(1000 个 / 每页 250 × 2 次尝试)、`defi-logos` 0、`prune-notes` 0 —— 都远低于 50,不必切块。测试按真 fetch 数钉着,并钉「重跑零出网」。
 - **幂等**:前三件各按参考层自己的 TTL 门控(汇率 6h、平台一天、目录一周;新鲜就一次批量缓存读、零出网),DeFi 图是同值覆盖写,剪 note 是带 `IS NOT NULL` 门的 UPDATE。
-- **谁投、多久投一次只在 `jobs/schedule.ts`**。每小时:`prices`、`fx`、`platforms` / `defi-logos`(读最新快照 → 延后到同步落库之后)。每天(23:00 那个 trigger,刷全局映射表之前、自己兜住 —— 刷表持续失败也挡不住剪 note):`prune-notes`、`catalogue`(一周 TTL,每小时投是 167 条空跑换一次真刷)。
+- **谁投、多久投一次只在 `jobs/schedule.ts`**。每小时:`prices`、`fx`、`platforms` / `defi-logos`(读最新快照 → 延后到同步落库之后)。每天(23:00 那个 trigger;FOL-85 之后它只做这一件,不再自己兜住,见 ADR 0056):`prune-notes`、`catalogue`(一周 TTL,每小时投是 167 条空跑换一次真刷)。
 - **新鲜度判在 consumer,不在 cron**:cron 里先读缓存再决定投不投,那次读要逐用户落在 cron 那一次调用的 10ms 里;consumer 本来就要读这一次。多投一条的代价约 3 次队列操作。每用户每小时 (账户数 + 4) 条、每天另 2 条。
 - **读端点不出网**:`getCurrencyPreference`(`displayRate`)与 `listFiatOptions` 不再冷缓存就 `fx.warm`,只读缓存;没有汇率 → 前者整体回退 USD(原有形状),后者那一项不带价(原有形状)。切换器在「选了 EUR 却回退 USD」时提示一句(汇率一小时内会暖上)。同步重估里的 `fx.resolve` **本来就只读缓存**(软过期、不回源)—— FOL-87 补记里说它是 SWR 是写错了;现在有测试钉着它零出网。
 

@@ -55,6 +55,11 @@ pnpm run deploy
 # 6. better-auth needs BETTER_AUTH_URL to match the real origin → set it and redeploy
 pnpm exec wrangler secret put BETTER_AUTH_URL     # the workers.dev URL from step 5
 pnpm run deploy
+
+# 7. Fill the global token map once (contract address → CoinGecko coin). Until it has rows,
+#    on-chain tokens can't be matched to a coin (no price, no logo). From then on the
+#    "Ref index refresh" GitHub Actions workflow keeps it fresh daily — see below.
+CLOUDFLARE_API_TOKEN=<token with D1:Edit> pnpm run ref-index:refresh
 ```
 
 **Custom domain:** bind a Workers Custom Domain in the Cloudflare dashboard, then use that domain for `BETTER_AUTH_URL` in step 6.
@@ -122,6 +127,34 @@ verify → migrate → deploy. Same result as the tag command, just tappable fro
 > rollback. Review the pending migration before tagging. To gate deploys behind manual approval,
 > add **required reviewers** to the `production` environment (repo Settings → Environments) —
 > the workflow already targets it and will then wait for an approval before migrating/deploying.
+
+## Global token map refresh (CI, daily)
+
+`global_token_ref_index` (on-chain contract → the CoinGecko coin it is; ADR 0022) is refreshed by
+**`.github/workflows/ref-index-refresh.yml`**, not by the Worker (FOL-85, ADR 0056): pulling the
+2.6 MB coin list and diffing ~23k rows cost ~500 ms CPU per run, and the free plan gives one
+invocation 10 ms. The workflow runs `apps/web/scripts/ref-index/refresh.ts` on a GitHub runner,
+which talks to the production D1 through the Cloudflare D1 REST API (`account_id` and
+`database_id` are read from `wrangler.jsonc`) and only writes the rows that changed.
+
+- **Schedule:** daily at 23:00 UTC, plus **Actions → Ref index refresh → Run workflow** by hand
+  (tick *dry run* to only print the counts). GitHub's schedule is best-effort — runs are often
+  10–60 minutes late and occasionally skipped under load; that's fine for a map that is allowed to
+  lag a day. On a public repo GitHub pauses schedules after 60 days without a commit — re-enable it
+  on the workflow page if that happens.
+- **Secrets:** the same repo-level **`CLOUDFLARE_API_TOKEN`** the deploy uses — it already has
+  **D1 → Edit**, which is all this needs. Optional repo secret **`COINGECKO_API_KEY`** (demo/pro);
+  without it the run is keyless, which is fine for its two requests.
+- **After the first deploy** (or when upgrading a deployment from before FOL-85), run the workflow
+  once by hand — the Worker's 23:00 cron no longer fills the table. Locally, the equivalent is
+  `CLOUDFLARE_API_TOKEN=… pnpm --filter @folio/web ref-index:refresh` (add `--dry-run` to only
+  compute the diff, `--env preview` for the preview D1).
+- **Local dev:** `pnpm --filter @folio/web ref-index:local` fills the `pnpm dev` database
+  (`.wrangler/state`) the same way, straight into the local SQLite file (no token needed).
+- **Reading a run:** the log ends with `rows` / `skipped` / `inserted` / `updated` / `deleted`.
+  In the steady state inserted/updated/deleted are near 0; `unmatchedPlatforms` above 0 shows up as
+  a warning annotation (a chain whose coins will have no price until the slug table is fixed).
+  A failed run (CoinGecko down, D1 error, bad token) exits non-zero and the run turns red.
 
 ## PR preview (CI, on demand via label)
 

@@ -105,3 +105,7 @@ upstream_local_name  issued:bitcoin           ← 上游 ref 的 localName 规�
 **`refreshedAt` 语义漂移(可接受)**:`= max(updated_at)`,差量后只有变动行才刷 `updated_at`,于是它漂成「上次**有变更**的时间」。唯一消费方是 cron 的一行日志,无逻辑依赖;日志改为额外打出这轮 改/增/删 各几行(稳态应接近 0,长期偏高即信号)。
 
 **效果**:`global_token_ref_index` 的 `rows_written` 从 ~3 万/天 降到接近 0(仅上游真变动行数),每日总写入落回快照那 ~4k + 突发,稳低于 10 万免费额度。
+
+## Update — 刷表挪出 Worker(FOL-85,2026-09-28)
+
+「cron 每日灌」里的 **cron 不再是 Worker 的 23:00 trigger**,改成 GitHub Actions 的定时 workflow(同一时刻,UTC),经 D1 REST API 写库;转换、差量写、两条护栏一行没变,还是同一段代码。理由(免费计划 10ms CPU vs 这一趟约 500ms)与代价(GitHub schedule 不准点;23:30 的 sweep 不再保证当天用上新映射)见 [ADR 0056](0056-ref-index-refresh-runs-in-github-actions.md)。上面「首次部署要先手动触发一次刷表」仍然成立 —— 触发的是那个 workflow。

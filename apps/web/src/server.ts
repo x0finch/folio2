@@ -1,13 +1,12 @@
 import { GlobalDatabase } from "@folio/db";
-import { GlobalRefIndexService } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
-import { Cause, Effect, Option } from "effect";
+import { Effect } from "effect";
 import { withDefaultNoStore } from "./lib/server/entry/cache-headers";
 import { configureLogging } from "./lib/server/entry/log";
 import { consumeMessage } from "./lib/server/jobs/consume";
 import { fanOutDaily } from "./lib/server/jobs/schedule";
-import { runAtEdge, withGlobalDb, withOracleWarm } from "./lib/server/runtime";
+import { runAtEdge, withGlobalDb } from "./lib/server/runtime";
 import { fanOutAllUsers } from "./lib/server/sync/round";
 
 // 自定义 worker 入口:用 createServerEntry 包 TanStack 的默认 fetch(SSR/server fns),
@@ -18,36 +17,14 @@ import { fanOutAllUsers } from "./lib/server/sync/round";
 const cronLog = getLogger(["folio", "cron"]);
 const webLog = getLogger(["folio", "web"]);
 
-// 刷全局映射表那个 trigger 的表达式(与 wrangler.jsonc 的 triggers.crons 第一条一致)。
+// 每天那个 trigger 的表达式(与 wrangler.jsonc 的 triggers.crons 第一条一致)。
 // 硬编码在这里是 Workers 的形状使然:分支只能靠 controller.cron 的字符串比对。
-const GLOBAL_REF_INDEX_CRON = "0 23 * * *";
-
-// 刷 `global_token_ref_index`:拉整份币目录 → 转换(在 adapter 里)→ 一次整份灌(分批写)。
-// 与用户无关,所以不枚举用户。失败会上抛到外层统一记 error —— 刷表挂了必须可见,
-// 否则新币会一直认不出来而没有任何迹象。
-const refreshGlobalRefIndex = (cron: string): Effect.Effect<void, Error> =>
-  withOracleWarm(
-    Effect.gen(function* () {
-      const svc = yield* GlobalRefIndexService;
-      const before = yield* svc.refreshedAt();
-      cronLog.info("global ref index refresh start", {
-        cron,
-        lastRefreshedAt: Option.getOrNull(before),
-      });
-      const result = yield* svc.warm();
-      cronLog.info("global ref index refresh done", {
-        cron,
-        rows: result.rows,
-        skipped: result.skipped,
-        unmatchedPlatforms: result.unmatchedPlatforms.length,
-        // 差量写(#FOL-68):这轮实际落库的 改/增/删 行数。稳态下应接近 0 —— 若长期偏高,
-        // 说明上游目录在抖或差量失效,是该查的信号。
-        updated: result.updated,
-        inserted: result.inserted,
-        deleted: result.deleted,
-      });
-    }),
-  );
+//
+// **它以前还刷全局代币映射表**(拉 2.6 MB 币目录 + 与几万行比对):生产 480–520ms CPU、7 次里 2 次
+// exceededCpu —— 免费计划一次调用只有 10ms。FOL-85 起那一趟在 GitHub Actions 里跑
+// (`.github/workflows/ref-index-refresh.yml` → `scripts/ref-index/refresh.ts`,ADR 0056),
+// 这个 trigger 只剩投每天的逐用户活。
+const DAILY_CRON = "0 23 * * *";
 
 // cron 扫「有哪些用户」那一条。**没有 userId**(它问的正是这个),所以它来自 `GlobalDatabase`
 // —— db 那张「表里没有『谁的』这回事」的门票,不是 per-user 的 `Database`。
@@ -60,25 +37,14 @@ const listUserIds = withGlobalDb(Effect.flatMap(GlobalDatabase, (db) => db.accou
 // **搭在这个 trigger 上而不是新开一个**:它要的就是「每天一次」,而另一个 trigger 是每小时
 // (#446 起)—— 挂那儿会一天投 24 遍同一件事。
 //
-// **排在刷表之前,而且整趟自己兜住。** 排在后面的话,一个**持续**失败的刷表(上游改了格式、
-// 配额用光)会把剪 note 永久停掉,而不只是推迟一天 —— 那时存储会一直长而没有任何迹象。
-// 自己兜住则保证反方向也不会发生:投递出问题不会挡住刷表(新币认不出来是更重的后果),
-// 也不会把整趟 cron 拖成异常收尾。两个方向都不再互相牵连。
-//
-// 兜的是 `Cause` 不是类型化失败:`listUserIds` / 投递抛的是 defect(db / 队列挂了),
-// `catchAll` 接不住(同 `fanOutAllUsers` 的注释)。
-const enqueueDailyJobs = (cron: string): Effect.Effect<void> =>
+// **不再自己兜住**:以前它排在刷全局映射表之前、兜住是为了「投递出问题不挡刷表」;刷表挪走之后
+// 这一趟就是整次调用的全部,失败就该上抛到 `scheduled()` 那一处记 error(与 sweep 同一个口径)。
+const enqueueDailyJobs = (cron: string): Effect.Effect<void, Error> =>
   Effect.gen(function* () {
     const userIds = yield* listUserIds;
     const result = yield* fanOutDaily(userIds);
     cronLog.info("daily jobs enqueued", { cron, users: userIds.length, ...result });
-  }).pipe(
-    Effect.catchAllCause((cause) =>
-      Effect.sync(() =>
-        cronLog.warn("daily jobs enqueue failed", { cron, error: Cause.pretty(cause) }),
-      ),
-    ),
-  );
+  });
 
 // 全量 sweep(FOL-86):**只开轮、只投消息,不碰上游**。每个账户一条 `sync-account`、每个用户补
 // `prices` / `fx` / `platforms` / `defi-logos` 各一条(FOL-88,见 jobs/schedule),真活在 `queue()`
@@ -118,11 +84,11 @@ export default {
   ...serverEntry,
 
   // 两个定时任务共一个 scheduled(),按 controller.cron 分支(见 wrangler.jsonc 的 triggers):
-  //   · GLOBAL_REF_INDEX_CRON(每天 23:00)—— 先投每天的逐用户活(剪 note / 目录,FOL-88),再刷全局代币映射表
+  //   · DAILY_CRON(每天 23:00)—— 投每天的逐用户活(剪 note / 目录,FOL-88)
   //   · 其余(每小时 :30,#446)—— 全量 sync sweep(FOL-86 起只投队列,见 `sweepAllUsers`)
-  // 拆两个 trigger 而不是挤一次:拉几 MB JSON + 写几万行是重活,与 sweep 挤一次调用有超预算风险。
+  // 全局代币映射表不在这里刷了(FOL-85,见 DAILY_CRON 上面那段)。
   // waitUntil 保证跑完才结束本次调用。env/ctx 由运行时传入;env 不单独取用
-  // (configureLogging / fanOutAllUsers / oracleWarm 都走 cloudflare:workers 全局)。
+  // (configureLogging / fanOutAllUsers 都走 cloudflare:workers 全局)。
   async scheduled(controller: ScheduledController, _env: Cloudflare.Env, ctx: ExecutionContext) {
     ctx.waitUntil(
       (async () => {
@@ -131,11 +97,8 @@ export default {
           // **整趟一个 effect,只跑一次。** 两个分支各自是一个 effect(内部已装好各自要的那层),
           // 边缘只在这里 —— 官方那句「`run*` 尽量放在程序的边缘」在 cron 这条路上就是这个形状。
           await runAtEdge(
-            controller.cron === GLOBAL_REF_INDEX_CRON
-              ? Effect.zipRight(
-                  enqueueDailyJobs(controller.cron),
-                  refreshGlobalRefIndex(controller.cron),
-                )
+            controller.cron === DAILY_CRON
+              ? enqueueDailyJobs(controller.cron)
               : sweepAllUsers(controller.cron),
           );
         } catch (err) {

@@ -3,17 +3,22 @@ import { type DbClient, GlobalDatabase, type RefIndexDiffCounts } from "@folio/d
 import { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Clock, Effect, type Option } from "effect";
 
-// 全局映射表的维护门面(cron)。**不进 `oracleLayer`** —— 刷这张表跟 userId 毫无关系
-// (ADR 0022),所以 cron 不必先假造一个用户、也不必把 per-user 的三个 store 建出来:
+// 全局映射表的维护门面。**不进 `oracleLayer`** —— 刷这张表跟 userId 毫无关系
+// (ADR 0022),所以调用方不必先假造一个用户、也不必把 per-user 的三个 store 建出来:
 // 它单独 provide 本 layer + 那两个端口就能跑。
 //
-// 两个动词绑成一个服务,跟平台 / 汇率同款组织:调用点只有 `refreshGlobalRefIndex` 一处,
+// **调用方不在 Worker 里**(FOL-85,ADR 0056):那一趟拉 2.6 MB、比对几万行,免费计划一次调用 10ms CPU
+// 装不下,于是由 GitHub Actions 里的 Node 脚本(`apps/web/scripts/ref-index/refresh.ts`)跑,
+// 连接是 D1 REST API 接成的 `DbClient`(`@folio/db` 的 `provideRemoteDbClient`)。本服务一行没变 ——
+// 它从来只认端口和门票,不认自己跑在哪。
+//
+// 两个动词绑成一个服务,跟平台 / 汇率同款组织:调用点只有那个脚本一处,
 // 散成两个顶层函数不如一个 Tag 清楚。
 //
 // 动词沿用项目现成的 `warm`。
 //
-// **错误交出去,不降级** —— 与读路径相反:这里没有「本地旧值」可退,而 cron 需要知道这一轮
-// 白跑了(它会记日志 / 让平台重试)。降级在这儿等于把一次静默故障变成两次。
+// **错误交出去,不降级** —— 与读路径相反:这里没有「本地旧值」可退,而调用方需要知道这一轮
+// 白跑了(脚本以非零退出、workflow 变红)。降级在这儿等于把一次静默故障变成两次。
 
 // 服务的形状从下面这段 `effect` 的返回值推导,`.Default` 就是它的 layer —— 不再手写
 // interface + Tag + layer 三件套(#501)。
@@ -43,7 +48,7 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
             const result = yield* upstream.fetchRefIndex();
             // 失配是**静默故障**(那条链的币从此没价没图,却不报错)→ 必须喊出来。
             // 迁移前这是 `OracleWarmConfig.onWarn` 一个回调字段(「这一层不该知道日志怎么落」);
-            // 现在走 Effect 自己的日志系统,而「落到哪」由 cron 提供的 Logger layer 决定 ——
+            // 现在走 Effect 自己的日志系统,而「落到哪」由调用方(刷表脚本)提供的 Logger 决定 ——
             // 同一件事,少一个配置字段,而且 `Effect.logWarning` 在任何调用点都能用。
             if (result.unmatchedPlatforms.length > 0) {
               yield* Effect.logWarning(
@@ -55,7 +60,7 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
                 }),
               );
             }
-            // 差量写(#FOL-68):只有真变了的行才落库,返回这轮 改/增/删 的计数供 cron 记日志
+            // 差量写(#FOL-68):只有真变了的行才落库,返回这轮 改/增/删 的计数供调用方记日志
             // —— 稳态下三者都接近 0,一眼就能看出「这轮其实没写什么」。
             const counts = yield* refIndex.putAll(result.rows, yield* Clock.currentTimeMillis);
             return {

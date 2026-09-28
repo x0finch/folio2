@@ -25,8 +25,9 @@ import { type DbEnv, type Drizzle, getDb } from "./connect";
 type Stmt = Parameters<Drizzle["batch"]>[0][number]; // drizzle BatchItem
 
 // 桥本身:一个 drizzle 句柄 + 两个方法。**纯值**,建它只是 `drizzle(env.DB)` + 两个闭包(见 connect.ts)。
-const connect = (env: DbEnv) => {
-  const db = getDb(env);
+// 收句柄而不是收 env:D1 绑定是一种来源,`./remote.ts` 的 SQL 代理(Node 里的定时任务,FOL-85)是另一种,
+// 两者共用这同一段桥 —— span、空 batch 的 no-op、defect 语义都只写一次。
+export const connectTo = (db: Drizzle) => {
   return {
     // **span 加在这一处**(#504 T16)。上面那段说的「将来想加 span 只改一处」就是这个。
     // 这一层的名字只有一个(`db.query`),所以它答的是「这一次查询多久」,答不了「哪个 op」。
@@ -59,6 +60,8 @@ const connect = (env: DbEnv) => {
       ),
   };
 };
+
+const connect = (env: DbEnv) => connectTo(getDb(env));
 
 export class DbClient extends Effect.Service<DbClient>()("db/DbClient", {
   effect: (env: DbEnv) => Effect.sync(() => connect(env)),

@@ -83,6 +83,14 @@ export type { ExportToken, ImportTokenInput } from "./domains/transfer";
 // 这一层的类型化失败。`NotFound` 出现在带归属校验的那些 op 的 `E` 通道里(#504 T5),
 // `InvalidInput` 出现在有域规则要查库才判得了的那些(#504 T6)—— 两个以前都是 defect。
 export { InvalidInput, NotFound } from "./errors";
+// 第二种连接(FOL-85):Node 里的定时任务没有 D1 绑定,交一条 SQL 传输进来,接成同一个 `DbClient`。
+// 同一条红线 —— 给的是传输,拿不回句柄。
+export {
+  provideRemoteDbClient,
+  type RemoteMethod,
+  type RemoteSql,
+  type RemoteStatement,
+} from "./remote";
 export type {
   Account,
   AccountSafe,

@@ -1,5 +1,4 @@
 import { env } from "cloudflare:workers";
-import type { UpstreamError } from "@folio/client-core";
 import {
   Database,
   type DbClient,
@@ -8,7 +7,7 @@ import {
   provideCurrentUser,
   provideDbClient,
 } from "@folio/db";
-import type { GlobalRefIndexService, OracleServices } from "@folio/oracle";
+import type { OracleServices } from "@folio/oracle";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { ConnectorRegistry } from "./connectors/registry";
 import { logCategory, logTapeLogger } from "./effect-log";
@@ -58,8 +57,9 @@ const withServerFnTiming =
 /**
  * **每个 isolate 建一次的那张服务图**(ADR 0054)。
  *
- * 三张门票(`Database` / 参考层 / `ConnectorRegistry`)+ cron 那两样不带 user 的(`GlobalDatabase`、
- * 刷全局映射表的门面)+ 日志转发器。**里面没有一样是某个请求、某个用户的**:db 的 op 在跑的
+ * 三张门票(`Database` / 参考层 / `ConnectorRegistry`)+ cron 那张不带 user 的(`GlobalDatabase`)
+ * + 日志转发器。(刷全局映射表的门面以前也在这里,FOL-85 挪去了 GitHub Actions,ADR 0056。)
+ * **里面没有一样是某个请求、某个用户的**:db 的 op 在跑的
  * 那一刻才从 context 里取连接与用户,参考层与 connector 建的时候只抓门票、上游和部署级的 env。
  * 这不是凭感觉 —— 每一片建的时候握着什么,ADR 0054 列了清单(没有 fiber、timer、I/O 句柄;
  * 那种东西跨请求用会撞上 Workers 的「不能替另一个请求做 I/O」)。
@@ -67,12 +67,7 @@ const withServerFnTiming =
  * **以前这张图每请求建一遍又拆一遍**(`userLayer(userId)` → `Effect.provide`):生产 profile 里
  * 最便宜的一个 server fn,Effect 那一块就占 5–7ms,而免费计划一次请求只有 10ms CPU。
  */
-type IsolateServices =
-  | Database
-  | OracleServices
-  | ConnectorRegistry
-  | GlobalDatabase
-  | GlobalRefIndexService;
+type IsolateServices = Database | OracleServices | ConnectorRegistry | GlobalDatabase;
 
 const isolateLayer = (): Layer.Layer<IsolateServices> =>
   Layer.mergeAll(Database.Default, oracleServices(), ConnectorRegistry.Default, logTapeLogger);
@@ -209,19 +204,14 @@ export const runEffect =
 // —— 不带 user 的那半(cron)——
 
 /**
- * **系统级(无 userId)的活** —— cron 枚举用户、刷全局映射表。原则 #6 的受控例外。
+ * **系统级(无 userId)的活** —— cron 枚举用户。原则 #6 的受控例外。
  *
- * 只给一个连接(外加服务图):这些 op 在 `GlobalDatabase` / `GlobalRefIndexService` 上,`R` 里
+ * 只给一个连接(外加服务图):这些 op 在 `GlobalDatabase` 上,`R` 里
  * 压根没有 `CurrentUser`,所以不必(也不许)假造一个用户。
  */
 export const withGlobalDb = <A, E>(
-  effect: Effect.Effect<A, E, GlobalDatabase | GlobalRefIndexService | DbClient>,
+  effect: Effect.Effect<A, E, GlobalDatabase | DbClient>,
 ): Effect.Effect<A, E> => Effect.provide(provideDbClient(env)(effect), isolateRuntime());
-
-/** 刷全局映射表那一趟:`withGlobalDb` + 上游错误变成人话(同 `forUser` 的 `toError`)。 */
-export const withOracleWarm = <A>(
-  effect: Effect.Effect<A, UpstreamError, GlobalRefIndexService | DbClient>,
-): Effect.Effect<A, Error> => withGlobalDb(effect).pipe(Effect.mapError(toError));
 
 /**
  * 边缘:跑一个**已经装配好**的 cron effect。cron 一次调用只经这里一次,跑在与 server fn 同一个

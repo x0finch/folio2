@@ -24,7 +24,7 @@ export const HOST = "127.0.0.1";
 export const DEFAULT_FAKE_UPSTREAM_PORT = 3399;
 /** perf:cpu:jobs 每个定时任务量几次(不含第一次,那次单列成 `:first`)。整点 sweep 重,多量几次。 */
 export const DEFAULT_SWEEP_REPS = 5;
-export const DEFAULT_REF_INDEX_REPS = 3;
+export const DEFAULT_DAILY_REPS = 3;
 
 /** 每个端点测几发(顺序发,一次一发)。 */
 export const DEFAULT_REPS = 30;

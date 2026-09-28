@@ -106,13 +106,19 @@ Cloudflare Workers 免费档每个请求只有 **10ms CPU**。做性能的活,�
 ```sh
 pnpm --filter @folio/web perf:cpu:jobs                     # 构建 → 灌数据 → 两个 cron 各量一轮
 pnpm --filter @folio/web perf:cpu:jobs --no-build --only cron-sweep --reps 3
-pnpm --filter @folio/web perf:cpu:jobs --list              # cron-ref-index / cron-sweep
+pnpm --filter @folio/web perf:cpu:jobs --list              # cron-daily / cron-sweep
 pnpm --filter @folio/web perf:cpu:jobs --help
 ```
 
 上面那个 `perf:cpu` 只量读路径。这个量**后台写路径**:整点 sweep(`30 * * * *`,同步每个账户 +
-预热)与每天的刷表(`0 23 * * *`,剪 note + 刷全局代币映射表)。改 cron 之前、之后各跑一遍,两张表
-贴进 PR。基线存在 `baselines/`(`jobs-before-2026-09-28.txt` 是改成队列扇出之前的那一份)。
+预热)与每天那条(`0 23 * * *`,投剪 note / 目录的活)。改 cron 之前、之后各跑一遍,两张表
+贴进 PR。基线存在 `baselines/`(`jobs-before-2026-09-28.txt` 是改成队列扇出之前的那一份,里面的
+`cron-ref-index` 行是刷全局映射表还在 Worker 里跑的时候量的)。
+
+**全局代币映射表不在这里量了**(FOL-85,ADR 0056):那一趟(基线里 ≈ 390ms)挪到了 GitHub Actions
+里的 Node 脚本(`scripts/ref-index/refresh.ts`),不再吃 Worker 的 10ms,所以 `cron-ref-index` 这一格
+没了。harness 仍要一张非空的表(sweep 靠它认链上的币):灌完数据后用**同一个脚本**
+`--local` 对着 perf 库刷一次(指到假上游),日志里打出它的计数与墙钟,不进表。
 
 **本机数字 ≠ 边缘数字。** 两者没有换算系数;能搬过去的是形状(谁占大头、第一次与稳态之比、改动前后
 的差)。线上真值看 Workers Logs 的 `cpuTime`。
@@ -138,9 +144,9 @@ pnpm --filter @folio/web perf:cpu:jobs --help
    所以一次触发 = 一次完整调用)。重起的理由:生产的整点 cron 隔着一小时,多半落在一个没热过这条
    路径的 isolate 上;连着触发的话 JIT、Rabby 的链表缓存、各家的闸都是热的。sweep 每次之前还把代币价
    标成过期(`PRICE_TTL_MS` 30 分钟,生产隔一小时必然过期)。
-5. 每个任务先单列一次 **`:first`**(灌完数据后的第一次:映射表是空的 / 目录没缓存 / 代币没建行),
-   再量 `--reps` 次稳态(默认 sweep 5、刷表 3)。只量 sweep 时,映射表是空的就先不计时地刷一次 ——
-   链上的币靠它认。
+5. 每个任务先单列一次 **`:first`**(灌完数据后的第一次:目录没缓存 / 代币没建行),
+   再量 `--reps` 次稳态(默认 sweep 5、每天那条 3)。映射表是空的就先用 `scripts/ref-index` 刷一次
+   (不计时,见上)—— 链上的币靠它认。
 6. **队列(前向兼容)**:构建出的 wrangler.json 里有 `queues.consumers` 时,触发之后接着等队列
    排空(一段时间既没有 CPU 活动、也没有新的 `QUEUE <name> a/b (Nms)` 日志行,阈值随配置的
    `max_batch_timeout`),多出两行:`<任务>:window`(cron + 它引出的全部消费,每次触发的总数)与
