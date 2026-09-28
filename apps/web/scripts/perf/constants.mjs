@@ -20,6 +20,12 @@ export const DEFAULT_PORT = 3300;
 export const DEFAULT_INSPECTOR_PORT = 9330;
 export const HOST = "127.0.0.1";
 
+/** perf:cpu:jobs 的本机假上游端口(见 fake-upstream.mjs)。 */
+export const DEFAULT_FAKE_UPSTREAM_PORT = 3399;
+/** perf:cpu:jobs 每个定时任务量几次(不含第一次,那次单列成 `:first`)。整点 sweep 重,多量几次。 */
+export const DEFAULT_SWEEP_REPS = 5;
+export const DEFAULT_REF_INDEX_REPS = 3;
+
 /** 每个端点测几发(顺序发,一次一发)。 */
 export const DEFAULT_REPS = 30;
 /** 正式采样前的预热发数 —— 让首调编译不混进稳态数字(冷启动另有 `--cold`)。 */

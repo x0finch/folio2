@@ -101,6 +101,86 @@ Cloudflare Workers 免费档每个请求只有 **10ms CPU**。做性能的活,�
 - `--cold` 的第一发把模块求值、better-auth / Effect 的首调初始化都算进去了;Cloudflare 把 worker
   启动(模块解析求值)记在另一份约 400ms 的预算里,所以冷启动这个数和线上计费不是一回事。
 
+## perf:cpu:jobs —— 定时任务(和队列)每次调用吃多少 CPU
+
+```sh
+pnpm --filter @folio/web perf:cpu:jobs                     # 构建 → 灌数据 → 两个 cron 各量一轮
+pnpm --filter @folio/web perf:cpu:jobs --no-build --only cron-sweep --reps 3
+pnpm --filter @folio/web perf:cpu:jobs --list              # cron-ref-index / cron-sweep
+pnpm --filter @folio/web perf:cpu:jobs --help
+```
+
+上面那个 `perf:cpu` 只量读路径。这个量**后台写路径**:整点 sweep(`30 * * * *`,同步每个账户 +
+预热)与每天的刷表(`0 23 * * *`,剪 note + 刷全局代币映射表)。改 cron 之前、之后各跑一遍,两张表
+贴进 PR。基线存在 `baselines/`(`jobs-before-2026-09-28.txt` 是改成队列扇出之前的那一份)。
+
+**本机数字 ≠ 边缘数字。** 两者没有换算系数;能搬过去的是形状(谁占大头、第一次与稳态之比、改动前后
+的差)。线上真值看 Workers Logs 的 `cpuTime`。
+
+### 它做了什么(与 perf:cpu 不同的部分)
+
+1. **假上游**(`fake-upstream.mjs`,默认 `127.0.0.1:3399`)。沙箱出网被挡,而这条路每一步都要出网。
+   一个 HTTP server 按路径前缀扮演 cron 会打的每一家:binance / okx / bybit / rabby(EVM)/
+   coinstats(Solana)/ hyperliquid / blockbook(BTC)/ CoinGecko(`coins/markets`、`simple/price`、
+   `coins/list?include_platform=true`、`asset_platforms`、`exchange_rates`、交易所、搜索、历史价)。
+   响应形状照录制的 fixture,带上生产响应里我们不读的那些字段(JSON.parse 按字节收费)。
+   数据确定性生成,**一个代币宇宙所有上游共用**:CEX 报的 symbol、钱包报的合约地址、CoinGecko 的
+   目录与映射表指的是同一批币,mint 才认得出来、估值那段才真的跑。`coins/list` 约 18k 个币、
+   23k 条平台地址、2.6 MB,与生产同量级。每个账户约 50 行持仓(bitcoin 单地址只有一行)。
+2. worker 经 `dist/server/.dev.vars` 被指到假上游:各家的 base URL 覆盖(`BINANCE_*_BASE` /
+   `OKX_API_BASE` / `BYBIT_API_BASE` 是生产本来就有的 #264 开关;`RABBY_API_BASE` /
+   `COINSTATS_API_BASE` / `HYPERLIQUID_API_BASE` / `BLOCKBOOK_API_BASE` / `COINGECKO_API_BASE` 是
+   FOL-84 补的同款开关,**生产不设**)外加两把假 key(CoinStats 没 key 不出网;CoinGecko 有 key 走
+   demo 档的闸,只影响 wall)。你 `.dev.vars` 里就算有真 key,也被这些同名覆盖换掉。
+3. 灌的账户带**真形状的凭据**:secret 字段按 app 的规矩用 `SECRETS_KEY` 加密(AES-GCM),worker
+   解得开、同步真的会跑,不会在「缺凭据」那一步跳过。
+4. 每次调用都**重起 worker**,触发 `/cdn-cgi/handler/scheduled?cron=…`(它等 `waitUntil` 跑完才答,
+   所以一次触发 = 一次完整调用)。重起的理由:生产的整点 cron 隔着一小时,多半落在一个没热过这条
+   路径的 isolate 上;连着触发的话 JIT、Rabby 的链表缓存、各家的闸都是热的。sweep 每次之前还把代币价
+   标成过期(`PRICE_TTL_MS` 30 分钟,生产隔一小时必然过期)。
+5. 每个任务先单列一次 **`:first`**(灌完数据后的第一次:映射表是空的 / 目录没缓存 / 代币没建行),
+   再量 `--reps` 次稳态(默认 sweep 5、刷表 3)。只量 sweep 时,映射表是空的就先不计时地刷一次 ——
+   链上的币靠它认。
+6. **队列(前向兼容)**:构建出的 wrangler.json 里有 `queues.consumers` 时,触发之后接着等队列
+   排空(一段时间既没有 CPU 活动、也没有新的 `QUEUE <name> a/b (Nms)` 日志行,阈值随配置的
+   `max_batch_timeout`),多出两行:`<任务>:window`(cron + 它引出的全部消费,每次触发的总数)与
+   `<任务>:queue`(逐批)。逐批的拆法是按时间窗:一批的起点 = 看到那行日志的时刻 − 它自报的耗时,
+   与 cron 本体重叠时会拆错,所以逐批是**近似**,总数是准的。没有队列 → 这两行不出现。
+
+### 怎么读输出
+
+```
+   invocation         n  status  mean  p50  max  proc  wall p50  fetches  result      owners (mean ms/invocation)
+!  cron-sweep:first*  1  200     …                                    83  synced 8/8  Effect … · app code … · D1 driver …
+!  cron-sweep         5  200     …                                    63  synced 8/8  …
+```
+
+- **mean / p50 / max** —— 每次调用的采样 CPU(JS + GC),在 n 次之间比。
+- **空档样本封顶(与 perf:cpu 唯一的口径差别)**:一次 cron 大半时间在等(闸、上游、D1),isolate
+  闲着时采样器是停的,恢复后第一个样本带着整段空档。不封顶的话,一次 sweep 27 秒的窗口里有 21 秒
+  落在这种样本上,量到的是等待。所以单个样本最多记 10 × 采样间隔(1ms),超出的记进 summary 的
+  `gapMs`。这使 mean 偏向**上界**(每次恢复最多多记不到 1ms);封顶取 2 × 间隔时 sweep 低约 25%。
+  `*` 同 perf:cpu:封顶样本贡献了四分之一以上 —— 总数仍可用,但抖动大,多跑几次看 p50。
+- **proc** —— 同一段窗口里内核记的 workerd 上 CPU。它含本地 D1(SQLite 在同一个进程里跑,sweep
+  写几百行、刷表比对几万行)、HTTP 解析、**以及采样器自己**,所以比 mean 高得多是正常的;它的用处是
+  前后对比时看「总量」有没有一起动。
+- **wall p50** —— 触发到答的往返。sweep 的 wall 主要是闸在排队(Rabby 每秒 1 发、CoinGecko 每分钟
+  80 发),不是 CPU。
+- **fetches** —— 这次调用假上游收到几发(按上游 + 路径的明细在 `summary.json` 的 `fetchesByRoute`)。
+- **result** —— 从这次调用自己的日志里读出来的:sweep 是 `synced ok/总数`,刷表是
+  `rows 总数 +新增/~改/-删`。没干成(有账户失败、没见到收尾日志)的状态格会标 `✗`,那行数字作废。
+- **owners** —— 同 perf:cpu。
+
+输出目录默认 `.wrangler/perf-state/runs/jobs-<时间戳>/`:每次调用一份 `<任务>-<first|repN>.cpuprofile`、
+`summary.json`(逐次的 CPU / gap / 逐路由的出网数 / 收尾日志的字段 / 队列逐批)、`wrangler.log`。
+
+### 局限
+
+- 假上游答得比真上游快、而且从不失败:重试、限流退避那几条路不在数字里。
+- bitcoin 只测了单地址(xpub 那条会多派生、多一截 CPU);EVM 只走 Rabby(Zerion 不是默认源)。
+- `:first` 在本机是「灌完数据的第一次」,生产上对应的是新用户 / 新币第一次进来那一轮,不是每小时。
+- 数据集只有一个用户;多用户的形状(sweep 逐用户串行)要靠 `--accounts` 放大近似。
+
 ## 加一个端点
 
 在 `endpoints.mjs` 的 `ENDPOINTS` 里加一行:server fn 写 `fn: "<handler 名>"`(只支持 GET,id 从

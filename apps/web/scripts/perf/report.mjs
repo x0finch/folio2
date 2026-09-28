@@ -79,3 +79,58 @@ export function formatTable(rows, { budgetMs, title }) {
       : []),
   ].join("\n");
 }
+
+/**
+ * perf:cpu:jobs 的表:一行一个定时任务(或它的 `:first` / `:queue` / `:window`)。
+ * rows: [{ key, n, status, ok, result, meanCpuMs, p50CpuMs, maxCpuMs, procCpuMs, wallP50Ms, fetches, owners }]
+ * mean/p50/max 是**每次调用**的 CPU(同一行的 n 次之间比);超预算以 `!` 起头,没干成的状态格标 `✗`。
+ */
+export function formatJobsTable(rows, { budgetMs, title }) {
+  const header = [
+    "",
+    "invocation",
+    "n",
+    "status",
+    "mean",
+    "p50",
+    "max",
+    "proc",
+    "wall p50",
+    "fetches",
+    "result",
+    "owners (mean ms/invocation)",
+  ];
+  const body = rows.map((r) => [
+    r.meanCpuMs > budgetMs ? "!" : " ",
+    r.coarseShare > COARSE_FLAG_SHARE ? `${r.key}*` : r.key,
+    String(r.n),
+    r.ok ? r.status : `${r.status} ✗`,
+    ms(r.meanCpuMs),
+    ms(r.p50CpuMs),
+    ms(r.maxCpuMs),
+    ms(r.procCpuMs),
+    ms(r.wallP50Ms),
+    r.fetches == null ? "—" : r.fetches.toFixed(0),
+    r.result,
+    ownerCell(r.owners),
+  ]);
+  const widths = header.map((h, c) => Math.max(h.length, ...body.map((row) => row[c].length)));
+  const numeric = new Set([2, 4, 5, 6, 7, 8, 9]);
+  const line = (row) =>
+    row
+      .map((cell, c) => (numeric.has(c) ? cell.padStart(widths[c]) : cell.padEnd(widths[c])))
+      .join("  ")
+      .trimEnd();
+  const over = rows.filter((r) => r.meanCpuMs > budgetMs).length;
+  return [
+    title,
+    line(header),
+    line(widths.map((w) => "-".repeat(w))),
+    ...body.map(line),
+    "",
+    "mean/p50/max: V8 samples (JS + GC) per invocation, across n invocations (fresh worker each).",
+    "proc: workerd on-CPU for the same window from the kernel (incl. local D1 + sampler overhead).",
+    "fetches: requests the fake upstream received during that invocation.",
+    `budget ${budgetMs} ms → ${over}/${rows.length} over (marked !). Local CPU ≠ edge CPU: compare shapes and deltas.`,
+  ].join("\n");
+}
