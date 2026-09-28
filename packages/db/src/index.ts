@@ -37,6 +37,7 @@ export {
   Database,
   DatabaseForOracle,
   type DbRequest,
+  databaseTickets,
   GlobalDatabase,
   type GlobalRefIndexStore,
   type TokenPriceStore,

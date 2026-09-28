@@ -15,7 +15,7 @@ import type { SyncAccountJob } from "@/lib/server/jobs/message";
 import { type Enqueued, enqueue } from "@/lib/server/jobs/queue";
 import { hourlyUserJobs } from "@/lib/server/jobs/schedule";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
-import { forUser } from "@/lib/server/runtime";
+import { forUser, forUserDb } from "@/lib/server/runtime";
 import { makeSyncServicesLayer } from "./deps";
 import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 
@@ -317,7 +317,7 @@ const fanOutUserRounds = (userId: string): Effect.Effect<Enqueued[], Error> =>
       jobs.push(...syncJobsOf(userId, round, ids));
     }
     return jobs;
-  }).pipe((work) => forUser(userId, work));
+  }).pipe((work) => forUserDb(userId, work));
 
 /** cron 那一趟的小计:投了多少条、几个用户没投成。**同步的成败不在这里** —— 它们还没跑。 */
 export interface FanOutResult {

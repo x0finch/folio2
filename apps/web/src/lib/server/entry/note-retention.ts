@@ -2,7 +2,7 @@ import { Database } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import { Clock, Effect } from "effect";
 import type { PruneNotesJob } from "@/lib/server/jobs/message";
-import { forUser } from "@/lib/server/runtime";
+import { forUserDb } from "@/lib/server/runtime";
 
 // 展示 note 的保留期(#456)。
 //
@@ -38,7 +38,7 @@ const DAY_MS = 86_400_000;
  * 日志只带计数(P6.7)。
  */
 export const runPruneNotesJob = (job: PruneNotesJob): Effect.Effect<void, Error> =>
-  forUser(
+  forUserDb(
     job.userId,
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;

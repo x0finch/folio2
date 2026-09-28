@@ -1,17 +1,19 @@
 import { env } from "cloudflare:workers";
 import {
-  Database,
+  type CurrentUser,
+  type Database,
   type DbClient,
   type DbRequest,
+  databaseTickets,
   type GlobalDatabase,
   provideCurrentUser,
   provideDbClient,
 } from "@folio/db";
 import type { OracleServices } from "@folio/oracle";
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Context, Effect, Layer, Runtime, Scope } from "effect";
 import type { JsonResponse } from "@/lib/core/json-response";
-import { ConnectorRegistry } from "./connectors/registry";
-import { logCategory, logTapeLogger } from "./effect-log";
+import { type ConnectorRegistry, connectorRegistryContext } from "./connectors/registry";
+import { logCategory, withLogTapeLogger } from "./effect-log";
 import { type AppError, toError } from "./errors";
 import { oracleServices } from "./oracle";
 import { withSpanTree } from "./tracing";
@@ -70,18 +72,60 @@ const withServerFnTiming =
  */
 type IsolateServices = Database | OracleServices | ConnectorRegistry | GlobalDatabase;
 
-const isolateLayer = (): Layer.Layer<IsolateServices> =>
-  Layer.mergeAll(Database.Default, oracleServices(), ConnectorRegistry.Default, logTapeLogger);
+/**
+ * **只有 db 的那一半** —— 两张 db 门票 + 日志转发器。cron 的两趟(列用户、开轮、投消息)与剪 note
+ * 只要它;参考层、CoinGecko client、connector 目录它们一样都不碰。
+ */
+type DbServices = Database | GlobalDatabase;
 
 /**
  * **惰性**:第一次有请求来才建,形状与 `session/auth.ts` 的 `getAuth()` 一样 —— 模块加载期什么都
- * 不跑(Workers 的启动 CPU 限制,CLAUDE.md / ADR 0045 §3)。这是本文件唯一的模块级可变状态。
+ * 不跑(Workers 的启动 CPU 限制,CLAUDE.md / ADR 0045 §3)。下面两个就是本文件全部的模块级可变状态。
  *
- * 从不 `dispose`:它活到 isolate 被回收为止,而它的 scope 里没有要收尾的东西(见上面的清单)。
+ * **两个运行时**(FOL-83 第二轮,ADR 0054 补记):冷 isolate 上经 Layer 把整张图建一遍,本机实测约
+ * 45ms CPU —— 每小时那个 cron 本体(只开轮 + 投 13 条消息)一共约 100ms,免费计划一次调用 10ms。
+ * 其中大半是 **Layer 的构建机器本身**(memo 表、scope、`mergeAll` 并行合并时 fork 的 fiber;
+ * Node 上同一个进程里建第二遍仍要 ~6ms),不是服务。于是:
+ *
+ *   · `dbRuntime` —— **不经 Layer 手搭**的 `Runtime`:两张 db 门票(`databaseTickets()`,纯闭包)+
+ *     日志转发器(`withLogTapeLogger`,两个 FiberRef 的初值)。cron、剪 note、以及每个入口的
+ *     「边缘」(`runAtEdge`)只用它。
+ *   · `isolateRuntime` —— 在 `dbRuntime` 之上补参考层与 connector 门票,第一次有活要它们时才建
+ *     (见它自己的注释)。db 那两张门票**就是 `dbRuntime` 里那一份**,两个运行时里的 `Database`
+ *     是同一个对象,每个 isolate 仍只有一份。
+ *
+ * 从不 `dispose`:它们活到 isolate 被回收为止,而里面没有要收尾的东西(见上面的清单)。
  */
-let isolate: ManagedRuntime.ManagedRuntime<IsolateServices, never> | undefined;
-const isolateRuntime = () => {
-  isolate ??= ManagedRuntime.make(isolateLayer());
+let dbOnly: Runtime.Runtime<DbServices> | undefined;
+const dbRuntime = (): Runtime.Runtime<DbServices> => {
+  dbOnly ??= Runtime.make({
+    context: databaseTickets(),
+    fiberRefs: withLogTapeLogger(Runtime.defaultRuntime.fiberRefs),
+    runtimeFlags: Runtime.defaultRuntime.runtimeFlags,
+  });
+  return dbOnly;
+};
+
+/**
+ * 整张图 = `dbRuntime` 那份 context + connector 门票 + 参考层。**同样不经 `ManagedRuntime`**:
+ * 参考层那半的构造分散在各包的 layer 里、彼此依赖,只能经 Layer 建 —— 但只建它自己
+ * (`Layer.buildWithScope` 一次,同步跑完:那些 layer 建的时候只造闭包,见上面的清单),
+ * 日志转发器、db 门票、connector 门票都不再绕一圈 Layer。`runSync` 是对「全同步」的断言:
+ * 哪天有人往参考层里加了一个要等 I/O 才建得出来的 layer,这里当场炸(AsyncFiberException),
+ * 而不是悄悄变成每个 isolate 第一发请求多等一次。scope 从不关闭,理由同上。
+ */
+let isolate: Runtime.Runtime<IsolateServices> | undefined;
+const isolateRuntime = (): Runtime.Runtime<IsolateServices> => {
+  if (isolate) return isolate;
+  const base = dbRuntime();
+  const oracle = Effect.runSync(
+    Effect.flatMap(Scope.make(), (scope) => Layer.buildWithScope(oracleServices(), scope)),
+  );
+  isolate = Runtime.make({
+    context: base.context.pipe(Context.merge(oracle), Context.merge(connectorRegistryContext())),
+    fiberRefs: base.fiberRefs,
+    runtimeFlags: base.runtimeFlags,
+  });
   return isolate;
 };
 
@@ -119,10 +163,10 @@ const asUser =
 // **外面**,所以连那一步本身打的日志也带得上;挂在里面就只覆盖被包住那段。
 // 出口的 `R` 是 isolate 的那张图,由跑它的边缘给(下面 `runForUser` 直接跑在运行时上,
 // `forUser` 自己 provide 那个运行时)。
-const inRequest = <A, E extends AppError>(
+const inRequest = <A, E extends AppError, R extends UserServices>(
   userId: string,
-  effect: Effect.Effect<A, E, UserServices>,
-): Effect.Effect<A, Error, IsolateServices> =>
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, Error, Exclude<Exclude<R, CurrentUser>, DbClient>> =>
   effect.pipe(
     asUser(userId), // ← 注入发生在这一行
     Effect.mapError(toError), // ← 失败变成人话的唯一一处(见 ./errors)
@@ -146,6 +190,16 @@ export const forUser = <A, E extends AppError>(
 ): Effect.Effect<A, Error> => Effect.provide(inRequest(userId, effect), isolateRuntime());
 
 /**
+ * `forUser` 的「只碰 db」版:effect 的 `R` 里只有 `Database`(+ 一次请求的两样),于是只建
+ * `dbRuntime` —— cron 开轮投消息、剪 note 用它,冷 isolate 上不为用不着的参考层 / connector
+ * 付那一遍构建。给 user 的方式与 `forUser` 逐字相同(`inRequest`)。
+ */
+export const forUserDb = <A, E extends AppError>(
+  userId: string,
+  effect: Effect.Effect<A, E, Database | DbRequest>,
+): Effect.Effect<A, Error> => Effect.provide(inRequest(userId, effect), dbRuntime());
+
+/**
  * **发动点** —— 在 `forUser` 之上补只有「跑」才需要的:span 树。
  *
  * 路由 / 测试 / 需要显式 userId 的 server fn 都走这里。server fn 的标准装配另有
@@ -165,7 +219,7 @@ export const runForUser = <A, E extends AppError>(
   // 一次请求一棵 span 树(#504 T16)—— **只在 `LOG_LEVEL` 为 debug 时装**(理由见 tracing.ts
   // 「开销与开关」)。装在这儿而不是 `forUser` 里:cron 那条路把 N 个用户拼成**一个** effect,
   // 树该按那一整趟算,由它自己的边缘装(`runAtEdge`)。
-  isolateRuntime().runPromise(withSpanTree(inRequest(userId, effect)));
+  Runtime.runPromise(isolateRuntime())(withSpanTree(inRequest(userId, effect)));
 
 /** `runEffect` 的 timing 壳,给必须走 `runForUser` 的 server fn(如 syncAccount)复用。 */
 export const runTimedForUser = <A, E extends AppError>(
@@ -228,7 +282,7 @@ export const runEffectJson =
  */
 export const withGlobalDb = <A, E>(
   effect: Effect.Effect<A, E, GlobalDatabase | DbClient>,
-): Effect.Effect<A, E> => Effect.provide(provideDbClient(env)(effect), isolateRuntime());
+): Effect.Effect<A, E> => Effect.provide(provideDbClient(env)(effect), dbRuntime());
 
 /**
  * 边缘:跑一个**已经装配好**的 cron effect。cron 一次调用只经这里一次,跑在与 server fn 同一个
@@ -237,4 +291,6 @@ export const withGlobalDb = <A, E>(
 export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
   // span 树也在这儿装(#504 T16):cron 一次调用就是一趟,那棵树该按整趟算。
   // 同样只在 `LOG_LEVEL` 为 debug 时装(见 tracing.ts「开销与开关」)。
-  isolateRuntime().runPromise(withSpanTree(effect));
+  // 跑在 db 那半上:传进来的 effect 已经装配好(`forUser` / `forUserDb` / `withGlobalDb` 各自
+  // provide 了它要的那个运行时),这里只要日志转发器 —— 不为一趟 cron 把整张图建起来。
+  Runtime.runPromise(dbRuntime())(withSpanTree(effect));

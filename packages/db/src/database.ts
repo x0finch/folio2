@@ -119,29 +119,29 @@ const ownerless = bindPerCall(
 //
 // **挂的是各领域的绑定函数,不是它们的 Tag**(#504 T5):聚合的意义正是让装配点不必知道里头有几个
 // 领域。
-export class Database extends Effect.Service<Database>()("db/Database", {
-  sync: () =>
-    perUser({
-      accounts: makeAccountStore,
-      // 数据版本号(FOL-94):只读;抬它的是触发器(见 `domains/data-version.ts`)。
-      dataVersion: makeDataVersionStore,
-      manual: makeManualStore,
-      portfolios: makePortfolioStore,
-      settings: makeSettingsStore,
-      snapshots: makeSnapshotStore,
-      // 同步轮的状态(ADR 0048)。它落在 `user_cache` 上,但**不是**那片 KV 的一个用法 ——
-      // 它的写入是带轮 id 条件的单语句,通用 `put(key, value)` 表达不了,漏网竞态会互相盖。
-      syncRounds: makeSyncRoundStore,
-      tabPins: makeTabPinStore,
-      tags: makeTagStore,
-      transfer: makeTransferStore,
-      // **per-user 的 KV 缓存也在这张票上。** 它不是「领域」,是一片存储 —— 但取用方式与领域
-      // 一样,而 app 真的有一处直接用它:DeFi 协议图(`logos/store.ts`)那份数据来自用户
-      // 自己同步下来的余额 meta,没有上游、不出网,不属于参考层。以前它只能从参考层的装配里
-      // 漏一个 `CacheStore` 端口出来给 app,那是「借道」;现在它就在 db 的门票上。
-      cache: makeUserCacheStore,
-    }),
-}) {}
+const databaseOps = () =>
+  perUser({
+    accounts: makeAccountStore,
+    // 数据版本号(FOL-94):只读;抬它的是触发器(见 `domains/data-version.ts`)。
+    dataVersion: makeDataVersionStore,
+    manual: makeManualStore,
+    portfolios: makePortfolioStore,
+    settings: makeSettingsStore,
+    snapshots: makeSnapshotStore,
+    // 同步轮的状态(ADR 0048)。它落在 `user_cache` 上,但**不是**那片 KV 的一个用法 ——
+    // 它的写入是带轮 id 条件的单语句,通用 `put(key, value)` 表达不了,漏网竞态会互相盖。
+    syncRounds: makeSyncRoundStore,
+    tabPins: makeTabPinStore,
+    tags: makeTagStore,
+    transfer: makeTransferStore,
+    // **per-user 的 KV 缓存也在这张票上。** 它不是「领域」,是一片存储 —— 但取用方式与领域
+    // 一样,而 app 真的有一处直接用它:DeFi 协议图(`logos/store.ts`)那份数据来自用户
+    // 自己同步下来的余额 meta,没有上游、不出网,不属于参考层。以前它只能从参考层的装配里
+    // 漏一个 `CacheStore` 端口出来给 app,那是「借道」;现在它就在 db 的门票上。
+    cache: makeUserCacheStore,
+  });
+
+export class Database extends Effect.Service<Database>()("db/Database", { sync: databaseOps }) {}
 
 // **第二张门票:没有「谁的」这回事的那些 op。**
 //
@@ -159,13 +159,28 @@ export class Database extends Effect.Service<Database>()("db/Database", {
 //
 // `R` 里只有 `DbClient`,**没有 `CurrentUser`** —— 这就是它与 `Database` 的全部区别,
 // 也是类型上「这里够不到任何用户数据」的写法。
+const globalOps = () =>
+  ownerless({
+    refIndex: makeGlobalRefIndexStore,
+    accounts: makeGlobalAccountStore,
+  });
+
 export class GlobalDatabase extends Effect.Service<GlobalDatabase>()("db/GlobalDatabase", {
-  sync: () =>
-    ownerless({
-      refIndex: makeGlobalRefIndexStore,
-      accounts: makeGlobalAccountStore,
-    }),
+  sync: globalOps,
 }) {}
+
+/**
+ * **上面两张门票,不经 Layer、直接造成一份 context**(FOL-83 第二轮,ADR 0054 补记)。
+ *
+ * 与 `Database.Default` / `GlobalDatabase.Default` 是同一份构造(同一个 `databaseOps` / `globalOps`),
+ * 只是不走 Layer 的构建机器:冷 isolate 上 `ManagedRuntime.make(Layer.mergeAll(这两张 + 日志))`
+ * 本机实测约 20ms CPU,其中大半是 Layer 自己(memo 表、scope、并行合并时 fork 的 fiber),
+ * 两张门票本身是纯闭包、零 I/O。app 的 cron / 队列入口只要这两张时就用这份手搭一个 `Runtime`。
+ */
+export const databaseTickets = (): Context.Context<Database | GlobalDatabase> =>
+  Context.make(Database, Database.make(databaseOps())).pipe(
+    Context.add(GlobalDatabase, GlobalDatabase.make(globalOps())),
+  );
 
 // **第三张门票:参考层要的那几片。**
 //
