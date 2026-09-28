@@ -191,7 +191,31 @@ pnpm --filter @folio/web perf:cpu:jobs --help
 - **owners** —— 同 perf:cpu。
 
 输出目录默认 `.wrangler/perf-state/runs/jobs-<时间戳>/`:每次调用一份 `<任务>-<first|repN>.cpuprofile`、
-`summary.json`(逐次的 CPU / gap / 逐路由的出网数 / 收尾日志的字段 / 队列逐批)、`wrangler.log`。
+`summary.json`(逐次的 CPU / gap / 逐路由的出网数 / 收尾日志的字段 / 队列逐批)、`wrangler.log`,
+以及每份 profile 旁边一份 `<任务>-<tag>.slots.json`(这一窗里每次调用的起点与 kind)。
+
+### 看到函数这一级:`perf:cpu:analyze`
+
+owners 只说到包(「Effect 325 ms」)。要知道是 Effect 里的哪件事,对着**同一次构建**的输出目录跑:
+
+```sh
+pnpm --filter @folio/web perf:cpu:analyze <run-dir>                    # 每个 kind:self / inclusive top-25
+pnpm --filter @folio/web perf:cpu:analyze <run-dir> --kind sync-account --top 40
+pnpm --filter @folio/web perf:cpu:analyze <run-dir> --tree --kind cron  # 自顶向下的树,折叠 Effect 运行时帧
+```
+
+拆窗与封顶和表里同一个规则(每次调用一格、空档样本封顶),数字是**每次调用**的平均。Effect 的
+fiber 是蹦床式的,调用栈里常常只剩 `runLoop` / `evaluateEffect`,认不出业务 —— 所以 `--tree`
+默认把 Effect 运行时的帧折掉(`--collapse` 可改),inclusive 列表里它们仍在。
+
+### 两个诊断开关
+
+- `--warm`:一个场景只起一个 worker,后几次落在热 isolate 上。与默认口径对照,就知道一次调用里
+  多少是冷 isolate 的首跑开销(第二轮实测:每天那条 cron 冷 ≈57ms、热 ≈7ms)。
+- `--cron-only`:只量 `scheduled()` 那一次。worker 用去掉 `queues.consumers` 的配置起
+  (`dist/server/wrangler.producer-only.json`),投的消息没人消费,就不会和 cron 叠在同一个采样窗里;
+  每次触发前清掉同步轮,免得下一次 cron 在心跳期内因为「活轮还在」不投。默认口径下 cron 那一格的
+  起止靠日志估,consumer 的开头几毫秒常被算进 cron —— 比 cron 本体时用这个。
 
 ### 局限
 

@@ -26,6 +26,7 @@
     "gen:icons": "node scripts/gen-icons.mjs",
     "perf:cpu": "node --disable-warning=ExperimentalWarning scripts/perf/cpu.mjs",
     "perf:cpu:online": "node scripts/perf/online.mjs",
+    "perf:cpu:analyze": "node scripts/perf/analyze.mjs",
     "perf:cpu:jobs": "node --disable-warning=ExperimentalWarning scripts/perf/jobs.mjs",
     "perf:requests": "node --disable-warning=ExperimentalWarning scripts/perf/requests.mjs",
     "test:e2e": "playwright test",

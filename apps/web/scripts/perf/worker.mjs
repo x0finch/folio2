@@ -107,6 +107,21 @@ function run(cmd, args, { logFile, env } = {}) {
   }
 }
 
+/**
+ * 构建产物的配置去掉 `queues.consumers`(生产者照留)—— `perf:cpu:jobs --cron-only` 用:只量 cron
+ * 那一次调用,投出去的消息没人消费,不会在采样窗口里跟 cron 叠在一起。写在 `wrangler.json` 旁边,
+ * 相对路径(`main` 等)与 `.dev.vars` 照旧对得上。
+ */
+function producerOnlyConfig() {
+  const config = builtConfig();
+  const file = join(DIST_SERVER_DIR, "wrangler.producer-only.json");
+  writeFileSync(
+    file,
+    JSON.stringify({ ...config, queues: { ...config.queues, consumers: undefined } }, null, 2),
+  );
+  return file;
+}
+
 /** 构建出的 wrangler.json(`wrangler deploy` 发的就是它)。 */
 export function builtConfig() {
   return JSON.parse(readFileSync(BUILT_CONFIG, "utf8"));
@@ -187,6 +202,7 @@ export async function startWorker({
   logFile,
   probePath = READY_PROBE_PATH,
   vars,
+  noQueueConsumers = false,
 }) {
   for (const p of [port, inspectorPort]) {
     if (await portInUse(p))
@@ -199,7 +215,7 @@ export async function startWorker({
     [
       "dev",
       "--config",
-      BUILT_CONFIG,
+      noQueueConsumers ? producerOnlyConfig() : BUILT_CONFIG,
       "--ip",
       HOST,
       "--port",

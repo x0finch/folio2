@@ -446,6 +446,22 @@ export function expirePrices(userId) {
   }
 }
 
+/**
+ * 清掉这个用户的同步轮(`sync-round:*`,ADR 0048)。`perf:cpu:jobs --cron-only` 不等队列排空就停 worker,
+ * 留下没收官的轮;不清的话下一次 cron 在心跳期内看到「活轮还在」就不投 `sync-account`,量的就不是
+ * 同一件事了。
+ */
+export function clearSyncRounds(userId) {
+  const db = new DatabaseSync(perfDbPath());
+  try {
+    return db
+      .prepare("delete from user_cache where user_id = ? and k like 'sync-round:%'")
+      .run(userId).changes;
+  } finally {
+    db.close();
+  }
+}
+
 /** 全局映射表(`global_token_ref_index`)有几行 —— 0 = 还没刷过,sweep 认不出链上的币。 */
 export function refIndexRowCount() {
   const db = new DatabaseSync(perfDbPath(), { readOnly: true });

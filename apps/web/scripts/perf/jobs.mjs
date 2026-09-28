@@ -46,7 +46,7 @@ import {
   PERF_STATE_DIR,
   WEB_ROOT,
 } from "./constants.mjs";
-import { expirePrices, refIndexRowCount } from "./dataset.mjs";
+import { clearSyncRounds, expirePrices, refIndexRowCount } from "./dataset.mjs";
 import { startFakeUpstream } from "./fake-upstream.mjs";
 import { attribute, COARSE_SAMPLE_FACTOR, hostLoad, profileWindow, withCdp } from "./profiler.mjs";
 import { formatJobsTable, quantile } from "./report.mjs";
@@ -110,7 +110,10 @@ const SCENARIOS = [
       const synced = rounds.reduce((n, r) => n + r.synced, 0);
       const drained = drainedResult(settled);
       return {
-        ok: done.failed === 0 && rounds.length > 0 && synced === total && drained.ok,
+        // `--cron-only`:没等队列(`settled.summary` 为空),只看 cron 自己投成了没有。
+        ok:
+          done.failed === 0 &&
+          (!settled?.summary || (rounds.length > 0 && synced === total && drained.ok)),
         text: `synced ${synced}/${total}, ${drained.text}`,
         detail: { ...done, rounds, queue: settled?.summary },
       };
@@ -199,6 +202,10 @@ const USAGE = `usage: perf:cpu:jobs [options]
   --port N               worker port (default ${DEFAULT_PORT})
   --inspector-port N     inspector port (default ${DEFAULT_INSPECTOR_PORT})
   --upstream-port N      fake upstream port (default ${DEFAULT_FAKE_UPSTREAM_PORT})
+  --cron-only            measure the scheduled() invocation only: stop once the cron has enqueued,
+                         don't wait for (or measure) the queue consumers
+  --warm                 keep one worker per scenario (default: restart before every invocation);
+                         shows how much of an invocation is cold-isolate cost
   --out DIR              output dir (default ${join(PERF_STATE_DIR, "runs", "jobs-<timestamp>")})`;
 
 function parseOptions(argv) {
@@ -219,6 +226,8 @@ function parseOptions(argv) {
       "inspector-port": { type: "string", default: String(DEFAULT_INSPECTOR_PORT) },
       "upstream-port": { type: "string", default: String(DEFAULT_FAKE_UPSTREAM_PORT) },
       out: { type: "string" },
+      warm: { type: "boolean", default: false },
+      "cron-only": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -244,6 +253,8 @@ function parseOptions(argv) {
     port: num("port"),
     inspectorPort: num("inspector-port"),
     upstreamPort: num("upstream-port"),
+    warm: values.warm,
+    cronOnly: values["cron-only"],
     out: values.out ?? join(PERF_STATE_DIR, "runs", `jobs-${stamp}`),
   };
 }
@@ -451,9 +462,14 @@ function fetchesPerSlot(hits, starts) {
 async function measureOnce(ctx, scenario, tag) {
   const { opts, workerOpts, fake, queue, userId } = ctx;
   scenario.beforeEach({ userId });
+  if (opts.cronOnly) clearSyncRounds(userId);
   // 每次都重起 worker,所以「这次启动之后写进日志的」就是这次调用的全部日志。
   const logFrom = statSync(workerOpts.logFile).size;
-  const w = await startWorker(workerOpts);
+  // `--warm`:一个场景一个 worker,后面几次落在同一个(热的)isolate 上 —— 与默认口径对照,
+  // 就知道一次调用里有多少是冷 isolate 的首跑开销。
+  const start = () => startWorker({ ...workerOpts, noQueueConsumers: opts.cronOnly });
+  ctx.worker ??= opts.warm ? await start() : undefined;
+  const w = ctx.worker ?? (await start());
   try {
     const readLog = logCursor(workerOpts.logFile);
     const hitsFrom = fake.hits.length;
@@ -461,10 +477,25 @@ async function measureOnce(ctx, scenario, tag) {
       profileWindow(cdp, {
         cpuNs: w.cpuNs,
         trigger: () => fireScheduled(originOf(opts.port), scenario.cron),
-        settle: () => settleQueue(queue, readLog, scenario),
+        settle: () => settleQueue(opts.cronOnly ? null : queue, readLog, scenario),
       }),
     );
     writeFileSync(join(opts.out, `${scenario.key}-${tag}.cpuprofile`), JSON.stringify(run.profile));
+    // 每次调用的时间窗(第 0 格是 cron 本身,其后每次 consumer 调用一格):`analyze.mjs` 靠它把
+    // profile 拆成逐调用、逐函数的 top-N。
+    writeFileSync(
+      join(opts.out, `${scenario.key}-${tag}.slots.json`),
+      JSON.stringify({
+        scenario: scenario.key,
+        beforeStartUs: run.beforeStartUs,
+        stopUs: run.stopUs,
+        maxSampleUs: opts.samplingUs * COARSE_SAMPLE_FACTOR,
+        slots: run.requests.map((r, i) => ({
+          startUs: r.startUs,
+          kind: i === 0 ? "cron" : r.kind,
+        })),
+      }),
+    );
     // 空档样本封顶(见 attribute 的 maxSampleUs):cron 大半时间在等,不封顶的话量到的是等待。
     const a = attribute(run, opts.samplingUs, {
       maxSampleUs: opts.samplingUs * COARSE_SAMPLE_FACTOR,
@@ -507,7 +538,7 @@ async function measureOnce(ctx, scenario, tag) {
       topModules: a.topModules.map((m) => ({ ...m, ms: m.ms * n })),
     };
   } finally {
-    await w.stop();
+    if (!opts.warm) await w.stop();
   }
 }
 
@@ -606,6 +637,10 @@ async function runScenario(ctx, scenario) {
       }),
     );
     rows.push(...queueRowsOf(scenario.key, steady));
+  }
+  if (ctx.worker) {
+    await ctx.worker.stop();
+    ctx.worker = undefined;
   }
   return { key: scenario.key, cron: scenario.cron, first, runs, rows };
 }
