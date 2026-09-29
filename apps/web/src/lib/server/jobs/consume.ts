@@ -8,8 +8,8 @@ import { giveUpQueuedAccount, syncQueuedAccount } from "@/lib/server/sync/round"
 import { JOB_MAX_RETRIES } from "./constants";
 import { decodeJob, type Job } from "./message";
 
-// **队列 consumer 的分派**(FOL-86)。`src/server.ts` 的 `queue()` 每条消息调一次 `consumeMessage`,
-// 经 `runAtEdge` 跑在 `dbRuntime` 上;要参考层 / connector 的活由`forUser`(整张图)/ `forUserDb`(只要 db)
+// **后台活 consumer 的分派**(FOL-86)。运行器那个 DO 的 alarm(`durable.ts`,FOL-100)每件活调一次
+// `consumeMessage`,经 `runAtEdge` 跑在 `dbRuntime` 上;要参考层 / connector 的活由`forUser`(整张图)/ `forUserDb`(只要 db)
 // 在同一个 isolate 的服务图里补上 —— 不另起一张图(见 runtime.ts 顶部)。
 
 /** 一条活真正要干的事。**穷尽 switch**:加了 kind 忘了接,这里编译不过。 */
@@ -32,7 +32,7 @@ const runJob = (job: Job): Effect.Effect<void, Error> => {
 };
 
 /**
- * 最后一次投递也失败了,送进死信之前还要做什么。**只有会让别处挂着的那种活才需要**:`sync-account`
+ * 最后一次投递也失败了,被埋掉之前还要做什么。**只有会让别处挂着的那种活才需要**:`sync-account`
  * 不收尾,轮里那个账户要等心跳过期才被念成(整轮)「中断」;刷价 / 预热 / 剪 note 失败了就是这一轮
  * 没做上(下一次 cron 再投),没有谁在等它。
  */
@@ -58,8 +58,8 @@ const reasonOf = (cause: Cause.Cause<unknown>): string => {
 };
 
 /**
- * Cloudflare `Message` 里 consumer 用得到的那几样 —— 收窄成接口,单测递一个假的就够,不必造
- * 整个 `MessageBatch`。
+ * 一条消息里 consumer 用得到的那几样。FOL-86 时它是 Cloudflare 队列 `Message` 的收窄;FOL-100 起由运行器
+ * 把自己表里的一行包成这个形状(`runner.ts`)—— consumer 不关心消息从哪来。单测递一个假的就够。
  */
 export interface QueueMessage {
   readonly id: string;
@@ -74,14 +74,13 @@ export interface QueueMessage {
  * 一条消息:解码 → 跑 → **ack 或 retry,由这里一处决定**。永不失败(返回的 effect 错误面是 `never`),
  * 所以批里一条的下场不会波及别的消息、也不会变成 queue handler 的异常(那会让整批重投)。
  *
- *   · 解不开 → ack + warn。重投也还是解不开,留着只会烧掉重试次数、再掉进死信。
+ *   · 解不开 → ack + warn。重跑也还是解不开,留着只会烧掉重试次数、再被埋掉。
  *   · 跑成功 → ack。
- *   · 失败,还有重投机会 → `retry()`(延迟由 wrangler.jsonc 的 `retry_delay` 给)。
+ *   · 失败,还有重跑机会 → `retry()`(运行器按指数退避排下一次,`jobRetryDelayMs`)。
  *   · 失败,这是最后一次(`attempts > JOB_MAX_RETRIES`)→ `giveUp` 收尾(不管收尾成没成)再 `retry()`:
- *     重投次数已用完,这一下把消息送进**死信队列**,留给人看(FOL-86 验收:失败消息进死信可见)。
- *     收尾先做,所以轮不挂 pending;死信队列**没有 consumer**(tests/queue-config.test.ts 钉着),
- *     消息不会绕回来再跑一遍 —— 真有人把它从死信里重放回主队列,`sync-account` 那条也只会被
- *     「还 pending 吗」挡下(收尾已把账户记成 failed)。
+ *     次数已用完,运行器把这件活**埋掉**(留在 DO 存储里、标上死亡时间,给人看 —— 等价于以前的死信队列,
+ *     FOL-86 验收:失败的活看得见)。收尾先做,所以轮不挂 pending;埋掉的不会再被领。真有人把它挖出来
+ *     重跑,`sync-account` 那条也只会被「还 pending 吗」挡下(收尾已把账户记成 failed)。
  *
  * 日志只带 kind / 消息 id / 次数 / accountId 这一级(P6.7),错误是 `Cause.pretty`。
  *
@@ -115,7 +114,7 @@ export const consumeMessage = (
       message.retry();
       return;
     }
-    log.error("job failed on final attempt, sending to dead-letter queue", { ...meta, error });
+    log.error("job failed on final attempt, burying it", { ...meta, error });
     const settled = yield* Effect.exit(
       giveUp(job, `failed ${message.attempts} times: ${reasonOf(exit.cause)}`),
     );

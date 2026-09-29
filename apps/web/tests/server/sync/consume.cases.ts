@@ -230,9 +230,9 @@ describe("jobs/consume", () => {
       expect((await roundOf(job.portfolioId))?.accounts[job.accountId]?.status).toBe("pending");
     });
 
-    // 不收尾的话那个账户永远 pending,面板要等心跳过期才说「中断」。收完尾照样送进死信
-    // (重投次数已用完,`retry()` 就是进死信)—— FOL-86 验收:失败消息进死信可见。
-    it("最后一次投递仍失败 → 记 failed、收官,再 retry() 送进死信(不 ack)", async () => {
+    // 不收尾的话那个账户永远 pending,面板要等心跳过期才说「中断」。收完尾照样 retry()
+    // (次数已用完,运行器据此把它埋掉,见 tests/job-runner.test.ts)—— FOL-86 验收:失败的活看得见。
+    it("最后一次投递仍失败 → 记 failed、收官,再 retry() 交给运行器埋掉(不 ack)", async () => {
       await cex("a");
       const [job] = await fanOut();
       if (!job) throw new Error("no job enqueued");
@@ -245,15 +245,15 @@ describe("jobs/consume", () => {
       expect(round?.finishedAt).not.toBeNull();
     });
 
-    // 刷价这类活没有收尾可做,但最终失败一样要在死信里看得见,不能 ack 掉只剩一行日志。
-    it("没有收尾的活最后一次失败 → 同样送进死信", async () => {
+    // 刷价这类活没有收尾可做,但最终失败一样要被埋下、看得见,不能 ack 掉只剩一行日志。
+    it("没有收尾的活最后一次失败 → 同样 retry()(交给运行器埋掉)", async () => {
       const { message, state } = fakeMessage({ kind: "prices", userId: USER }, JOB_MAX_RETRIES + 1);
       await Effect.runPromise(consumeMessage(message, boom));
       expect(state).toEqual({ acked: false, retried: true });
     });
 
-    // 死信里的那条要是被人重放回主队列:收尾已把账户记成 failed,「还 pending 吗」挡下它,不再出网。
-    it("送进死信的 sync-account 再被投一次 → 空跑,不出网、不改写", async () => {
+    // 埋掉的那条要是被人挖出来重跑:收尾已把账户记成 failed,「还 pending 吗」挡下它,不再出网。
+    it("埋掉的 sync-account 再被投一次 → 空跑,不出网、不改写", async () => {
       await cex("a");
       const [job] = await fanOut();
       if (!job) throw new Error("no job enqueued");

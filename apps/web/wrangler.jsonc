@@ -24,8 +24,8 @@
 
   // 两个定时任务,**刻意拆成两个 trigger**(ADR 0022 / #199):
   //   · 每天 23:00 整 —— 投每天的逐用户活(`prune-notes` / `catalogue`,FOL-88,只投不跑)
-  //   · 每小时 30 分 —— 全量 sync sweep(#446)。**FOL-86 起它只开轮 + 投队列**(见下面 `queues`),
-  //     不在这一次调用里碰上游;每个账户的同步各自是一次 consumer 调用。
+  //   · 每小时 30 分 —— 全量 sync sweep(#446)。**FOL-86 起它只开轮 + 投活**(见下面 `durable_objects`),
+  //     不在这一次调用里碰上游;每个账户的同步各自是运行器的一次 alarm。
   // src/server.ts 的 scheduled() 按 controller.cron 分支。
   //
   // **全局代币映射表不在这里刷了**(FOL-85,ADR 0056):拉 2.6 MB 币目录 + 与几万行比对,生产
@@ -33,7 +33,7 @@
   // (`.github/workflows/ref-index-refresh.yml`,同样每天 23:00 UTC),经 D1 REST API 写这个库。
   //
   // **sweep 落在半点而不是整点**:整点的话每天 23:00 会与上面那条同时触发 —— Workers 各起一次
-  // scheduled 调用、各自投一遍队列。这条约束由 tests/cron-triggers.test.ts 锁着。
+  // scheduled 调用、各自投一遍活。这条约束由 tests/cron-triggers.test.ts 锁着。
   //
   // **为什么提到每小时**(#446):24h 盈亏按快照分段算(ADR 0040),每次同步就是一个切口,
   // 切口越密越准。一天一张照片 = 没得切,分段法永远退化成「按 24 小时前的数量算」。
@@ -41,36 +41,22 @@
   // 带 account 级 note 的账户另加约 37 MB —— note 每次同步原样重存,去重是 #456。
   "triggers": { "crons": ["0 23 * * *", "30 * * * *"] },
 
-  // 后台任务队列(FOL-86,ADR 0055)。**免费计划每次调用 10ms CPU / 50 个外部 subrequest,
-  // HTTP、cron、queue consumer 一视同仁** —— 所以整点 sweep 不再在 cron 那一次调用里跑完所有账户:
-  // cron 只开轮 + 往这里投消息(一个账户一条 `sync-account`,一个用户 `prices` / `fx` / `platforms` /
-  // `defi-logos` 各一条;每天另投 `prune-notes` / `catalogue`,见 src/lib/server/jobs/schedule.ts),
-  // 真活由 consumer 一条消息一次调用地跑,每条各自一份预算。消息的形状在
-  // src/lib/server/jobs/message.ts,consumer 入口是 src/server.ts 的 `queue()`。
-  //   · `max_batch_size: 1` —— 一次调用只处理一条,预算按「一个账户」算,而不是「一批账户」。
-  //   · `max_retries: 3` + `retry_delay: 30` —— 只有 defect(D1 瞬时错之类)才走重试;上游失败
-  //     已在同步内核里重试过、收成「这个账户失败」,不再经队列重来。**最后一次仍失败时 consumer
-  //     先收尾(把账户记成 failed、够了就收官)再 retry() 送进死信**,所以轮状态不会挂着 pending,
-  //     失败的消息也看得见。两个数与 jobs/constants.ts 的 `JOB_MAX_RETRIES` / `JOB_RETRY_DELAY_SECONDS`
-  //     由 tests/queue-config.test.ts 锁成一致(轮的心跳按后者倒推)。
-  //   · 死信队列接每一条最终失败的消息(连同 exceededCpu 被杀满四次的),**没有 consumer**
-  //     (测试钉着)—— 在 Dashboard 里看,不会被原样再跑一遍。
-  //   · `max_concurrency: 6` = `SYNC_CONCURRENCY`:以前「每用户同时最多 6 发上游」由一把进程内的闸
-  //     拦着,拆成一条消息一次调用后闸递不过去,由这里的并发上限顶上。
-  // 队列要先建一次(`wrangler queues create`,见 DEPLOY.md)。env 里不继承,test / preview 各有一份。
-  "queues": {
-    "producers": [{ "binding": "JOBS", "queue": "folio-jobs" }],
-    "consumers": [
-      {
-        "queue": "folio-jobs",
-        "max_batch_size": 1,
-        "max_retries": 3,
-        "retry_delay": 30,
-        "max_concurrency": 6,
-        "dead_letter_queue": "folio-jobs-dlq"
-      }
-    ]
+  // 后台任务运行器(FOL-100,ADR 0058;取代 FOL-86 的 Cloudflare 队列)。**免费计划每次 HTTP / cron /
+  // 队列调用只有 10ms CPU**,而一条 `sync-account` 本地实测约 50ms —— 所以活不在那些调用里跑:
+  // cron / server fn 只往这个 Durable Object 里投(`enqueue`),DO 把活排在自己的 SQLite 里,alarm
+  // 一次跑一件(src/lib/server/jobs/durable.ts)。DO 每次调用(含 alarm)默认 30s CPU —— **免费计划上是否
+  // 同样如此,文档说法不一,上线后按 Workers Logs 的 outcome 实测**(FOL-100;ADR 0058「前提」)。
+  //   · 一次 alarm 一件:每次调用 50 个外部 subrequest 的上限照旧,活已按它切好(FOL-86)。
+  //   · 重试由运行器自己排(指数退避 30s → 60s → 120s,jobs/constants.ts),最后一次仍失败时 consumer
+  //     先收尾(账户记 failed)、运行器把那一行**埋掉**留给人看 —— 等价于以前的死信队列。
+  //   · 只有一个实例、单线程:所有用户的活排在一条线上(以前是 `max_concurrency: 6`)。
+  // 免费计划只能用 SQLite 存储的 DO(`new_sqlite_classes`)。DO 不必事先 create:部署时按下面的
+  // `migrations` 建出来。**`durable_objects` 在 env 里不继承**,test / preview 各有一份(tests/runner-config.test.ts 锁着);
+  // `migrations` 是顶层的,各 env 共用。
+  "durable_objects": {
+    "bindings": [{ "name": "JOB_RUNNER", "class_name": "JobRunner" }]
   },
+  "migrations": [{ "tag": "v1-job-runner", "new_sqlite_classes": ["JobRunner"] }],
 
   // 静态资源路由(ADR 0049 补记):HTML 文档是构建期 prerender 出的 `index.html`(vite.config.ts 的
   // SPA 模式),**导航请求不进 Worker**。没命中文件的路径一律回 index.html(SPA 兜底),
@@ -116,19 +102,9 @@
           "migrations_dir": "../../packages/db/drizzle"
         }
       ],
-      // 队列只在本地(Miniflare 自己模拟,不必 create)。名字与生产不同,只为读的时候不混。
-      "queues": {
-        "producers": [{ "binding": "JOBS", "queue": "folio-e2e-jobs" }],
-        "consumers": [
-          {
-            "queue": "folio-e2e-jobs",
-            "max_batch_size": 1,
-            "max_retries": 3,
-            "retry_delay": 30,
-            "max_concurrency": 6,
-            "dead_letter_queue": "folio-e2e-jobs-dlq"
-          }
-        ]
+      // 运行器在本地由 Miniflare 模拟(alarm 照样会响)。
+      "durable_objects": {
+        "bindings": [{ "name": "JOB_RUNNER", "class_name": "JobRunner" }]
       },
       "observability": { "enabled": true, "head_sampling_rate": 1 }
     },
@@ -144,7 +120,7 @@
     // preview-reset.yml 重建一次(那次数据丢)。
     //
     // ⚠️ **不带 triggers** —— preview 不需要 cron(不跑定时刷表/同步,免得偷打上游)。
-    // (队列 consumer 照带:没有 cron 就没人往里投定时的活,见下面 `queues`。)
+    // (运行器照带:没有 cron 就没人往里投定时的活,但手动同步要它,见下面 `durable_objects`。)
     // 顶层配置在 env 里不继承,所以绑定/vars 要原样重列。
     // BETTER_AUTH_URL / SECRETS_KEY / BETTER_AUTH_SECRET / COINSTATS_API_KEY 这些密钥由
     // `wrangler secret put --env preview` 一次性设在 `folio-preview` Worker 上(见 DEPLOY.md),
@@ -179,20 +155,10 @@
           "migrations_dir": "../../packages/db/drizzle"
         }
       ],
-      // 队列:preview **有** consumer(自己那一对队列,与生产互不相干)—— 没有 cron 往里投,
-      // 但以后手动同步也走队列(FOL-89),preview 上那条路得能跑通。队列同样要先建一次(DEPLOY.md)。
-      "queues": {
-        "producers": [{ "binding": "JOBS", "queue": "folio-preview-jobs" }],
-        "consumers": [
-          {
-            "queue": "folio-preview-jobs",
-            "max_batch_size": 1,
-            "max_retries": 3,
-            "retry_delay": 30,
-            "max_concurrency": 6,
-            "dead_letter_queue": "folio-preview-jobs-dlq"
-          }
-        ]
+      // 运行器:preview 自己的那个(不同 Worker → 不同的 DO 命名空间,与生产互不相干)。没有 cron 往里投,
+      // 但手动同步也走它(FOL-89),preview 上那条路得能跑通。
+      "durable_objects": {
+        "bindings": [{ "name": "JOB_RUNNER", "class_name": "JobRunner" }]
       },
       "observability": { "enabled": true, "head_sampling_rate": 1 }
     }

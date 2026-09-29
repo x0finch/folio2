@@ -3,7 +3,7 @@
 // Runtime types generated with workerd@1.20260625.1 2025-09-02 nodejs_compat
 interface __BaseEnv_Env {
 	DB: D1Database;
-	JOBS: Queue;
+	JOB_RUNNER: DurableObjectNamespace<import("./src/server").JobRunner>;
 	BETTER_AUTH_SECRET: string;
 	BETTER_AUTH_URL: string;
 	SECRETS_KEY: string;
@@ -21,6 +21,7 @@ interface __BaseEnv_Env {
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/server");
+		durableNamespaces: "JobRunner";
 	}
 	interface Env extends __BaseEnv_Env {}
 }

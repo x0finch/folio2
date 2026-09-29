@@ -1,20 +1,26 @@
 import { DEFAULT_TOP_N } from "@folio/oracle-basic";
 
-// 队列那一侧的常量(FOL-86)。
+// 后台任务运行器那一侧的常量(FOL-86 起;FOL-100 起活在 Durable Object 的 alarm 里跑,ADR 0058)。
 
 /**
- * 一条消息最多重投几次 —— **与 wrangler.jsonc 各 env 的 `queues.consumers[].max_retries` 必须逐字一致**
- * (tests/queue-config.test.ts 锁着)。consumer 靠它判断「这是最后一次投递」:到了这一次还失败,先自己
- * 收尾(轮里那个账户记成 failed,别让它挂着 pending),再 `retry()` —— 重投次数已经用完,这一下把消息
- * 送进死信队列,留给人看(FOL-86 验收:失败消息进死信可见)。
+ * 一件活最多**重跑**几次(首跑之外)。运行器靠它认「最后一次」:到了这一次还失败,consumer 先自己收尾
+ * (轮里那个账户记成 failed,别让它挂着 pending),再 `retry()` —— 次数用完,运行器把它**埋掉**
+ * (留在 DO 存储里、标上死亡时间,给人看),不再跑。
  */
 export const JOB_MAX_RETRIES = 3;
 
+/** 第一次重跑前等多久(毫秒)。之后每次翻倍(指数退避,见 `jobRetryDelayMs`)。 */
+const JOB_RETRY_BASE_DELAY_MS = 30_000;
+
 /**
- * 两次投递之间隔多久(秒)—— **与 wrangler.jsonc 各 env 的 `queues.consumers[].retry_delay` 逐字一致**
- * (tests/queue-config.test.ts 锁着)。轮的心跳按它倒推(`sync/round.ts` 的 `ROUND_HEARTBEAT_MS`)。
+ * 第 `attempt` 次跑失败之后,隔多久再跑(毫秒):30s → 60s → 120s。平台对 alarm 自己的重试只有 6 次、
+ * 间隔也不由我们定,所以**重试不交给平台** —— alarm 永远正常返回,失败的活由运行器按这里排下一次。
  */
-export const JOB_RETRY_DELAY_SECONDS = 30;
+export const jobRetryDelayMs = (attempt: number): number =>
+  JOB_RETRY_BASE_DELAY_MS * 2 ** (Math.max(attempt, 1) - 1);
+
+/** 最长那一次重跑间隔(毫秒)—— 轮的心跳按它倒推(`sync/round.ts` 的 `ROUND_HEARTBEAT_MS`)。 */
+export const JOB_RETRY_MAX_DELAY_MS = jobRetryDelayMs(JOB_MAX_RETRIES);
 
 /**
  * 一条 `sync-account` 跑一遍(一次投递)最长多久(毫秒):同步内核对上游 3 次尝试 × 20s 超时 + 退避 ≈ 70s,
@@ -22,25 +28,49 @@ export const JOB_RETRY_DELAY_SECONDS = 30;
  */
 export const SYNC_ATTEMPT_BUDGET_MS = 80_000;
 
-/** 重投到点之后、队列真把它派出去之前的调度余量(毫秒;不含积压)。 */
+/**
+ * 到点之后、运行器真把它跑起来之前的调度余量(毫秒;**不含积压**)。运行器是**一个** DO、一次 alarm 跑
+ * 一件活,所以排在前面的活会让后面的晚开跑 —— 单用户、个位数账户时是秒级。
+ */
 export const REDELIVERY_SLACK_MS = 10_000;
 
 /**
- * 一条 `sync-account` 从第一次投递开跑到**最后一次投递收场**最长多久(毫秒):`JOB_MAX_RETRIES + 1` 次投递
- * 各跑满 `SYNC_ATTEMPT_BUDGET_MS`,中间隔 `JOB_MAX_RETRIES` 个重投间隔(`retry_delay` + 调度余量)——
- * 4 × 80 + 3 × (30 + 10) = 440s。前端等单账户同步的上限从它推(`queries/account-sync.ts`,review R2-#3)。
+ * 一件活被领走之后「锁」多久(毫秒)。领的那一刻就把次数 +1、把到点时间推到这么久以后:DO 在跑的中途
+ * 被驱逐(超 CPU、实例重启)时,这件活不会丢,过了租期照样再跑,而且**那一次算数** —— 一件每次都把 DO
+ * 跑崩的活,跑满次数也会被埋掉,不会无限循环。取一次投递的最坏耗时再留余量。
+ */
+export const JOB_LEASE_MS = SYNC_ATTEMPT_BUDGET_MS + REDELIVERY_SLACK_MS;
+
+/**
+ * 一条 `sync-account` 从第一次开跑到**最后一次收场**最长多久(毫秒):`JOB_MAX_RETRIES + 1` 次各跑满
+ * `SYNC_ATTEMPT_BUDGET_MS`,中间隔 `JOB_MAX_RETRIES` 个退避间隔(30 + 60 + 120)各加一份调度余量 ——
+ * 4 × 80 + 210 + 3 × 10 = 560s。前端等单账户同步的上限从它推(`queries/account-sync.ts`,review R2-#3)。
  */
 export const SYNC_RETRY_CHAIN_MS =
   (JOB_MAX_RETRIES + 1) * SYNC_ATTEMPT_BUDGET_MS +
-  JOB_MAX_RETRIES * (JOB_RETRY_DELAY_SECONDS * 1000 + REDELIVERY_SLACK_MS);
+  Array.from({ length: JOB_MAX_RETRIES }, (_, i) => jobRetryDelayMs(i + 1)).reduce(
+    (a, b) => a + b,
+    0,
+  ) +
+  JOB_MAX_RETRIES * REDELIVERY_SLACK_MS;
 
 /**
- * 一条消息大约花几次队列操作(写 / 读 / 删各一次)。免费计划一天 10k 次;cron 那一行日志按它记一个估算。
+ * 一件活花几次 DO 请求:它自己那一次 alarm(投递那一次 RPC 按批算,不按件)。免费计划一天 10 万次;
+ * cron 那一行日志按它记一个估算。
  */
-export const QUEUE_OPS_PER_MESSAGE = 3;
+export const RUNNER_ALARMS_PER_JOB = 1;
 
-/** `Queue.sendBatch` 一次最多收几条(Cloudflare 的硬上限)。超过就分批发。 */
-export const QUEUE_SEND_BATCH_MAX = 100;
+/** 埋掉的活在 DO 存储里留多久(毫秒)。够人来看一眼,又不让死活无限堆。 */
+export const DEAD_JOB_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * 有到点的活、却这么久(毫秒)没跑过一次 alarm,cron 的戳一下就记一条 warn —— 运行器可能卡住了。
+ * 取一次投递最坏耗时的几倍:正常积压到不了这么久。
+ */
+export const RUNNER_STALL_MS = 15 * 60 * 1000;
+
+/** 运行器只有一个实例,按这个名字取(`idFromName`)。所有用户的活排在同一条线上。 */
+export const JOB_RUNNER_NAME = "jobs";
 
 /**
  * 读**最新快照**的那几件(`platforms` / `defi-logos`)比同一个用户的 `sync-account` 晚投多久(秒)。

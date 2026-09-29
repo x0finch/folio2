@@ -108,7 +108,7 @@ describe("sync/cron(fan-out)", () => {
       accounts: 2,
       failed: 0,
       jobs: 2 + 5,
-      queueOps: (2 + 5) * 3,
+      alarms: 2 + 5,
     });
     // 轮开着、还没收官 —— 收官是最后一个 consumer 的事。
     expect(mine?.finishedAt).toBeNull();

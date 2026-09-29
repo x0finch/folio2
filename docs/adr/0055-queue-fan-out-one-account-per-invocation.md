@@ -1,6 +1,6 @@
 # 0055 — 后台活走 Cloudflare Queue:一条消息一个账户,一条消息一次调用
 
-日期:2026-09-28。状态:已接受。FOL-86。**不改** [ADR 0048](0048-sync-round-state-lives-server-side.md) 的轮状态模型(服务端事实、条件单语句写),只改「谁来跑、在哪次调用里跑」。
+日期:2026-09-28。状态:**运输层已被 [ADR 0058](0058-background-jobs-run-in-a-durable-object.md) 取代**(队列 → Durable Object 的 alarm);消息形状、一件活一次调用、ack / retry 的判定、「最后一个落账的收官」都照旧。FOL-86。**不改** [ADR 0048](0048-sync-round-state-lives-server-side.md) 的轮状态模型(服务端事实、条件单语句写),只改「谁来跑、在哪次调用里跑」。
 
 ## 背景
 

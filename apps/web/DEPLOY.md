@@ -33,11 +33,10 @@ pnpm exec wrangler d1 create folio
 # 3. Apply migrations to the REMOTE D1 (local & remote are separate DBs)
 pnpm exec wrangler d1 migrations apply folio --remote
 
-# 3b. Create the background-job queues (FOL-86 / ADR 0055). The hourly cron only enqueues
-#     one message per account; the `queue()` consumer does the syncing. `wrangler deploy`
-#     FAILS if a queue named in wrangler.jsonc → queues doesn't exist yet. One-time only.
-pnpm exec wrangler queues create folio-jobs
-pnpm exec wrangler queues create folio-jobs-dlq
+# 3b. Background jobs need no setup step (FOL-100 / ADR 0058). They run in a SQLite-backed
+#     Durable Object (`JobRunner`) that `wrangler deploy` creates from wrangler.jsonc → migrations.
+#     (The old Cloudflare Queues `folio-jobs` / `folio-jobs-dlq` are no longer used; if you created
+#     them for the FOL-86 version you can delete them: `wrangler queues delete folio-jobs` etc.)
 
 # 4. Set secrets (each prompts for the value — never written to git)
 pnpm exec wrangler secret put SECRETS_KEY
@@ -77,7 +76,7 @@ check which side you are on, look for `edge cache: hit` in `wrangler tail` — o
 1. Open the URL → **sign up** → you land on the overview.
 2. Add a **manual** account (symbol/amount/usd) → **Sync now** → it appears with a total.
 3. (Optional) add an on-chain wallet (EVM needs no key) → Sync.
-4. Logs: `pnpm exec wrangler tail` — structured JSON lines (`account synced` with `userId`/`accountId`/`type`, etc.). Two crons auto-run: the hourly sync sweep (`30 * * * *` UTC) and the daily jobs (`0 23 * * *` UTC). Trigger the **hourly** one manually from the dashboard (Workers → folio → Triggers / Cron) to see a `cron sweep enqueued` line (with `jobs` and a `queueOps` estimate), followed (one queue-consumer invocation per account) by `account synced` lines and a `queued round done` line per portfolio. The daily one logs `daily jobs enqueued`. Jobs that still fail on their last retry are sent to `folio-jobs-dlq` (the sync round is marked failed first) — inspect them under Queues in the dashboard; nothing consumes that queue.
+4. Logs: `pnpm exec wrangler tail` — structured JSON lines (`account synced` with `userId`/`accountId`/`type`, etc.). Two crons auto-run: the hourly sync sweep (`30 * * * *` UTC) and the daily jobs (`0 23 * * *` UTC). Trigger the **hourly** one manually from the dashboard (Workers → folio → Triggers / Cron) to see a `cron sweep enqueued` line (with `jobs` and an `alarms` estimate), followed (one `JobRunner` alarm invocation per job) by `job done` / `account synced` lines and a `queued round done` line per portfolio. The daily one logs `daily jobs enqueued`. Jobs that still fail on their last retry are **buried** in the runner's own storage (the sync round is marked failed first) and logged as `job buried after final attempt`; they're kept 7 days and never run again. **First deploy of the runner:** check `pnpm --filter @folio/web perf:cpu:online` (or Workers Logs, filtered to the `JobRunner` alarm invocations) — if they show `exceededCpu`, the free plan's Durable Object CPU limit is lower than documented (ADR 0058 "Premise") and you should revert this change.
 
 **Existing deployment upgrading past FOL-86:** run step 3b once before the next deploy.
 
@@ -231,10 +230,6 @@ cd apps/web
 # 1. Create the preview D1, then paste the printed database_id into
 #    wrangler.jsonc → env.preview.d1_databases[0].database_id (replacing the REPLACE_WITH_… placeholder)
 pnpm exec wrangler d1 create folio-preview
-
-# 1b. Create the preview's own queue pair (see step 3b above; preview has a consumer, no cron)
-pnpm exec wrangler queues create folio-preview-jobs
-pnpm exec wrangler queues create folio-preview-jobs-dlq
 
 # 2. Set the preview Worker's secrets. Use `--name folio-preview`, NOT `--env preview`:
 #    env.preview now sets its own `name`, so `--env preview` resolves to a non-existent
