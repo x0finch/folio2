@@ -15,10 +15,10 @@ const json = (body: unknown, init?: ResponseInit): Response =>
   });
 
 type Ctx = Parameters<typeof hyperliquidProvider.fetchBalances>[0];
-const ctx = (address = ADDR): Ctx =>
+const ctx = (address = ADDR, providerCreds: Record<string, string> = {}): Ctx =>
   ({
     account: { id: "a1", label: "HL", connectorId: "hyperliquid", creds: { address } },
-    creds: {},
+    creds: providerCreds,
   }) as unknown as Ctx;
 
 const run = <A>(stub: HttpStub, effect: Effect.Effect<A, ConnectorError, ProviderNeeds>) =>
@@ -72,6 +72,28 @@ describe("fetchBalances", () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     const err = await failing(stub, hyperliquidProvider.fetchBalances(ctx()));
     expect(err._tag).toBe("ConnectorRateLimitError");
+  });
+});
+
+describe("base 覆盖", () => {
+  it("PC 只声明一个 public 的 base 覆盖 key", () => {
+    expect(hyperliquidProvider.creds.map((f) => f.key)).toEqual(["HYPERLIQUID_API_BASE"]);
+    expect(hyperliquidProvider.creds.every((f) => f.type === "public")).toBe(true);
+  });
+
+  it("设了就打覆盖的 base,不设就直连官方", async () => {
+    const stub = httpStub(() => json(fixture));
+    await run(
+      stub,
+      hyperliquidProvider.fetchBalances(
+        ctx(ADDR, { HYPERLIQUID_API_BASE: "http://127.0.0.1:3399/hyperliquid" }),
+      ),
+    );
+    await run(stub, hyperliquidProvider.fetchBalances(ctx()));
+    expect(stub.calls.map((c) => c.request.url.href)).toEqual([
+      "http://127.0.0.1:3399/hyperliquid/info",
+      "https://api.hyperliquid.xyz/info",
+    ]);
   });
 });
 

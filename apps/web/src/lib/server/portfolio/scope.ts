@@ -1,4 +1,4 @@
-import { Database, type DbRequest } from "@folio/db";
+import { type AccountSafe, Database, type DbRequest, type PortfolioMembership } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
 import { inView, type TabPinScope } from "@/lib/core/accounts-in-view";
@@ -31,17 +31,20 @@ export interface PortfolioScope {
 
 // 校验传入的 selectedId 属于该用户,否则退回默认(客户端传入不可信 —— 传别人的 id 只会得到空视图,
 // 不泄露任何数据,但显式回退到默认更符合直觉)。返回选中 id + 默认 Portfolio。
+//
+// **一条查询**(FOL-92):默认那个就在列表里(`isDefault`),只有列表里找不到它(新用户第一次落地)
+// 才走 `ensureDefault` 去建。以前每次都并发跑 `list` + `ensureDefault` 两条 —— 读路径上每条 D1 查询
+// 都有一份固定的 Worker CPU,而几乎每个读接口都要先过这一步。
 export const resolveScope = (
   requested: string | undefined,
 ): Effect.Effect<{ selectedId: string; defaultId: string }, never, Database | DbRequest> =>
   Effect.gen(function* () {
     const store = (yield* Database).portfolios;
-    const [portfolios, defaultPf] = yield* Effect.all([store.list(), store.ensureDefault()], {
-      concurrency: 2,
-    });
+    const portfolios = yield* store.list();
+    const defaultId = portfolios.find((p) => p.isDefault)?.id ?? (yield* store.ensureDefault()).id;
     const selectedId =
-      requested && portfolios.some((p) => p.id === requested) ? requested : defaultPf.id;
-    return { selectedId, defaultId: defaultPf.id };
+      requested && portfolios.some((p) => p.id === requested) ? requested : defaultId;
+    return { selectedId, defaultId };
   });
 
 // 当前组合的成员判据(ADR 0047:作用域在服务端定)。账户域那几个读取口共用这一份。
@@ -51,6 +54,13 @@ export const resolveScope = (
 export interface ScopedMembership {
   selectedId: string;
   defaultId: string;
+  /**
+   * 该用户的**全部**账户(安全列,不按组合筛 —— 筛用 `has`)。顺带给出来是因为几乎每个调用方
+   * 接下来都要它:账户与归属是同一条 join 查出来的(`accounts.listWithPortfolio`),不必再查一趟。
+   */
+  accounts: AccountSafe[];
+  /** 账户 → 组合的归属行(`accountsInView` 那一族纯函数的原料)。 */
+  memberships: PortfolioMembership[];
   /** 这个账户在不在当前组合的视图里(归档与否不影响)。 */
   has: (accountId: string) => boolean;
   /** 这个账户归属哪个组合 —— 没有归属行的按兜底规则算进默认组合(同 `inView`)。 */
@@ -61,13 +71,26 @@ export const scopedMembership = (
   requested: string | undefined,
 ): Effect.Effect<ScopedMembership, never, Database | DbRequest> =>
   Effect.gen(function* () {
-    const store = (yield* Database).portfolios;
-    const { selectedId, defaultId } = yield* resolveScope(requested);
-    const memberships = yield* store.listMemberships();
-    const portfolioOf = new Map(memberships.map((m) => [m.accountId, m.portfolioId]));
+    const db = yield* Database;
+    const [{ selectedId, defaultId }, rows] = yield* Effect.all(
+      [resolveScope(requested), db.accounts.listWithPortfolio()],
+      { concurrency: 2 },
+    );
+    const portfolioOf = new Map<string, string>();
+    const memberships: PortfolioMembership[] = [];
+    const accounts: AccountSafe[] = [];
+    for (const { portfolioId, ...account } of rows) {
+      accounts.push(account);
+      if (portfolioId != null) {
+        portfolioOf.set(account.id, portfolioId);
+        memberships.push({ accountId: account.id, portfolioId });
+      }
+    }
     return {
       selectedId,
       defaultId,
+      accounts,
+      memberships,
       has: (accountId) => inView(portfolioOf.get(accountId), selectedId, defaultId),
       portfolioIdOf: (accountId) => portfolioOf.get(accountId) ?? defaultId,
     };

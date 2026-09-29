@@ -1,4 +1,6 @@
+import { Effect } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
+import { consumeMessage } from "@/lib/server/jobs/consume";
 import { handleListFiatOptions } from "@/lib/server/tokens/list-fiat-options";
 import { json, stubOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
@@ -27,6 +29,18 @@ describe("tokens/list-fiat-options", () => {
   const bySymbol = <T extends { symbol: string }>(options: readonly T[], symbol: string) =>
     options.find((o) => o.symbol === symbol);
 
+  // 汇率只由队列的 `fx` 活暖(FOL-88),handler 自己只读缓存 —— 要带价的用例先跑一条。
+  const warmFx = () =>
+    Effect.runPromise(
+      consumeMessage({
+        id: "m-fx",
+        body: { kind: "fx", userId: USER },
+        attempts: 1,
+        ack: () => {},
+        retry: () => {},
+      }),
+    );
+
   beforeEach(async () => {
     await freshUser(USER);
   });
@@ -34,6 +48,7 @@ describe("tokens/list-fiat-options", () => {
   describe("listFiatOptions", () => {
     it("返回一批法币,取得到汇率的带价和取到的时刻", async () => {
       stubOutbound([["/exchange_rates", () => json(RATES)]]);
+      await warmFx();
       const out = await call(USER, handleListFiatOptions({ locale: "en" }));
 
       expect(out.length).toBeGreaterThan(1);
@@ -65,6 +80,7 @@ describe("tokens/list-fiat-options", () => {
 
     it("某个法币取不到汇率 → 只缺那一项,不是整批失败", async () => {
       stubOutbound([["/exchange_rates", () => json(RATES)]]);
+      await warmFx();
       const out = await call(USER, handleListFiatOptions({ locale: "en" }));
       const krw = bySymbol(out, "KRW") as { price?: number } | undefined;
       expect(krw).toBeDefined();
@@ -74,6 +90,7 @@ describe("tokens/list-fiat-options", () => {
 
     it("汇率上游整个挂了 → 选项照样给,界面还能选", async () => {
       stubOutbound([["/exchange_rates", () => json({ error: "down" }, 503)]]);
+      await warmFx();
       const out = await call(USER, handleListFiatOptions({ locale: "en" }));
       expect(out.length).toBeGreaterThan(1);
       // USD 恒 1 不靠上游;其余没价。

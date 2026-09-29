@@ -20,7 +20,7 @@ const build = (over: Partial<Parameters<typeof buildAccountRows>[0]> = {}) =>
   buildAccountRows({
     accounts: [account()],
     // biome-ignore lint/suspicious/noExplicitAny: 同上
-    holdings: { rows: [], pricesStale: false } as any,
+    holdings: { rows: [] } as any,
     allTags: [],
     tagLinks: [],
     ...over,
@@ -50,7 +50,6 @@ describe("buildAccountRows", () => {
         rows: [
           { account: { id: "a1" }, totalUsd: 999, takenAt: 1690000000000, balances: [{ x: 1 }] },
         ],
-        pricesStale: false,
         // biome-ignore lint/suspicious/noExplicitAny: 测试替身
       } as any,
     });
@@ -65,7 +64,6 @@ describe("buildAccountRows", () => {
     const [row] = build({
       holdings: {
         rows: [{ account: { id: "a1" }, totalUsd: 1234, takenAt: 42, balances: [{ x: 1 }] }],
-        pricesStale: false,
         // biome-ignore lint/suspicious/noExplicitAny: 测试替身
       } as any,
     });

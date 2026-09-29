@@ -42,7 +42,9 @@ describe("portfolio/get-history", () => {
   });
 
   /** 页面那两行:曲线接口给原料,总览按账户那张表凑出末点。 */
-  const curve = async (data: { portfolioId?: string } = {}) => {
+  const curve = async (
+    data: { portfolioId?: string; range?: "7d" | "30d" | "1y" | "all" } = {},
+  ) => {
     const raw = await call(USER, handleGetPortfolioHistory(data));
     // 两边各自演进后的合流:读走预计算那条(这一支的形状),末点防呆收整份总览(底座那一支的形状)。
     const overview = await readOverview(USER, data);
@@ -156,8 +158,59 @@ describe("portfolio/get-history", () => {
       const raw = await call(USER, handleGetPortfolioHistory({ range: "all" }));
 
       expect(raw.sampled).toBe(true);
-      expect(raw.rows.length).toBeLessThanOrEqual(80);
+      // 服务端只在 SQL 里按桶封顶(每账户 ≤ 200 行收盘,FOL-92);降采样在浏览器。
+      expect(raw.rows.length).toBeLessThanOrEqual(200);
       expect(raw.rows.length).toBeGreaterThan(10);
+      const curve = toPortfolioCurve(raw, { accountTotals: [] });
+      expect(curve.length).toBeLessThanOrEqual(82);
+    }, 30_000);
+
+    // review R2-#5:混合组合(synced + 手记)的长窗。手记行以前按自己的时刻另发,浏览器在两个 synced
+    // 候选时刻之间的手记时刻上,把 synced 账户那次单日闪崩一直带着 —— 拼出从没存在过的组合值。
+    // 现在手记一起进 SQL:它的行都落在同一批候选时刻上,重建出的每个点都等于真实组合值。
+    it("长窗 all + 手记账户 → 手记一起进候选时刻,每个点都是真值", async () => {
+      vi.useFakeTimers({ now: ago(100 * DAY), toFake: ["Date"] });
+      const manual = await seedManualAccount(USER, "手记", {
+        symbol: "BTC",
+        unitPrice: 100,
+        amount: 2,
+      });
+      vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+      const acc = await seedAccount(USER, "甲", "bitcoin");
+      const start = NOW - 120 * DAY + DAY / 3;
+      const CRASH = 60;
+      // 很早以前的一张:「全部」的跨度拉到四年多,一桶约 25 天 —— 闪崩所在的候选之后,下一个候选
+      // 要隔好几天,中间落着好几个手记时刻。
+      await seedSnapshot(USER, acc.id, start - 1500 * DAY, [
+        { tokenId: BTC, amount: 1, usdValue: 900 },
+      ]);
+      for (let i = 0; i < 120; i++) {
+        await seedSnapshot(USER, acc.id, start + i * DAY, [
+          { tokenId: BTC, amount: 1, usdValue: i === CRASH ? 100 : 1000 + ((i * 37) % 11) },
+        ]);
+      }
+
+      const raw = await call(USER, handleGetPortfolioHistory({ range: "all" }));
+
+      expect(raw.sampled).toBe(true);
+      // 手记账户同样封顶(每账户 ≤ 3 × 66 桶 + 1 = 199 行),不再是它自己那份另发的日线。
+      const manualRows = raw.rows.filter((r) => r.accountId === manual.id);
+      expect(manualRows.length).toBeGreaterThan(0);
+      expect(manualRows.length).toBeLessThanOrEqual(199);
+
+      // 参照系:全量快照 + 全量手记行的阶梯重建。
+      const truthRows = [
+        ...(await db(USER).snapshots.listTotals()),
+        ...(await call(USER, loadManualHistoryRows([manual], NOW))),
+      ];
+      const truth = buildPortfolioHistory(truthRows);
+      const valueAt = (t: number) => truth.filter((p) => p.t <= t).at(-1)?.total;
+      const rebuilt = buildPortfolioHistory(raw.rows);
+      expect(rebuilt.length).toBeGreaterThan(3);
+      for (const p of rebuilt) expect(p.total).toBeCloseTo(valueAt(p.t) ?? Number.NaN, 6);
+      // 闪崩那一天还在,而且只有那一个点是它。
+      const crashValue = Math.min(...truth.map((p) => p.total));
+      expect(rebuilt.filter((p) => p.total === crashValue)).toHaveLength(1);
     }, 30_000);
 
     it("与老那条服务端算法对拍:同一份数据,曲线一个点都不差", async () => {
@@ -179,8 +232,11 @@ describe("portfolio/get-history", () => {
       await db(USER).accounts.setArchived(gone.id, true);
       vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
 
-      const legacy = await call(USER, legacyPortfolioHistory({ range: "30d" }));
-      const served = await curve();
+      // **按 7 天窗口对拍**(FOL-91):逐点相同只在「读原始快照」那一档成立;超过 7 天的窗口改读
+      // 日汇总,日内的点按设计合并掉了 —— 那一档在「日」粒度上的对拍在 packages/db 的
+      // daily-totals.test.ts。夹具只跨 5 天,7 天窗口盖得住全部。
+      const legacy = await call(USER, legacyPortfolioHistory({ range: "7d" }));
+      const served = await curve({ range: "7d" });
 
       expect(served).toEqual(legacy.series);
       // 夹具没有绕过被测代码:真有一条像样的曲线,而且末点真的被实时总额顶替过
@@ -191,7 +247,7 @@ describe("portfolio/get-history", () => {
       // 正好多出它那 70,封存之前的点一个字不变。
       const sealedAt = ago(2 * DAY);
       await db(USER).accounts.setArchived(gone.id, false);
-      const unsealed = await curve();
+      const unsealed = await curve({ range: "7d" });
       expect(unsealed.map((p) => p.t)).toEqual(served.map((p) => p.t));
       expect(unsealed.filter((p) => p.t >= sealedAt).length).toBeGreaterThan(1);
       for (const [i, p] of unsealed.entries()) {

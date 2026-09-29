@@ -1,6 +1,6 @@
 import type { TokenPriceWrite, TokenRecordPrice, TokenRef } from "@folio/oracle-basic";
 import { formatTokenRef } from "@folio/oracle-ref";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { Clock, Effect, Option } from "effect";
 import { chunk, type DbClient } from "../client";
 import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
@@ -15,6 +15,9 @@ import { tokenDailyPrices, tokenRefs, tokens } from "../schema";
 // `token_daily_prices`(全局键 = tokenRef,过去日不可变 → 永久存、无 TTL,#199/ADR 0022 的受控例外)。
 //
 // **时间走 `Clock`**(以前是 `opts.now`);`env` 不再出现在签名里(见 ../client.ts)。
+
+// 一条多行 INSERT 装几行日价:3 个绑定 / 行 × 30 = 90,在 D1 ~100 参数上限内。
+const DAILY_ROWS_PER_STATEMENT = 30;
 
 export const makeUserTokenPriceStore = (namer: string) => (client: DbClient, userId: string) => {
   // tokenId → 它在当前上游那里的 tokenRef(历史日价的键)。没有那一档的 ref 行 → `none`。
@@ -67,23 +70,61 @@ export const makeUserTokenPriceStore = (namer: string) => (client: DbClient, use
     });
 
   // 按 ref 写一批日桶:upsert(撞主键改价)。同样是两个 put 共用的那一份。
+  // **多行 INSERT**(FOL-90):补日价那条活一窗就是一年 365 行,一行一条语句的话光拼语句就要吃掉
+  // 免费计划 10ms CPU 的一大块。每行 3 个绑定 → 一条语句 `DAILY_ROWS_PER_STATEMENT` 行,
+  // 稳在 D1 ~100 参数上限内;几条语句一个 batch(一次往返、原子)。
   const writeDaily = (
     ref: string,
     prices: readonly { dayBucket: number; unitPrice: number }[],
   ): Effect.Effect<void> =>
     client.batch((db) =>
-      prices.map((p) =>
-        db
-          .insert(tokenDailyPrices)
-          .values({ tokenRef: ref, dayBucket: p.dayBucket, unitPrice: p.unitPrice })
-          .onConflictDoUpdate({
-            target: [tokenDailyPrices.tokenRef, tokenDailyPrices.dayBucket],
-            set: { unitPrice: p.unitPrice },
-          }),
-      ),
+      chunk(prices, DAILY_ROWS_PER_STATEMENT)
+        .filter((part) => part.length > 0)
+        .map((part) =>
+          db
+            .insert(tokenDailyPrices)
+            .values(
+              part.map((p) => ({ tokenRef: ref, dayBucket: p.dayBucket, unitPrice: p.unitPrice })),
+            )
+            .onConflictDoUpdate({
+              target: [tokenDailyPrices.tokenRef, tokenDailyPrices.dayBucket],
+              set: { unitPrice: sql`excluded.unit_price` },
+            }),
+        ),
     );
 
   return {
+    /** 本用户全部 Token 的价(`getByIds` 的整表版,FOL-92)。口径同下:尚无价的不出现、过期照给。 */
+    getAll: (): Effect.Effect<Map<string, TokenRecordPrice>> =>
+      Effect.gen(function* () {
+        const t = yield* Clock.currentTimeMillis;
+        const rows = yield* client.query((db) =>
+          db
+            .select({
+              id: tokens.id,
+              unitPrice: tokens.unitPrice,
+              change24h: tokens.change24h,
+              marketCapRank: tokens.marketCapRank,
+              priceAsOf: tokens.priceAsOf,
+              priceExpiresAt: tokens.priceExpiresAt,
+            })
+            .from(tokens)
+            .where(eq(tokens.userId, userId)),
+        );
+        const out = new Map<string, TokenRecordPrice>();
+        for (const r of rows) {
+          if (r.unitPrice == null || r.priceAsOf == null) continue; // 尚无价
+          out.set(r.id, {
+            unitPrice: r.unitPrice,
+            change24h: r.change24h ?? undefined,
+            marketCapRank: r.marketCapRank ?? undefined,
+            asOf: r.priceAsOf,
+            stale: (r.priceExpiresAt ?? 0) <= t,
+          });
+        }
+        return out;
+      }),
+
     // 过期不删,读出带 stale(SWR)。尚无价的行不出现在结果里。
     getByIds: (ids: readonly string[]): Effect.Effect<Map<string, TokenRecordPrice>> =>
       Effect.gen(function* () {
@@ -121,25 +162,44 @@ export const makeUserTokenPriceStore = (namer: string) => (client: DbClient, use
         return out;
       }),
 
+    // **一条语句写完一批**(FOL-83 第二轮):以前是一行一条 `UPDATE`、一个 batch 发出去 —— 60 个币就是
+    // 60 次 drizzle 拼语句 + 60 条语句过 D1 驱动,本机 profile 里 `prices` 那条活约 20ms CPU 花在这
+    // (免费计划一次调用 10ms)。现在整批序列化成**一个** JSON 绑定参数,`UPDATE … FROM json_each(?)`
+    // 按 id 对上逐行改:语句一条、绑定三个,与批大小无关(D1 的 ~100 绑定上限碰不到;单个绑定值的上限
+    // 是 MB 级,一条消息最多 1000 个币,见 `PRICES_IDS_PER_MESSAGE`)。
+    //
+    // 语义逐条对齐旧写法:
+    //   · `change24h` 缺 → 写 NULL(旧:`?? null`);
+    //   · `marketCapRank` 缺 → **不动**原值(旧:只在有值时写 —— 喂刷价的端点不含排名,
+    //     不这么做会把持仓币的排名反复抹掉);
+    //   · 同一个 tokenId 出现两次 → 后一条赢(旧:batch 按序执行)。`UPDATE … FROM` 在一行对上
+    //     多行时取哪一行是未定义的,所以先在这里按 id 去重、留最后一条。
+    //   · 只改本用户的行(`user_id = ?`),与旧的 `where` 同一道门。
     put: (prices: readonly TokenPriceWrite[], ttlMs: number): Effect.Effect<void> =>
       Effect.gen(function* () {
         if (prices.length === 0) return;
         const priceExpiresAt = (yield* Clock.currentTimeMillis) + ttlMs;
-        yield* client.batch((db) =>
-          prices.map((p) =>
-            db
-              .update(tokens)
-              .set({
-                unitPrice: p.unitPrice,
-                change24h: p.change24h ?? null,
-                // 排名只在有值时写。喂刷价的 simple/price 端点不含排名,`?? null` 会把持仓币
-                // (反复刷价)的排名反复抹掉 —— 只剩没被刷价的币有排名。
-                ...(p.marketCapRank !== undefined ? { marketCapRank: p.marketCapRank } : {}),
-                priceAsOf: p.asOf,
-                priceExpiresAt,
-              })
-              .where(and(eq(tokens.userId, userId), eq(tokens.id, p.tokenId))),
-          ),
+        const last = new Map<string, TokenPriceWrite>();
+        for (const p of prices) last.set(p.tokenId, p);
+        const rows = JSON.stringify(
+          Array.from(last.values(), (p) => ({
+            id: p.tokenId,
+            p: p.unitPrice,
+            c: p.change24h ?? null,
+            r: p.marketCapRank ?? null,
+            a: p.asOf,
+          })),
+        );
+        yield* client.query((db) =>
+          db.run(sql`
+            update ${tokens} set
+              unit_price = j.value ->> '$.p',
+              change_24h = j.value ->> '$.c',
+              market_cap_rank = coalesce(j.value ->> '$.r', ${tokens}.market_cap_rank),
+              price_as_of = j.value ->> '$.a',
+              price_expires_at = ${priceExpiresAt}
+            from json_each(${rows}) as j
+            where ${tokens}.user_id = ${userId} and ${tokens}.id = j.value ->> '$.id'`),
         );
       }),
 

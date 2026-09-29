@@ -33,6 +33,9 @@ export const TOP_TOKENS_LIMIT = 50;
 // —— 历史价日桶(#148 / ADR 0019)——
 export const MS_PER_DAY = 24 * 60 * 60 * 1000;
 export const dayBucketOf = (ms: number): number => Math.floor(ms / MS_PER_DAY);
+// 补历史日价(FOL-90 的 `daily-prices` 活)一发区间请求最多覆盖几天。一年:三年的回填是 3–4 发,
+// 且区间长于三个月时上游按**日**给点(短区间给小时点,一发几千个点只会白烧解析的 CPU)。
+export const DAILY_FILL_DAYS_PER_CALL = 365;
 
 // key 归一口径:store 只按 key 存/查,归一一律在调用方(这里)完成。
 export const normalizeSymbol = (symbol: string): string => symbol.trim().toUpperCase();

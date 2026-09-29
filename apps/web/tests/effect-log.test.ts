@@ -1,7 +1,7 @@
 import { configure, type LogRecord } from "@logtape/logtape";
-import { Effect } from "effect";
+import { Effect, Runtime } from "effect";
 import { beforeAll, describe, expect, it } from "vitest";
-import { logCategory, logTapeLogger } from "@/lib/server/effect-log";
+import { logCategory, logTapeLogger, withLogTapeLogger } from "@/lib/server/effect-log";
 
 // 参考层的降级与告警走 Effect 自己的日志系统,而「落到哪」由这个转发器决定(见 effect-log.ts)。
 // 它跑在**错误路径**上 —— 降级时才被调到 —— 所以它自己坏掉最难发现:上游挂了本该记一行,
@@ -17,10 +17,22 @@ beforeAll(async () => {
   });
 });
 
-const run = <A>(effect: Effect.Effect<A>) =>
-  Effect.runPromise(Effect.provide(effect, logTapeLogger));
+// **两条装法,同一份断言**:layer(`logTapeLogger`,测试与 Layer 装配用)与直接改 FiberRefs 的
+// `withLogTapeLogger`(`runtime.ts` 手搭的运行时用,FOL-83 第二轮)。两边任何一条行为分叉,
+// 下面每一条都会在其中一边红。
+const routes = {
+  layer: <A>(effect: Effect.Effect<A>) => Effect.runPromise(Effect.provide(effect, logTapeLogger)),
+  fiberRefs: <A>(effect: Effect.Effect<A>) =>
+    Runtime.runPromise(
+      Runtime.make({
+        context: Runtime.defaultRuntime.context,
+        fiberRefs: withLogTapeLogger(Runtime.defaultRuntime.fiberRefs),
+        runtimeFlags: Runtime.defaultRuntime.runtimeFlags,
+      }),
+    )(effect),
+};
 
-describe("Effect 日志 → LogTape", () => {
+describe.each(Object.entries(routes))("Effect 日志 → LogTape(%s)", (_route, run) => {
   it("warning + annotations → LogTape 的 warning + properties", async () => {
     captured.length = 0;
     await run(

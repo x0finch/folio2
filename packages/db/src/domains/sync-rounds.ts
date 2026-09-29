@@ -81,6 +81,13 @@ export interface SettleSyncRoundInput {
   ttlMs: number;
 }
 
+export interface EnlistSyncRoundInput {
+  portfolioId: string;
+  roundId: string;
+  account: { id: string; label: string };
+  ttlMs: number;
+}
+
 export interface TouchSyncRoundInput {
   portfolioId: string;
   roundId: string;
@@ -195,8 +202,14 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
     /**
      * 记一个账户的下场,并把心跳续到 `now + ttl`。
      *
-     * **认不出的 accountId 不往明细里凭空加一条**(`json_type(…) IS NOT NULL` 那一句):
-     * 开轮那一刻的名单就是这一轮的分母,事后长出一条会让 `x / N` 里的 N 自己变大。
+     * **只有 `pending → 终态` 这一步**(`status = 'pending'` 那一句):认不出的 accountId 因此不往
+     * 明细里凭空加一条(开轮那一刻的名单就是这一轮的分母,事后长出一条会让 `x / N` 里的 N 自己变大),
+     * 已落过账的也不被第二个下场改写 —— 同一个账户的两条消息(at-least-once 重投、enlist 已 pending
+     * 的那个)可能**并发**越过 consumer 的「还 pending 吗」(那一读在一次几十秒的同步之前),先落的算数。
+     *
+     * **已收官的轮一个字都不改**(`finishedAt is null` 那一句,与 `touch` / `enlist` 同款):
+     * 收官那一刻写下的是 7 天保留期与最终报告,晚到的一次 settle 既不该改报告,也不该把保留期
+     * 改回心跳的 120 秒。
      */
     settle: (input: SettleSyncRoundInput): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -215,10 +228,46 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
               and(
                 mine(input.portfolioId),
                 sameRound(input.roundId),
-                sql`json_type(${asJson}, ${path}) is not null`,
+                sql`json_extract(${asJson}, '$.finishedAt') is null`,
+                sql`json_extract(${asJson}, ${path} || '.status') = 'pending'`,
               ),
             ),
         );
+      }),
+
+    /**
+     * 把一个账户**拉进一轮还活着的轮**(记成 `pending`),顺带续心跳(FOL-89)。
+     *
+     * 单账户同步(`syncAccount`)撞上同组合正在跑的一轮时用它:开轮幂等会把活轮原样还回来,而那一轮
+     * 的名单里可能没有这个账户(刚建的),或者它已经落过账了(刚同步过又点一次)。两种都记回 `pending`,
+     * 由调用方投一条 `sync-account` 去跑 —— 于是它的结果落在同一轮里,`finishIfSettled` 也要等它。
+     *
+     * **只对活轮生效**(未收官 ∧ 未过期,判据与开轮的覆盖条件互为反面):落空 → `none`,调用方该回去
+     * 重开一轮(那时必开得动)。已经 `pending` 的账户再拉一次是同值覆盖写 —— 顶多多投一条消息,
+     * consumer 的「还 pending 吗」检查会让第二条空跑。
+     */
+    enlist: (input: EnlistSyncRoundInput): Effect.Effect<Option.Option<SyncRoundRecord>> =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const path = sql`'$.accounts.' || json_quote(${input.account.id})`;
+        const rows = yield* client.query((db) =>
+          db
+            .update(userCache)
+            .set({
+              v: sql`json_set(${userCache.v}, ${path}, json_object('label', ${input.account.label}, 'status', 'pending'))`,
+              expiresAt: now + input.ttlMs,
+            })
+            .where(
+              and(
+                mine(input.portfolioId),
+                sameRound(input.roundId),
+                sql`json_extract(${asJson}, '$.finishedAt') is null`,
+                sql`${userCache.expiresAt} > ${now}`,
+              ),
+            )
+            .returning({ v: userCache.v, expiresAt: userCache.expiresAt }),
+        );
+        return Option.fromNullable(rows[0] ? decode(rows[0]) : undefined);
       }),
 
     /**
@@ -259,6 +308,42 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
             .set({ v: next, expiresAt: now + input.retentionMs })
             .where(and(mine(input.portfolioId), sameRound(input.roundId))),
         );
+      }),
+
+    /**
+     * **「最后一个落账的人收官」**(FOL-86:队列一条消息一个账户,没有一条任务从头跑到尾)。
+     *
+     * 只在「这一轮还没收官 ∧ 明细里一个 `pending` 都不剩」时落 `finishedAt` —— **一条**条件
+     * UPDATE,判据与写入在同一句里,所以并发的两个 consumer 各自 settle 完再各调一次,也只有
+     * 一个抢得到(`finishedAt is null` 那一句),而最后落账的那一个一定看得到零个 `pending`。
+     * 先读再判再写会把这两条保证都丢掉。
+     *
+     * 抢到了回收官后的那一轮(调用方要念小计),没抢到 / 还有没落账的 → `none`。
+     */
+    finishIfSettled: (input: FinishSyncRoundInput): Effect.Effect<Option.Option<SyncRoundRecord>> =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const rows = yield* client.query((db) =>
+          db
+            .update(userCache)
+            .set({
+              v:
+                input.error === undefined
+                  ? sql`json_set(${userCache.v}, '$.finishedAt', ${now})`
+                  : sql`json_set(${userCache.v}, '$.finishedAt', ${now}, '$.error', ${input.error})`,
+              expiresAt: now + input.retentionMs,
+            })
+            .where(
+              and(
+                mine(input.portfolioId),
+                sameRound(input.roundId),
+                sql`json_extract(${asJson}, '$.finishedAt') is null`,
+                sql`not exists (select 1 from json_each(${asJson}, '$.accounts') where json_extract(value, '$.status') = 'pending')`,
+              ),
+            )
+            .returning({ v: userCache.v, expiresAt: userCache.expiresAt }),
+        );
+        return Option.fromNullable(rows[0] ? decode(rows[0]) : undefined);
       }),
   };
 };

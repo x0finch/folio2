@@ -1,5 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
+import { readJson } from "@/lib/core/json-response";
 import { floorToHour, GAIN_START_FLOOR_MS, GAIN_WINDOW_MS } from "@/lib/core/portfolio";
+import { snapshotsFromWire } from "@/lib/core/snapshot-wire";
 import { getSnapshots } from "@/lib/server/portfolio";
 import { RETRY, STALE_TIME, shouldRetry } from "./constants";
 import { portfolioKeys } from "./keys";
@@ -9,7 +11,8 @@ import { portfolioKeys } from "./keys";
 const portfolioSnapshotsQuery = (portfolioId: string, keyAt: number, at: number, after?: number) =>
   queryOptions({
     queryKey: portfolioKeys.snapshots(portfolioId, keyAt, after),
-    queryFn: () => getSnapshots({ data: { portfolioId, at, after } }),
+    queryFn: async () =>
+      snapshotsFromWire(await readJson(await getSnapshots({ data: { portfolioId, at, after } }))),
     staleTime: STALE_TIME.live,
     // 页头同步胶囊 `useSyncStatus` 在外壳(无 island 边界)suspend 在当下快照上;默认 5 次失败即抛,
     // 整个 authed 壳掀进 `StalledShell` 且 `reset` 救不回。与 `accountListQuery` 同理走 forever,

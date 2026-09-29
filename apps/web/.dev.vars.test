@@ -20,3 +20,6 @@ LOG_LEVEL=warning
 BINANCE_API_BASE=http://localhost:3099
 BINANCE_FAPI_BASE=http://localhost:3099
 BINANCE_DAPI_BASE=http://localhost:3099
+# CoinGecko 也指到同一个假 server(FOL-84 的 base URL 覆盖开关,生产不设)。不指的话刷价任务
+# 打真网,在本地串行的队列里堵住同步消息(见 binance-server.mjs 的 COINGECKO_PREFIX)。
+COINGECKO_API_BASE=http://localhost:3099/coingecko/api/v3

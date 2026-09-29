@@ -1,9 +1,9 @@
-import { Chunk, Effect, Stream } from "effect";
+import { Chunk, Effect, Option, Stream } from "effect";
 import { syncAccount } from "./account";
 import { SYNC_CONCURRENCY } from "./constants";
 import type { SyncDepError } from "./errors";
 import { AccountStore, type SyncServices } from "./services";
-import type { AccountSyncResult, SweepResult, SyncResult } from "./types";
+import type { AccountSyncResult, SyncResult } from "./types";
 
 // 一个用户的一轮同步,**逐账户产出结果**。
 //
@@ -44,20 +44,21 @@ export const syncUser = (userId: string): Effect.Effect<SyncResult, SyncDepError
     Effect.map((chunk) => ({ results: Chunk.toArray(chunk) })),
   );
 
-// 一个用户这一轮的账户计数。cron 的小计从**收官后的轮记录**读回来(ADR 0048 —— 那份记录就是
-// 这一轮的账本),所以这里只剩形状与加法;`userTally`(从流现折计数)随之退场:它是「轮状态
-// 只活在内存里」那个年代的产物,留着就是第二本账。
-export type Tally = { readonly ok: number; readonly failed: number; readonly skipped: number };
-
-// 逐用户的小计加成一份。纯函数 —— 累加规则跟「怎么装配」无关,所以留在包里,
-// 装配那一方(壳,以及片 3 之后的 apps/web)只管把 tallies 递进来。
-export const sumTallies = (users: number, tallies: readonly Tally[]): SweepResult =>
-  tallies.reduce<SweepResult>(
-    (acc, t) => ({
-      users: acc.users,
-      ok: acc.ok + t.ok,
-      failed: acc.failed + t.failed,
-      skipped: acc.skipped + t.skipped,
-    }),
-    { users, ok: 0, failed: 0, skipped: 0 },
-  );
+// **只同步一个账户**(队列 consumer 一条消息一个账户,FOL-86)。与 `syncUserStream` 同样的两次读、
+// 同一个 `syncAccount`,只是不经 Stream:一个账户用不着有界并发的流(`Stream.unwrap` + `mapEffect`
+// 的队列、子 fiber、分块),而那套机器在一条总共该 10ms 的消息里是实打实的开销(FOL-83 第二轮)。
+// 名单里没有它(两次投递之间被归档 / 删了,或不是可同步账户)→ `none`,与流的「一个都没产出」同义。
+export const syncOne = (
+  userId: string,
+  accountId: string,
+): Effect.Effect<Option.Option<AccountSyncResult>, SyncDepError, SyncServices> =>
+  Effect.gen(function* () {
+    const store = yield* AccountStore;
+    const [accounts, rawList] = yield* Effect.all([store.list(), store.rawCreds()], {
+      concurrency: 2,
+    });
+    const account = accounts.find((a) => a.id === accountId);
+    if (!account) return Option.none();
+    const creds = rawList.find((r) => r.id === accountId)?.creds ?? null;
+    return Option.some(yield* syncAccount(userId, account, creds));
+  });

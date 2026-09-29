@@ -89,6 +89,20 @@ describe("建行与幂等", () => {
     expect(info?.ref).toBe(USDC_UP);
   });
 
+  it("getAll / 价 getAll(整表版,FOL-92):与按 id 读逐项相同,只含本人", async () => {
+    const store = storeFor(USER_A);
+    const usdc = await store.create(seed("USDC", "USD Coin", "p.png"), [USDC_ETH, USDC_UP]);
+    const loose = await store.create(seed("FOO"), [USDC_ARB]);
+    await storeFor(USER_B).create(seed("USDC"), [USDC_UP]);
+    await priceStoreFor(USER_A).put([{ tokenId: usdc, unitPrice: 1, asOf: 900 }], 500);
+
+    expect(await store.getAll()).toEqual(await store.getByIds([usdc, loose]));
+    expect([...(await store.getAll()).keys()].sort()).toEqual([usdc, loose].sort());
+    const prices = priceStoreFor(USER_A);
+    expect(await prices.getAll()).toEqual(await prices.getByIds([usdc, loose]));
+    expect([...(await prices.getAll()).keys()]).toEqual([usdc]); // 尚无价的不出现
+  });
+
   it("只有 provider 那条 ref → 上游还没认出来,ref 为 null、linked 为 false", async () => {
     const store = storeFor(USER_A);
     const id = await store.create(seed("SCAM"), [USDC_ETH]);
@@ -413,6 +427,52 @@ describe("价 facet", () => {
     const prices = priceStoreFor(USER_A);
     await prices.put([{ tokenId: id, unitPrice: 1, asOf: 1 }], 500);
     expect((await prices.getByIds([id])).get(id)?.marketCapRank).toBe(7);
+  });
+
+  // 一批写成一条 `UPDATE … FROM json_each(?)`(FOL-83 第二轮)。下面钉的是旧写法(一行一条 UPDATE、
+  // batch 按序跑)自然就有、而单语句要刻意保住的几条。
+  it("一批多行:各写各的;有排名的写上、缺 change24h 的写成 NULL;别人的行不动", async () => {
+    const a = storeFor(USER_A);
+    const x = await a.create(seed("AAA"), ["coingecko/issued:aaa"]);
+    const y = await a.create(seed("BBB"), ["coingecko/issued:bbb"]);
+    const other = await storeFor(USER_B).create(seed("AAA"), ["coingecko/issued:aaa"]);
+    const prices = priceStoreFor(USER_A);
+    await prices.put([{ tokenId: x, unitPrice: 2, change24h: 0.5, asOf: 800 }], 500);
+    await priceStoreFor(USER_B).put([{ tokenId: other, unitPrice: 9, asOf: 800 }], 500);
+
+    await prices.put(
+      [
+        { tokenId: x, unitPrice: 3.25, asOf: 900 },
+        { tokenId: y, unitPrice: 0.000123, change24h: -1.5, marketCapRank: 42, asOf: 901 },
+        // 不是本人的 id:这一批里夹着也不许写到 B 的行上。
+        { tokenId: other, unitPrice: 1234, asOf: 902 },
+      ],
+      500,
+    );
+
+    const got = await prices.getByIds([x, y]);
+    expect(got.get(x)).toEqual({ unitPrice: 3.25, asOf: 900, stale: false });
+    expect(got.get(y)).toEqual({
+      unitPrice: 0.000123,
+      change24h: -1.5,
+      marketCapRank: 42,
+      asOf: 901,
+      stale: false,
+    });
+    expect((await priceStoreFor(USER_B).getByIds([other])).get(other)?.unitPrice).toBe(9);
+  });
+
+  it("同一个 id 在一批里出现两次 → 后一条赢", async () => {
+    const id = await storeFor(USER_A).create(seed("USDC"), [USDC_UP]);
+    const prices = priceStoreFor(USER_A);
+    await prices.put(
+      [
+        { tokenId: id, unitPrice: 1, asOf: 900 },
+        { tokenId: id, unitPrice: 2, asOf: 901 },
+      ],
+      500,
+    );
+    expect((await prices.getByIds([id])).get(id)).toMatchObject({ unitPrice: 2, asOf: 901 });
   });
 });
 

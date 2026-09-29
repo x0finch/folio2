@@ -9,6 +9,7 @@ import { isManual } from "@/lib/core/manual";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { sealCreds } from "@/lib/server/creds";
 import { createManualAccount } from "@/lib/server/manual/store";
+import { refillDailyPrices } from "@/lib/server/prices/daily";
 
 // 账户创建的分派逻辑(handler 之外的纯 Effect → 不引 createServerFn/requireAuth,可在 workers-pool 集成测)。
 // createAccount server fn(见 ./index)只做装配;auth 薄壳即 handleCreateAccount。SECRETS_KEY 只在此 app 层见,不进 connectors。
@@ -73,5 +74,15 @@ export const handleCreateAccount = Effect.fn("createAccount")(function* (
   if (portfolioId) {
     yield* (yield* Database).portfolios.assignAccount(account.id, portfolioId);
   }
+  return account;
+});
+
+// server fn 的那一层:建的是手记账户 → 投一条定向的 `daily-prices`(FOL-90),首币的历史曲线
+// 不必等下一个整点。消息里的 userId 由装配点填(`enqueueForUser`)。
+export const handleCreateAccountAndRefill = Effect.fn("createAccount")(function* (
+  data: z.infer<typeof CreateAccountInput>,
+) {
+  const account = yield* handleCreateAccount(data);
+  if (isManual(account.connectorId)) yield* refillDailyPrices(account.id);
   return account;
 });

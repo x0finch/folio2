@@ -50,6 +50,15 @@ describe("刷新映射表", () => {
     expect(isInvalidated(settingsKeys.valuation())).toBe(false);
   });
 
+  // 这条事件是轮查询自己读到新进度时发的 —— 把轮本身也标旧就是每前进一格重读一遍刚读到的东西。
+  it("sync.round 不刷轮本身", async () => {
+    seed(syncKeys.round(PF));
+
+    await invalidateFor(queryClient, "sync.round");
+
+    expect(isInvalidated(syncKeys.round(PF))).toBe(false);
+  });
+
   it("sync.round 盖住不同组合的快照键", async () => {
     const def = portfolioKeys.snapshots("pf-default", SNAPSHOT_AT);
     const other = portfolioKeys.snapshots("pf-other", SNAPSHOT_AT);
@@ -189,24 +198,6 @@ describe("刷新映射表", () => {
     await invalidateFor(queryClient, "settings.data");
 
     expect(keys.map(isInvalidated)).toEqual([true, true, true, true, true, true]);
-  });
-
-  it("prices.refreshed 只刷富化字典", async () => {
-    seed(tokenKeys.enrichment());
-    seed(portfolioKeys.snapshots("pf-1", SNAPSHOT_AT));
-    seed(syncKeys.round(PF));
-    seed(settingsKeys.valuation());
-
-    await invalidateFor(queryClient, "prices.refreshed");
-
-    expect(isInvalidated(tokenKeys.enrichment())).toBe(true);
-    expect(
-      [
-        portfolioKeys.snapshots("pf-1", SNAPSHOT_AT),
-        syncKeys.round(PF),
-        settingsKeys.valuation(),
-      ].map(isInvalidated),
-    ).toEqual([false, false, false]);
   });
 
   it("表里每条前缀都落在已知的域前缀上", () => {

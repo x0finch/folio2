@@ -12,6 +12,9 @@ export const WEB_ROOT = fileURLToPath(new URL("../../", import.meta.url));
  */
 export const PERF_STATE_DIR = join(WEB_ROOT, ".wrangler", "perf-state");
 
+/** D1 迁移目录(与 wrangler.jsonc 的 `migrations_dir` 同一处)。 */
+export const MIGRATIONS_DIR = join(WEB_ROOT, "..", "..", "packages", "db", "drizzle");
+
 /** 构建产物:`vite build` 写出来的、`wrangler deploy` 原样发出去的那一份。 */
 export const DIST_SERVER_DIR = join(WEB_ROOT, "dist", "server");
 
@@ -19,6 +22,12 @@ export const DIST_SERVER_DIR = join(WEB_ROOT, "dist", "server");
 export const DEFAULT_PORT = 3300;
 export const DEFAULT_INSPECTOR_PORT = 9330;
 export const HOST = "127.0.0.1";
+
+/** perf:cpu:jobs 的本机假上游端口(见 fake-upstream.mjs)。 */
+export const DEFAULT_FAKE_UPSTREAM_PORT = 3399;
+/** perf:cpu:jobs 每个定时任务量几次(不含第一次,那次单列成 `:first`)。整点 sweep 重,多量几次。 */
+export const DEFAULT_SWEEP_REPS = 5;
+export const DEFAULT_DAILY_REPS = 3;
 
 /** 每个端点测几发(顺序发,一次一发)。 */
 export const DEFAULT_REPS = 30;

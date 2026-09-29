@@ -29,7 +29,7 @@ const MANIFEST_ENTRY =
   /"([0-9a-f]{64})":\s*\{\s*functionName: "([A-Za-z0-9_$]+)_createServerFn_handler"/g;
 
 /** 构建产物里的 handler 名 → server fn id。 */
-function serverFnIds() {
+export function serverFnIds() {
   const file = readdirSync(ASSETS_DIR).find((f) => f.startsWith(RESOLVER_PREFIX));
   if (!file) throw new Error(`no server-fn resolver manifest in ${ASSETS_DIR} — build first`);
   const src = readFileSync(join(ASSETS_DIR, file), "utf8");
@@ -60,6 +60,7 @@ const ENDPOINTS = [
   { key: "auth-get-session", label: "GET /api/auth/get-session", path: "/api/auth/get-session" },
   { key: "fn-getSession", fn: "getSession" },
   { key: "fn-getValuationSettings", fn: "getValuationSettings" },
+  { key: "fn-getDataVersion", fn: "getDataVersion" },
   { key: "fn-listPortfolios", fn: "listPortfolios" },
   { key: "fn-listAccounts", fn: "listAccounts", data: ({ portfolioId }) => ({ portfolioId }) },
   {

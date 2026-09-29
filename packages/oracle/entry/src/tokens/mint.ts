@@ -213,7 +213,10 @@ export function makeMinting(deps: MintDeps): TokenMinting {
         // 自己看出来)。账户是并发跑的,同一条 ref 可能被同时 mint,靠 store 的 upsert-then-read
         // 幂等收敛(见 `TokenStore.create`),不靠「先统一 mint 再并发写」。
         for (const [ref, seed] of byRef) {
-          out.set(ref, yield* mintOne(ref, seed, hits.get(ref)));
+          const hit = hits.get(ref);
+          // 已经认出来的(绝大多数行)当场收下 —— 与 `mintOne` 第一行同一个判据,只是不为每一行
+          // 起一段 `Effect.gen`(一次同步几十行,在 10ms 的预算里不是零,FOL-83 第二轮)。
+          out.set(ref, hit?.linked ? hit.tokenId : yield* mintOne(ref, seed, hit));
         }
         return out;
       }),

@@ -1,0 +1,60 @@
+name: Ref index refresh
+
+# 每天刷一次 `global_token_ref_index`(链上合约 → CoinGecko 的叫法,ADR 0022)到**生产** D1。
+#
+# 为什么在这里跑、不在 Worker 的 23:00 cron 里(FOL-85,ADR 0056):那一趟拉 2.6 MB 币目录、与几万行
+# 比对,生产 480–520ms CPU、7 次里 2 次 exceededCpu —— 免费计划一次调用只有 10ms。Actions 的 runner
+# 没有这个顶;逻辑一行没变(同一个 `GlobalRefIndexService` + `putAll` 差量写),只是连接从 D1 绑定
+# 换成了 D1 REST API。脚本:apps/web/scripts/ref-index/refresh.ts。
+#
+# 需要仓库 secret `CLOUDFLARE_API_TOKEN` —— deploy.yml 那一把(Workers Scripts:Edit + **D1:Edit**),
+# 不必另建。可选 `COINGECKO_API_KEY`(没有就走 keyless 额度,这一趟只打两发)。
+#
+# **定时不准点是常态**:GitHub 的 schedule 在整点前后常晚 10–60 分钟,高峰时甚至丢一次。这张表是
+# 「新币最多滞后一天」的缓存(ADR 0022),晚一小时、偶尔丢一天都无所谓;丢了想补就 Actions →
+# Ref index refresh → Run workflow。另:公开仓库 60 天没有提交,GitHub 会自动停掉 schedule(页面上
+# 有提示,点一下重新启用)。schedule 只在默认分支上生效。
+on:
+  schedule:
+    - cron: "0 23 * * *" # UTC,与原来那个 Worker cron 同一时刻
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "只算差量、打印计数,一行不写"
+        type: boolean
+        default: false
+
+# 只读代码;写的是 Cloudflare,不是这个仓库。
+permissions:
+  contents: read
+
+# 同一时刻只跑一轮:两轮并发会各自按旧的表算差量、重复写。不取消进行中的那轮 —— 半途被杀的
+# 一批写是事务、可重跑,但没必要。
+concurrency:
+  group: ref-index-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # 失败(上游 / D1 / token)→ 非零退出 → 这次 run 变红,GitHub 默认会发邮件给仓库 owner。
+      # token 只经 env 进脚本、只进请求头;脚本从不打印它。
+      - name: Refresh global_token_ref_index (remote D1)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          DRY_RUN_FLAG: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: pnpm --filter @folio/web run ref-index:refresh $DRY_RUN_FLAG

@@ -9,9 +9,9 @@ import { ConnectorGrid } from "@/components/connector-grid";
 import { CredentialForm } from "@/components/credential-form";
 import { IconButton } from "@/components/icon-button";
 import { connectorLabelFallback } from "@/lib/core/logo";
+import { syncAccountAndWait } from "@/lib/queries/account-sync";
 import { connectorCatalogQuery, connectorCredentialSpecsQuery } from "@/lib/queries/connectors";
 import { invalidateFor } from "@/lib/queries/refresh";
-import { syncAccount } from "@/lib/server/sync";
 
 // 补录目标(A3):缺凭据账户点补录 icon 时传入,modal 直接进补录视图(跳过网格,锁定 connector)。
 export interface CompleteTarget {
@@ -88,6 +88,17 @@ export function AddAccountModal({
   // 加账户 / 补录凭据同时改账户域与组合域 —— 映射表那一条已经把两个前缀都列上了。
   const refresh = () => invalidateFor(queryClient, "account.write");
   const refreshAfterSync = () => invalidateFor(queryClient, "account.sync");
+  // 后台补一次同步,**等它在队列里跑完**(FOL-89:`syncAccount` 只排队、即返)再刷新填余额。
+  // 等的期间页头胶囊在转(那一轮落进了同步轮缓存),账户行先以空值出现。
+  // 同步失败要说出来:凭据已 live 校验过,这时候失败多半是上游抽风,用户该知道余额还没进来。
+  // 发起本身失败(网络)静默 —— 账户已建好,下一次同步自会补上。
+  const syncInBackground = (accountId: string) =>
+    void syncAccountAndWait(queryClient, accountId)
+      .then((outcome) => {
+        if (!outcome.ok && !outcome.skipped) toast.error(outcome.error ?? t("syncGenericError"));
+        return refreshAfterSync();
+      })
+      .catch(() => {});
   const { data: catalog } = useQuery(connectorCatalogQuery());
   const isDesktop = useMediaQuery("(min-width: 640px)");
   const [internalOpen, setInternalOpen] = useState(false);
@@ -118,26 +129,22 @@ export function AddAccountModal({
     setStep("grid");
     setConnectorId(null);
   };
-  // 创建成功:关闭 + 即时出现(此刻空值),再后台同步新账户 → 完成二次 invalidate 填充;失败静默(创建流已校验)。
+  // 创建成功:关闭 + 即时出现(此刻空值),再后台同步新账户 → 跑完二次 invalidate 填充。
   const handleDone = (newId: string) => {
     setOpen(false);
     void refresh();
-    void syncAccount({ data: { accountId: newId } })
-      .then(() => refreshAfterSync())
-      .catch(() => {});
+    syncInBackground(newId);
   };
 
-  // 补录成功(A3):弹"已保存,正在同步…" + 关补录视图 + 立即刷新(账户翻正)+ 后台补一次 sync 填余额。
-  // 后台 sync 失败静默(凭据已 live 校验、账户健康;下次同步自会补上)——同 handleDone。
+  // 补录成功(A3):弹"已保存,正在同步…" + 关补录视图 + 立即刷新(账户翻正)+ 后台补一次 sync 填余额
+  // (同 handleDone)。
   const handleCompleteDone = () => {
     if (!completeFor) return;
     const { accountId } = completeFor;
     toast.success(t("credSavedSyncing"));
     onCompleteClose?.();
     void refresh();
-    void syncAccount({ data: { accountId } })
-      .then(() => refreshAfterSync())
-      .catch(() => {});
+    syncInBackground(accountId);
   };
 
   // viewId 驱动 morph:关闭为 null;补录视图独立 id;否则网格/表单各自的 step 串作 viewId → 两步间形变。

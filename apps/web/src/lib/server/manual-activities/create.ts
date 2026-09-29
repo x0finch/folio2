@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { z } from "zod";
 import { addManualActivities } from "@/lib/server/manual/store";
+import { refillDailyPrices } from "@/lib/server/prices/daily";
 import { OccurredAt } from "./occurred-at";
 
 export const ActivityKind = z.enum(["add", "reduce", "set"]);
@@ -33,5 +34,15 @@ export const handleCreateManualActivities = Effect.fn("createManualActivities")(
   drafts: Parameters<typeof addManualActivities>[1];
 }) {
   const result = yield* addManualActivities(data.accountId, data.drafts);
+  return result;
+});
+
+// server fn 的那一层:写成功之后给这个账户的币投一条定向的 `daily-prices`(FOL-90),新币的历史
+// 曲线不必等下一个整点。消息里的 userId 由装配点填(`enqueueForUser`)。
+export const handleCreateManualActivitiesAndRefill = Effect.fn("createManualActivities")(function* (
+  data: Parameters<typeof handleCreateManualActivities>[0],
+) {
+  const result = yield* handleCreateManualActivities(data);
+  if (result.ok) yield* refillDailyPrices(data.accountId);
   return result;
 });

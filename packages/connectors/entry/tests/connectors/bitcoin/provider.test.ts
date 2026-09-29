@@ -32,7 +32,12 @@ const mempool = (a: string) => `https://mempool.space/address/${a}`;
 
 // 新 FetchContext 形状:account.creds(AC:addressOrXpub + scriptType)+ creds(PC:空)。
 // CredsOf 把两字段都作必填键(scriptType 值可为 undefined),故显式带上 scriptType 键。
-function ctx(input: { addressOrXpub: string; scriptType?: ScriptType } = { addressOrXpub: ADDR }) {
+// PC 默认不给(生产不设 base 覆盖);CredsOf 把它作必填键,所以这里按契约形状收一次。
+type Ctx = Parameters<typeof blockbookProvider.fetchBalances>[0];
+function ctx(
+  input: { addressOrXpub: string; scriptType?: ScriptType } = { addressOrXpub: ADDR },
+  providerCreds: Record<string, string> = {},
+): Ctx {
   return {
     account: {
       id: "a1",
@@ -40,8 +45,8 @@ function ctx(input: { addressOrXpub: string; scriptType?: ScriptType } = { addre
       connectorId: "bitcoin",
       creds: { addressOrXpub: input.addressOrXpub, scriptType: input.scriptType },
     },
-    creds: {},
-  };
+    creds: providerCreds,
+  } as unknown as Ctx;
 }
 
 const json = (body: unknown, status = 200) =>
@@ -167,9 +172,22 @@ describe("blockbookProvider.fetchBalances — 错误映射", () => {
     });
   });
 
-  it("id=blockbook,creds 为空(公共实例免 key,开箱即用)", () => {
+  it("id=blockbook,PC 只有一个 public 的节点覆盖(公共实例免 key,开箱即用)", () => {
     expect(blockbookProvider.id).toBe("blockbook");
-    expect(blockbookProvider.creds).toEqual([]);
+    expect(blockbookProvider.creds.map((f) => f.key)).toEqual(["BLOCKBOOK_API_BASE"]);
+    expect(blockbookProvider.creds.every((f) => f.type === "public")).toBe(true);
+  });
+
+  it("节点覆盖生效:只打那一个节点,内置的公共节点一个不留", async () => {
+    mockBlockbook({ status: 500 });
+    await failing(
+      blockbookProvider.fetchBalances(
+        ctx({ addressOrXpub: ADDR }, { BLOCKBOOK_API_BASE: "http://127.0.0.1:3399/blockbook" }),
+      ),
+    );
+    const urls = stub.calls.map((c) => c.request.url.href);
+    // 500 本来会换下一个节点 —— 只配了一个,所以恰好一发,且落在覆盖的那个上。
+    expect(urls).toEqual([`http://127.0.0.1:3399/blockbook/address/${ADDR}`]);
   });
 });
 

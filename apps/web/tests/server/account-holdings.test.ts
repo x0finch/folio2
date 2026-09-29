@@ -15,7 +15,7 @@ import { addManualActivities } from "./manual-fns";
 // **#527 后续件 4:五条同层同保真度的用例摘去了新家** —— 「归档在列表里且值停封存」「默认路径
 // 不算盈亏」「归档拿 undefined(账户级与现货行)」「没基准给 null」现在住 `portfolio/
 // account-holdings.test.ts` 与 `portfolio/gain.test.ts`(同一个 runForUser + 真 D1,断言相同)。
-// 留在这里的都是那边没有的:跨链盈亏摊分、manual 与同步账户共用 token_id、刷价信号。
+// 留在这里的都是那边没有的:跨链盈亏摊分、manual 与同步账户共用 token_id。
 const USER = "user-account-holdings";
 
 let outbound: string[] = [];
@@ -66,44 +66,6 @@ describe("按账户明细与归档", () => {
     expect(of("NeverSynced")).toBeDefined();
     expect(of("NeverSynced")?.totalUsd).toBe(0);
     expect(of("NeverSynced")?.balances).toEqual([]);
-  });
-
-  // 刷价信号泄漏:只有归档账户还持有的币,不该让客户端每次进页白发一次批量刷价 ——
-  // 而且刷完也不改它的显示值(封存值取自快照,不现推)。
-  it("只有归档账户持有的币不会把刷价信号点亮", async () => {
-    // 新 mint 的代币「有身份、无价」→ 富化会把它记成价格过期。让它只属于归档账户。
-    const ghost = await dbFor(USER).transfer.importToken({ symbol: "GHOST", name: "Ghost" }, [
-      { namer: "coingecko", localName: "issued:ghost" },
-    ]);
-    const gone = await evmAccount("Gone", "0xgone");
-    await dbFor(USER).snapshots.write(gone.id, {
-      takenAt: 1000,
-      totalUsd: 10,
-      balances: [{ tokenId: ghost, amount: 1, usdValue: 10, kind: "spot", platform: "evm:1" }],
-    });
-    await dbFor(USER).accounts.setArchived(gone.id, true);
-
-    const { view, of } = await rowsByLabel();
-
-    // 那一行自己仍然照实说「我这行的价过期了」——收窄发生在汇总那一步,不是把行的事实改掉。
-    expect(of("Gone")?.pricesStale).toBe(true);
-    expect(view.pricesStale).toBe(false);
-  });
-
-  it("活跃账户的币过期照旧点亮信号 —— 收窄不是把这件事整个关掉", async () => {
-    const ghost = await dbFor(USER).transfer.importToken({ symbol: "GHOST2", name: "Ghost2" }, [
-      { namer: "coingecko", localName: "issued:ghost2" },
-    ]);
-    const live = await evmAccount("Live", "0xlive");
-    await dbFor(USER).snapshots.write(live.id, {
-      takenAt: 1000,
-      totalUsd: 10,
-      balances: [{ tokenId: ghost, amount: 1, usdValue: 10, kind: "spot", platform: "evm:1" }],
-    });
-
-    const { view } = await rowsByLabel();
-
-    expect(view.pricesStale).toBe(true);
   });
 });
 

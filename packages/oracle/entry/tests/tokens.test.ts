@@ -1,4 +1,10 @@
-import { dayBucketOf, MS_PER_DAY, PRICE_TTL_MS, type TokenInfo } from "@folio/oracle-basic";
+import {
+  DAILY_FILL_DAYS_PER_CALL,
+  dayBucketOf,
+  MS_PER_DAY,
+  PRICE_TTL_MS,
+  type TokenInfo,
+} from "@folio/oracle-basic";
 import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import { TokenService } from "../src/tokens";
@@ -79,66 +85,29 @@ describe("富化 —— 两个 store 各读自己那半,服务层合成整行", 
   });
 });
 
-describe("取价 —— 走同一个 SWR 编排", () => {
-  it("新鲜 → 直接回,不碰上游", async () => {
-    const h = setup([info({ id: "tk_1" })]);
+describe("取价(有 id 的那档)—— 只读价表,一批一次,零网络(FOL-87)", () => {
+  it("新鲜的与 stale 的都原样给出,stale 标志带着;表里没有的不在结果里", async () => {
+    const h = setup([info({ id: "tk_1" }), info({ id: "tk_2", ref: "src/issued:ethereum" })]);
     await h.run(
       Effect.gen(function* () {
         const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: NOW }], PRICE_TTL_MS);
-        expect(yield* tokens.priceOf("tk_1")).toEqual(
-          Option.some(expect.objectContaining({ unitPrice: 60000, stale: false })),
-        );
-        expect(h.upstream.calls).toEqual([]);
-      }),
-    );
-  });
-
-  it("stale → 回源 → 写回(长尾币按需取价走这条)", async () => {
-    const h = setup([info({ id: "tk_1" })]);
-    await h.run(
-      Effect.gen(function* () {
-        const tokens = yield* TokenService;
-        yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: 0 }], PRICE_TTL_MS);
-        yield* TestClock.adjust(Duration.millis(PRICE_TTL_MS + 1));
+        yield* h.prices.put([{ tokenId: "tk_2", unitPrice: 3000, asOf: 0 }], 0);
         h.upstream.prices.set(SRC_BTC, { unitPrice: 61000, asOf: NOW });
 
-        expect(Option.getOrThrow(yield* tokens.priceOf("tk_1"))).toMatchObject({
-          unitPrice: 61000,
-        });
-        expect(h.upstream.calls).toEqual([`fetchPrices:${SRC_BTC}`]);
-        expect(h.prices.current.get("tk_1")?.price.unitPrice).toBe(61000); // 写回了
-      }),
-    );
-  });
-
-  it("上游还没认出的币取不了价 —— 不问上游,把旧值原样给出去", async () => {
-    const h = setup([info({ id: "tk_1", ref: null })]);
-    await h.run(
-      Effect.gen(function* () {
-        const tokens = yield* TokenService;
-        yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 42, asOf: 0 }], 0);
-        expect(Option.getOrThrow(yield* tokens.priceOf("tk_1"))).toMatchObject({
-          unitPrice: 42,
-          stale: true,
-        });
+        const got = yield* tokens.pricesOf(["tk_1", "tk_2", "tk_missing"]);
+        expect(got.get("tk_1")).toMatchObject({ unitPrice: 60000, stale: false });
+        expect(got.get("tk_2")).toMatchObject({ unitPrice: 3000, stale: true });
+        expect(got.has("tk_missing")).toBe(false);
+        // stale 也不回源 —— 回源只归 `refreshStale`(队列的 prices 活)。
         expect(h.upstream.calls).toEqual([]);
       }),
     );
   });
 
-  it("上游也没有 → 保留旧值(过期不删)", async () => {
-    const h = setup([info({ id: "tk_1" })]);
-    await h.run(
-      Effect.gen(function* () {
-        const tokens = yield* TokenService;
-        yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: 0 }], 0);
-        expect(Option.getOrThrow(yield* tokens.priceOf("tk_1"))).toMatchObject({
-          unitPrice: 60000,
-        });
-        expect(h.prices.current.get("tk_1")?.price.unitPrice).toBe(60000);
-      }),
-    );
+  it("空输入 → 空 Map", async () => {
+    const h = setup();
+    expect(await h.run(Effect.flatMap(TokenService, (t) => t.pricesOf([])))).toEqual(new Map());
   });
 });
 
@@ -385,34 +354,142 @@ describe("边角", () => {
 describe("历史日价(按 token_id)", () => {
   const day = (offset: number) => (TODAY + offset) * MS_PER_DAY;
 
-  it("范围查:缓存命中的过去日直接用,缺的一次回源补齐并落缓存", async () => {
+  it("priceSeries 只读表:缺的过去日不在结果里,**一发都不出网**(FOL-90)", async () => {
     const h = setup([info({ id: "tk_1" })]);
-    h.upstream.series = [
-      { atMs: day(-2), unitPrice: 200 },
-      { atMs: day(-1), unitPrice: 300 },
-    ];
+    h.upstream.series = [{ atMs: day(-2), unitPrice: 200 }];
     await h.run(
       Effect.gen(function* () {
         const tokens = yield* TokenService;
-        yield* h.prices.putDaily("tk_1", [{ dayBucket: TODAY - 3, unitPrice: 100 }]);
-
+        yield* h.prices.putDaily("tk_1", [
+          { dayBucket: TODAY - 3, unitPrice: 100 },
+          { dayBucket: TODAY - 1, unitPrice: 300 },
+        ]);
         expect(yield* tokens.priceSeries("tk_1", day(-3), day(-1))).toEqual([
           { atMs: day(-3), unitPrice: 100 },
-          { atMs: day(-2), unitPrice: 200 },
           { atMs: day(-1), unitPrice: 300 },
         ]);
-        // 补齐的两天永久落了缓存(过去日不可变)。
-        expect(yield* h.prices.getDaily("tk_1", [TODAY - 2, TODAY - 1])).toEqual(
-          new Map([
-            [TODAY - 2, 200],
-            [TODAY - 1, 300],
-          ]),
-        );
+        expect(h.upstream.calls).toEqual([]);
       }),
     );
   });
 
-  it("全部命中缓存 → 不碰上游", async () => {
+  it("今日桶读价表的现价(多旧都给),不出网、不落日价表;没有现价 → 缺", async () => {
+    const h = setup([info({ id: "tk_1" }), info({ id: "tk_2" })]);
+    h.upstream.series = [{ atMs: NOW, unitPrice: 999 }];
+    await h.run(
+      Effect.gen(function* () {
+        const tokens = yield* TokenService;
+        yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 42, asOf: NOW }], PRICE_TTL_MS);
+        expect(yield* tokens.priceSeries("tk_1", day(0), NOW)).toEqual([
+          { atMs: day(0), unitPrice: 42 },
+        ]);
+        expect(yield* tokens.priceSeries("tk_2", day(0), NOW)).toEqual([]);
+        expect(yield* h.prices.getDaily("tk_1", [TODAY])).toEqual(new Map());
+        expect(h.upstream.calls).toEqual([]);
+      }),
+    );
+  });
+
+  it("fillDaily:缺的过去日一发补齐落表(不含今天);重跑零出网", async () => {
+    const h = setup([info({ id: "tk_1" })]);
+    h.upstream.series = [
+      { atMs: day(-3), unitPrice: 100 },
+      { atMs: day(-2), unitPrice: 200 },
+      { atMs: day(-1), unitPrice: 300 },
+      { atMs: NOW, unitPrice: 999 },
+    ];
+    await h.run(
+      Effect.gen(function* () {
+        const tokens = yield* TokenService;
+        expect(yield* tokens.fillDaily("tk_1", day(-3), 10)).toEqual({
+          calls: 1,
+          done: true,
+          failed: false,
+        });
+        expect(yield* h.prices.getDaily("tk_1", [TODAY - 3, TODAY - 2, TODAY - 1, TODAY])).toEqual(
+          new Map([
+            [TODAY - 3, 100],
+            [TODAY - 2, 200],
+            [TODAY - 1, 300],
+          ]),
+        );
+        expect(yield* tokens.fillDaily("tk_1", day(-3), 10)).toEqual({
+          calls: 0,
+          done: true,
+          failed: false,
+        });
+        expect(h.upstream.calls).toHaveLength(1);
+      }),
+    );
+  });
+
+  it("fillDaily:上游那几天**就是没有点** → 记成「试过」,重跑不再为它们出网", async () => {
+    const h = setup([info({ id: "tk_1" })]);
+    h.upstream.series = [{ atMs: day(-1), unitPrice: 300 }]; // -3、-2 两天上游没有
+    await h.run(
+      Effect.gen(function* () {
+        const tokens = yield* TokenService;
+        yield* tokens.fillDaily("tk_1", day(-3), 10);
+        yield* tokens.fillDaily("tk_1", day(-3), 10);
+        expect(h.upstream.calls).toHaveLength(1);
+      }),
+    );
+  });
+
+  it("fillDaily:按预算切窗 —— 三年 = 多窗,预算用完停下、下一次接着补;第二天只补昨天", async () => {
+    const h = setup([info({ id: "tk_1" })]);
+    const DAYS = 3 * 365;
+    h.upstream.series = Array.from({ length: DAYS }, (_, i) => ({
+      atMs: day(i - DAYS),
+      unitPrice: i + 1,
+    }));
+    await h.run(
+      Effect.gen(function* () {
+        const tokens = yield* TokenService;
+        const first = yield* tokens.fillDaily("tk_1", day(-DAYS), 2);
+        expect(first).toEqual({ calls: 2, done: false, failed: false });
+        const rest = yield* tokens.fillDaily("tk_1", day(-DAYS), 10);
+        expect(rest.done).toBe(true);
+        expect(first.calls + rest.calls).toBe(Math.ceil(DAYS / DAILY_FILL_DAYS_PER_CALL));
+        const buckets = Array.from({ length: DAYS }, (_, i) => TODAY - DAYS + i);
+        expect((yield* h.prices.getDaily("tk_1", buckets)).size).toBe(DAYS);
+
+        // 过了一天:只有「昨天」(原来的今天)要补,一发。
+        h.upstream.series.push({ atMs: day(0), unitPrice: 7 });
+        yield* TestClock.adjust(Duration.days(1));
+        const before = h.upstream.calls.length;
+        expect(yield* tokens.fillDaily("tk_1", day(-DAYS), 10)).toEqual({
+          calls: 1,
+          done: true,
+          failed: false,
+        });
+        expect(h.upstream.calls.length - before).toBe(1);
+        expect(yield* h.prices.getDaily("tk_1", [TODAY])).toEqual(new Map([[TODAY, 7]]));
+      }),
+    );
+  });
+
+  it("fillDaily:上游失败 → `failed`、区间不推过去,下一次再试;不抛", async () => {
+    const h = setup([info({ id: "tk_1" })]);
+    h.upstream.fail = upstreamDown();
+    await h.run(
+      Effect.gen(function* () {
+        const tokens = yield* TokenService;
+        expect(yield* tokens.fillDaily("tk_1", day(-2), 10)).toEqual({
+          calls: 1,
+          done: false,
+          failed: true,
+        });
+        h.upstream.fail = undefined;
+        h.upstream.series = [{ atMs: day(-2), unitPrice: 5 }];
+        expect((yield* tokens.fillDaily("tk_1", day(-2), 10)).done).toBe(true);
+        expect(yield* h.prices.getDaily("tk_1", [TODAY - 2])).toEqual(new Map([[TODAY - 2, 5]]));
+      }),
+    );
+    expect(h.logs.some((l) => l.annotations.at === "tokens.fillDaily")).toBe(true);
+  });
+
+  it("fillDaily:表里已有整窗(别的用户补过)→ 不出网,直接算试过", async () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
@@ -421,38 +498,12 @@ describe("历史日价(按 token_id)", () => {
           { dayBucket: TODAY - 2, unitPrice: 1 },
           { dayBucket: TODAY - 1, unitPrice: 2 },
         ]);
-        expect(yield* tokens.priceSeries("tk_1", day(-2), day(-1))).toHaveLength(2);
+        expect(yield* tokens.fillDaily("tk_1", day(-2), 10)).toEqual({
+          calls: 0,
+          done: true,
+          failed: false,
+        });
         expect(h.upstream.calls).toEqual([]);
-      }),
-    );
-  });
-
-  it("今日桶恒现取、不落缓存(它还会变)", async () => {
-    const h = setup([info({ id: "tk_1" })]);
-    h.upstream.series = [{ atMs: NOW, unitPrice: 999 }];
-    await h.run(
-      Effect.gen(function* () {
-        const tokens = yield* TokenService;
-        expect(yield* tokens.priceSeries("tk_1", day(0), NOW)).toEqual([
-          { atMs: day(0), unitPrice: 999 },
-        ]);
-        expect(yield* h.prices.getDaily("tk_1", [TODAY])).toEqual(new Map());
-        yield* tokens.priceSeries("tk_1", day(0), NOW);
-        expect(h.upstream.calls).toHaveLength(2); // 第二次照样回源
-      }),
-    );
-  });
-
-  it("上游失败 → 退回仅缓存,不抛", async () => {
-    const h = setup([info({ id: "tk_1" })]);
-    h.upstream.fail = upstreamDown();
-    await h.run(
-      Effect.gen(function* () {
-        const tokens = yield* TokenService;
-        yield* h.prices.putDaily("tk_1", [{ dayBucket: TODAY - 2, unitPrice: 7 }]);
-        expect(yield* tokens.priceSeries("tk_1", day(-2), day(-1))).toEqual([
-          { atMs: day(-2), unitPrice: 7 },
-        ]);
       }),
     );
   });
@@ -464,6 +515,11 @@ describe("历史日价(按 token_id)", () => {
         const tokens = yield* TokenService;
         expect(yield* tokens.priceSeries("unknown", day(-2), day(-1))).toEqual([]);
         expect(yield* tokens.priceSeries("tk_1", day(-1), day(-2))).toEqual([]);
+        expect(yield* tokens.fillDaily("unknown", day(-2), 10)).toEqual({
+          calls: 0,
+          done: true,
+          failed: false,
+        });
         expect(h.upstream.calls).toEqual([]);
       }),
     );

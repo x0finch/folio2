@@ -1,5 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { HistoryRange } from "@/lib/core/history-range";
+import { type JsonBody, readJson } from "@/lib/core/json-response";
 import type { AccountHoldingsView } from "@/lib/core/portfolio";
 import { getAccountHistory, listAccounts } from "@/lib/server/accounts";
 import { getTokenValueHistory } from "@/lib/server/holdings";
@@ -22,7 +23,7 @@ import { accountKeys } from "./keys";
 export const accountListQuery = (portfolioId: string) =>
   queryOptions({
     queryKey: accountKeys.list(portfolioId),
-    queryFn: () => listAccounts({ data: { portfolioId } }),
+    queryFn: async () => readJson(await listAccounts({ data: { portfolioId } })),
     staleTime: STALE_TIME.live,
     // **外壳赖以存在的读,永不认命重试**(FOL-58 回归修复):页头同步胶囊 `useSyncStatus` 在
     // `ShellWithSync`——任何 island 边界之外——suspend 在这条(+ 快照 `now`)上。默认 5 次失败后
@@ -32,7 +33,7 @@ export const accountListQuery = (portfolioId: string) =>
   });
 
 /** 一份账户列表行的形状(含该组合的归档账户、归属与凭据投影)。 */
-export type AccountListItem = Awaited<ReturnType<typeof listAccounts>>[number];
+export type AccountListItem = JsonBody<Awaited<ReturnType<typeof listAccounts>>>[number];
 /** 按账户的持仓视图(浏览器原子 query 合并:现价重算的总额/持仓 + 两端相减的 24h 盈亏)。 */
 export type AccountHoldings = AccountHoldingsView;
 
@@ -52,15 +53,17 @@ export const accountHistoryQuery = (args: {
     queryKey: accountKeys.history(args.accountId, args.range),
     // connectorId 传给服务端做读路径分流(manual→账本 / 其余→快照),省一次账户反查。
     // 它由 accountId 决定,所以不进 key —— 进了只会让同一账户凭空多出一条永不命中的缓存。
-    queryFn: () =>
-      getAccountHistory({
-        data: {
-          accountId: args.accountId,
-          since: args.since,
-          connectorId: args.connectorId,
-          range: args.range,
-        },
-      }),
+    queryFn: async () =>
+      readJson(
+        await getAccountHistory({
+          data: {
+            accountId: args.accountId,
+            since: args.since,
+            connectorId: args.connectorId,
+            range: args.range,
+          },
+        }),
+      ),
     staleTime: STALE_TIME.history,
   });
 
@@ -71,10 +74,12 @@ export const holdingHistoryQuery = (args: {
 }) =>
   queryOptions({
     queryKey: accountKeys.holdingHistory(args.holdingKey, args.range),
-    queryFn: () =>
-      getTokenValueHistory({
-        data: { key: args.holdingKey, since: args.since, range: args.range },
-      }),
+    queryFn: async () =>
+      readJson(
+        await getTokenValueHistory({
+          data: { key: args.holdingKey, since: args.since, range: args.range },
+        }),
+      ),
     staleTime: STALE_TIME.history,
   });
 

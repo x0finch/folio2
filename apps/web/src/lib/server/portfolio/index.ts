@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { runEffect } from "@/lib/server/runtime";
+import { runEffect, runEffectJson } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { handleGetFiatRefs } from "./fiat-refs";
 import { handleGetPortfolioHistory, PortfolioHistoryInput } from "./get-history";
@@ -12,7 +12,7 @@ import { handleGetSnapshots, SnapshotsInput } from "./snapshots";
 export const getSnapshots = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(SnapshotsInput)
-  .handler(runEffect(handleGetSnapshots));
+  .handler(runEffectJson(handleGetSnapshots));
 
 export const getFiatRefs = createServerFn({ method: "GET" })
   .middleware([requireAuth])
@@ -27,4 +27,4 @@ export const resolvePlatformMeta = createServerFn({ method: "GET" })
 export const getPortfolioHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioHistoryInput)
-  .handler(runEffect(handleGetPortfolioHistory));
+  .handler(runEffectJson(handleGetPortfolioHistory));

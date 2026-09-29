@@ -34,6 +34,10 @@ function AvatarImage({ className, src, alt = "", ...props }: React.ComponentProp
       data-slot="avatar-image"
       src={src}
       alt={alt}
+      // logo 墙一屏几十张、多数在折叠区/滚动区外:懒加载 + 异步解码,不跟首屏抢连接与主线程。
+      // 写在 `{...props}` 之前 → 调用方要首屏立即出图时仍可覆盖。
+      loading="lazy"
+      decoding="async"
       onError={() => setErrored(true)}
       className={cn("absolute inset-0 size-full rounded-full object-cover", className)}
       {...props}

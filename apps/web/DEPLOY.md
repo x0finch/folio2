@@ -33,6 +33,12 @@ pnpm exec wrangler d1 create folio
 # 3. Apply migrations to the REMOTE D1 (local & remote are separate DBs)
 pnpm exec wrangler d1 migrations apply folio --remote
 
+# 3b. Create the background-job queues (FOL-86 / ADR 0055). The hourly cron only enqueues
+#     one message per account; the `queue()` consumer does the syncing. `wrangler deploy`
+#     FAILS if a queue named in wrangler.jsonc → queues doesn't exist yet. One-time only.
+pnpm exec wrangler queues create folio-jobs
+pnpm exec wrangler queues create folio-jobs-dlq
+
 # 4. Set secrets (each prompts for the value — never written to git)
 pnpm exec wrangler secret put SECRETS_KEY
 pnpm exec wrangler secret put BETTER_AUTH_SECRET
@@ -44,11 +50,16 @@ pnpm exec wrangler secret put COINGECKO_API_KEY
 
 # 5. Build + deploy (the `deploy` script runs `vite build` then `wrangler deploy`)
 pnpm run deploy
-# → note the printed URL, e.g. https://folio-web.<your-subdomain>.workers.dev
+# → note the printed URL, e.g. https://folio.<your-subdomain>.workers.dev
 
 # 6. better-auth needs BETTER_AUTH_URL to match the real origin → set it and redeploy
 pnpm exec wrangler secret put BETTER_AUTH_URL     # the workers.dev URL from step 5
 pnpm run deploy
+
+# 7. Fill the global token map once (contract address → CoinGecko coin). Until it has rows,
+#    on-chain tokens can't be matched to a coin (no price, no logo). From then on the
+#    "Ref index refresh" GitHub Actions workflow keeps it fresh daily — see below.
+CLOUDFLARE_API_TOKEN=<token with D1:Edit> pnpm run ref-index:refresh
 ```
 
 **Custom domain:** bind a Workers Custom Domain in the Cloudflare dashboard, then use that domain for `BETTER_AUTH_URL` in step 6.
@@ -66,7 +77,22 @@ check which side you are on, look for `edge cache: hit` in `wrangler tail` — o
 1. Open the URL → **sign up** → you land on the overview.
 2. Add a **manual** account (symbol/amount/usd) → **Sync now** → it appears with a total.
 3. (Optional) add an on-chain wallet (EVM needs no key) → Sync.
-4. Logs: `pnpm exec wrangler tail` — structured JSON lines (`account synced` with `userId`/`accountId`/`type`, etc.). The daily cron (`0 0 * * *` UTC) auto-runs; trigger it manually from the dashboard (Workers → folio-web → Triggers / Cron) to see a `cron sweep done` line.
+4. Logs: `pnpm exec wrangler tail` — structured JSON lines (`account synced` with `userId`/`accountId`/`type`, etc.). Two crons auto-run: the hourly sync sweep (`30 * * * *` UTC) and the daily jobs (`0 23 * * *` UTC). Trigger the **hourly** one manually from the dashboard (Workers → folio → Triggers / Cron) to see a `cron sweep enqueued` line (with `jobs` and a `queueOps` estimate), followed (one queue-consumer invocation per account) by `account synced` lines and a `queued round done` line per portfolio. The daily one logs `daily jobs enqueued`. Jobs that still fail on their last retry are sent to `folio-jobs-dlq` (the sync round is marked failed first) — inspect them under Queues in the dashboard; nothing consumes that queue.
+
+**Existing deployment upgrading past FOL-86:** run step 3b once before the next deploy.
+
+**Existing deployment upgrading past FOL-91 (migration `0009_account_daily_totals`):** run this
+once, **right after that deploy finishes** (manual or CI):
+
+```sh
+cd apps/web && pnpm run db:backfill-daily-totals   # re-runs 0009's backfill on the remote D1
+```
+
+Why: the migration backfills the daily rollup from snapshots, but it runs *before* the deploy, and
+the old Worker keeps writing snapshots (hourly cron, manual sync) until the new one is live — and
+the old code doesn't maintain the rollup. Those in-between snapshots would otherwise stay out of
+the 30d/1y/all charts for good. The statement is read straight from the migration file,
+`INSERT OR REPLACE`, so it's safe to run again any time (append `-- --local` for the dev DB).
 
 ## Updating later (manual)
 
@@ -75,6 +101,7 @@ cd apps/web
 # if schema changed: pnpm --filter @folio/db exec drizzle-kit generate, then:
 pnpm exec wrangler d1 migrations apply folio --remote
 pnpm run deploy
+# first deploy past FOL-91 only: pnpm run db:backfill-daily-totals (see "Verify" above)
 ```
 
 ## Auto-deploy (CI, on tag)
@@ -114,6 +141,34 @@ verify → migrate → deploy. Same result as the tag command, just tappable fro
 > rollback. Review the pending migration before tagging. To gate deploys behind manual approval,
 > add **required reviewers** to the `production` environment (repo Settings → Environments) —
 > the workflow already targets it and will then wait for an approval before migrating/deploying.
+
+## Global token map refresh (CI, daily)
+
+`global_token_ref_index` (on-chain contract → the CoinGecko coin it is; ADR 0022) is refreshed by
+**`.github/workflows/ref-index-refresh.yml`**, not by the Worker (FOL-85, ADR 0056): pulling the
+2.6 MB coin list and diffing ~23k rows cost ~500 ms CPU per run, and the free plan gives one
+invocation 10 ms. The workflow runs `apps/web/scripts/ref-index/refresh.ts` on a GitHub runner,
+which talks to the production D1 through the Cloudflare D1 REST API (`account_id` and
+`database_id` are read from `wrangler.jsonc`) and only writes the rows that changed.
+
+- **Schedule:** daily at 23:00 UTC, plus **Actions → Ref index refresh → Run workflow** by hand
+  (tick *dry run* to only print the counts). GitHub's schedule is best-effort — runs are often
+  10–60 minutes late and occasionally skipped under load; that's fine for a map that is allowed to
+  lag a day. On a public repo GitHub pauses schedules after 60 days without a commit — re-enable it
+  on the workflow page if that happens.
+- **Secrets:** the same repo-level **`CLOUDFLARE_API_TOKEN`** the deploy uses — it already has
+  **D1 → Edit**, which is all this needs. Optional repo secret **`COINGECKO_API_KEY`** (demo/pro);
+  without it the run is keyless, which is fine for its two requests.
+- **After the first deploy** (or when upgrading a deployment from before FOL-85), run the workflow
+  once by hand — the Worker's 23:00 cron no longer fills the table. Locally, the equivalent is
+  `CLOUDFLARE_API_TOKEN=… pnpm --filter @folio/web ref-index:refresh` (add `--dry-run` to only
+  compute the diff, `--env preview` for the preview D1).
+- **Local dev:** `pnpm --filter @folio/web ref-index:local` fills the `pnpm dev` database
+  (`.wrangler/state`) the same way, straight into the local SQLite file (no token needed).
+- **Reading a run:** the log ends with `rows` / `skipped` / `inserted` / `updated` / `deleted`.
+  In the steady state inserted/updated/deleted are near 0; `unmatchedPlatforms` above 0 shows up as
+  a warning annotation (a chain whose coins will have no price until the slug table is fixed).
+  A failed run (CoinGecko down, D1 error, bad token) exits non-zero and the run turns red.
 
 ## PR preview (CI, on demand via label)
 
@@ -176,6 +231,10 @@ cd apps/web
 # 1. Create the preview D1, then paste the printed database_id into
 #    wrangler.jsonc → env.preview.d1_databases[0].database_id (replacing the REPLACE_WITH_… placeholder)
 pnpm exec wrangler d1 create folio-preview
+
+# 1b. Create the preview's own queue pair (see step 3b above; preview has a consumer, no cron)
+pnpm exec wrangler queues create folio-preview-jobs
+pnpm exec wrangler queues create folio-preview-jobs-dlq
 
 # 2. Set the preview Worker's secrets. Use `--name folio-preview`, NOT `--env preview`:
 #    env.preview now sets its own `name`, so `--env preview` resolves to a non-existent

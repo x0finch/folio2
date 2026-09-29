@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
 import { DatabaseForOracle, GlobalDatabase } from "@folio/db";
-import { GlobalRefIndexService, type OracleServices, oracleLayer } from "@folio/oracle";
+import { type OracleServices, oracleLayer } from "@folio/oracle";
 import { coinGeckoUpstreamLayers, UPSTREAM_ID } from "@folio/oracle-upstream-coingecko";
 import { Layer } from "effect";
+import { coinGeckoConfigOf } from "./coingecko-config";
 
 // 参考层的装配点(ADR 0023,#199/#200)。**这是全仓唯一同时认识两边的文件** ——
 // 一边是 D1 store,一边是 CoinGecko adapter;`@folio/oracle` 自己两边都不认识。
@@ -23,7 +24,9 @@ import { Layer } from "effect";
 // **isolate 建一次就读这一次**:`env` 是部署级的(同一个 isolate 里每个请求看到的是同一份),
 // 所以把 key 冻进 isolate 级的 client 不会让哪个请求读到别人的值。换 key 要重新部署,那本来就
 // 起一批新 isolate。
-const cgConfig = () => ({ apiKey: env.COINGECKO_API_KEY || undefined });
+//
+// 读法(哪些变量、空串怎么算)在 `./coingecko-config.ts`:GitHub Actions 里刷全局映射表的脚本也用它。
+const cgConfig = () => coinGeckoConfigOf(env as unknown as Record<string, string | undefined>);
 
 // 当前上游的命名者。db 层不预设任何厂商(表名列名零 vendor 字样,#199),所以凡是要按命名者
 // 点查 `token_refs` 的读(如手记持仓的「用户选了哪个币」)都由 app 把它传进去。
@@ -59,8 +62,12 @@ const dbForOracle = () =>
   Layer.merge(DatabaseForOracle.Default(UPSTREAM_ID), GlobalDatabase.Default);
 
 /**
- * 参考层,装好、封住 —— 出去的是它那三个域服务 + cron 刷全局映射表的那个门面,外加
- * **不带 userId 的那张 db 门票**(`GlobalDatabase`:cron 扫「有哪些用户」要它)。
+ * 参考层,装好、封住 —— 出去的是它那三个域服务,外加 **不带 userId 的那张 db 门票**
+ * (`GlobalDatabase`:cron 扫「有哪些用户」要它)。
+ *
+ * **刷全局映射表的门面(`GlobalRefIndexService`)不在这里了**(FOL-85,ADR 0056):那一趟拉 2.6 MB、
+ * 比对几万行,免费计划一次调用 10ms CPU 装不下,挪到了 GitHub Actions 里的 Node 脚本
+ * (`scripts/ref-index/`),那边是它的第二个装配点。Worker 只读这张表(mint 的正查)。
  *
  * **`DatabaseForOracle` 不往外透(#504 T17 那道收窄,是结构性的)**:代币行与价格行住在它上面,
  * 这张 layer 把它喂进参考层之后就**不再往外透** —— handler 在运行时也拿不到它,不只是类型上。
@@ -70,10 +77,7 @@ const dbForOracle = () =>
  * 它上面**没有一条用户数据**(ADR 0022),handler 的 `UserServices` 里也没有它
  * (`user-services-surface.test.ts` 钉着)。
  */
-export const oracleServices = (): Layer.Layer<
-  OracleServices | GlobalRefIndexService | GlobalDatabase
-> =>
-  Layer.provide(
-    Layer.merge(oracleLayer, GlobalRefIndexService.Default),
-    Layer.merge(dbForOracle(), upstreams()),
-  ).pipe(Layer.provideMerge(GlobalDatabase.Default));
+export const oracleServices = (): Layer.Layer<OracleServices | GlobalDatabase> =>
+  Layer.provide(oracleLayer, Layer.merge(dbForOracle(), upstreams())).pipe(
+    Layer.provideMerge(GlobalDatabase.Default),
+  );

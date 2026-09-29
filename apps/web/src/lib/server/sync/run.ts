@@ -1,69 +1,72 @@
 import { Database, NotFound } from "@folio/db";
-import { Account as SyncKernel } from "@folio/sync";
-import { getLogger } from "@logtape/logtape";
-import { Effect } from "effect";
+import type { AccountSyncResult } from "@folio/sync";
+import { Clock, Effect } from "effect";
 import { z } from "zod";
 import { isManual } from "@/lib/core/manual";
-import { logCategory } from "@/lib/server/effect-log";
-import { syncServicesLayer, warmTokens } from "./deps";
+import { ConnectorRegistry } from "@/lib/server/connectors/registry";
+import { isComplete, readStoredCreds } from "@/lib/server/creds";
+import { startAccountRound } from "./round";
+import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 
-const syncLog = getLogger(["folio", "web", "sync"]);
-
-// 只同步单个账户(详情侧栏「单独同步」):取该账户 + 其 raw creds → `@folio/sync` 内核隔离写快照。
-// 归档账户理论上侧栏会禁用此项;即便调用,内核仍按现有逻辑处理(缺凭据→skipped)。
-// 全量同步走 /api/sync 流式端点(服务端 waitUntil 兜底);这里只管单账户同步(状态在 ./get-status)。
+// 只同步单个账户(详情侧栏「同步」、加账户 / 补凭据之后那一次):**排进一轮、投一条消息、即返**(FOL-89)。
 //
-// **一次装配跑完整条链**(#394 T5):读账户 → 读凭据 → 同步 → 预热,四步共一份 context。以前是
-// 两次 `db.`(各自建一次 layer、各跑一次 runPromise)+ 一次 `warmTokensForUser`(再建一套),
-// 而预热本身内部还要再读一遍账户与快照。
-//
-// **同步内核也在这一个 effect 里**(#403 片 2):`@folio/sync` 的 Effect 内核直接接出来,
-// `SyncServices` 由 `syncServicesLayer` 供上,而它要的 db / 参考层服务就是装配点那一次已经装好的
-// 那些。以前这里是 `Effect.promise(() => syncAccountCore(…))`—— 一道 Promise 边界,
-// 而且内核里的 mint / revalue 各自还要再装一次参考层。
+// 以前这里在请求里把整条链跑完 —— 读账户 → 读凭据 → 同步(出网)→ 预热(价 / 汇率 / 平台 / DeFi 图,
+// 又是一圈出网)—— 全部落在这一次调用的 10ms CPU 里。现在同步在队列 consumer 里跑(与 cron 同一个
+// 内核,ADR 0055),这里只做**不出网**的那几步:认账户、挡掉注定跳过的、把它排进一轮。
+// 前端拿回 `{ queued: true, … }` 后按那一轮轮询,等这个账户落账(`SyncRoundView.statuses`)。
 export const SyncAccountInput = z.object({ accountId: z.string().min(1) });
 
-// **userId 是显式参数,不是从 context 摸出来的。** 同步内核要它标日志(`@folio/sync` 的
-// `syncAccount`,cron 那条路也这么传),而 `runEffect` 刻意不把 userId 交给 handler。
-// 与其为一个日志字段把它重新放进**全部** handler 的可见面,不如这一处显式接一次 ——
-// 装配点因此走 `runForUser`(与 `runEffect` 同一个内核,见 ./index)。
+/**
+ * `syncAccount` 的回包。
+ *
+ *   · `queued: false` —— 当场就知道结果、不必排队的那几种(手记 / 凭据没填完 / 已归档),结果就在 `result`。
+ *   · `queued: true`  —— 已排进 `portfolioId` 上 `roundId` 那一轮;`round` 是此刻的样子,前端直接落缓存。
+ */
+export type SyncAccountStart =
+  | { queued: false; result: AccountSyncResult }
+  | {
+      queued: true;
+      accountId: string;
+      portfolioId: string;
+      roundId: string;
+      round: SyncRoundView;
+    };
+
+// 投的消息要带 userId(consumer 那一侧按它装配),由装配点经 `enqueueForUser` 填 —— handler 不收它(#504)。
 export const handleSyncAccount = Effect.fn("syncAccount")(function* (
-  userId: string,
   data: z.infer<typeof SyncAccountInput>,
 ) {
   const accounts = (yield* Database).accounts;
   const account = yield* accounts.getById(data.accountId);
-  // 「没这个账户」现在是**类型化失败**(#504 T6):以前它在边缘 `throw`,因为在 effect 里 `die`
-  // 会被包成 FiberFailure、日志里只剩一坨 Cause。`NotFound` 两头都好:前端拿到那句人话,
-  // 兜底日志打的 `Cause.pretty` 里连 handler 名和调用链一起有。
+  // 「没这个账户」是**类型化失败**(#504 T6):前端拿到那句人话,兜底日志里有 handler 名和调用链。
   if (!account) return yield* Effect.fail(new NotFound({ entity: "account", id: data.accountId }));
+  const done = (result: AccountSyncResult): SyncAccountStart => ({ queued: false, result });
   // manual 不是同步源(ADR 0018:当下值由 creds 现造,不写快照)。UI 已对 manual 隐藏「同步」;此处防御式跳过。
+  // **带上为什么跳过**(#527 裁定 2):手记账户没有上游,和「凭据没填完」都跳过,但只有后者有下一步动作。
   if (isManual(account.connectorId)) {
-    // **带上为什么跳过**(#527 裁定 2):手记账户没有上游,和「凭据没填完」都跳过,但只有后者
-    // 有下一步动作。以前两者返回同一个形状,界面分不出该不该提示用户去补凭据。
-    return { accountId: account.id, ok: false, skipped: true, skipReason: "manual" as const };
+    return done({ accountId: account.id, ok: false, skipped: true, skipReason: "manual" });
   }
-  const rawCreds = yield* accounts.getRawCreds(data.accountId);
-  // `logCategory("sync")`:内核的日志落 `folio.sync`,不跟着请求这一半走 `folio.oracle`。
-  // **不能靠再叠一层 `Logger.replace`** —— 那不会顶掉外层那个,只会两个都在、每条写两遍
-  // (#403 片 2 实测)。类目跟着日志走,转发器只有一个。
-  const result = yield* SyncKernel.syncAccount(userId, account, rawCreds).pipe(
-    Effect.provide(syncServicesLayer),
-    logCategory("sync"),
-  );
-  syncLog.info("single account sync", {
+  // 归档账户不进任何一轮(开轮的名单判据同一个),排进去也只会被 consumer 记成 skipped。
+  if (!isSyncableAccount(account)) return done({ accountId: account.id, ok: false, skipped: true });
+  // 凭据没填完:**当场回、不排队**。同步内核照样会判出 needs-keys,但那要一条消息、一次调用才换来
+  // 一句此刻就答得出的话;界面也要立刻提示去补凭据(#527 裁定 2)。判据与账户列表的 needsCredentials
+  // 同一个(`isComplete` × connector 的字段规格)。
+  const specs = (yield* ConnectorRegistry).specs[account.connectorId] ?? [];
+  const stored = readStoredCreds(yield* accounts.getRawCreds(account.id)) ?? {};
+  if (!isComplete(specs, stored)) {
+    return done({
+      accountId: account.id,
+      ok: false,
+      skipped: true,
+      skipReason: "missing-credentials",
+    });
+  }
+  const round = yield* startAccountRound({ id: account.id, label: account.label });
+  return {
+    queued: true,
     accountId: account.id,
-    connectorId: account.connectorId,
-    ok: result.ok,
-    skipped: result.skipped,
-    skipReason: result.skipReason,
-  });
-  // **只有真同步成功才预热**(#527 发现 3):skipped(手记 / 凭据不齐)和失败都没写任何新快照,
-  // 预热不会让总览更新鲜 —— 却要白打 4 发上游(exchange_rates ×2 + coins/markets ×2)。
-  // CoinGecko 免费档每分钟 10 发,在设置页对着一个缺凭据的账户连点几下「同步」就能把限额打空,
-  // 而屏幕上什么都没发生。
-  if (result.ok) {
-    yield* warmTokens; // 让总览能 cache-only 富化新价
-  }
-  return result;
+    portfolioId: round.portfolioId,
+    roundId: round.roundId,
+    round: syncRoundView(round, yield* Clock.currentTimeMillis),
+  } satisfies SyncAccountStart;
 });

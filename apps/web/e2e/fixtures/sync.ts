@@ -46,8 +46,9 @@ export async function upstream(request: APIRequestContext): Promise<UpstreamStat
  * 拼它等于把一个随构建变的内部细节钉进测试。而「加账户」本身就是个有 UI 的用户动作,点一遍顺带把
  * 创建流覆盖了。
  *
- * **注意**:创建成功后 add-account-modal 会自己在后台补一次 `syncAccount`(见其 handleDone),
- * 所以本函数返回时账户可能已经有一张快照。要量「点下去这一轮」的测试必须先把那次等掉。
+ * **注意**:创建成功后 add-account-modal 会自己在后台补一次 `syncAccount`(见其 handleDone)——
+ * FOL-89 起它只把账户排进一轮、投一条队列消息,真同步由本地(Miniflare)的队列 consumer 跑,
+ * 所以本函数返回之后账户随时可能出一张快照。要量「点下去这一轮」的测试必须先把那次等掉。
  */
 export async function addBinanceAccount(page: Page, label: string) {
   // 点到 modal 真开为止。**不是为了等一段时间** —— 账户页刚 goto 完时 React 可能还没挂上 handler,
@@ -121,10 +122,11 @@ export async function addBinanceAccount(page: Page, label: string) {
 /**
  * 屏蔽「创建账户之后那次后台同步」——只在一次性造很多账户时用。
  *
- * 为什么要屏蔽:`add-account-modal` 的 handleDone 会 `void syncAccount(...)`,而那个 server fn 是
- * **await 完 `warmTokensForUser` 才返回**的 —— 预热要打真实的价格 / 汇率 / logo 上游。连着造八个账户
- * 时这些请求堆在一起把 worker 堵住,后一个账户的创建从两秒涨到十几秒(实测)。造账户不是被测对象,
- * 没必要为它付这个钱;而且屏蔽之后这些账户在被测那一轮之前**一张快照都没有**,断言反而更干净。
+ * 为什么要屏蔽:`add-account-modal` 的 handleDone 会 `void syncAccount(...)`。FOL-89 起那个 server fn
+ * 只排队、即返,但每一次仍往队列里投一条 `sync-account` 外加价 / 汇率 / 平台那几条(它们打真实的
+ * CoinGecko)—— 而**本地 Miniflare 的队列是串行消费的**(一批跑完才派下一批,不认 `max_concurrency`),
+ * 连着造八个账户时这几十条消息会排在被测那一轮前面。造账户不是被测对象,没必要为它付这个钱;
+ * 而且屏蔽之后这些账户在被测那一轮之前**一张快照都没有**,断言反而更干净。
  *
  * 按请求体分辨而不是按 URL:server fn 的地址带编译期散列,认不出是哪一个。而 `syncAccount` 的入参
  * 只有 accountId,`createAccount` 带的是 connectorId/label/values —— 这就够分了。
@@ -141,18 +143,6 @@ export async function unblockPostCreateSync(page: Page) {
   await page.unroute("**/_serverFn/**");
 }
 
-/**
- * 点页头那枚同步胶囊 = 跑整轮同步(见 sync-status.tsx 的 StatusSegment onClick),
- * 返回时 `POST /api/sync` 已经发出。
- *
- * 同样要重试点击:reload 之后头几百毫秒的点击会被吞(见 addBinanceAccount 的注释)。
- * 重复点不会多跑一轮 —— `useSyncRound` 的 `sync()` 在 disabled 时直接 return,而**开轮本身也是
- * 幂等的**(ADR 0048):真发出去两次,第二次拿回的是同一轮。
- *
- * **只等请求发出,不等响应体**:这条请求现在开轮即返(不再是攒完才发的 NDJSON 流),但「回包
- * 到手」仍然只说明轮开了,不说明服务端已经在打上游。要判断它真的在干活,问假上游收到请求没有
- * (setUpstream hits)。
- */
 // 悬停页头那枚胶囊,开同步面板(FOL-32 后桌面 popover 走 hover)。
 //
 // 「开着」认触发器的 `aria-expanded="true"`(beUI PopoverTrigger 挂的,见 popover.tsx),
@@ -171,24 +161,64 @@ export async function hoverSyncPill(page: Page) {
   }).toPass({ timeout: 20_000 });
 }
 
+/**
+ * 点页头那枚同步胶囊 = 跑整轮同步(见 sync-status.tsx 的 StatusSegment onClick),
+ * 返回时 `POST /api/sync` 已经发出。
+ *
+ * 重复点不会多跑一轮 —— `useSyncRound` 的 `sync()` 在 disabled 时直接 return,而**开轮本身也是
+ * 幂等的**(ADR 0048):真发出去两次,第二次拿回的是同一轮。
+ *
+ * **只等请求发出,不等响应体**:这条请求开轮、投完队列消息即返(FOL-89),「回包到手」只说明轮开了、
+ * 活投出去了,不说明 consumer 已经在打上游。要判断它真的在干活,问假上游收到请求没有
+ * (setUpstream hits)。
+ */
 export async function clickSyncPill(page: Page) {
   const pill = page.getByRole("button", { name: /^(Synced|Needs attention|Syncing…)$/ });
+  // 为什么不是「点一下,3 秒内等 POST」(旧写法,挂过):那 3 秒是在**点之前**起算的,而 reload 之后
+  // 胶囊要等客户端渲染完才出现(壳是零数据的,见 check-shell-is-zero-data)—— dev server 上实测
+  // 2.6s 起步,开了 page.route 的用例更慢。超过 3 秒时 waitForRequest 在 click 还挂着的时候就 reject 了,
+  // 没人接 → unhandled rejection 直接判死整条测试,外面那层 toPass 根本没机会重试。
+  //
+  // 第二个坑是 hover 弹层:光标一进胶囊面板就开,而开场那一帧 morph 的裁剪区**正好是胶囊本身**
+  // (popover.tsx 的 insetForProgress,p=0 即 trigger 矩形),内容层 pointer-events 已经打开 ——
+  // mousedown 落在胶囊上、mouseup 落在面板上,click 事件发给了两者的公共祖先,sync() 根本没被调用。
+  // 所以:先 hover、等弹层开完(胶囊中心的命中元素重新是胶囊自己),再点。光标没挪,不会再触发一次打开。
+  await hoverSyncPill(page);
+  await expect
+    .poll(
+      () =>
+        pill.evaluate((el) => {
+          const r = el.getBoundingClientRect();
+          const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return hit !== null && el.contains(hit);
+        }),
+      { message: "同步面板的开场动画一直盖着胶囊" },
+    )
+    .toBe(true);
   await expect(async () => {
-    const sent = page.waitForRequest(
-      (r) => r.url().includes("/api/sync") && r.method() === "POST",
-      { timeout: 3_000 },
-    );
-    await pill.click();
-    await sent;
+    // Promise.all 同时挂上两边:任何一边先失败都由这里接住、交给 toPass 重试,不留悬空的 promise。
+    await Promise.all([
+      page.waitForRequest((r) => r.url().includes("/api/sync") && r.method() === "POST", {
+        timeout: 3_000,
+      }),
+      pill.click(),
+    ]);
   }).toPass({ timeout: 30_000 });
 }
+
+/**
+ * 本地队列串行消费(Miniflare 不认 `max_concurrency`),同步消息前面可能排着刷价 / 汇率任务;
+ * 它们打的是假 CoinGecko,回得飞快,但 CoinGecko client 自带的限速闸(没 key 时每分钟只放几发)
+ * 照样把每发隔开约 6 秒 —— 一轮下来同步消息要等十几秒才轮到。线上是并发消费,不排这个队。
+ */
+const UPSTREAM_HIT_TIMEOUT_MS = 45_000;
 
 /** 等假上游真的开始收请求 —— 服务端这一轮在干活了。配合 `setUpstream(request, { hits: 0 })` 用。 */
 export async function waitForUpstreamHit(request: APIRequestContext) {
   await expect
     .poll(async () => (await upstream(request)).hits, {
       message: "假上游一个请求都没收到 —— 服务端这一轮没起跑",
-      timeout: 15_000,
+      timeout: UPSTREAM_HIT_TIMEOUT_MS,
     })
     .toBeGreaterThan(0);
 }

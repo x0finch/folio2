@@ -23,6 +23,7 @@ import {
   buildPortfolioHistory,
   downsampleSeries,
   type HistoryPoint,
+  minMaxDownsampleHistory,
   type SnapshotTotalRow,
 } from "@/lib/core/history";
 import {
@@ -31,7 +32,7 @@ import {
   tokenLogoUrl,
   toLogoSource,
 } from "@/lib/core/logo";
-import { displayTokenId, refreshableTokenIds, type TokenEnrichment } from "@/lib/core/token-model";
+import { displayTokenId, type TokenEnrichment } from "@/lib/core/token-model";
 
 // 首页 / 组合的**纯计算层**(FOL-45)。跟 `history.ts` 同目录、同风格:无 Effect、无 Oracle、
 // 无 cloudflare env —— 喂原料(账户 / 快照 / 富化字典 / 价格字典 / 平台元数据字典)→ 出视图形状。
@@ -259,7 +260,7 @@ export interface Holding {
 }
 
 // 分组键 = `token_id`。没有 token_id 的行**各自成行**,键 = `账户 + 余额行 id`。
-// (只在本模块内用 —— buildCanonicalHoldings / buildTokenValueHistory;不再对外导出,#201 后无外部消费者。)
+// (只在本模块内用 —— buildCanonicalHoldings;不再对外导出,#201 后无外部消费者。)
 function groupKey(row: AggInput): string {
   return row.tokenId ?? `no-token:${row.account.id}:${row.id ?? norm(row.symbol)}`;
 }
@@ -354,64 +355,22 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
 
 //  —— 单币价值历史
 
-// 单币【持仓价值】历史:把历史余额行按 token_id 归属,按 (账户×快照) 汇总【冻结】价值,
-// 再复用 buildPortfolioHistory 跨账户阶梯式重建 —— 与主页 hero 同语义。
-// 归属用与聚合同一套 `groupKey` / `isEligible`,确保历史 ≡ 当前 Holding。
-export interface TokenHistRow extends AggInput {
-  takenAt: number; // 该行所属快照时刻(账户 = account.id)
-}
-
-export function buildTokenValueHistory(rows: readonly TokenHistRow[], key: string): HistoryPoint[] {
-  // 按 (账户, takenAt) 汇总匹配本 Holding 的 eligible 行的冻结 value → 喂阶梯重建。
-  const bySnap = new Map<string, SnapshotTotalRow>();
-  for (const row of rows) {
-    if (!isEligible(row) || groupKey(row) !== key) continue;
-    const k = `${row.account.id}|${row.takenAt}`;
-    const cur = bySnap.get(k);
-    if (cur) cur.totalUsd += row.value;
-    else bySnap.set(k, { accountId: row.account.id, takenAt: row.takenAt, totalUsd: row.value });
-  }
-  return buildPortfolioHistory([...bySnap.values()]);
-}
-
-// 单币价值历史接口下发的原料(FOL-50 + FOL-46):
-//   · 短窗:`rows` = 窗口内该币的原样余额行,浏览器 `buildTokenValueHistory` 重建 + 自适应降采样。
-//   · 长窗(1y/all):服务端已重建 + min-max 降采样 → `points`(与总览/账户曲线同一套降采样,
-//     payload 随窗口封顶不随历史膨胀);此时 `rows` 为空、`sampled` 为 true。
-export interface TokenValueHistoryRow {
-  accountId: string;
-  takenAt: number;
-  amount: number;
-  usdValue: number;
-  kind: string;
-  tokenId: string | null;
-  metaJson: string | null;
-}
+// 单币价值历史接口下发的原料(FOL-50 + FOL-46 + FOL-92):每账户、每桶一行的**现货价值合计**
+// (`SnapshotTotalRow` 形状,与组合曲线同一种)。归属(token_id)与入选口径(只数现货,
+// `viewKind === "spot"`)在 SQL 里判,合计也在那儿算 —— 浏览器拿到的已经是「某账户某时刻这个币值多少」。
+//   · 短窗(≤ 7 天每张快照一行 / 30 天每天一行):阶梯重建 + 自适应降采样。
+//   · 长窗(1y/all,`sampled`):SQL 按桶挑出的最低 / 最高 / 最后时刻,每账户 ≤ 199 行(review #2),
+//     阶梯重建 + min-max 降采样。
 export interface TokenValueHistoryRaw {
-  rows: TokenValueHistoryRow[];
-  points?: HistoryPoint[];
+  rows: SnapshotTotalRow[];
   sampled?: boolean;
 }
 
-// 原样余额行 → buildTokenValueHistory 吃的 TokenHistRow(symbol/label/connectorId 不参与单币曲线,置空)。
-// 服务端(长窗重建)与浏览器(短窗重建)共用这一个映射。
-export function tokenHistRowsFromRaw(rows: readonly TokenValueHistoryRow[]): TokenHistRow[] {
-  return rows.map((r) => ({
-    symbol: "",
-    amount: r.amount,
-    value: r.usdValue,
-    kind: viewKind(r),
-    account: { id: r.accountId, label: "", connectorId: "" },
-    tokenId: r.tokenId,
-    takenAt: r.takenAt,
-  }));
-}
-
-// 原料 → 单币价值曲线。长窗直接用服务端降采样好的 `points`;短窗浏览器重建 + 自适应降采样
-// (与 buildAccountValueHistory 的 `sampled ? base : downsampleSeries(base)` 同一口径)。
-export function tokenValueHistoryFromRaw(raw: TokenValueHistoryRaw, key: string): HistoryPoint[] {
-  if (raw.sampled && raw.points) return raw.points;
-  return downsampleSeries(buildTokenValueHistory(tokenHistRowsFromRaw(raw.rows), key));
+// 原料 → 单币价值曲线:跨账户阶梯重建(与主页 hero 同语义),再按窗口降采样
+// (与 buildAccountValueHistory 的 `sampled ? minMax : downsampleSeries` 同一口径)。
+export function tokenValueHistoryFromRaw(raw: TokenValueHistoryRaw): HistoryPoint[] {
+  const series = buildPortfolioHistory(raw.rows);
+  return raw.sampled ? minMaxDownsampleHistory(series) : downsampleSeries(series);
 }
 
 //  —— 首页 tab 条(纯推导)
@@ -540,8 +499,6 @@ export interface OverviewInput {
   liveTotals: ReadonlyMap<string, number>;
   // 平台(链 ∪ 场馆)展示元数据(`platforms.resolve(overviewChainIds(...))`)。
   platformMeta: ReadonlyMap<string, PlatformMeta>;
-  // 值得回源刷价的 token_id 集合(`refreshableTokenIds(overviewEligibleBalances(...))`)—— pricesStale 只在此集合内判脏(#245)。
-  refreshableIds: ReadonlySet<string>;
   // 场馆键(manual/exchange:/perp:)→ 连接器自带 name+logo,不查 CoinGecko(#52);链键返回 null → 走 platformMeta。
   connectorMeta?: (key: string) => { name: string; logo?: string } | null;
   // 估值模式(Phase 3,#81)。缺省 self-first(= 旧行为)。
@@ -576,7 +533,6 @@ export interface OverviewView {
   gain24h?: Gain | null;
   holdingsSubtotal: number;
   defiSubtotal: number;
-  pricesStale: boolean;
 }
 
 // —— 调用点备料用的三个纯 id 收集器(与 buildOverview 内部口径一致,单处定义免得走散)——
@@ -594,20 +550,6 @@ export function overviewEnrichIds(
     }
   }
   return [...ids];
-}
-
-// 进聚合的现货余额(喂 refreshableTokenIds 判 pricesStale)。
-export function overviewEligibleBalances(
-  accounts: AccountSafe[],
-  byAccount: ReadonlyMap<string, SnapshotSlice>,
-): OverviewBalance[] {
-  const out: OverviewBalance[] = [];
-  for (const account of accounts) {
-    for (const b of balancesOf(byAccount, account.id)) {
-      if (isFungible(viewKind(b))) out.push(b);
-    }
-  }
-  return out;
 }
 
 // 该送去 platforms.resolve 的链键:eligible 行的平台键去重,减去连接器自带展示的场馆键(#52)。
@@ -632,7 +574,6 @@ export function buildOverview(
     enriched,
     liveTotals,
     platformMeta,
-    refreshableIds,
     connectorMeta,
     mode = "self-first",
     fiatRefs,
@@ -748,11 +689,6 @@ export function buildOverview(
   }
 
   const holdingsSubtotal = holdings.reduce((sum, h) => sum + h.totalValue, 0);
-  // 价 stale = 有价但过期,或**认得出来却压根没价**(新层刚建行时)→ 客户端触发一次刷新。
-  // **只在刷价集合内判脏**(#245:dust 跳过)。
-  const pricesStale = rows.some(
-    ({ b, e }) => b.tokenId != null && refreshableIds.has(b.tokenId) && (e?.price?.stale ?? true),
-  );
 
   // 3) 次级分区(每账户 defi 分组 + perp 权益/敞口)。perp 权益不进 Holdings(#129)。
   const decorate = (bs: OverviewBalance[]): OverviewBalance[] =>
@@ -826,7 +762,6 @@ export function buildOverview(
     ...(withGain ? { gain24h: portfolioGain } : {}),
     holdingsSubtotal,
     defiSubtotal,
-    pricesStale,
   };
 }
 
@@ -843,8 +778,8 @@ export interface BalanceView {
   usdValue: number;
   kind: string;
   selfPrice?: number | null; // 读时现推的原料(liveValue)
-  platform?: string | null; // 聚合来源单元 / refreshableTokenIds 判 dust
-  tokenId?: string | null; // 富化查表 / 聚合身份 / 法币身份 / pricesStale
+  platform?: string | null; // 聚合来源单元
+  tokenId?: string | null; // 富化查表 / 聚合身份 / 法币身份
   metaJson: string | null; // defi/perp meta 解析
 }
 
@@ -857,7 +792,7 @@ interface SnapshotView {
 
 // 服务端发的一份「当前快照原料」(方案 C:名字 / 库里当前价内联发下来;logo 只发「有没有图」布尔,
 // URL 由 token id 在浏览器里拼,见 `TokenView`)。Map 走 entries
-// 过线,客户端在 `select` 里重建 Map 再调 `buildOverview` —— 首页总额 / 持仓 / 各小计 / pricesStale
+// 过线,客户端在 `select` 里重建 Map 再调 `buildOverview` —— 首页总额 / 持仓 / 各小计
 // 全部在浏览器里算,读接口只取行 + 备料,不做聚合。
 export interface PortfolioSnapshotData {
   accounts: AccountSafe[];
@@ -890,9 +825,9 @@ const sliceMap = (entries: [string, SnapshotView][]): Map<string, SnapshotSlice>
     entries.map(([id, s]) => [id, { snapshot: { takenAt: s.takenAt }, balances: s.balances }]),
   );
 
-// 客户端把原料算成总览:重建两组快照(当前 + 24 小时前)→ 纯算 liveTotals / refreshableIds →
+// 客户端把原料算成总览:重建两组快照(当前 + 24 小时前)→ 纯算 liveTotals →
 // 浏览器把快照原料算成总览视图(FOL-48 / FOL-54)。原料由原子读在客户端 `assemblePortfolioSnapshotData`
-// 拼好;总额 / 持仓 / 各小计 / pricesStale 与 `buildOverview` 逐值一致。
+// 拼好;总额 / 持仓 / 各小计与 `buildOverview` 逐值一致。
 // (共用同一个 `buildOverview`);24h 盈亏(ADR 0050)由两组快照两端相减,浏览器里算。
 export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewView {
   const byAccount = sliceMap(raw.snapshots);
@@ -902,14 +837,10 @@ export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewVi
   const connectorMeta = new Map(raw.connectorMeta);
   const fiatRefs = new Map(raw.fiatRefs);
   const liveTotals = deriveLiveAccountTotals(raw.accounts, byAccount, enriched, raw.mode);
-  const refreshableIds = new Set(
-    refreshableTokenIds(overviewEligibleBalances(raw.accounts, byAccount)),
-  );
   return buildOverview(raw.accounts, byAccount, {
     enriched,
     liveTotals,
     platformMeta,
-    refreshableIds,
     connectorMeta: (key) => connectorMeta.get(key) ?? null,
     mode: raw.mode,
     fiatRefs,
@@ -1159,32 +1090,6 @@ const enrichBalanceRows = (
     return tv ? { ...b, ...enrichmentFromView(tv) } : b;
   });
 
-/** 单行是否有过期价(含归档行 —— 汇总那步再收窄,行本身照实)。 */
-const rowPricesStale = (
-  balances: BalanceView[],
-  enriched: ReadonlyMap<string, TokenEnrichmentView>,
-): boolean => {
-  const refreshable = new Set(refreshableTokenIds(balances));
-  for (const b of balances) {
-    const id = displayTokenId(b);
-    if (!id || !refreshable.has(id)) continue;
-    const tv = enriched.get(id);
-    if (tv?.hasRef && tv.price?.stale !== false) return true;
-  }
-  return false;
-};
-
-const pricesStaleForRows = (
-  rows: readonly { archivedAt: number | null; balances: BalanceView[] }[],
-  enriched: ReadonlyMap<string, TokenEnrichmentView>,
-): boolean => {
-  for (const row of rows) {
-    if (row.archivedAt != null) continue;
-    if (rowPricesStale(row.balances, enriched)) return true;
-  }
-  return false;
-};
-
 // 账户页原子资源在浏览器合并 → `AccountHoldingsData` → `accountRowsFromRaw`(FOL-54 / FOL-55)。
 export function assembleAccountHoldingsData(args: {
   accounts: readonly { id: string; label: string; archivedAt: number | null }[];
@@ -1204,7 +1109,6 @@ export function assembleAccountHoldingsData(args: {
       takenAt: latest?.takenAt ?? null,
       note: latest?.note,
       balances,
-      pricesStale: rowPricesStale(balances, args.enriched),
     };
   });
   const prevSnapshots = args.snapshotsPrev.map((s): [string, SnapshotView] => [
@@ -1215,7 +1119,6 @@ export function assembleAccountHoldingsData(args: {
     rows,
     prevSnapshots,
     mode: args.mode,
-    pricesStale: pricesStaleForRows(rows, args.enriched),
   };
 }
 
@@ -1229,7 +1132,6 @@ interface AccountHoldingRow {
   takenAt: number | null;
   note?: Note[];
   balances: OverviewBalance[];
-  pricesStale: boolean;
 }
 
 // 账户明细读接口的原料(`getAccountHoldings` 的出参)。**只发料,不聚合、不重算、不算盈亏** ——
@@ -1240,13 +1142,11 @@ export interface AccountHoldingsData {
   prevSnapshots: [string, SnapshotView][];
   // 估值口径(self-first / source-first)—— 现价重算用它,与首页同一个 mode。
   mode: ValuationMode;
-  pricesStale: boolean;
 }
 
 // 账户明细在浏览器算完的视图:每账户带现价重算的总额/持仓 + 两端相减的 24h 盈亏。
 export interface AccountHoldingsView {
   rows: WithAccountHoldingGain<AccountHoldingRow>[];
-  pricesStale: boolean;
 }
 
 // 浏览器把账户明细原料算成行:活跃账户逐行 `liveValue` 现价重算(与首页 `deriveLiveAccountTotals`
@@ -1263,5 +1163,5 @@ export function accountRowsFromRaw(raw: AccountHoldingsData): AccountHoldingsVie
     }));
     return { ...r, balances, totalUsd: balances.reduce((sum, b) => sum + b.usdValue, 0) };
   });
-  return { rows: attachAccountHoldingGains(priced, prevByAccount), pricesStale: raw.pricesStale };
+  return { rows: attachAccountHoldingGains(priced, prevByAccount) };
 }

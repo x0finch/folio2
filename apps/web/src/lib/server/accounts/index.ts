@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { PortfolioSelectInput } from "@/lib/server/portfolio/scope";
-import { runEffect } from "@/lib/server/runtime";
+import { runEffect, runEffectJson } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { ArchiveAccountInput, handleArchiveAccount } from "./archive";
-import { CreateAccountInput, handleCreateAccount } from "./create";
+import { CreateAccountInput, handleCreateAccountAndRefill } from "./create";
 import { handleReplaceAccountCredentials, ReplaceCredentialsInput } from "./credentials";
 import { AccountHistoryInput, handleGetAccountHistory } from "./history";
 import { handleListAccounts } from "./list";
@@ -18,12 +18,13 @@ import { handleRenameAccount, RenameAccountInput } from "./rename";
 export const listAccounts = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioSelectInput)
-  .handler(runEffect(handleListAccounts));
+  .handler(runEffectJson(handleListAccounts));
 
 export const createAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(CreateAccountInput)
-  .handler(runEffect(handleCreateAccount));
+  // 建手记账户之后投一条 `daily-prices`(FOL-90,见 ./create);消息里的 userId 由装配点填。
+  .handler(runEffect(handleCreateAccountAndRefill));
 
 export const replaceAccountCredentials = createServerFn({ method: "POST" })
   .middleware([requireAuth])
@@ -48,4 +49,4 @@ export const removeAccount = createServerFn({ method: "POST" })
 export const getAccountHistory = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(AccountHistoryInput)
-  .handler(runEffect(handleGetAccountHistory));
+  .handler(runEffectJson(handleGetAccountHistory));

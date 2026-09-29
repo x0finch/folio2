@@ -61,3 +61,20 @@
 - **一次请求一个 `DbClient`**:`one-db-client.test.ts` 改成数真构造(`env.DB` 被读几次),跨三张门票、四个领域一次请求 = 1,同一组合子跑两次 = 2。
 - **在 `wrangler dev` 上跑通**:构建产物,两个用户(种子用户 + 现注册一个),五个 server fn 200 发并发交错 + 两个用户各一发 `POST /api/sync`(后台根 fiber),再触发一次 `cron=30 * * * *`:零个非 200,40 次 `listAccounts` 的响应体里没有一次出现另一个用户的 id;cron 逐用户扫完、日志里的 userId 各归各;没有「替另一个请求做 I/O」一类报错。
   日志里会有 `Disallowed operation called within global scope`,来自 `@effect/platform` 的 `HttpClient` 用 `FinalizationRegistry` 在 GC 时 `controller.abort()` 未读完的响应 —— **改前的构建同样出现**(同一处代码,同量级),与本 ADR 无关,另记一票。
+
+## 补记:isolate 那张图不再经 `ManagedRuntime` / Layer 建(FOL-83 第二轮,2026-09-28)
+
+**只改「怎么建」,不改「建什么、活多久」**:仍是每个 isolate 一份、惰性、从不 dispose;每请求仍只给 `CurrentUser` + `DbClient`;上面那张「建的时候握着什么」的清单一格没动。
+
+**为什么**:第一轮把后台拆成一条消息一次调用之后,冷 isolate 上的调用里最大的一块是**建这张图本身**。`perf:cpu:jobs` 的函数级 profile(`perf:cpu:analyze`)里,每天那个 cron 本体 57ms 中约 45ms 花在 `runAtEdge → ManagedRuntime` 的构建里,业务一行还没跑;`--warm`(同一个 isolate 连着跑)只剩约 7ms。Node 上冷进程对照:`ManagedRuntime.make(Layer.mergeAll(两张 db 门票 + 日志))` 20ms,同一份东西手搭成 `Runtime.make` 4.5ms;`Layer.mergeAll` 三个 `Layer.succeed` 冷的时候就要 5ms、热的时候仍要 2ms。钱花在 Layer 的机器上(memo 表、scope、并行合并 fork 的 fiber),不在服务上 —— 服务本来就是纯闭包。
+
+**怎么建**(`apps/web/src/lib/server/runtime.ts`):
+
+- **`dbRuntime`**:`Runtime.make({ context: databaseTickets(), fiberRefs: withLogTapeLogger(默认), … })`。`databaseTickets()` 是 `@folio/db` 新出的一个函数:与 `Database.Default` / `GlobalDatabase.Default` **同一个构造函数**(`databaseOps` / `globalOps`),只是直接造成一份 `Context`。`withLogTapeLogger` 是日志层那两步(换默认 logger、门限 All)直接写进 `FiberRefs`,测试让每条日志用例在 layer 与 FiberRefs 两条路上各跑一遍。cron 开轮投消息、剪 note(`forUserDb`)、`withGlobalDb`、以及每个入口的边缘 `runAtEdge` 只用它 —— **不为一趟 cron 把参考层建起来**。
+- **`isolateRuntime`**:在 `dbRuntime` 那份 context 上补参考层与 connector 门票。参考层的构造分散在各包的 layer 里、彼此依赖,仍经 Layer 建,但只建它自己:`Effect.runSync(Layer.buildWithScope(oracleServices(), scope))` 一次。`runSync` 是对「全同步」的断言 —— 哪天有人往参考层里加了一个要等 I/O 才建得出的 layer,这里当场 `AsyncFiberException`,而不是悄悄变慢。connector 门票同样直接造(`connectorRegistryContext()`,与 `.Default` 同一个 `makeRegistry`)。两个运行时里的 `Database` 是同一个对象。
+
+**没变的**:`Database.Default` 等 layer 都还在(测试、`makeSyncServicesLayer`、参考层内部都用);`CurrentUser` 的给法、`user-services-surface.test.ts`、`isolate-runtime.test.ts`(两个用户交错、同一个引用建一次)原样通过。
+
+**量到的**(本机,`perf:cpu:jobs --cron-only`,每次调用新起 worker):每天那个 cron 本体 53.7 → 17.7ms,每小时那个 38.5ms(原 72.2)。参考层那半的冷构建(本机约 20ms)挪到了「这个 isolate 里第一条要参考层的消息」上 —— 那是 cron 投出去的 `sync-account` / `prices` 等,它们本来就要它。
+
+**否决的**:把整张图挪到模块顶层建(启动期 CPU 另算预算,不进这 10ms)。量上它最省,但它是把钱挪到启动预算里而不是省掉,且与「模块加载期什么都不跑」(CLAUDE.md、本 ADR 上文)正面冲突;参考层那半在顶层建还得确认没有一步碰到 Workers 在全局作用域里禁止的操作。留作以后的选项,不在本轮做。

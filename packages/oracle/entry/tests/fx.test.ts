@@ -4,13 +4,14 @@ import { describe, expect, it } from "vitest";
 import { btcUsdDaily, deriveFiatDaily, FxService, fxKey, readFx, writeFx } from "../src/fx";
 import { harness, now0, upstreamDown } from "./fakes";
 
-// 汇率服务的三个方法,两种判据:
+// 汇率服务的四个方法:
 //   `resolve` / `warm`  **现**汇率 —— 读软过期、写按 TTL(前两组)
-//   `rateSeries`        **历史**日汇率 —— SWR + BTC 反算(后两组,ADR 0026 / #274)
+//   `rateSeries`        **历史**日汇率 —— 只读表,今天读现汇率(FOL-90)
+//   `fillDaily`         **历史**日汇率的补 —— BTC 反算(ADR 0026 / #274),只在 `daily-prices` 活里跑
 //
 // 两半合成一个服务(以前是 `FxRateResolver` / `FxHistory`,见 `../src/fx` 的开头),
 // 但**持久化仍然是两处**,这一组的分组就是照着这件事切的:现汇率只碰 `user_cache`,
-// 历史日汇率一个 `CacheStore` 都不碰(它落全局的 `token_daily_prices`)。
+// 历史日汇率落全局的 `token_daily_prices`(user_cache 里只记「补过哪一段」,FOL-90)。
 
 const setup = (rates: Record<string, number> = {}) => harness({ rates });
 const withFx = <A, E, R>(f: (fx: FxService) => Effect.Effect<A, E, R>) =>
@@ -256,9 +257,8 @@ describe("缓存:键、形状、批量", () => {
   });
 });
 
-// —— 历史日汇率(`rateSeries`)——
-// SWR 照 priceSeries:缓存命中直用 / 缺的从 BTC 反算并落库 / 今日现取 / 上游挂了降级不抛。
-// **这一段一个 `CacheStore` 都不碰** —— 它落 `token_daily_prices`,不进 user_cache。
+// —— 历史日汇率(`rateSeries` 读 / `fillDaily` 补)——
+// 读只读表;补从 BTC 两腿反算、落 `token_daily_prices`(「试过哪一段」记在 user_cache,见 daily-fill)。
 const NOW = now0;
 const TODAY = Math.floor(NOW / MS_PER_DAY);
 const day = (offset: number): number => (TODAY + offset) * MS_PER_DAY;
@@ -337,26 +337,71 @@ describe("rateSeries —— 历史日汇率", () => {
     );
   });
 
-  it("缺的过去日:从 BTC 两腿反算,并永久落 token_daily_prices", async () => {
+  it("缺的过去日不在结果里,**不反算、不出网**(FOL-90:补是 `fillDaily` 的活)", async () => {
     const h = setup();
-    // 两条腿都从代币 upstream 的 fetchPriceSeries 取(vsCurrency 分 USD / EUR)。
-    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY - 2]: 120000, [TODAY - 1]: 100000 }));
-    h.upstream.seriesByVs.set("EUR", btcLeg({ [TODAY - 2]: 100000, [TODAY - 1]: 100000 }));
-
+    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY - 1]: 100000 }));
+    h.upstream.seriesByVs.set("EUR", btcLeg({ [TODAY - 1]: 100000 }));
     await h.run(
       Effect.gen(function* () {
         const fx = yield* FxService;
+        yield* h.prices.putDailyByRef(FIAT_EUR, [{ dayBucket: TODAY - 2, unitPrice: 1.15 }]);
         expect(yield* fx.rateSeries("EUR", day(-2), day(-1))).toEqual([
-          { atMs: day(-2), unitPrice: 1.2 },
-          { atMs: day(-1), unitPrice: 1 },
+          { atMs: day(-2), unitPrice: 1.15 },
         ]);
-        // 过去日不可变 → 落库,下次直接命中。
-        expect(yield* h.prices.getDailyByRef(FIAT_EUR, [TODAY - 2, TODAY - 1])).toEqual(
+      }),
+    );
+    expect(h.upstream.calls).toEqual([]);
+  });
+
+  it("今日桶读现汇率缓存(`fx` 活在刷它),不出网、不落日价表;没有现汇率 → 缺", async () => {
+    const h = setup({ EUR: 1.09 });
+    await h.run(
+      Effect.gen(function* () {
+        const fx = yield* FxService;
+        expect(yield* fx.rateSeries("EUR", day(0), NOW)).toEqual([]);
+        yield* fx.warm(["EUR"]);
+        expect(yield* fx.rateSeries("EUR", day(0), NOW)).toEqual([
+          { atMs: day(0), unitPrice: 1.09 },
+        ]);
+        expect(yield* h.prices.getDailyByRef(FIAT_EUR, [TODAY])).toEqual(new Map());
+      }),
+    );
+    expect(h.upstream.calls).toEqual([]);
+  });
+
+  it("from > to → 空", async () => {
+    const h = setup();
+    expect(await h.run(withFx((fx) => fx.rateSeries("EUR", day(-1), day(-2))))).toEqual([]);
+  });
+});
+
+describe("fillDaily —— 补历史日汇率(`daily-prices` 活的法币那半)", () => {
+  it("缺的过去日:从 BTC 两腿反算、落 token_daily_prices;一窗记 2 发;重跑零出网", async () => {
+    const h = setup();
+    h.upstream.seriesByVs.set(
+      "USD",
+      btcLeg({ [TODAY - 2]: 120000, [TODAY - 1]: 100000, [TODAY]: 1 }),
+    );
+    h.upstream.seriesByVs.set("EUR", btcLeg({ [TODAY - 2]: 100000, [TODAY - 1]: 100000 }));
+    await h.run(
+      Effect.gen(function* () {
+        const fx = yield* FxService;
+        expect(yield* fx.fillDaily("EUR", day(-2), 10)).toEqual({
+          calls: 2,
+          done: true,
+          failed: false,
+        });
+        expect(yield* h.prices.getDailyByRef(FIAT_EUR, [TODAY - 2, TODAY - 1, TODAY])).toEqual(
           new Map([
             [TODAY - 2, 1.2],
             [TODAY - 1, 1],
           ]),
         );
+        const before = h.upstream.calls.length;
+        expect((yield* fx.fillDaily("EUR", day(-2), 10)).calls).toBe(0);
+        expect(h.upstream.calls.length).toBe(before);
+        // 补完之后读路径直接命中。
+        expect(yield* fx.rateSeries("EUR", day(-2), day(-1))).toHaveLength(2);
       }),
     );
   });
@@ -367,53 +412,37 @@ describe("rateSeries —— 历史日汇率", () => {
     await h.run(
       Effect.gen(function* () {
         const fx = yield* FxService;
-        // BTC 美元历史已在全局表(BTC 持有者暖过 / 上一轮落的)。
         yield* h.prices.putDailyByRef(BTC_REF, [
           { dayBucket: TODAY - 2, unitPrice: 120000 },
           { dayBucket: TODAY - 1, unitPrice: 100000 },
         ]);
-        yield* fx.rateSeries("EUR", day(-2), day(-1));
-        expect(h.upstream.calls).toEqual([legCall("EUR")]); // 美元腿命中缓存不出网
+        yield* fx.fillDaily("EUR", day(-2), 10);
+        expect(h.upstream.calls).toEqual([legCall("EUR")]);
       }),
     );
   });
 
-  it("今日桶恒现取、不落库(可变)", async () => {
+  it("预算不够一窗(< 2 发)→ 一发不出、没做完", async () => {
     const h = setup();
-    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY]: 100000 }));
-    h.upstream.seriesByVs.set("EUR", btcLeg({ [TODAY]: 100000 }));
-
-    await h.run(
-      Effect.gen(function* () {
-        const fx = yield* FxService;
-        expect(yield* fx.rateSeries("EUR", day(0), day(0))).toEqual([
-          { atMs: day(0), unitPrice: 1 },
-        ]);
-        // 今日不落 —— 明天再看这一天已是过去日、会重取一次定值。
-        expect(yield* h.prices.getDailyByRef(FIAT_EUR, [TODAY])).toEqual(new Map());
-      }),
-    );
+    expect(await h.run(withFx((fx) => fx.fillDaily("EUR", day(-2), 1)))).toEqual({
+      calls: 0,
+      done: false,
+      failed: false,
+    });
+    expect(h.upstream.calls).toEqual([]);
   });
 
-  it("上游挂了 → 降级到仅缓存,不抛", async () => {
+  it("上游挂了 → failed、记一行,不抛", async () => {
     const h = setup();
     h.upstream.fail = upstreamDown();
-    await h.run(
-      Effect.gen(function* () {
-        const fx = yield* FxService;
-        yield* h.prices.putDailyByRef(FIAT_EUR, [{ dayBucket: TODAY - 2, unitPrice: 1.15 }]);
-        // 请求 [-2, -1]:-2 命中缓存、-1 缺且反算失败 → 只回 -2,不抛。
-        expect(yield* fx.rateSeries("EUR", day(-2), day(-1))).toEqual([
-          { atMs: day(-2), unitPrice: 1.15 },
-        ]);
-      }),
-    );
-    expect(h.logs.some((l) => l.annotations.at === "fx.rateSeries")).toBe(true);
+    expect((await h.run(withFx((fx) => fx.fillDaily("EUR", day(-2), 10)))).failed).toBe(true);
+    expect(h.logs.some((l) => l.annotations.at === "fx.fillDaily")).toBe(true);
   });
 
-  it("from > to → 空", async () => {
+  it("USD 无事可做", async () => {
     const h = setup();
-    expect(await h.run(withFx((fx) => fx.rateSeries("EUR", day(-1), day(-2))))).toEqual([]);
+    expect((await h.run(withFx((fx) => fx.fillDaily("usd", day(-2), 10)))).calls).toBe(0);
+    expect(h.upstream.calls).toEqual([]);
   });
 });
 
@@ -423,7 +452,7 @@ describe("rateSeries —— 历史日汇率", () => {
 // 摆两条腿、跑完整条反算、最后数请求次数,而那一路上任何一步坏了都会让这条断言变绿。
 describe("BTC 美元腿:优先读缓存,不重取", () => {
   const leg = (h: ReturnType<typeof setup>, buckets: readonly number[]) =>
-    h.run(btcUsdDaily(h.prices, h.upstream, BTC_REF, buckets, TODAY));
+    h.run(btcUsdDaily(h.prices, h.upstream, BTC_REF, buckets));
 
   it("全都命中缓存 → 零请求", async () => {
     const h = setup();
@@ -463,29 +492,13 @@ describe("BTC 美元腿:优先读缓存,不重取", () => {
     );
   });
 
-  it("**今日桶恒取**,哪怕过去日全都命中 —— 但今日不落库(可变)", async () => {
-    const h = setup();
-    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY]: 99000 }));
-    await h.run(h.prices.putDailyByRef(BTC_REF, [{ dayBucket: TODAY - 1, unitPrice: 100000 }]));
-
-    expect(await leg(h, [TODAY - 1, TODAY])).toEqual(
-      new Map([
-        [TODAY - 1, 100000],
-        [TODAY, 99000],
-      ]),
-    );
-    expect(h.upstream.calls).toEqual([legCall("USD")]); // 为今日那一桶出的网
-    // 今日不进库 —— 明天它成了过去日,会重取一次定值。
-    expect(h.prices.dailyByRef.get(BTC_REF)).toEqual(new Map([[TODAY - 1, 100000]]));
-  });
-
   it("缓存里的值胜出 —— 同一天上游又给了个不同的数也不覆盖", async () => {
     const h = setup();
-    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY - 1]: 111111, [TODAY]: 99000 }));
+    h.upstream.seriesByVs.set("USD", btcLeg({ [TODAY - 2]: 99000, [TODAY - 1]: 111111 }));
     await h.run(h.prices.putDailyByRef(BTC_REF, [{ dayBucket: TODAY - 1, unitPrice: 100000 }]));
 
     // 过去日不可变:落过库的那天以库里为准(上游这次给的 111111 丢掉)。
-    expect((await leg(h, [TODAY - 1, TODAY])).get(TODAY - 1)).toBe(100000);
+    expect((await leg(h, [TODAY - 2, TODAY - 1])).get(TODAY - 1)).toBe(100000);
     expect(h.prices.dailyByRef.get(BTC_REF)?.get(TODAY - 1)).toBe(100000);
   });
 });

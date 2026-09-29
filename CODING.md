@@ -21,7 +21,7 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
   - **尚未迁移的包**:`await fetch(url, { headers })` 直接调全局。Never stash fetch on an object / inject a `fetchImpl` seam and **call it as a method** (`deps.fetchImpl(url)`) — `this` becomes that object and CF Workers throws `Illegal invocation` (and then needs a `bind` patch). Mock it in tests with `vi.spyOn(globalThis, "fetch")` + `afterEach(() => vi.restoreAllMocks())`.
     **裸函数调用不在此列**:`const f = globalThis.fetch; f(url)`(`this === undefined`)在 workerd 上是放行的 —— 实测两种调法给的都是同一个 `Invalid URL`,没有 `Illegal invocation`。这条要紧,因为 `@effect/platform` 的 `FetchHttpClient` 内部正是这么调的;`apps/web/tests/server/outbound-workerd.test.ts` 在真 workerd 里钉住它。
   - 两边共同的那条判断仍然成立:**运行时全局(fetch / crypto / clock)不该在生产签名上开一个只为测试存在的注入参数**。区别只在「换成什么」——非 Effect 包换成 mock 全局,Effect 包换成一个**服务**(`R` 通道,不是 config 字段)。
-- **Facades expose intent, not primitives.** A package's public interface offers domain-intent methods (`priceOf` / `enrich` / `warm`), not its internal collaborators (`.store` / `.provider`). Orchestration — cache→fetch→write, single-flight, TTL gating, ref construction — lives *inside* the instance; callers express *what* they want, never *how*. Smell: app code doing `store.getX` → `provider.fetchX` → `store.putX`, or building the module's own value objects by hand. Corollary: let callers pass raw identity (`AssetRef.coinId`) and construct the internal ref (`TokenRef`) for them — don't leak the constructor.
+- **Facades expose intent, not primitives.** A package's public interface offers domain-intent methods (`pricesOf` / `enrich` / `warm`), not its internal collaborators (`.store` / `.provider`). Orchestration — cache→fetch→write, single-flight, TTL gating, ref construction — lives *inside* the instance; callers express *what* they want, never *how*. Smell: app code doing `store.getX` → `provider.fetchX` → `store.putX`, or building the module's own value objects by hand. Corollary: let callers pass raw identity (`AssetRef.coinId`) and construct the internal ref (`TokenRef`) for them — don't leak the constructor.
 - **Bind ambient env once, at a single call site.** A factory like `createDb(env)` / `createTokens(env)` should be invoked in exactly one server-only module; everything else imports the ready instance (`import { db }` → `db.xxx`), never re-calls the factory. The single binding point is a `Proxy` that builds the facade per access from the `cloudflare:workers` env — deferring the env read to call time (request/scheduled), not module load.
 - **客户端打包的代码只从"契约/basic"包引类型与 schema,绝不从"entry/门面"包引。** entry 包(如 `@folio/connectors`)经其 registry `import` 全部 provider 实现;任何被客户端组件引用的文件(`apps/web/src/lib/*`、组件)只要 **value-import** 它,就会把整张 provider 依赖图打进 client bundle —— 轻则体积膨胀,重则某 provider 的 server-only dep(`cloudflare:workers` 等)直接破坏 client build。契约(`Balance` / `CredField` / 各 `*Meta` schema)一律从 `@folio/connectors-basic` 取;registry / provider / manifest 只在 server 侧(sync)用。同理适用于其它 basic/entry 分层的包。
 - **别造无逻辑的转发。** 一个函数如果只是把参数换个形状递给另一个函数,它就不该存在 —— 直接调那个函数。
@@ -176,10 +176,12 @@ Coding conventions for Folio. Consolidates the coding-related rules from [CLAUDE
 
 ### CF Workers 上的状态
 
-- **两种 layer,活得不一样长**(ADR 0054)。app 的 `runtime.ts` 里有一个惰性的 isolate 级
-  `ManagedRuntime`:进它的 layer **跨请求活**(建一次,isolate 回收才没);每请求 `Effect.provide`
+- **两种 layer,活得不一样长**(ADR 0054)。app 的 `runtime.ts` 里有惰性的 isolate 级运行时
+  (手搭的 `Runtime`,见 ADR 0054 第二轮补记 —— 冷 isolate 上 `ManagedRuntime` + Layer 的构建机器
+  本身就是几十毫秒):进它的服务 **跨请求活**(建一次,isolate 回收才没);每请求 `Effect.provide`
   的 layer 仍是 **per-run** 的,每请求重置。跨请求要活、又不该绑在服务图上的东西(限频游标)照旧
-  在模块级。
+  在模块级。**热路径上每次调用都要装的东西别用 Layer 拼**:能直接造成 `Context` 就直接造
+  (`makeSyncServices`),Layer 留给真有依赖图、建一次的地方。
 - **所以官方那些「状态绑 Scope」的组合子要先问它落在哪一种里。** `RateLimiter`(semaphore + 后台
   refill fiber)、`Cache` / `cachedWithTTL`:放在每请求那一侧,每请求一份新的,等于没有;放进
   isolate 运行时,就是一条**跨请求活着的 fiber / timer** —— 下一条。用之前先问:**它的状态活在哪?**

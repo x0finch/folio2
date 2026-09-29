@@ -65,17 +65,29 @@ export function checkDevVars() {
   return text;
 }
 
+/** .dev.vars 里某一项的值(给灌数据的脚本用,如 SECRETS_KEY)。不打印。 */
+export function devVar(key) {
+  return parseDevVars(checkDevVars()).find(([k]) => k === key)?.[1];
+}
+
 /**
  * 给构建产物写一份 `.dev.vars`(wrangler 从配置文件旁边读它)。`vite build` 也会拷一份过去,
  * 但它会在两次运行之间消失(踩过:没了它 BETTER_AUTH_URL 是 undefined,每个 auth 调用 500),
  * 所以每次起之前都重写。BETTER_AUTH_URL 改成 perf 自己的 origin —— better-auth 的 CSRF 与
  * passkey rpID 都按它校验,和实际访问的 origin 必须逐字一致。
  */
-function writeDevVars(port) {
+//
+// `vars`:额外的覆盖(perf:cpu:jobs 用它把各家上游的 base URL 指到本机假上游)。同名的一律以它为准,
+// 所以 .dev.vars 里就算有真 key,也跟着被换成假的,不会被带去任何地方。
+function writeDevVars(port, vars = {}) {
   const kept = parseDevVars(checkDevVars()).filter(
-    ([k]) => !DEV_ONLY_VARS.has(k) && k !== "BETTER_AUTH_URL",
+    ([k]) => !DEV_ONLY_VARS.has(k) && k !== "BETTER_AUTH_URL" && !(k in vars),
   );
-  const lines = [...kept.map(([k, v]) => `${k}=${v}`), `BETTER_AUTH_URL=${originOf(port)}`];
+  const lines = [
+    ...kept.map(([k, v]) => `${k}=${v}`),
+    ...Object.entries(vars).map(([k, v]) => `${k}=${v}`),
+    `BETTER_AUTH_URL=${originOf(port)}`,
+  ];
   writeFileSync(join(DIST_SERVER_DIR, ".dev.vars"), `${lines.join("\n")}\n`, { mode: 0o600 });
 }
 
@@ -95,6 +107,26 @@ function run(cmd, args, { logFile, env } = {}) {
   }
 }
 
+/**
+ * 构建产物的配置去掉 `queues.consumers`(生产者照留)—— `perf:cpu:jobs --cron-only` 用:只量 cron
+ * 那一次调用,投出去的消息没人消费,不会在采样窗口里跟 cron 叠在一起。写在 `wrangler.json` 旁边,
+ * 相对路径(`main` 等)与 `.dev.vars` 照旧对得上。
+ */
+function producerOnlyConfig() {
+  const config = builtConfig();
+  const file = join(DIST_SERVER_DIR, "wrangler.producer-only.json");
+  writeFileSync(
+    file,
+    JSON.stringify({ ...config, queues: { ...config.queues, consumers: undefined } }, null, 2),
+  );
+  return file;
+}
+
+/** 构建出的 wrangler.json(`wrangler deploy` 发的就是它)。 */
+export function builtConfig() {
+  return JSON.parse(readFileSync(BUILT_CONFIG, "utf8"));
+}
+
 export function build(logFile) {
   run("vite", ["build"], { logFile });
 }
@@ -105,7 +137,7 @@ export function build(logFile) {
  */
 export function migrate(logFile) {
   mkdirSync(PERF_STATE_DIR, { recursive: true });
-  const { d1_databases: dbs } = JSON.parse(readFileSync(BUILT_CONFIG, "utf8"));
+  const { d1_databases: dbs } = builtConfig();
   const name = dbs?.[0]?.database_name;
   if (!name) throw new Error(`no d1 database in ${BUILT_CONFIG}`);
   // CI=1:wrangler 否则会停下来问「确定要迁吗」。
@@ -164,19 +196,26 @@ const READY_PROBE_PATH = "/api/auth/get-session";
  * 起 `wrangler dev`,等到 `probePath` 能答再返回。返回 { stop() }。
  * 以独立进程组起(detached),停的时候整组发信号 —— wrangler 底下还挂着 workerd 子进程。
  */
-export async function startWorker({ port, inspectorPort, logFile, probePath = READY_PROBE_PATH }) {
+export async function startWorker({
+  port,
+  inspectorPort,
+  logFile,
+  probePath = READY_PROBE_PATH,
+  vars,
+  noQueueConsumers = false,
+}) {
   for (const p of [port, inspectorPort]) {
     if (await portInUse(p))
       throw new Error(`port ${p} is already in use — pass --port / --inspector-port`);
   }
-  writeDevVars(port);
+  writeDevVars(port, vars);
   const fd = openSync(logFile, "a");
   const child = spawn(
     join(BIN, "wrangler"),
     [
       "dev",
       "--config",
-      BUILT_CONFIG,
+      noQueueConsumers ? producerOnlyConfig() : BUILT_CONFIG,
       "--ip",
       HOST,
       "--port",

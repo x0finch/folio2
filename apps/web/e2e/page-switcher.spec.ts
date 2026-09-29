@@ -64,11 +64,12 @@ async function watchSkeletons(page: Page) {
 const skeletonsSeen = (page: Page) =>
   page.evaluate(() => (window as unknown as { __skeletons: string[] }).__skeletons);
 
-const headerSyncTop = async (page: Page) => {
-  const box = await page.locator('[data-slot="header-sync"]:visible').boundingBox();
-  if (!box) throw new Error("页头同步条不可见");
-  return box.y;
-};
+// 量**相对文档**的位置,不是 `boundingBox()` 那种相对视口的:手机视口下点「By chain」有时会把
+// 洞察页滚下去一截(CI 抓到过 -40 → 77),切页后滚动归零 —— 同步条一动没动,视口坐标却变了。
+const headerSyncTop = (page: Page) =>
+  page
+    .locator('[data-slot="header-sync"]:visible')
+    .evaluate((el) => Math.round(el.getBoundingClientRect().top + window.scrollY));
 
 test.describe("page 切换器:一个路由 + Activity 保活", () => {
   test.describe.configure({ timeout: 90_000 });

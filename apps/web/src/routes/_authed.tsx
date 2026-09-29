@@ -5,6 +5,7 @@ import {
   Outlet,
   redirect,
   retainSearchParams,
+  useNavigate,
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
@@ -13,6 +14,7 @@ import { AppShell, AppShellSkeleton } from "@/components/app-shell";
 import { LockScreen } from "@/components/lock-screen";
 import { PortfolioSelector } from "@/components/portfolio-selector";
 import { BalancePrivacyProvider } from "@/lib/hooks/use-balance-privacy";
+import { readLockFlag } from "@/lib/hooks/use-idle-lock";
 import { PortfolioProvider, pickSelectedPortfolio, usePortfolio } from "@/lib/hooks/use-portfolio";
 import {
   CurrencyProvider,
@@ -20,9 +22,12 @@ import {
   useStoredCurrency,
 } from "@/lib/hooks/use-prefer-currency";
 import { RETRY, withRetry } from "@/lib/queries/constants";
+import { watchDataVersion } from "@/lib/queries/data-version";
+import { dataVersionKeys } from "@/lib/queries/keys";
+import { forgetQueryCache, queryPersistence } from "@/lib/queries/persist";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
-import { valuationSettingsQuery } from "@/lib/queries/settings";
+import { dataVersionQuery, valuationSettingsQuery } from "@/lib/queries/settings";
 import { prefetchSyncStatusAtoms, useSyncStatus } from "@/lib/queries/sync";
 import { getSession } from "@/lib/server/session";
 import type { PageKey } from "./_authed/-page-keys";
@@ -67,12 +72,28 @@ export const Route = createFileRoute("/_authed")({
   // 路径参数的关键理由之一,见 ADR 0046)。它只在「新 search 里没有这个键」时补旧值,并且尊重
   // 显式写的 `portfolio: undefined` —— 所以「切回默认 → 参数消失」与这条同时成立。
   search: { middlewares: [retainSearchParams(["portfolio"])] },
-  beforeLoad: async ({ abortController }) => {
+  beforeLoad: async ({ abortController, context }) => {
     // 这次调用不走查询缓存,所以 QueryClient 上那份重试默认值管不到它 —— 单独包一层同款退避,
     // 且**不放弃**(理由见 constants 的 withRetry)。signal 一定要接:导航取消 / 预取被丢弃时
     // 路由会 abort 它,不接的话每次取消都留一条循环在后台打服务器。
     const current = await withRetry(getSession, isRedirect, RETRY.forever, abortController.signal);
-    if (!current) throw redirect({ to: "/login" });
+    if (!current) {
+      // 会话没了(过期 / 别处登出):这台机器上存着的查询缓存也不该再留(FOL-94)。
+      await forgetQueryCache(context.queryClient);
+      throw redirect({ to: "/login" });
+    }
+    // **先把上次的查询缓存恢复进内存,再让 loader 跑**(FOL-94,`lib/queries/persist.ts`):loader 里的
+    // `ensureQueryData` 命中恢复出来的数据就不发请求 —— 重开页面只剩版本号那一发。同一个用户第二次
+    // 走到这里是 no-op。锁着的时候不恢复、也不开写(锁屏期间的导航同样走到这里,review #14)。
+    await queryPersistence().start(context.queryClient, current.user.id, {
+      locked: readLockFlag(),
+    });
+    // 缓存里没有版本号(头一回打开 / 锁着重开过)时,**赶在 loader 的数据请求之前**先把它问出去
+    // (review #24):版本号的监视器会把第一次读到的号当基准、不失效 —— 这只在「那个号不晚于数据」
+    // 时才对。先发它,数据就是在这个号或更新的号上读到的;中间有人写了,下一次问号时号变了,照常失效。
+    if (!context.queryClient.getQueryData(dataVersionKeys.all)) {
+      void context.queryClient.prefetchQuery(dataVersionQuery());
+    }
     return { user: current.user };
   },
   // **这里故意不声明 `loaderDeps`**(与 home / insights 相反),尽管 loader 读了地址里的组合参数:
@@ -158,6 +179,9 @@ function ShellWithSync({ userName, children }: { userName: string; children: Rea
   // 之下这是唯一的提前量 —— 没按过的页一律不加载。**接在这一层**,因为 `prefetchPage` 牵着
   // 四个 page 的查询链,而外壳那个文件同时住着必须零依赖的 `AppShellSkeleton`(ADR 0049)。
   const warm = (page: PageKey) => prefetchPage(page, queryClient, selectedId);
+  // 数据版本号(FOL-94):回到页面 / 可见时每分钟问一次,号变了才失效数据查询。挂在**锁屏之内**
+  // 这一层 —— 锁着的时候不问(页面都卸了,没有要刷的东西)。
+  useEffect(() => watchDataVersion(queryClient, dataVersionQuery()), [queryClient]);
   return (
     <AppShell
       userName={userName}
@@ -172,6 +196,13 @@ function ShellWithSync({ userName, children }: { userName: string; children: Rea
 
 function AuthedLayout() {
   const { user } = Route.useRouteContext();
+  const navigate = useNavigate();
+  // 别的标签页登出了(review #3):本页的持久化已经停写、内存已清空(`persist.ts`),会话是整个浏览器
+  // 共用的 cookie、已经没了 —— 直接送回登录页。挂在锁屏**之外**:锁着的标签页也得走。
+  useEffect(
+    () => queryPersistence().onSignedOutElsewhere(() => void navigate({ to: "/login" })),
+    [navigate],
+  );
   const currencyCode = useStoredCurrency();
   const { data: preferCurrency } = useSuspenseQuery(currencyPreferenceQuery(currencyCode));
   const { data: portfolios } = useSuspenseQuery(portfolioListQuery());

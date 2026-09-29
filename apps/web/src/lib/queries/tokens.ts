@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { readJson } from "@/lib/core/json-response";
 import {
   getTokenEnrichment,
   listFiatOptions,
@@ -39,6 +40,6 @@ export const tokenSearchQuery = (query: string) =>
 export const tokenEnrichmentQuery = () =>
   queryOptions({
     queryKey: tokenKeys.enrichment(),
-    queryFn: () => getTokenEnrichment(),
+    queryFn: async () => readJson(await getTokenEnrichment()),
     staleTime: STALE_TIME.live,
   });

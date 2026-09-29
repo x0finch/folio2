@@ -37,6 +37,7 @@ export {
   Database,
   DatabaseForOracle,
   type DbRequest,
+  databaseTickets,
   GlobalDatabase,
   type GlobalRefIndexStore,
   type TokenPriceStore,
@@ -44,7 +45,11 @@ export {
 } from "./database";
 // 领域的类型**按文件逐个转出**(#504 T13)。以前它们走 `domains/index.ts` 那个桶,而领域服务
 // 反倒逐文件转 —— 同一个目录两套写法,「这个名字是哪个领域的」还得进桶里再找一次。
-export type { AccountRawCreds, CreateAccountInput } from "./domains/accounts";
+export type {
+  AccountRawCreds,
+  AccountWithPortfolio,
+  CreateAccountInput,
+} from "./domains/accounts";
 // 参考层那半的契约类型。**接口不再由 `@folio/oracle-basic` 定、db 顶上去实现** —— 它们就是
 // db 里那几份实现推导出来的类型,出包是因为 oracle 的几片把 store 当参数往下传,要个名字。
 export type { CacheEntry, CacheWrite } from "./domains/cache";
@@ -61,9 +66,11 @@ export type {
 export type { PortfolioMembership } from "./domains/portfolios";
 export type { UserSettingsView } from "./domains/settings";
 export type {
-  SnapshotBalanceHistoryRow,
+  BalanceRawRow,
   SnapshotBalanceInput,
   SnapshotBalanceView,
+  SnapshotRawRow,
+  SnapshotRawRows,
   SnapshotTotal,
   SnapshotWithBalances,
   WriteSnapshotInput,
@@ -83,6 +90,14 @@ export type { ExportToken, ImportTokenInput } from "./domains/transfer";
 // 这一层的类型化失败。`NotFound` 出现在带归属校验的那些 op 的 `E` 通道里(#504 T5),
 // `InvalidInput` 出现在有域规则要查库才判得了的那些(#504 T6)—— 两个以前都是 defect。
 export { InvalidInput, NotFound } from "./errors";
+// 第二种连接(FOL-85):Node 里的定时任务没有 D1 绑定,交一条 SQL 传输进来,接成同一个 `DbClient`。
+// 同一条红线 —— 给的是传输,拿不回句柄。
+export {
+  provideRemoteDbClient,
+  type RemoteMethod,
+  type RemoteSql,
+  type RemoteStatement,
+} from "./remote";
 export type {
   Account,
   AccountSafe,

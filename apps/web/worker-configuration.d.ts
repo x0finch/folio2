@@ -3,6 +3,7 @@
 // Runtime types generated with workerd@1.20260625.1 2025-09-02 nodejs_compat
 interface __BaseEnv_Env {
 	DB: D1Database;
+	JOBS: Queue;
 	BETTER_AUTH_SECRET: string;
 	BETTER_AUTH_URL: string;
 	SECRETS_KEY: string;

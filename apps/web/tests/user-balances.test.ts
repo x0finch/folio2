@@ -1,14 +1,22 @@
-import type { SnapshotWithBalances } from "@folio/db";
+import type { BalanceRawRow } from "@folio/db";
 import { describe, expect, it } from "vitest";
 import type { BalanceLike } from "@/lib/core/token-model";
 import { userDisplayBalances } from "@/lib/core/token-model";
 
 // 身份走 token_id(#243:symbol / tokenRef 不再落快照,显示名住 Token 那一行)。
-const snap = (accountId: string, tokenIds: string[]): SnapshotWithBalances =>
-  ({
-    snapshot: { accountId, totalUsd: 0, takenAt: 1000 },
-    balances: tokenIds.map((tokenId) => ({ tokenId, kind: "spot" })),
-  }) as unknown as SnapshotWithBalances;
+// 快照那半是 `latestRaw()` 的余额元组(账户, id, 数量, 美元值, kind, 自带价, 平台, token_id, meta)。
+const snap = (accountId: string, tokenIds: string[]): BalanceRawRow[] =>
+  tokenIds.map((tokenId, i) => [
+    accountId,
+    `${accountId}-${i}`,
+    1,
+    5,
+    "spot",
+    null,
+    "evm:1",
+    tokenId,
+    null,
+  ]);
 
 const manual = (tokenId: string): BalanceLike => ({ kind: "spot", tokenId });
 
@@ -17,14 +25,16 @@ const manual = (tokenId: string): BalanceLike => ({ kind: "spot", tokenId });
 describe("userDisplayBalances", () => {
   it("合并快照余额与 manual 合成余额(两者都在)", () => {
     const out = userDisplayBalances(
-      [snap("cex", ["tk-btc"]), snap("wallet", ["tk-eth"])],
+      [...snap("cex", ["tk-btc"]), ...snap("wallet", ["tk-eth"])],
       [manual("tk-sol")],
     );
     expect(out.map((b) => b.tokenId)).toEqual(["tk-btc", "tk-eth", "tk-sol"]);
+    // 元组按列落到 BalanceLike 的四个字段(dust 门要 usdValue / kind)。
+    expect(out[0]).toEqual({ kind: "spot", usdValue: 5, platform: "evm:1", tokenId: "tk-btc" });
   });
 
   it("无 manual → 只快照余额", () => {
-    const out = userDisplayBalances([snap("cex", ["tk-btc"])], []);
+    const out = userDisplayBalances(snap("cex", ["tk-btc"]), []);
     expect(out.map((b) => b.tokenId)).toEqual(["tk-btc"]);
   });
 

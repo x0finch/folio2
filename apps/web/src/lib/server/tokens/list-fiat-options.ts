@@ -17,11 +17,11 @@ export const handleListFiatOptions = Effect.fn("listFiatOptions")(function* (
   // 认不出的 locale 落默认语言(调用方可改的输入)。
   const base = buildFiatOptions(pickLocale(data.locale, null));
   // 法币的「价」= FX 汇率(USD 恒 1),直接填进下拉项 —— 否则价格列显 "—"(法币在代币价格源没有价)。
-  // warm 一次(冷则一把拉全所有支持币种;通常 _authed loader / 切币种时已暖过 → no-op)。
+  // **只读缓存,不出网**(FOL-88):汇率由队列的 `fx` 活每小时暖(一把写全部支持币种)。以前这里先
+  // `fx.warm` 一次 —— 一个读端点顺手打上游、写库。
   // asOf 置当下 → 下拉 SWR(staleTickets)判它新鲜、不再拿它去 refreshTokenPrices 白刷(价已现填,重取无意义)。
-  // 取不到汇率(warm 失败且非 USD)→ 该项不带价,回退 "—"(降级,不阻断)。24h 涨跌法币不给。
+  // 缓存里没有(还没暖过 / 上游没收录)→ 该项不带价,回退 "—"(降级,不阻断)。24h 涨跌法币不给。
   const { fx } = yield* Oracle;
-  yield* fx.warm(base.map((o) => o.symbol));
   const asOf = yield* Clock.currentTimeMillis;
   return yield* Effect.forEach(base, (o) =>
     Effect.map(fx.resolve(o.symbol), (price) =>

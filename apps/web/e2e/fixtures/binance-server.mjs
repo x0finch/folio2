@@ -21,6 +21,7 @@
 import { createServer } from "node:http";
 
 const PORT = Number(process.env.FAKE_BINANCE_PORT ?? 3099);
+const COINGECKO_PREFIX = "/coingecko/api/v3";
 
 // —— 可变状态,经 /__control 改 ——
 // 为什么不用启动时的环境变量:一轮测试里**同一个进程要扮演两种上游**。加账户时要快(校验凭据别干等),
@@ -85,6 +86,15 @@ createServer(async (req, res) => {
       }
     }
     return json(res, 200, state);
+  }
+
+  // 假 CoinGecko:`.dev.vars.test` 的 `COINGECKO_API_BASE` 指到 `/coingecko/api/v3`。只求**快**:
+  // 本地 Miniflare 串行消费队列,打真 CoinGecko 的刷价任务(e2e 里被拒 + 重试,一条约 12 秒)会
+  // 堵在同步消息前面,「点同步 → 上游 15 秒内收到请求」就超时。回空结果 —— 参考层照旧当「没刷到」
+  // 降级,e2e 本来也不验价格。不计 hits、不吃 delayMs:那两个是给 Binance 那条链路用的。
+  if (path.startsWith(COINGECKO_PREFIX)) {
+    const rest = path.slice(COINGECKO_PREFIX.length);
+    return json(res, 200, rest.startsWith("/coins") || rest === "/asset_platforms" ? [] : {});
   }
 
   state.hits += 1;

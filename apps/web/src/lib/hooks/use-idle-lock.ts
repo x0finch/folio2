@@ -43,7 +43,9 @@ function writeLastActive(t: number): void {
 }
 
 // 锁标志读写:非空即锁定。写用时间戳(值每次不同才会触发别的标签的 storage 事件)。
-function readLockFlag(): boolean {
+// 读那一半也出文件:路由鉴权时据它决定要不要把 IndexedDB 里的查询缓存恢复进内存(FOL-94)——
+// 锁着就不恢复,不必等锁屏挂上去再清。
+export function readLockFlag(): boolean {
   try {
     return localStorage.getItem(LOCK_FLAG_KEY) != null;
   } catch {

@@ -5,3 +5,7 @@
 import "./cron.cases";
 import "./round.cases";
 import "./run.cases";
+import "./consume.cases";
+import "./prices.cases";
+import "./daily-prices.cases";
+import "./reference.cases";

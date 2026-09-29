@@ -1,7 +1,8 @@
 import { Database } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
-import { Cause, Clock, Effect, Exit } from "effect";
-import { forUser } from "@/lib/server/runtime";
+import { Clock, Effect } from "effect";
+import type { PruneNotesJob } from "@/lib/server/jobs/message";
+import { forUserDb } from "@/lib/server/runtime";
 
 // 展示 note 的保留期(#456)。
 //
@@ -26,54 +27,24 @@ import { forUser } from "@/lib/server/runtime";
 const NOTE_RETENTION_DAYS = 7;
 const DAY_MS = 86_400_000;
 
-/** 一个用户的清理,**装配好了但还没跑**(cron 把 N 个用户拼进自己那一个 effect)。 */
-const pruneNotesFor = (
-  userId: string,
-  olderThan: number,
-): Effect.Effect<{ snapshots: number; balances: number }, Error> =>
-  forUser(
-    userId,
-    Effect.flatMap(Database, (db) => db.snapshots.pruneNotes(olderThan)),
-  );
-
 /**
- * 逐用户剪掉保留期外的展示 note,**各自兜住**(与 `warmAllUsers` 同一形状):一个用户失败不该让
- * 后面的用户排不上队,也不该把整次 cron 拖成异常收尾 —— 这是维护动作,不是正确性动作。
+ * `prune-notes` 的 consumer(FOL-88):剪掉**这一个用户**保留期外的展示 note。每天那个 cron 给每个用户
+ * 投一条(`@/lib/server/jobs/schedule` 的 `fanOutDaily`)。以前是 cron 那一次调用里逐用户串行剪
+ * (`pruneNotesAllUsers`),逐用户的失败隔离要自己兜;现在每个用户是自己的一次调用,隔离由队列给,
+ * 失败(只会是 defect —— D1 挂了)交给队列重投。
  *
- * **为什么不用 `Effect.partition`**:官方那几个错误累积算子内部是 `Effect.either`,只累积类型化
- * 失败,defect(我们自己抛的 TypeError、db 抛的东西)照样炸穿。`Effect.exit` 收整个 `Cause`,
- * 两类都进来。(同 `warmAllUsers` 的注释。)
- *
- * 时间走 `Clock` 而不是 `Date.now()`:测试要能把时钟推到窗口两侧,而不是靠改保留天数去凑。
- *
- * `pruneOne` 可注入,只为单测能让指定用户失败;生产路径用默认的 `pruneNotesFor`。
+ * **幂等**:两条 UPDATE 都带 `note IS NOT NULL` 的门,重投 / 重复投递只会剪到 0 行。
+ * 窗口在**跑的那一刻**按 `Clock` 算(不是投的那一刻):重投晚了 30 秒,窗口跟着挪 30 秒,无所谓。
+ * 日志只带计数(P6.7)。
  */
-export const pruneNotesAllUsers = (
-  userIds: readonly string[],
-  pruneOne: (
-    userId: string,
-    olderThan: number,
-  ) => Effect.Effect<{ snapshots: number; balances: number }, Error> = pruneNotesFor,
-): Effect.Effect<{ users: number; failed: number; snapshots: number; balances: number }> =>
-  Effect.gen(function* () {
-    const log = getLogger(["folio", "cron"]);
-    const now = yield* Clock.currentTimeMillis;
-    const olderThan = now - NOTE_RETENTION_DAYS * DAY_MS;
-    const exits = yield* Effect.forEach(userIds, (userId) =>
-      Effect.exit(pruneOne(userId, olderThan)),
-    );
-    let failed = 0;
-    let snapshots = 0;
-    let balances = 0;
-    for (const exit of exits) {
-      if (Exit.isSuccess(exit)) {
-        snapshots += exit.value.snapshots;
-        balances += exit.value.balances;
-      } else {
-        failed++;
-        // 不带 userId(P6.7:日志只记 accountId/type/code/counts);「哪个用户」交给计数 + 汇总行。
-        log.warn("prune notes failed, user skipped", { error: Cause.pretty(exit.cause) });
-      }
-    }
-    return { users: userIds.length, failed, snapshots, balances };
-  });
+export const runPruneNotesJob = (job: PruneNotesJob): Effect.Effect<void, Error> =>
+  forUserDb(
+    job.userId,
+    Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const pruned = yield* (yield* Database).snapshots.pruneNotes(
+        now - NOTE_RETENTION_DAYS * DAY_MS,
+      );
+      getLogger(["folio", "jobs"]).info("prune notes done", pruned);
+    }),
+  );

@@ -7,6 +7,7 @@
 // 上游实例由 app 在初始化时注入(ADR 0023)。
 
 export {
+  DAILY_FILL_DAYS_PER_CALL,
   DEFAULT_TOP_N,
   dayBucketOf,
   FX_TTL_MS,

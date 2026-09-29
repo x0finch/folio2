@@ -3,7 +3,9 @@
 // 为什么不在 worker 里用 `performance.now()`:workerd 里那个时钟在同步计算期间**不走**(防计时
 // 侧信道),只在 I/O 边界前进。于是 `withServerFnTiming` 记下的 durationMs 只看得见 I/O 等待,
 // 看不见 CPU —— FOL-40 就是按它排的序,排错了。采样 profiler 在 V8 里按真实时间打点,不受影响。
+import { availableParallelism, loadavg } from "node:os";
 import { WebSocket } from "ws";
+import { HOST } from "./constants.mjs";
 import { NON_CPU_FRAMES, ownerOf } from "./owners.mjs";
 
 /** workerd 的 inspector 代理不收没有 `Origin` 头的升级请求(HTTP 400 "Expected Origin header")。 */
@@ -19,7 +21,7 @@ const CLOCK_SKEW_TOLERANCE_US = 50_000;
  * 样本带着整段空档(几毫秒)记在当时那一帧上 —— 总数大体仍对(CPU 约为 wall 的八成,与最初
  * 那轮测量一致),但落到哪一发请求上就是碰运气。便宜的端点这种样本占比高,见 coarseShare。
  */
-const COARSE_SAMPLE_FACTOR = 10;
+export const COARSE_SAMPLE_FACTOR = 10;
 
 const nowUs = () => Number(process.hrtime.bigint() / 1000n);
 
@@ -30,7 +32,7 @@ const nowUs = () => Number(process.hrtime.bigint() / 1000n);
  *   `Profiler.stop` 的回应一大(几个端点之后就会)连接直接断:"Max decompressed message size
  *   exceeded"。`ws` 能关掉压缩、自己定上限。
  */
-export async function connectCdp(url) {
+async function connectCdp(url) {
   const ws = new WebSocket(url, {
     origin: INSPECTOR_ORIGIN,
     perMessageDeflate: false,
@@ -84,6 +86,36 @@ export async function connectCdp(url) {
   };
 }
 
+/**
+ * 机器忙的时候(别的进程在抢核)采样量到的 CPU 会整体偏高 —— 被抢走的时间片落在正在跑的帧上。
+ * 1 分钟负载超过核数的这个比例就在输出里提醒一句,并把负载写进 summary,两次运行好对照。
+ */
+const BUSY_LOAD_RATIO = 0.75;
+
+export function hostLoad() {
+  const cpus = availableParallelism();
+  const [load1] = loadavg();
+  return {
+    cpus,
+    load1: +load1.toFixed(2),
+    busy: load1 > cpus * BUSY_LOAD_RATIO,
+    node: process.version,
+  };
+}
+
+/** 连上 inspector、开好采样器,跑 fn(cdp),无论成败都关掉。 */
+export async function withCdp({ inspectorPort, samplingUs }, fn) {
+  const cdp = await connectCdp(`ws://${HOST}:${inspectorPort}/ws`);
+  try {
+    await cdp.send("Profiler.enable");
+    await cdp.send("Profiler.setSamplingInterval", { interval: samplingUs });
+    return await fn(cdp);
+  } finally {
+    await cdp.send("Profiler.disable").catch(() => {});
+    cdp.close();
+  }
+}
+
 async function fire(url, init) {
   const t0 = nowUs();
   const res = await fetch(url, { ...init, redirect: "manual" });
@@ -118,6 +150,36 @@ export async function measureProcessCpu({ url, init }, reps, cpuNs) {
   return (cpuNs() - before) / 1e6 / reps;
 }
 
+/**
+ * 一段**窗口**的 profile(perf:cpu:jobs):开采样 → `trigger()`(触发一次 cron,等它答)→
+ * `settle()`(等后续的调用 —— 队列消费 —— 跑完)→ 停采样。
+ *
+ * 与 profileEndpoint 不同:这里一次触发背后可能是好几次调用(cron 一次 + 队列 N 批),它们的起点
+ * 由 `settle()` 报回来(`invocations: [{ startUs, … }]`),拼成 attribute 能拆的那张「请求」表。
+ * `cpuNs` 在窗口两端各读一次内核账 —— 与采样在**同一段**,所以含采样器自身的开销(略高于不开采样)。
+ */
+export async function profileWindow(cdp, { trigger, settle, cpuNs }) {
+  const beforeStartUs = nowUs();
+  await cdp.send("Profiler.start");
+  const cpuBefore = cpuNs();
+  const startUs = nowUs();
+  const triggered = await trigger();
+  const later = await settle(triggered);
+  const cpuAfter = cpuNs();
+  const stopUs = nowUs();
+  const { profile } = await cdp.send("Profiler.stop");
+  return {
+    profile,
+    beforeStartUs,
+    stopUs,
+    triggered,
+    // 第 0 格是被触发的那次调用本身(从触发起算),其后是 settle 报回来的后续调用。
+    requests: [{ startUs, ...triggered }, ...later.invocations],
+    settled: later,
+    procCpuMs: cpuBefore === null || cpuAfter === null ? null : (cpuAfter - cpuBefore) / 1e6,
+  };
+}
+
 /** 冷启动:worker 刚起、还没接过请求时发第一发。 */
 export async function profileFirstRequest(cdp, { url, init }) {
   const beforeStartUs = nowUs();
@@ -138,8 +200,12 @@ export async function profileFirstRequest(cdp, { url, init }) {
  * - 稀疏样本(间隔远超设定)也照记,但单独统计占比(coarseShare),好让报表标出来。
  * - 这要求 profile 的时间戳与本机 `process.hrtime` 是同一个单调时钟(Linux 上 V8 与 libuv 都用
  *   CLOCK_MONOTONIC,实测对得上)。对不上就不拆分,只给总数 —— 宁可少一列,不给错的数。
+ * - `maxSampleUs`(perf:cpu:jobs 用):单个样本最多记这么多,超出的部分记进 `gapMs`、不算 CPU。
+ *   一次 cron 大半时间在等(闸、上游、D1),isolate 闲着时采样器是停的,恢复后第一个样本带着整段
+ *   空档 —— 一次 sweep 实测 27s 的窗口里 21s 落在这种样本上,而内核账只有 6s。请求那边空档只在
+ *   两发之间(见 coarseShare),所以 perf:cpu 不传它,口径不变。
  */
-export function attribute(run, samplingUs) {
+export function attribute(run, samplingUs, { maxSampleUs } = {}) {
   const { profile, requests, beforeStartUs, stopUs } = run;
   const coarseAboveUs = samplingUs * COARSE_SAMPLE_FACTOR;
   let coarseUs = 0;
@@ -154,20 +220,23 @@ export function attribute(run, samplingUs) {
   const owners = new Map();
   let programUs = 0;
   let outsideUs = 0;
+  let gapUs = 0;
   let t = profile.startTime;
   let slot = -1;
 
   profile.samples.forEach((nodeId, i) => {
-    const dt = profile.timeDeltas[i] ?? 0;
-    t += dt;
+    const raw = profile.timeDeltas[i] ?? 0;
+    t += raw;
     const frame = nodes.get(nodeId)?.callFrame;
     if (!frame) return;
+    const dt = maxSampleUs ? Math.min(raw, maxSampleUs) : raw;
+    if (!NON_CPU_FRAMES.has(frame.functionName)) gapUs += raw - dt;
     if (frame.functionName === "(program)") programUs += dt;
     if (NON_CPU_FRAMES.has(frame.functionName)) return;
     if (!owners.has(nodeId)) owners.set(nodeId, ownerOf(frame));
     const owner = owners.get(nodeId);
     byGroup.set(owner.group, (byGroup.get(owner.group) ?? 0) + dt);
-    if (dt > coarseAboveUs) coarseUs += dt;
+    if (raw > coarseAboveUs) coarseUs += dt;
     const mkey = `${owner.group}\u0000${owner.module}`;
     byModule.set(mkey, (byModule.get(mkey) ?? 0) + dt);
     if (!aligned) return;
@@ -190,6 +259,7 @@ export function attribute(run, samplingUs) {
     gcMs: perReqMs(byGroup.get("GC") ?? 0),
     programMs: perReqMs(programUs),
     outsideMs: outsideUs / 1000,
+    gapMs: gapUs / 1000,
     // 计入 CPU 的时间里,来自稀疏样本的占比。高 → mean 仍可用,逐请求的 p50 / max 不可信。
     coarseShare: totalUs ? coarseUs / totalUs : 0,
     samples: profile.samples.length,

@@ -1,4 +1,3 @@
-import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { manualFiatRefs } from "@/lib/server/manual/store";
 import { type PortfolioScope, scopedMembership } from "./scope";
@@ -8,7 +7,7 @@ import { type PortfolioScope, scopedMembership } from "./scope";
 
 export const handleGetFiatRefs = Effect.fn("getFiatRefs")(function* (data: PortfolioScope = {}) {
   const member = yield* scopedMembership(data.portfolioId);
-  const accounts = (yield* (yield* Database).accounts.list()).filter((a) => member.has(a.id));
+  const accounts = member.accounts.filter((a) => member.has(a.id));
   const fiatRefs = yield* manualFiatRefs(accounts);
   return { fiatRefs: [...fiatRefs] as [string, string][] };
 });

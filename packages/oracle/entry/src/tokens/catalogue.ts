@@ -3,8 +3,8 @@ import type { CacheStore, DbRequest } from "@folio/db";
 import type { TokenMetaUpstream, UpstreamToken } from "@folio/oracle-basic";
 import { DEFAULT_TOP_N, PRICE_TTL_MS, WARM_TTL_MS } from "@folio/oracle-basic";
 import type { TokenUpstream } from "@folio/oracle-basic/ports";
-import { Effect } from "effect";
-import { type WarmRow, warmBlob } from "./warm";
+import { Clock, Effect, Option } from "effect";
+import { WARM_KEY, type WarmRow, warmBlob } from "./warm";
 
 // 币目录 —— 用户**选币**时看到的东西:默认那一列(市值前 N)与搜索结果。
 //
@@ -56,6 +56,33 @@ export const refreshWarmCatalogue = (
 ): Effect.Effect<readonly WarmRow[], never, DbRequest> =>
   warmBlob(cache, upstream, topN, (blob, now) => now - blob.asOf > WARM_TTL_MS);
 
+/**
+ * 预热那条路先问一句「够新吗」,**只看 blob 自己的 `asOf`,不解码整份目录**(FOL-83 第二轮)。
+ *
+ * 一周里 167 次答案都是「够新」,而为了这一个数把 1000 行逐字段过一遍 Schema,本机实测约 9ms
+ * 解码 + 7ms 回收 —— 每天那条 `catalogue` 消息的一大半(免费计划一次调用 10ms)。判据与
+ * `refreshWarmCatalogue` 同一个(`now - asOf > WARM_TTL_MS` 才算旧);不够新 / 没有 / 形状不对
+ * (`asOf` 不是数、`rows` 不是数组)→ `none`,走原来那条完整的路(解码、回源、写回)。
+ *
+ * **与原来唯一的差别**:一份 `asOf` 够新、但某几行形状坏了的 blob,原来会被这一趟当 miss 重拉,
+ * 现在留到它过期为止。它照样自愈 —— 真要读行的三个读者(mint 的候选源、选币下拉)每次都完整
+ * 解码,解不动就当 miss 回源重写。返回的条数按 ref 去重,与 `dedupeByRef` 之后的长度同一个口径。
+ */
+const freshCatalogueSize = (
+  cache: CacheStore,
+  now: number,
+): Effect.Effect<Option.Option<number>, never, DbRequest> =>
+  Effect.map(cache.get(WARM_KEY), (hit) =>
+    Option.flatMap(hit, ({ value }) => {
+      const blob = value as { asOf?: unknown; rows?: unknown } | null;
+      if (typeof blob?.asOf !== "number" || !Array.isArray(blob.rows)) return Option.none();
+      if (now - blob.asOf > WARM_TTL_MS) return Option.none();
+      const refs = new Set<unknown>();
+      for (const row of blob.rows as { info?: { ref?: unknown } }[]) refs.add(row?.info?.ref);
+      return Option.some(refs.size);
+    }),
+  );
+
 // 市值升序取前 limit(无 rank 者垫底)。
 export function topByRank(rows: readonly WarmRow[], limit: number): readonly WarmRow[] {
   const rank = (r: WarmRow) => r.price.marketCapRank ?? Number.POSITIVE_INFINITY;
@@ -84,6 +111,10 @@ export const makeCatalogue = (cache: CacheStore, upstream: TokenUpstream): Token
     search: (query) => upstream.searchTokens(query),
 
     refreshCatalogue: () =>
-      Effect.map(refreshWarmCatalogue(cache, upstream, DEFAULT_TOP_N), (all) => all.length),
+      Effect.gen(function* () {
+        const fresh = yield* freshCatalogueSize(cache, yield* Clock.currentTimeMillis);
+        if (Option.isSome(fresh)) return fresh.value;
+        return (yield* refreshWarmCatalogue(cache, upstream, DEFAULT_TOP_N)).length;
+      }),
   };
 };

@@ -1,3 +1,4 @@
+import { FetchHttpClient } from "@effect/platform";
 import { runClient } from "@folio/client-core/testing";
 import type { AssetPlatform, MarketCoin } from "@folio/coingecko-client";
 import { TokenUpstream } from "@folio/oracle-basic/ports";
@@ -49,16 +50,27 @@ describe("端口 layer", () => {
     expect(id).toBe(UPSTREAM_ID);
   });
 
+  // layer 在包内自带真的 `FetchHttpClient`,外面 provide 的假 `HttpClient` 顶不掉它 —— 以前用
+  // `routed` 打桩,这条其实在打真的 CoinGecko(CI 上被 403 就红)。换掉的是它底下那个 `fetch`:
+  // `FetchHttpClient` 每发都从 fiber context 里找 `Fetch`,找不到才用 `globalThis.fetch`。
   it("经 layer 拿到的方法照样能出网(接线没断)", async () => {
-    const stub = routed({ "/coins/markets": [marketRow("bitcoin", 1)] });
+    const hits: string[] = [];
+    const fakeFetch: typeof globalThis.fetch = async (input) => {
+      hits.push(String(input));
+      return Response.json([marketRow("bitcoin", 1)]);
+    };
+    const stub = routed({});
     const rows = await runClient(
       stub.http,
       Effect.flatMap(TokenUpstream, (u) => u.fetchMarkets({ topN: 1 })).pipe(
         Effect.provide(coinGeckoUpstreamLayers().token),
+        Effect.provideService(FetchHttpClient.Fetch, fakeFetch),
       ),
       "none",
     );
     expect(rows.map((r) => r.ref)).toEqual(["coingecko/issued:bitcoin"]);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toContain("/coins/markets");
   });
 });
 

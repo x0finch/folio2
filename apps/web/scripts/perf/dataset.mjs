@@ -8,8 +8,8 @@
 //
 // **刻意不造 manual 账户**:有它在,每次 getSnapshots / getPortfolioHistory 都会去 CoinGecko 取
 // 今日价(今日桶永不缓存),沙箱里出网被挡,一发 36s —— 测出来的是网络,不是 CPU。
-import { createHash } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { createCipheriv, createHash, randomBytes } from "node:crypto";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
@@ -17,6 +17,7 @@ import {
   DAILY_PRICE_TOKENS,
   DAY_MS,
   HOUR_MS,
+  MIGRATIONS_DIR,
   PERF_STATE_DIR,
 } from "./constants.mjs";
 
@@ -84,6 +85,56 @@ const DRIFT_PERIOD_H = 11;
 const DRIFT_AMPLITUDE = 0.08;
 /** 账户与组合的「创建时间」往前推多少天。 */
 const HISTORY_AGE_DAYS = 90;
+
+/** AES-GCM 的参数 —— 与 `@folio/connectors-basic` 的 crypto.ts 逐项一致(那边是 Web Crypto)。 */
+const SECRET_KEY_BYTES = 32;
+const GCM_IV_BYTES = 12;
+
+/**
+ * 按 app 的规矩封一个 secret 字段:`base64(IV(12) ‖ 密文 ‖ GCM tag)`。Web Crypto 的 AES-GCM 输出
+ * 就是「密文 ‖ tag」,所以这里拼出来的与 `encrypt()` 同形,worker 用同一把 SECRETS_KEY 解得开。
+ */
+function sealSecret(plaintext, secretsKey) {
+  const key = Buffer.from(secretsKey, "base64");
+  if (key.length !== SECRET_KEY_BYTES) throw new Error("SECRETS_KEY must be base64 of 32 bytes");
+  const iv = randomBytes(GCM_IV_BYTES);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const body = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  return Buffer.concat([iv, body, cipher.getAuthTag()]).toString("base64");
+}
+
+/**
+ * 一个账户的 creds map(存库形状):secret 字段封好,public / semi 明文 —— 与 `sealCreds` 同一份规矩
+ * (字段表见各 connector 的 account.creds)。凭据是假的:同步打到的是本机假上游
+ * (`fake-upstream.mjs`),它不验签。读路径(perf:cpu)不解密,只看得到 semi 的打码与 public。
+ */
+function credsFor(connectorId, i, secretsKey) {
+  const seal = (v) => sealSecret(v, secretsKey);
+  const evmAddress = `0x${createHash("sha256").update(`folio-perf:addr:${i}`).digest("hex").slice(0, 40)}`;
+  switch (connectorId) {
+    case "binance":
+    case "bybit":
+      return {
+        apiKey: `perf-${connectorId}-key-${i}`,
+        secret: seal(`perf-${connectorId}-secret-${i}`),
+      };
+    case "okx":
+      return {
+        apiKey: `perf-okx-key-${i}`,
+        secret: seal(`perf-okx-secret-${i}`),
+        passphrase: seal(`perf-okx-pass-${i}`),
+      };
+    case "bitcoin":
+      return { addressOrXpub: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq" };
+    case "solana":
+      return {
+        address: `PerfSo1${createHash("sha256").update(`sol:${i}`).digest("hex").slice(0, 37)}`,
+      };
+    default:
+      // evm / hyperliquid:一个 EVM 地址。
+      return { address: evmAddress };
+  }
+}
 
 /** 由种子串散列出一个 UUID 形状的 id(版本位 4、变体位 8),同一种子恒得同一个 id。 */
 function stableId(seed) {
@@ -190,7 +241,7 @@ function seedTokens(db, userId, nTokens, now) {
   return tokens;
 }
 
-function seedAccounts(db, userId, portfolioId, nAccounts, now) {
+function seedAccounts(db, userId, portfolioId, nAccounts, now, secretsKey) {
   const insAccount = db.prepare(
     "insert into accounts (id,user_id,connector_id,platform,label,enc_credentials,created_at,archived_at) values (?,?,?,?,?,?,?,?)",
   );
@@ -202,8 +253,9 @@ function seedAccounts(db, userId, portfolioId, nAccounts, now) {
     const t = ACCOUNT_TEMPLATES[i % ACCOUNT_TEMPLATES.length];
     const id = stableId(`account:${i}`);
     const label = i < ACCOUNT_TEMPLATES.length ? t.label : `${t.label} #${i}`;
-    // 凭据只放一个 public 字段:读路径不解密,也就不需要 SECRETS_KEY 封过的密文。
-    const creds = JSON.stringify({ address: "0x00000000000000000000000000000000000000ff" });
+    // 凭据按真账户的形状封好(secret 字段用 SECRETS_KEY 加密):cron 的同步要能真的解开、真的出网
+    // (perf:cpu:jobs),否则它在「缺凭据」那一步就跳过,量不到取数与估值。
+    const creds = JSON.stringify(credsFor(t.connectorId, i, secretsKey));
     insAccount.run(
       id,
       userId,
@@ -291,6 +343,26 @@ function seedSnapshots(db, accounts, tokens, hours, now) {
   return { nSnap, nBal };
 }
 
+// 快照的日汇总(FOL-91)。生产上它由写快照那个 batch 维护、存量由迁移回填;这里快照是直写
+// SQLite 灌的,绕过了写侧 —— 不补的话长窗曲线读到一张空表,量出来的是「没数据」有多快。
+// **跑的就是迁移里那条回填语句**(从迁移文件里取,不另抄一份):灌完快照后重算一遍,与存量
+// 用户升级那一刻的结果相同。
+const DAILY_TOTALS_TABLE = "account_daily_totals";
+
+function seedDailyTotals(db) {
+  const file = readdirSync(MIGRATIONS_DIR).find(
+    (f) => f.endsWith(".sql") && f.includes(DAILY_TOTALS_TABLE),
+  );
+  // 没有这条迁移 = 被测的是 FOL-91 之前的代码(前后对比时的 BEFORE 那份),那时没有这张表 —— 跳过。
+  if (!file) return null;
+  const backfill = readFileSync(join(MIGRATIONS_DIR, file), "utf8")
+    .split("--> statement-breakpoint")
+    .find((stmt) => stmt.includes(`INSERT OR REPLACE INTO \`${DAILY_TOTALS_TABLE}\``));
+  if (!backfill) throw new Error(`no backfill statement in ${file}`);
+  db.exec(backfill);
+  return db.prepare(`select count(*) as n from ${DAILY_TOTALS_TABLE}`).get().n;
+}
+
 function seedDailyPrices(db, tokens, now) {
   const ins = db.prepare(
     "insert or replace into token_daily_prices (token_ref,day_bucket,unit_price) values (?,?,?)",
@@ -309,7 +381,7 @@ function seedDailyPrices(db, tokens, now) {
  * 清空业务表并重灌。返回各表行数,调用方打印出来 —— 数据集大小是结果的一部分,
  * 不同大小的两次运行不可比。
  */
-export function seedDataset({ userId, accounts: nAccounts, tokens: nTokens, days }) {
+export function seedDataset({ userId, accounts: nAccounts, tokens: nTokens, days, secretsKey }) {
   const db = new DatabaseSync(perfDbPath());
   let open = false;
   try {
@@ -327,10 +399,11 @@ export function seedDataset({ userId, accounts: nAccounts, tokens: nTokens, days
       "insert into user_settings (user_id,valuation_mode,updated_at,hide_balances) values (?,?,?,?)",
     ).run(userId, "self-first", now, 0);
     const tokens = seedTokens(db, userId, nTokens, now);
-    const accounts = seedAccounts(db, userId, portfolioId, nAccounts, now);
+    const accounts = seedAccounts(db, userId, portfolioId, nAccounts, now, secretsKey);
     seedTags(db, userId, portfolioId, accounts, now);
     seedCache(db, userId, accounts, now);
     const { nSnap, nBal } = seedSnapshots(db, accounts, tokens, days * 24, now);
+    const nDailyTotals = seedDailyTotals(db);
     const nDaily = seedDailyPrices(db, tokens, now);
     db.exec("COMMIT");
     open = false;
@@ -340,11 +413,60 @@ export function seedDataset({ userId, accounts: nAccounts, tokens: nTokens, days
       tokens: tokens.length,
       snapshots: nSnap,
       snapshotBalances: nBal,
+      dailyTotals: nDailyTotals,
       dailyPrices: nDaily,
     };
   } catch (err) {
     if (open) db.exec("ROLLBACK");
     throw err;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * 让库「老一个小时」:把 perf 用户所有代币的价标成过期(`PRICE_TTL_MS` 是 30 分钟)。
+ *
+ * 为什么要它:生产的整点 sweep 每次都隔着一小时,上一轮取的价**一定**过期了 —— 那一轮必然去
+ * CoinGecko 取价、写价。连着触发几次 cron 的话,第二次起价都还新鲜,那一截就被跳过,量小了。
+ * 其余缓存(汇率 6h、平台 30d、目录 7d)在生产的整点 sweep 里也多半是命中,不动。
+ * worker 必须停着(同 seedDataset)。
+ */
+export function expirePrices(userId) {
+  const db = new DatabaseSync(perfDbPath());
+  try {
+    const past = Date.now() - HOUR_MS;
+    return db
+      .prepare(
+        "update tokens set price_expires_at = ?, price_as_of = ? where user_id = ? and price_expires_at is not null",
+      )
+      .run(past, past - HOUR_MS, userId).changes;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * 清掉这个用户的同步轮(`sync-round:*`,ADR 0048)。`perf:cpu:jobs --cron-only` 不等队列排空就停 worker,
+ * 留下没收官的轮;不清的话下一次 cron 在心跳期内看到「活轮还在」就不投 `sync-account`,量的就不是
+ * 同一件事了。
+ */
+export function clearSyncRounds(userId) {
+  const db = new DatabaseSync(perfDbPath());
+  try {
+    return db
+      .prepare("delete from user_cache where user_id = ? and k like 'sync-round:%'")
+      .run(userId).changes;
+  } finally {
+    db.close();
+  }
+}
+
+/** 全局映射表(`global_token_ref_index`)有几行 —— 0 = 还没刷过,sweep 认不出链上的币。 */
+export function refIndexRowCount() {
+  const db = new DatabaseSync(perfDbPath(), { readOnly: true });
+  try {
+    return db.prepare("select count(*) as n from global_token_ref_index").get().n;
   } finally {
     db.close();
   }

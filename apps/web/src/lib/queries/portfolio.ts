@@ -1,5 +1,6 @@
 import { type QueryClient, queryOptions } from "@tanstack/react-query";
 import type { HistoryRange } from "@/lib/core/history-range";
+import { readJson } from "@/lib/core/json-response";
 import {
   computeHomeTabStrip,
   type HomeTabStripView,
@@ -21,7 +22,7 @@ import { portfolioKeys } from "./keys";
  * 一份组合总览的形状(按代币聚合的持仓 + 分段 + 小计)。消费方拆解 sections 时用得上。
  *
  * **它是原子 query 在浏览器合并的产物**(FOL-54 / FOL-56):接口发快照原料 + 富化 + 口径,
- * 总额 / 持仓 / 各小计 / 24h 盈亏 / pricesStale 由 `portfolioOverviewFromAtoms` 算出来。
+ * 总额 / 持仓 / 各小计 / 24h 盈亏由 `portfolioOverviewFromAtoms` 算出来。
  */
 export type PortfolioOverview = OverviewView & { pending: boolean };
 
@@ -60,6 +61,6 @@ export const fetchHomeTabStrip = async (
 export const portfolioHistoryQuery = (portfolioId: string, range: HistoryRange = "30d") =>
   queryOptions({
     queryKey: portfolioKeys.history(portfolioId, range),
-    queryFn: () => getPortfolioHistory({ data: { portfolioId, range } }),
+    queryFn: async () => readJson(await getPortfolioHistory({ data: { portfolioId, range } })),
     staleTime: STALE_TIME.live,
   });

@@ -21,13 +21,15 @@ type StubOf<S> = Omit<S, "_tag">;
 const emptyTokens: StubOf<Oracle["tokens"]> = {
   mint: () => Effect.succeed(new Map()),
   enrich: () => Effect.succeed(new Map()),
+  enrichAll: () => Effect.succeed(new Map()),
   logoUrlById: () => Effect.succeed(Option.none()),
-  priceOf: () => Effect.succeed(Option.none()),
+  pricesOf: () => Effect.succeed(new Map()),
   priceByRef: () => Effect.succeed(Option.none()),
   pricesByRefs: () => Effect.succeed(new Map()),
   refreshStale: () => Effect.succeed({ prices: 0, infos: 0, degraded: false }),
   priceSeries: () => Effect.succeed([]),
   priceAt: () => Effect.succeed(Option.none()),
+  fillDaily: () => Effect.succeed({ calls: 0, done: true, failed: false }),
   topTokens: () => Effect.succeed([]),
   search: () => Effect.succeed([]),
   refreshCatalogue: () => Effect.succeed(0),
@@ -37,6 +39,7 @@ const emptyFx: StubOf<Oracle["fx"]> = {
   resolve: () => Effect.succeed(Option.none()),
   warm: () => Effect.void,
   rateSeries: () => Effect.succeed([]),
+  fillDaily: () => Effect.succeed({ calls: 0, done: true, failed: false }),
 };
 
 const emptyPlatforms: StubOf<Oracle["platforms"]> = {

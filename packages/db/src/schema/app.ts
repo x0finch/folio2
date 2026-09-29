@@ -224,6 +224,37 @@ export const snapshotBalances = sqliteTable(
   (t) => [index("snapshot_balances_snapshot_id_idx").on(t.snapshotId)],
 );
 
+// 快照总额的**日汇总**(FOL-91):每账户每个 UTC 日一行,由 `SnapshotStore.write` 在同一个 batch
+// 里维护(迁移 0009 从存量快照回填一次)。长窗曲线(> 7 天)读它,不再逐行扫快照 —— 一年逐小时
+// 快照是每账户 8760 行,这里是 365 行。
+//
+// **它是派生数据,不是事实**:事实永远是 `snapshots`,这张表可以随时从那边整表重算(迁移里的
+// 回填语句就是那条重算)。所以导出不带它,导入经 `write` 自然重建。
+//
+// 用户隔离同快照:没有 user_id 列,经 `account_id → accounts.user_id` 限定(读侧必 join accounts);
+// 删账户 → 级联删。
+//
+// 四个点都记**值 + 时刻**:open/close 按 taken_at 取首末,min/max 取极值(并列取最早,与
+// min-max 降采样同一条规则)。单账户曲线要把日内极值画在它真实的时刻上,所以时刻也得存。
+export const accountDailyTotals = sqliteTable(
+  "account_daily_totals",
+  {
+    accountId: text("account_id")
+      .notNull()
+      .references(() => accounts.id, { onDelete: "cascade" }),
+    day: integer("day").notNull(), // 该 UTC 日零点的 epoch ms
+    openUsd: real("open_usd").notNull(),
+    openAt: integer("open_at").notNull(),
+    minUsd: real("min_usd").notNull(),
+    minAt: integer("min_at").notNull(),
+    maxUsd: real("max_usd").notNull(),
+    maxAt: integer("max_at").notNull(),
+    closeUsd: real("close_usd").notNull(),
+    closeAt: integer("close_at").notNull(), // 当日最后一张快照的 taken_at
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.day] })],
+);
+
 // —— 代币参考层(canonical-token-aggregation P1)——
 // 全局参考数据,**无 userId**(原则 #6 受控例外,同 listUserIdsWithAccounts)。
 // 代币表 = 系统认识的每个代币一行(CGK 收录币或 provider 孤儿);索引表 = 纯指针(symbol 候选 / tokenRef)。
@@ -417,3 +448,31 @@ export const manualActivity = sqliteTable(
     index("manual_activity_token_id_occurred_at_idx").on(t.tokenId, t.occurredAt),
   ],
 );
+
+// 每个用户一行的**数据版本号**(FOL-94):这个用户任何一处看得见的数据变了,它就 +1。
+// 浏览器把查询缓存存进 IndexedDB,回到页面 / 重开时只问这一个数(`getDataVersion`),变了才重拉。
+//
+// **不靠各个写 op 记得去抬它 —— 靠触发器**(迁移 0010 手写,drizzle-kit 不管触发器)。每张装着
+// 「谁的」可见数据的表各挂 AFTER INSERT/UPDATE/DELETE,在**同一条语句**里 upsert 这一行:与写本身
+// 同一个隐式事务,写回滚它就回滚,而且没有哪个 op(包括将来新加的)能忘。覆盖面由
+// `data-version.test.ts` 按 sqlite_master 数着 —— 新加一张带 user_id / account_id 的表而没决定
+// 它抬不抬版本号,那条用例当场红。
+//
+// **刻意不挂的**(写了也不改用户看见的东西,或者已经有同批的主表写替它抬过):
+//   · `snapshot_balances` / `account_daily_totals` —— 与 `snapshots` 同一个 batch 写,主表那条就够;
+//     每条余额行各抬一次只是白花 D1 的写行数(免费档 10 万行/天)
+//   · `user_cache` —— 参考层缓存 + 同步轮心跳(后者前端另有轮询盯着)
+//   · `token_refs` 与 `tokens` 的价格 / 信息刷新 —— 参考层自己的 SWR,前端有 `prices.refreshed`
+//     那条定向刷新;`tokens` 只在用户能改的三列(symbol / name / self_price)**真的变了**时抬
+//
+// 删用户时各表级联删,触发器里的 `EXISTS (SELECT 1 FROM user …)` 让这些级联不再往回插版本行
+// (否则撞本表的外键,整次删用户失败)。
+//
+// **重建(drizzle 的 `__new_X`)触发器引用到的表会在 RENAME 处失败** —— 迁移开头删光、末尾建回
+// 全部触发器(`pnpm db:triggers` 生成),见 ADR 0057。
+export const userDataVersion = sqliteTable("user_data_version", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => user.id, { onDelete: "cascade" }),
+  version: integer("version").notNull().default(0),
+});

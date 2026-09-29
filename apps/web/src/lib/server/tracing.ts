@@ -45,12 +45,10 @@ import { Effect, Layer, Option, Tracer } from "effect";
 // 也因此 `flush` 不做惰性拼串:树只在 debug 落地时才存在,它拼出来的字符串一定会被打出去。
 // 要看树就把 `LOG_LEVEL` 调成 `debug`(见 entry/log-level.ts)。
 
-// —— **它接不到的那一处** ——
+// —— **队列那一侧** ——
 //
-// `/api/sync` 的后台任务(`driveRound` 里那句 `runPromise`)**另起一条根 fiber**,而根 fiber
-// 不继承外层的 `Effect.provide`(#504 T12 里为日志层实测过同一件事)。所以那一趟同步不出树。
-// 没顺手补上是有判据的:一轮几十秒、逐账户落库,「一次请求一棵树」这个形状对它本来就不合适
-// —— 真要看它,轮记录本身(ADR 0048)就是它的账本,树该另行设计,不是把这份硬塞进去。
+// 同步(cron / 手动 / 单账户,FOL-86 / FOL-89)跑在队列 consumer 里,一条消息一次 `runAtEdge`,
+// 各出各的树。以前 `/api/sync` 在 waitUntil 里另起一条根 fiber 跑整轮、接不到这棵树 —— 那条路已经没了。
 //
 // **不影响 `Cause.pretty` 里的 handler 名**(T6 那半):换掉 tracer 之后错误堆栈里的
 // `at createTabPin` 照旧(实测过 —— 默认 tracer 与这份并排跑,两边输出逐字相同)。
@@ -142,7 +140,7 @@ const tracerOf = (c: Collector): Tracer.Tracer =>
  * 互不串,也不必操心跨请求的 Map 会不会漏。
  *
  * `emit` 可注入,只为单测能把树接出来看(生产路径用默认的那个 debug 日志)—— 与
- * `warmAllUsers` 的 `warmOne`、`pruneNotesAllUsers` 的 `pruneOne` 同一个理由。
+ * `fanOutAllUsers` 的 `fanOutOne`、`consumeMessage` 的 `run` 同一个理由。
  */
 export const spanTracerTo = (emit: (tree: string) => void): Layer.Layer<never> =>
   Layer.unwrapEffect(Effect.sync(() => Layer.setTracer(tracerOf(makeCollector(emit)))));

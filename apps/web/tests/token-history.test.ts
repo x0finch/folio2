@@ -1,127 +1,83 @@
 import { describe, expect, it } from "vitest";
-import { downsampleSeries } from "@/lib/core/history";
-import {
-  buildTokenValueHistory,
-  type TokenHistRow,
-  tokenValueHistoryFromRaw,
-} from "@/lib/core/portfolio";
+import { downsampleSeries, minMaxDownsampleHistory } from "@/lib/core/history";
+import { tokenValueHistoryFromRaw } from "@/lib/core/portfolio";
 
-const USDC = "tok-usdc"; // 归并键**就是** token_id 本身(ADR 0021 / #201:三级键塌成一级)
+// 单币价值曲线的浏览器那一半(FOL-92):归属与「只数现货」、每快照合计已在 SQL 里做完
+// (`packages/db` 的 `listTokenValueTotals`,那边的用例钉着),这里拿到的是每账户的 (时刻, 价值)。
 
-const r = (p: {
-  acct: string;
-  takenAt: number;
-  value: number;
-  kind?: string;
-  tokenId?: string;
-  symbol?: string;
-}): TokenHistRow => ({
-  symbol: p.symbol ?? "USDC",
-  amount: p.value,
-  value: p.value,
-  kind: p.kind ?? "spot",
-  account: { id: p.acct, label: "", connectorId: "" },
-  tokenId: p.tokenId,
-  takenAt: p.takenAt,
-});
+const H = 3_600_000;
 
-describe("buildTokenValueHistory", () => {
-  it("跨账户阶梯重建:某时刻 = Σ 各账户 ≤该刻最近快照里的该币价值", () => {
-    const s = buildTokenValueHistory(
-      [
-        r({ acct: "A", takenAt: 100, value: 10, tokenId: USDC }),
-        r({ acct: "A", takenAt: 200, value: 12, tokenId: USDC }),
-        r({ acct: "B", takenAt: 200, value: 5, tokenId: USDC }),
-        r({ acct: "B", takenAt: 300, value: 6, tokenId: USDC }),
+describe("tokenValueHistoryFromRaw", () => {
+  it("跨账户阶梯重建:某时刻 = Σ 各账户 ≤该刻最近一行", () => {
+    const s = tokenValueHistoryFromRaw({
+      rows: [
+        { accountId: "A", takenAt: 100 * H, totalUsd: 10 },
+        { accountId: "A", takenAt: 200 * H, totalUsd: 12 },
+        { accountId: "B", takenAt: 200 * H, totalUsd: 5 },
+        { accountId: "B", takenAt: 300 * H, totalUsd: 6 },
       ],
-      USDC,
-    );
+      sampled: false,
+    });
     // t100: A=10;t200(同刻并入):A=12,B=5→17;t300:A=12(沿用)+B=6→18
     expect(s).toEqual([
-      { t: 100, total: 10 },
-      { t: 200, total: 17 },
-      { t: 300, total: 18 },
+      { t: 100 * H, total: 10 },
+      { t: 200 * H, total: 17 },
+      { t: 300 * H, total: 18 },
     ]);
   });
 
-  it("只算匹配本 key 的 eligible 行:别的币 / defi 仓位排除", () => {
-    const s = buildTokenValueHistory(
-      [
-        r({ acct: "A", takenAt: 100, value: 10, tokenId: USDC }), // 命中 tok-usdc
-        r({ acct: "A", takenAt: 100, value: 99, kind: "defi", tokenId: USDC }), // 同 key 但 defi 不 eligible
-        r({ acct: "A", takenAt: 100, value: 7, tokenId: "tok-eth", symbol: "ETH" }), // 别的 key
-      ],
-      USDC,
-    );
-    expect(s).toEqual([{ t: 100, total: 10 }]);
+  it("短窗:重建 + 自适应降采样(与账户/总览短窗同口径)", () => {
+    const rows = Array.from({ length: 48 }, (_, i) => ({
+      accountId: "A",
+      takenAt: i * H,
+      totalUsd: 100 + i,
+    }));
+    const s = tokenValueHistoryFromRaw({ rows, sampled: false });
+    expect(s).toEqual(downsampleSeries(rows.map((r) => ({ t: r.takenAt, total: r.totalUsd }))));
   });
 
-  it("同账户同快照多行(跨链)→ 汇总", () => {
-    const s = buildTokenValueHistory(
-      [
-        r({ acct: "A", takenAt: 100, value: 10, tokenId: USDC }),
-        r({ acct: "A", takenAt: 100, value: 4, tokenId: USDC }),
-      ],
-      USDC,
-    );
-    expect(s).toEqual([{ t: 100, total: 14 }]);
+  it("长窗:重建之后 min-max 降采样,尖峰与深谷都在", () => {
+    const DAY = 86_400_000;
+    const rows = Array.from({ length: 200 }, (_, i) => ({
+      accountId: "A",
+      takenAt: i * DAY,
+      totalUsd: i === 77 ? 5000 : i === 133 ? 1 : 100,
+    }));
+    const s = tokenValueHistoryFromRaw({ rows, sampled: true });
+    expect(s.length).toBeLessThanOrEqual(80 + 2);
+    const totals = s.map((p) => p.total);
+    expect(Math.max(...totals)).toBe(5000);
+    expect(Math.min(...totals)).toBe(1);
+    expect(s[0]).toEqual({ t: 0, total: 100 });
+    expect(s.at(-1)).toEqual({ t: 199 * DAY, total: 100 });
   });
 
-  it("perp 权益不计入(#129:只认现货,与聚合同口径);无匹配 → 空序列", () => {
-    const equity = buildTokenValueHistory(
-      [r({ acct: "H", takenAt: 100, value: 8, kind: "perp_equity", tokenId: USDC })],
-      USDC,
-    );
-    expect(equity).toEqual([]); // 权益不 eligible → 单币历史里也没有它
-    expect(buildTokenValueHistory([], USDC)).toEqual([]);
+  it("没有行 → 空曲线", () => {
+    expect(tokenValueHistoryFromRaw({ rows: [], sampled: true })).toEqual([]);
   });
 });
 
-describe("tokenValueHistoryFromRaw", () => {
-  it("短窗:原料行 → 重建 + 自适应降采样(与账户/总览短窗同口径)", () => {
-    const raw = {
-      rows: [
-        {
-          accountId: "A",
-          takenAt: 100,
-          amount: 10,
-          usdValue: 10,
-          kind: "spot",
-          tokenId: USDC,
-          metaJson: null,
-        },
-        {
-          accountId: "B",
-          takenAt: 200,
-          amount: 5,
-          usdValue: 5,
-          kind: "spot",
-          tokenId: USDC,
-          metaJson: null,
-        },
-      ],
-      sampled: false,
-    };
-    expect(tokenValueHistoryFromRaw(raw, USDC)).toEqual(
-      downsampleSeries(
-        buildTokenValueHistory(
-          [
-            r({ acct: "A", takenAt: 100, value: 10, tokenId: USDC }),
-            r({ acct: "B", takenAt: 200, value: 5, tokenId: USDC }),
-          ],
-          USDC,
-        ),
-      ),
-    );
+describe("minMaxDownsampleHistory", () => {
+  it("每桶留最低与最高,首末点强制保留,升序", () => {
+    const pts = Array.from({ length: 1000 }, (_, i) => ({ t: i, total: Math.sin(i / 10) * 100 }));
+    const out = minMaxDownsampleHistory(pts, 20);
+    expect(out.length).toBeLessThanOrEqual(20 * 2 + 2);
+    expect(out[0]).toEqual(pts[0]);
+    expect(out.at(-1)).toEqual(pts.at(-1));
+    expect(Math.max(...out.map((p) => p.total))).toBe(Math.max(...pts.map((p) => p.total)));
+    expect(Math.min(...out.map((p) => p.total))).toBe(Math.min(...pts.map((p) => p.total)));
+    const ts = out.map((p) => p.t);
+    expect([...ts].sort((a, b) => a - b)).toEqual(ts);
   });
 
-  it("长窗:直接用服务端已降采样的 points,不再在浏览器重建", () => {
-    const points = [
-      { t: 1000, total: 10 },
-      { t: 2000, total: 30 },
-      { t: 3000, total: 20 },
-    ];
-    // rows 为空、sampled=true → 原样返回 points(服务端已 min-max)。
-    expect(tokenValueHistoryFromRaw({ rows: [], points, sampled: true }, USDC)).toEqual(points);
+  it("≤ 1 个点 / 全在同一刻 → 原样", () => {
+    expect(minMaxDownsampleHistory([])).toEqual([]);
+    expect(minMaxDownsampleHistory([{ t: 1, total: 2 }])).toEqual([{ t: 1, total: 2 }]);
+    expect(
+      minMaxDownsampleHistory([
+        { t: 1, total: 2 },
+        { t: 1, total: 3 },
+      ]),
+    ).toEqual([{ t: 1, total: 2 }]);
   });
 });

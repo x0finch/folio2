@@ -13,8 +13,9 @@ export const syncKeys = {
   /** 整个同步域的前缀 —— 刷新映射表用它(目前只有 round 查询)。 */
   all: ["sync"] as const,
   /**
-   * 这个组合最近一轮同步(ADR 0048)。**在 `all` 前缀之下**,所以「一轮跑完」那条定向刷新
-   * 照样盖得住它。按组合一份:切组合看的就是另一轮。
+   * 这个组合最近一轮同步(ADR 0048)。**在 `all` 前缀之下**,所以账户增删、组合改动、导入与
+   * 数据版本号变了那几条定向刷新都盖得住它(「轮前进一格」那条除外 —— 它就是读这个键读出来的)。
+   * 按组合一份:切组合看的就是另一轮。
    *
    * 页头同步摘要(FOL-58)不再单独占 key —— 由 accounts + snapshots 在浏览器派生。
    */
@@ -141,4 +142,12 @@ export const tokenKeys = {
   search: (query: string) => [...tokenKeys.all, "search", query] as const,
   /** 用户全部已知代币的展示富化(name/price/logo/change24h,FOL-54)。 */
   enrichment: () => [...tokenKeys.all, "enrichment"] as const,
+};
+
+export const dataVersionKeys = {
+  /**
+   * 这个用户的数据版本号(FOL-94)。**不在任何数据域前缀之下** —— 号一变就要失效那批数据查询
+   * (`REFRESH_MAP["data.changed"]`),它自己若在那批里面,就会把刚问回来的号一并标旧、再问一遍。
+   */
+  all: ["data-version"] as const,
 };

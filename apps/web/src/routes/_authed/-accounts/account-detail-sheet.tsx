@@ -44,10 +44,10 @@ import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
 import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
+import { syncAccountAndWait } from "@/lib/queries/account-sync";
 import { accountHistoryQuery } from "@/lib/queries/accounts";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { archiveAccount, removeAccount, renameAccount } from "@/lib/server/accounts";
-import { syncAccount } from "@/lib/server/sync";
 import { TrendPanel } from "@/routes/_authed/-home/hero/trend-panel";
 import { deltaTone, GainSkeleton, NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
 import { type AccountRow, accountShare, shareLabel } from "./list-rows";
@@ -333,7 +333,8 @@ function useAccountSheetWrites(account: AccountRow, onClose: () => void) {
   const refreshArchive = () => invalidateFor(queryClient, "account.archive");
 
   const syncMut = useMutation({
-    mutationFn: () => syncAccount({ data: { accountId: account.id } }),
+    // 发起 + 等它在队列里跑完(FOL-89):`syncPending` 覆盖整段,菜单项在那期间保持禁用。
+    mutationFn: () => syncAccountAndWait(queryClient, account.id),
     onSuccess: async (r) => {
       if (r.ok) toast.success(t("synced", { count: 1 }));
       // 缺凭据也是「跳过」,但它是用户能修的那种(#527 裁定 2):以前和手记账户共用一个静默

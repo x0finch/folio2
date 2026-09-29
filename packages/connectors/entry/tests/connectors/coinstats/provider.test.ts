@@ -37,12 +37,28 @@ const failing = (
 ): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
 
 describe("工厂:一份适配服务三条链", () => {
-  it("每个 connectionId 产出 id=coinstats 的 provider,声明 COINSTATS_API_KEY", () => {
+  it("每个 connectionId 产出 id=coinstats 的 provider,声明 COINSTATS_API_KEY + base 覆盖", () => {
     for (const chain of ["solana", "sui-wallet", "cosmos"]) {
       const provider = createCoinstatsProvider(chain);
       expect(provider.id).toBe("coinstats");
-      expect(provider.creds.map((f) => f.key)).toEqual(["COINSTATS_API_KEY"]);
+      expect(provider.creds.map((f) => f.key)).toEqual(["COINSTATS_API_KEY", "COINSTATS_API_BASE"]);
+      expect(provider.creds.find((f) => f.key === "COINSTATS_API_BASE")?.type).toBe("public");
     }
+  });
+
+  it("base 覆盖生效,默认 host 一个不留;不设就走官方", async () => {
+    const stub = httpStub(() => json(solana));
+    const provider = createCoinstatsProvider("solana");
+    await run(
+      stub,
+      provider.fetchBalances(
+        ctx({ COINSTATS_API_KEY: KEY, COINSTATS_API_BASE: "http://127.0.0.1:3399/coinstats" }),
+      ),
+    );
+    await run(stub, provider.fetchBalances(ctx()));
+    const [overridden, plain] = stub.calls.map((c) => c.request.url.href);
+    expect(overridden.startsWith("http://127.0.0.1:3399/coinstats/wallet/balance")).toBe(true);
+    expect(plain.startsWith("https://openapiv1.coinstats.app/")).toBe(true);
   });
 
   it("connectionId 绑定各自那条链(sui → 'sui-wallet')", async () => {

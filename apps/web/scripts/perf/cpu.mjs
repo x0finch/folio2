@@ -8,7 +8,6 @@
 //
 // 为什么要它、怎么读输出:见 scripts/perf/README.md。
 import { mkdirSync, writeFileSync } from "node:fs";
-import { availableParallelism, loadavg } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import {
@@ -21,21 +20,21 @@ import {
   DEFAULT_SAMPLING_US,
   DEFAULT_TOKENS,
   DEFAULT_WARMUP,
-  HOST,
   PERF_STATE_DIR,
   PERF_USER,
 } from "./constants.mjs";
-import { endpointInputs, findUserId, seedDataset } from "./dataset.mjs";
+import { endpointInputs } from "./dataset.mjs";
 import { buildEndpoints, ENDPOINT_KEYS } from "./endpoints.mjs";
 import {
   attribute,
-  connectCdp,
+  hostLoad,
   measureProcessCpu,
   profileEndpoint,
   profileFirstRequest,
+  withCdp,
 } from "./profiler.mjs";
 import { formatTable, quantile } from "./report.mjs";
-import { signIn, signUp } from "./session.mjs";
+import { prepareData, signIn } from "./session.mjs";
 import { build, checkDevVars, migrate, originOf, startWorker, stopAll } from "./worker.mjs";
 
 const USAGE = `usage: perf:cpu [options]
@@ -109,46 +108,6 @@ function parseOptions(argv) {
 
 const log = (msg) => process.stderr.write(`[perf] ${msg}\n`);
 
-/**
- * 机器忙的时候(别的进程在抢核)采样量到的 CPU 会整体偏高 —— 被抢走的时间片落在正在跑的帧上。
- * 1 分钟负载超过核数的这个比例就在输出里提醒一句,并把负载写进 summary,两次运行好对照。
- */
-const BUSY_LOAD_RATIO = 0.75;
-
-function hostLoad() {
-  const cpus = availableParallelism();
-  const [load1] = loadavg();
-  return {
-    cpus,
-    load1: +load1.toFixed(2),
-    busy: load1 > cpus * BUSY_LOAD_RATIO,
-    node: process.version,
-  };
-}
-
-/**
- * 保证 perf 用户存在、数据是新灌的,返回 { userId, counts }。
- * 灌数据要求 worker 停着(直写 SQLite),所以「还没注册过」时要先起一次注册、停掉、再灌。
- */
-async function prepareData(opts, workerOpts) {
-  let userId = findUserId(PERF_USER.email);
-  if (!userId) {
-    log(`registering ${PERF_USER.email}`);
-    const w = await startWorker(workerOpts);
-    try {
-      await signUp(originOf(opts.port), PERF_USER);
-    } finally {
-      await w.stop();
-    }
-    userId = findUserId(PERF_USER.email);
-    if (!userId) throw new Error("sign-up succeeded but the user row is not in the perf DB");
-  }
-  if (!opts.seed) return { userId, counts: null };
-  const counts = seedDataset({ userId, ...opts.dataset });
-  log(`seeded ${JSON.stringify(counts)}`);
-  return { userId, counts };
-}
-
 function summarizeRun(endpoint, run, samplingUs) {
   const a = attribute(run, samplingUs);
   const statuses = run.requests.map((r) => r.status);
@@ -177,18 +136,6 @@ function summarizeRun(endpoint, run, samplingUs) {
     owners: a.owners,
     topModules: a.topModules,
   };
-}
-
-async function withCdp(opts, fn) {
-  const cdp = await connectCdp(`ws://${HOST}:${opts.inspectorPort}/ws`);
-  try {
-    await cdp.send("Profiler.enable");
-    await cdp.send("Profiler.setSamplingInterval", { interval: opts.samplingUs });
-    return await fn(cdp);
-  } finally {
-    await cdp.send("Profiler.disable").catch(() => {});
-    cdp.close();
-  }
 }
 
 async function profileWarm(opts, workerOpts, endpoints) {
@@ -247,7 +194,7 @@ async function main() {
   }
   log(`migrating perf DB (${PERF_STATE_DIR})`);
   migrate(logFile);
-  const { userId, counts } = await prepareData(opts, workerOpts);
+  const { userId, counts } = await prepareData({ ...opts, workerOpts, log });
 
   // 登录要 worker 活着;冷启动模式每端点都会重起,cookie 在 D1 里跨重启有效。
   const origin = originOf(opts.port);

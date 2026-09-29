@@ -232,13 +232,19 @@ describe("snapshots", () => {
     expect(await snapshotsOf(USER_A).listTotalsByAccount(acc.id, 999)).toEqual([]);
   });
 
-  it("listBalanceHistoryForToken:只取该 token 在窗口内的余额行,升序", async () => {
+  it("listTokenValueTotals:该 token 每 (账户 × 快照) 的现货合计,窗口 + 桶在 SQL 里", async () => {
     const acc = await accounts(USER_A).create({ connectorId: "binance", label: "B", creds: "x" });
+    const other = await accounts(USER_B).create({ connectorId: "binance", label: "X", creds: "x" });
+    const DAY = 86_400_000;
     await snapshotsOf(USER_A).write(acc.id, {
       takenAt: 100,
       totalUsd: 30,
       balances: [
         { tokenId: "tk-btc", amount: 1, usdValue: 10, kind: "spot", platform: "binance" },
+        // 同一张快照里同一个币在两条链上 → 合计
+        { tokenId: "tk-btc", amount: 1, usdValue: 5, kind: "spot", platform: "ethereum" },
+        // 非现货不算(与 viewKind 口径一致)
+        { tokenId: "tk-btc", amount: 1, usdValue: 99, kind: "defi", platform: "binance" },
         { tokenId: "tk-eth", amount: 1, usdValue: 20, kind: "spot", platform: "binance" },
       ],
     });
@@ -247,15 +253,100 @@ describe("snapshots", () => {
       totalUsd: 40,
       balances: [{ tokenId: "tk-btc", amount: 1, usdValue: 30, kind: "spot", platform: "binance" }],
     });
+    await snapshotsOf(USER_A).write(acc.id, {
+      takenAt: DAY + 5,
+      totalUsd: 40,
+      balances: [{ tokenId: "tk-btc", amount: 1, usdValue: 40, kind: "spot", platform: "binance" }],
+    });
+    await snapshotsOf(USER_B).write(other.id, {
+      takenAt: 200,
+      totalUsd: 1,
+      balances: [{ tokenId: "tk-btc", amount: 1, usdValue: 1, kind: "spot", platform: "binance" }],
+    });
 
-    expect(await snapshotsOf(USER_A).listBalanceHistoryForToken("tk-btc")).toEqual([
-      expect.objectContaining({ takenAt: 100, usdValue: 10, tokenId: "tk-btc" }),
-      expect.objectContaining({ takenAt: 300, usdValue: 30, tokenId: "tk-btc" }),
+    const store = snapshotsOf(USER_A);
+    expect(await store.listTokenValueTotals("tk-btc", undefined, "snapshot")).toEqual([
+      { accountId: acc.id, takenAt: 100, totalUsd: 15 },
+      { accountId: acc.id, takenAt: 300, totalUsd: 30 },
+      { accountId: acc.id, takenAt: DAY + 5, totalUsd: 40 },
     ]);
-    expect(await snapshotsOf(USER_A).listBalanceHistoryForToken("tk-btc", 200)).toEqual([
-      expect.objectContaining({ takenAt: 300, usdValue: 30 }),
+    expect(await store.listTokenValueTotals("tk-btc", 200, "snapshot")).toEqual([
+      { accountId: acc.id, takenAt: 300, totalUsd: 30 },
+      { accountId: acc.id, takenAt: DAY + 5, totalUsd: 40 },
     ]);
-    expect(await snapshotsOf(USER_A).listBalanceHistoryForToken("tk-doge")).toEqual([]);
+    // 按日:每账户每个 UTC 日留最后一行。
+    expect(await store.listTokenValueTotals("tk-btc", undefined, "day")).toEqual([
+      { accountId: acc.id, takenAt: 300, totalUsd: 30 },
+      { accountId: acc.id, takenAt: DAY + 5, totalUsd: 40 },
+    ]);
+    const sampled = await store.listTokenValueTotals("tk-btc", undefined, "sampled");
+    expect(sampled.at(-1)).toEqual({ accountId: acc.id, takenAt: DAY + 5, totalUsd: 40 });
+    expect(await store.listTokenValueTotals("tk-doge", undefined, "snapshot")).toEqual([]);
+  });
+
+  it("latestRaw / asOfRaw:与 latest / asOf 同一组快照,原样元组、note 不解析", async () => {
+    const a = await accounts(USER_A).create({ connectorId: "binance", label: "A", creds: "x" });
+    const b = await accounts(USER_A).create({ connectorId: "binance", label: "B", creds: "x" });
+    const theirs = await accounts(USER_B).create({
+      connectorId: "binance",
+      label: "X",
+      creds: "x",
+    });
+    const note = [{ title: "t", content: "c" }];
+    await snapshotsOf(USER_A).write(a.id, {
+      takenAt: 100,
+      totalUsd: 1,
+      balances: [{ tokenId: "tk-old", amount: 1, usdValue: 1, kind: "spot" }],
+    });
+    await snapshotsOf(USER_A).write(a.id, {
+      takenAt: 200,
+      totalUsd: 30,
+      note,
+      balances: [
+        {
+          tokenId: "tk-btc",
+          amount: 2,
+          usdValue: 20,
+          kind: "spot",
+          platform: "binance",
+          selfPrice: 10,
+        },
+        { tokenId: "tk-lp", amount: 1, usdValue: 10, kind: "defi", meta: { protocol: "x" } },
+      ],
+    });
+    await snapshotsOf(USER_A).write(b.id, { takenAt: 150, totalUsd: 5, balances: [] });
+    await snapshotsOf(USER_B).write(theirs.id, { takenAt: 300, totalUsd: 9, balances: [] });
+
+    const raw = await snapshotsOf(USER_A).latestRaw();
+    expect([...raw.snapshots].sort((x, y) => x[1] - y[1])).toEqual([
+      [b.id, 150, 5, null],
+      [a.id, 200, 30, JSON.stringify(note)],
+    ]);
+    expect(
+      raw.balances.map(([acc, , amount, usd, kind, self, platform, token, meta]) => [
+        acc,
+        amount,
+        usd,
+        kind,
+        self,
+        platform,
+        token,
+        meta,
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        [a.id, 2, 20, "spot", 10, "binance", "tk-btc", null],
+        [a.id, 1, 10, "defi", null, null, "tk-lp", JSON.stringify({ protocol: "x" })],
+      ]),
+    );
+    expect(raw.balances).toHaveLength(2);
+
+    // 同一个窗口判据:[floor, t] 里最新那张;窗口里没有的账户不出现。
+    const prev = await snapshotsOf(USER_A).asOfRaw(120, 50);
+    expect(prev.snapshots).toEqual([[a.id, 100, 1, null]]);
+    expect(prev.balances.map((r) => r[7])).toEqual(["tk-old"]);
+    const parsed = await snapshotsOf(USER_A).asOf(120, 50);
+    expect(parsed.map((s) => s.snapshot.accountId)).toEqual([a.id]);
   });
 
   it("persists per-balance note (single Note) + account-level note (Note[]) and safeParses back (note 重设计)", async () => {

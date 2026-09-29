@@ -5,8 +5,29 @@ import {
   KEYS,
   lockNow,
   readLockState,
+  signUpAndLogin,
 } from "./fixtures/app";
 import { expect, test } from "./fixtures/test";
+
+/** 查询缓存那个 IndexedDB 库里按用户存的记录键(`user:<id>`,见 lib/queries/persist.ts)。 */
+const persistedUserKeys = (page: import("@playwright/test").Page) =>
+  page.evaluate(
+    () =>
+      new Promise<string[]>((resolve, reject) => {
+        const open = indexedDB.open("folio-query-cache");
+        open.onupgradeneeded = () => open.result.createObjectStore("clients");
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const all = db.transaction("clients").objectStore("clients").getAllKeys();
+          all.onsuccess = () => {
+            db.close();
+            resolve(all.result.map(String).filter((k) => k.startsWith("user:")));
+          };
+          all.onerror = () => reject(all.error);
+        };
+      }),
+  );
 
 // 同一个人开着好几个标签 —— 这块之前一条测试都没有,而它正是「换个标签就绕过了」最可能藏身的地方。
 //
@@ -71,7 +92,7 @@ test.describe("多个标签页", () => {
   });
 
   test("锁屏摆着,在另一个标签登出 → 不会卡在解不开也退不出的锁屏", async ({ page, addAuth }) => {
-    await addAuth();
+    const auth = await addAuth();
     await enableLock(page);
     await page.goto("/");
     await lockNow(page);
@@ -81,6 +102,11 @@ test.describe("多个标签页", () => {
     // 另一个标签此刻也是锁屏(上一条测过)。**先等锁屏真的出现**再点登出:设置页自己也有一个同名的
     // 登出按钮(用户卡里那个),服务端就渲染出来了 —— 不等的话可能点在那一个上,而它要弹二次确认。
     await expect(other.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
+    // 登出之后两个标签都会落到登录页,而登录页挂着 passkey 的 autofill(conditional UI)——
+    // 虚拟认证器「自动按下」,会把它当场批掉、又登回去(CI 上抓到过:登出 150ms 后第一个标签
+    // 就拿到了新会话,于是停在 `/`)。真人不会替自己按这一下,所以先把凭据清掉:这条测的是「走得掉」,
+    // 不是「autofill 会不会自动登录」。
+    await auth.clearCredentials();
     await other.getByRole("button", { name: /sign out/i }).click();
     await expect(other).toHaveURL(/\/login/);
 
@@ -96,6 +122,38 @@ test.describe("多个标签页", () => {
       }
       expect(page.url()).toMatch(/\/login/);
     }).toPass();
+    await other.close();
+  });
+
+  // review #3:以前登出只停了**本页**的写盘。另一个标签页手里还有整份数据,它的版本号轮询 / 聚焦重拉
+  // 一触发缓存事件,就把 `user:<id>` 原样写回刚清空的库 —— 登出了,组合还躺在盘上。
+  test("一个标签登出 → 另一个标签不再把查询缓存写回 IndexedDB", async ({ page }) => {
+    await signUpAndLogin(page);
+    await dismissPasskeyPrompt(page);
+    const other = await page.context().newPage();
+    await gotoHydrated(other, "/settings");
+    await gotoHydrated(page, "/settings");
+    // 两边都在写:库里有这个用户的那条记录。
+    await expect.poll(() => persistedUserKeys(page)).toHaveLength(1);
+
+    await page.getByRole("button", { name: /sign out/i }).click();
+    await page.locator("button.bg-destructive").click();
+    await expect(page).toHaveURL(/\/login/);
+
+    // 另一个标签:回到前台 → 版本号重问、缓存事件照来。写盘节流 1 秒,等到它被送回登录页后再多等
+    // 一个节流窗,确认没有哪次写落下来。
+    //
+    // 它的请求**挂住不回**:会话没了之后重拉会失败,失败状态里带着一个结构化克隆不了的跳转对象,
+    // 那次写盘本来就会失败 —— 验的就成了巧合,不是守卫。挂住时缓存里是「成功 + 正在重拉」,写得进去
+    // (没修之前这里就会留下 `user:<id>`)。
+    await other.route("**/_serverFn/**", () => {});
+    await other.bringToFront();
+    // react-query 的聚焦监听挂在 window 上;手造的事件不冒泡,所以直接发给 window。
+    await other.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+    await expect(other).toHaveURL(/\/login/);
+    await other.waitForTimeout(1_500);
+    expect(await persistedUserKeys(other)).toEqual([]);
+    expect(await persistedUserKeys(page)).toEqual([]);
     await other.close();
   });
 

@@ -13,7 +13,7 @@
 //
 // **对外一张 per-user 门票** + 一个全局维护门面:
 //   `Oracle` —— 聚合,三个字段 `tokens` / `fx` / `platforms`(#504 T15)
-//   `GlobalRefIndexService` 刷全局映射表(cron;不进 `oracleLayer`)
+//   `GlobalRefIndexService` 刷全局映射表(GitHub Actions 里的 Node 脚本,FOL-85;不进 `oracleLayer`)
 //
 // **三个域服务本身不出包了**(#504 T13)。它们仍是这一层的结构(见下面那张图),只是包外
 // 拿不到 Tag —— 一个领域一条拿法,而不是聚合与 Tag 并排两条。
@@ -25,7 +25,7 @@
 //   `fx.ts`             汇率
 //   `platforms.ts`      平台
 //   `oracle.ts`         per-user 装配(三个服务拼成 `oracleLayer`)
-//   `global-ref-index.ts` 刷全局映射表的 cron 门面(`GlobalRefIndexService`,不进 `oracleLayer`)
+//   `global-ref-index.ts` 刷全局映射表的门面(`GlobalRefIndexService`,不进 `oracleLayer`)
 //   `index.ts`          本文件,唯一的对外出口
 //
 // **那个 `global-` 前缀是这一层唯一的分界,而且它划的不是「模块」而是「谁的」。**

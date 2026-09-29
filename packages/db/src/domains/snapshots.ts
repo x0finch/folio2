@@ -21,10 +21,19 @@ import type { NotFound } from "../errors";
 import { accounts, snapshotBalances, snapshots } from "../schema";
 import type { Snapshot, SnapshotBalance } from "../schema/types";
 import {
-  HISTORY_MINMAX_BUCKETS,
+  queryDailyPointsByAccount,
+  recomputeDailyTotal,
+  upsertDailyTotal,
+  utcDay,
+} from "./daily-totals";
+import {
+  ACCOUNT_SAMPLED_BUCKETS,
+  HISTORY_SAMPLED_BUCKETS,
   queryCarryInTotals,
-  queryMinMaxTotalsByAccount,
-  queryMinMaxTotalsInScope,
+  queryDailyTotalsInScope,
+  querySampledPointsByAccount,
+  querySampledSteps,
+  querySampledTotalsInScope,
 } from "./history-minmax";
 import { assertAccountOwned } from "./ownership";
 
@@ -41,6 +50,11 @@ const BALANCE_INSERT_CHUNK = 8;
 // `BUCKET_LADDER[0]` 就是它,而折叠的全部理由就是「读侧本来就只画每个钟点的最后一个点」。
 // 按**绝对钟点**切(`floor(t / HOUR)`),和读侧同一种切法,不是「距上一张一小时内」。
 const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
+// 读端不归「现货」的那几种 kind(`apps/web/src/lib/core/balance-kind.ts` 的 `viewKind`:其余一律
+// 现货兜底)。单币价值历史只数现货 —— 与持仓聚合同一个口径。
+const NON_SPOT_KINDS = ["defi", "perp", "perp_equity", "perp_position"] as const;
 
 export interface SnapshotBalanceInput {
   amount: number;
@@ -102,18 +116,76 @@ export interface SnapshotTotal {
   totalUsd: number;
 }
 
-export interface SnapshotBalanceHistoryRow {
-  accountId: string;
-  takenAt: number;
-  amount: number;
-  usdValue: number;
-  kind: BalanceKind;
-  tokenId: string | null; // 归并身份(写快照时 mint 定死);单币历史按它归属(#201)
-  platform: string | null;
-  metaJson: string | null;
+/**
+ * 读模型「快照原料」的紧凑形状(FOL-92):位置元组,列就是 D1 回来的那几列,note / meta 仍是
+ * **原样 JSON 字符串** —— 解析与校验在浏览器做(`apps/web/src/lib/core/snapshot-wire.ts`)。
+ *
+ * 为什么是元组、为什么不解析:这条是每次打开页面都跑两趟的读(当下 + 24 小时前),一次几十到几百行。
+ * 逐行 `JSON.parse` + zod `safeParse` + 重新拼对象,再让序列化器逐个键写出去,都是 Worker 的 CPU,
+ * 而免费档一请求只有 10ms。D1 的 `raw()` 本来就给数组,原样交出去,服务端就不再有逐行的活。
+ */
+export type SnapshotRawRow = [
+  accountId: string,
+  takenAt: number,
+  totalUsd: number,
+  note: string | null,
+];
+/** 余额行:第一列是它所属快照的账户(每账户恰好一张快照)。balance 级 note 不发 —— 读端从不显示它。 */
+export type BalanceRawRow = [
+  accountId: string,
+  id: string,
+  amount: number,
+  usdValue: number,
+  kind: string,
+  selfPrice: number | null,
+  platform: string | null,
+  tokenId: string | null,
+  metaJson: string | null,
+];
+export interface SnapshotRawRows {
+  snapshots: SnapshotRawRow[];
+  balances: BalanceRawRow[];
 }
 
 export const makeSnapshotStore = (client: DbClient, userId: string) => {
+  /**
+   * `latestWithBalances` 的原料版(FOL-92):同一个「每账户窗口内最新那张」的点查,两条手写 SQL,
+   * 经 `db.values`(D1 `raw()`)直接拿数组 —— 不经 drizzle 的逐行映射,也不逐行解析 JSON。
+   *
+   * 第二条把第一条当子查询内联,而不是先取 id 再 `IN (?, ?, …)`:少一次把 id 攒进 JS,也不再受
+   * D1 每条语句约 100 个绑定参数的限制(账户多于 100 个时旧写法会炸)。子查询由 D1 执行,
+   * 不算 Worker 的 CPU;读数与第一条同形(每账户一次索引点查)。
+   */
+  const latestRawRows = (bounds?: {
+    upTo?: number;
+    floor?: number;
+  }): Effect.Effect<SnapshotRawRows> =>
+    client.query(async (db) => {
+      const upTo = bounds?.upTo != null ? sql` AND x.taken_at <= ${bounds.upTo}` : sql``;
+      const floor = bounds?.floor != null ? sql` AND x.taken_at >= ${bounds.floor}` : sql``;
+      const latestIds = sql`
+        SELECT (
+          SELECT x.id FROM ${snapshots} x
+          WHERE x.account_id = a.id${upTo}${floor}
+          ORDER BY x.taken_at DESC, x.rowid DESC
+          LIMIT 1
+        )
+        FROM ${accounts} a
+        WHERE a.user_id = ${userId}`;
+      const snaps = await db.values<SnapshotRawRow>(sql`
+        SELECT s.account_id, s.taken_at, s.total_usd, s.note
+        FROM ${snapshots} s
+        WHERE s.id IN (${latestIds})`);
+      if (snaps.length === 0) return { snapshots: [], balances: [] };
+      const balances = await db.values<BalanceRawRow>(sql`
+        SELECT s.account_id, b.id, b.amount, b.usd_value, b.kind, b.self_price, b.platform,
+               b.token_id, b.meta_json
+        FROM ${snapshotBalances} b
+        JOIN ${snapshots} s ON s.id = b.snapshot_id
+        WHERE b.snapshot_id IN (${latestIds})`);
+      return { snapshots: snaps, balances };
+    });
+
   /**
    * 每账户「窗口内最新」的快照 + 其余额;`upTo`/`floor` 缺省 = 不设那一侧的界。
    *   · `upTo == null && floor == null` → 每账户最新那张(`latest()`)。
@@ -274,6 +346,13 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
               note: input.note && input.note.length > 0 ? JSON.stringify(input.note) : null,
             }),
             ...balanceInserts,
+            // 日汇总(FOL-91)跟着同一个 batch 走:快照与它的日汇总要么一起落、要么一起不落。
+            //   · 折叠过 → 被删的那张可能正是当天的极值 / 开盘,只能整日重算(子查询读的是本 batch
+            //     删完、插完之后的那一天;钟点 ⊂ 日,所以只动这一天)。
+            //   · 纯追加 → 值只会并进来,和已有行逐项比即可,不回头读快照。
+            opts?.collapseSameHour
+              ? recomputeDailyTotal(db, accountId, utcDay(input.takenAt))
+              : upsertDailyTotal(db, accountId, input.takenAt, input.totalUsd),
           ];
         });
         return snapshotId;
@@ -318,24 +397,122 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
         );
       }),
 
-    listTotalsByAccountMinMax: (
+    /**
+     * 单账户中窗(> 7 天、< 1 年)的数据源(FOL-91):日汇总的 open/min/max/close 点,不降采样 ——
+     * 每天 ≤ 4 点,30 天 ≤ 120 行;浏览器照旧按跨度选桶(30 天跨度落在日桶,取的正是收盘)。
+     */
+    listDailyTotalsByAccount: (
       accountId: string,
       since?: number,
-      buckets = HISTORY_MINMAX_BUCKETS,
+    ): Effect.Effect<{ takenAt: number; totalUsd: number }[], NotFound> =>
+      Effect.gen(function* () {
+        yield* assertAccountOwned(client, userId, accountId);
+        return yield* client.query((db) => queryDailyPointsByAccount(db, accountId, since));
+      }),
+
+    /**
+     * 单账户长窗(1 年 / 全部,FOL-92):日汇总在 SQL 里按桶合并成开 / 低 / 高 / 收,≤ `buckets × 4`
+     * 点。**不降采样** —— min-max 在浏览器做;这里只保证行数有上界、全局极值原样在里面。
+     */
+    listSampledTotalsByAccount: (
+      accountId: string,
+      since?: number,
+      buckets = ACCOUNT_SAMPLED_BUCKETS,
     ): Effect.Effect<{ takenAt: number; totalUsd: number }[], NotFound> =>
       Effect.gen(function* () {
         yield* assertAccountOwned(client, userId, accountId);
         return yield* client.query((db) =>
-          queryMinMaxTotalsByAccount(db, accountId, since, buckets),
+          querySampledPointsByAccount(db, accountId, since, buckets),
         );
       }),
 
-    listTotalsMinMax: (
+    /**
+     * 组合中窗(> 7 天、< 1 年)的数据源(FOL-91):carry-in + 每账户每天一行收盘,不降采样。
+     * 形状与 `listTotals` 相同(浏览器原样重建),行数 ≤ 账户数 × (天数 + 1),与同步频率无关。
+     */
+    listDailyTotals: (
       accountIds: readonly string[],
       since?: number,
-      buckets = HISTORY_MINMAX_BUCKETS,
     ): Effect.Effect<SnapshotTotal[]> =>
-      client.query((db) => queryMinMaxTotalsInScope(db, userId, accountIds, since, buckets)),
+      client.query((db) => queryDailyTotalsInScope(db, userId, accountIds, since)),
+
+    /**
+     * 组合长窗(1 年 / 全部,FOL-92):日收盘 + carry-in,在组合时间线上按桶挑最低 / 最高 / 最后的
+     * 时刻,发各账户在那些时刻的值(review #2,见 `querySampledSteps`),每账户 ≤ `3 × buckets + 1` 行。
+     * 形状与 `listTotals` 相同;重建与 min-max 降采样在浏览器做,重建出的每点都是真实组合值。
+     *
+     * `extra`:表外账户(手记)的阶梯观测,**一起**参与挑候选时刻、一起按候选时刻发回(review R2-#5)——
+     * 混合组合里每个重建点也都是真值。它们原样来原样回,不读任何表。
+     */
+    listSampledTotals: (
+      accountIds: readonly string[],
+      since?: number,
+      buckets = HISTORY_SAMPLED_BUCKETS,
+      extra: readonly SnapshotTotal[] = [],
+    ): Effect.Effect<SnapshotTotal[]> =>
+      client.query((db) =>
+        querySampledTotalsInScope(db, userId, accountIds, since, buckets, extra),
+      ),
+
+    /**
+     * 单币价值历史的原料(FOL-92):某 token_id 每 (账户 × 快照) 的现货价值合计,再按 `bucket`
+     * 合并,升序。形状与 `listTotals` 相同,浏览器照组合曲线那样阶梯重建。
+     *
+     * **合计与「是不是现货」都在 SQL 里判**,以前是把窗口内每一条余额行(带 `meta_json`)原样读进
+     * Worker、在 JS 里逐行 `viewKind` + 归组 —— 一年逐小时就是每账户 8760 行起。现货的判据与
+     * `apps/web` 的 `viewKind(kind) === "spot"` 逐字等价:那边只有这四种 kind 不归现货(遗留的
+     * `perp` 不论 role 是 equity 还是 position 都不是现货),其余一律现货兜底。
+     *
+     * `bucket`:
+     *   · `"snapshot"` —— 不合并,每张快照一行(≤ 7 天的窗口,本来就 ≤ 每小时一行)。
+     *   · `"day"`      —— 每 UTC 日最后一行(浏览器在这个跨度上画的就是每日收盘,取的点完全相同)。
+     *   · `"sampled"`  —— 1 年 / 全部:`querySampledSteps`,在跨账户合计的时间线上按桶挑最低 / 最高 /
+     *     最后的时刻,发各账户在那些时刻的值(每账户 ≤ 3 × `HISTORY_SAMPLED_BUCKETS` + 1 行)。
+     */
+    listTokenValueTotals: (
+      tokenId: string,
+      since: number | undefined,
+      bucket: "snapshot" | "day" | "sampled",
+    ): Effect.Effect<SnapshotTotal[]> =>
+      client.query(async (db) => {
+        // 某 token 每 (账户 × 快照) 的现货合计。
+        const perSnapshot = sql`
+          SELECT s.account_id, s.taken_at, SUM(b.usd_value) AS total
+          FROM ${snapshotBalances} b
+          JOIN ${snapshots} s ON s.id = b.snapshot_id
+          JOIN ${accounts} a ON a.id = s.account_id
+          WHERE a.user_id = ${userId}
+            AND b.token_id = ${tokenId}
+            AND b.kind NOT IN (${sql.join(
+              NON_SPOT_KINDS.map((k) => sql`${k}`),
+              sql`, `,
+            )})${since != null ? sql` AND s.taken_at >= ${since}` : sql``}
+          GROUP BY s.id`;
+        // 长窗:与组合曲线同一套「在组合时间线上挑候选时刻」(review #2)—— 每账户每桶只留最后一行
+        // 会把落在桶中间的尖峰 / 深谷丢掉。
+        if (bucket === "sampled") {
+          return querySampledSteps(
+            db,
+            sql`tp AS (${perSnapshot}),
+            p AS (SELECT account_id, taken_at AS t, total AS v, 1 AS ord FROM tp)`,
+            HISTORY_SAMPLED_BUCKETS,
+          );
+        }
+        const bucketExpr =
+          bucket === "snapshot" ? sql`p.taken_at` : sql`CAST(p.taken_at / ${DAY_MS} AS INTEGER)`;
+        const rows = await db.values<[string, number, number]>(sql`
+          WITH p AS (${perSnapshot}),
+          ranked AS (
+            SELECT p.account_id, p.taken_at, p.total,
+              ROW_NUMBER() OVER (
+                PARTITION BY p.account_id, ${bucketExpr} ORDER BY p.taken_at DESC
+              ) AS rn
+            FROM p
+          )
+          SELECT account_id, taken_at, total FROM ranked WHERE rn = 1 ORDER BY taken_at
+        `);
+        return rows.map(([accountId, takenAt, totalUsd]) => ({ accountId, takenAt, totalUsd }));
+      }),
 
     /** 历史曲线数据源:全部快照的 (accountId, takenAt, totalUsd),按 takenAt 升序。 */
     // 只取这三列、不取 balances(比 `latest` 轻);组合净值时间序列在纯函数里
@@ -365,69 +542,6 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
         return [...carryIn, ...windowRows];
       }),
 
-    /** 全历史余额(跨所有快照):单币价值历史用。可选 since(epoch ms)裁窗口。 */
-    // app 侧按代币身份归属 + 阶梯式重建(见 apps/web buildTokenValueHistory)。每行带其快照的
-    // accountId/takenAt + 该余额的冻结口径列。snapshot_balances 仅按 snapshotId 建索引 → 跨快照全扫;
-    // 自托管单用户量级可接受(见 #121 备注),量大再议加 (account_id, taken_at) 复合索引。
-    listBalanceHistory: (since?: number): Effect.Effect<SnapshotBalanceHistoryRow[]> =>
-      client.query((db) =>
-        db
-          .select({
-            accountId: snapshots.accountId,
-            takenAt: snapshots.takenAt,
-            amount: snapshotBalances.amount,
-            usdValue: snapshotBalances.usdValue,
-            kind: snapshotBalances.kind,
-            tokenId: snapshotBalances.tokenId,
-            platform: snapshotBalances.platform,
-            metaJson: snapshotBalances.metaJson,
-          })
-          .from(snapshotBalances)
-          .innerJoin(snapshots, eq(snapshots.id, snapshotBalances.snapshotId))
-          .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
-          .where(
-            since != null
-              ? and(eq(accounts.userId, userId), gte(snapshots.takenAt, since))
-              : eq(accounts.userId, userId),
-          )
-          .orderBy(asc(snapshots.takenAt)),
-      ),
-
-    /**
-     * 单币价值历史的原料(FOL-50):只取某一 token_id 在窗口内的余额行,升序。
-     * 窗口是 WHERE,不是计算 —— 浏览器拿原样行喂 buildTokenValueHistory。
-     */
-    listBalanceHistoryForToken: (
-      tokenId: string,
-      since?: number,
-    ): Effect.Effect<SnapshotBalanceHistoryRow[]> =>
-      client.query((db) =>
-        db
-          .select({
-            accountId: snapshots.accountId,
-            takenAt: snapshots.takenAt,
-            amount: snapshotBalances.amount,
-            usdValue: snapshotBalances.usdValue,
-            kind: snapshotBalances.kind,
-            tokenId: snapshotBalances.tokenId,
-            platform: snapshotBalances.platform,
-            metaJson: snapshotBalances.metaJson,
-          })
-          .from(snapshotBalances)
-          .innerJoin(snapshots, eq(snapshots.id, snapshotBalances.snapshotId))
-          .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
-          .where(
-            since != null
-              ? and(
-                  eq(accounts.userId, userId),
-                  eq(snapshotBalances.tokenId, tokenId),
-                  gte(snapshots.takenAt, since),
-                )
-              : and(eq(accounts.userId, userId), eq(snapshotBalances.tokenId, tokenId)),
-          )
-          .orderBy(asc(snapshots.takenAt)),
-      ),
-
     /** 每个账户的最新快照 + 其余额(总览数据源)。 */
     latest: (): Effect.Effect<SnapshotWithBalances[]> => latestWithBalances(),
 
@@ -441,6 +555,13 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
      */
     asOf: (t: number, floor: number): Effect.Effect<SnapshotWithBalances[]> =>
       latestWithBalances({ upTo: t, floor }),
+
+    /** `latest()` 的原料版(紧凑元组、JSON 不解析,FOL-92)—— 读接口 `getSnapshots` 用。 */
+    latestRaw: (): Effect.Effect<SnapshotRawRows> => latestRawRows(),
+
+    /** `asOf(t, floor)` 的原料版(同上)。 */
+    asOfRaw: (t: number, floor: number): Effect.Effect<SnapshotRawRows> =>
+      latestRawRows({ upTo: t, floor }),
 
     /** 导出用:分页取全部快照(按 takenAt,id 稳定排序)。 */
     // 配合 `balancesFor` 一页页流式读出,内存恒定;每页配 inArray(≤ 页大小)取余额,

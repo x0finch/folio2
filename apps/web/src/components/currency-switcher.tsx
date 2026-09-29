@@ -1,5 +1,5 @@
 import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
-import { LogoAvatar, Select, SelectContent, SelectItem, SelectTrigger } from "@folio/ui";
+import { LogoAvatar, Select, SelectContent, SelectItem, SelectTrigger, toast } from "@folio/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { storeCurrency, usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
@@ -37,10 +37,14 @@ export function CurrencySwitcher() {
 
   // **顺序是要点**:码是外壳 `useSuspenseQuery` 的键。先写码的话,新键没有数据 → 整个外壳挂起成
   // 骨架闪一下;先把新键取进缓存再写码,换键那一刻数据已经在手。
+  //
+  // **汇率还没有时服务端整体回退 USD**(读端点不出网,汇率由后台每小时暖,FOL-88)。码照样写进去 ——
+  // 查询过期重取时汇率多半已经暖上,界面自己切过去;这一刻说一句,免得「点了没反应」。
   const setCurrency = useMutation({
     mutationFn: async (code: string) => {
-      await queryClient.ensureQueryData(currencyPreferenceQuery(code));
+      const preference = await queryClient.ensureQueryData(currencyPreferenceQuery(code));
       storeCurrency(code);
+      if (preference.currency.code !== code) toast.message(t("noRateYet", { code }));
     },
   });
 

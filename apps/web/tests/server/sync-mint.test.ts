@@ -3,7 +3,7 @@ import { type Balance, ConnectorFailure } from "@folio/connectors-basic";
 import { Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dbFor, globalDb, oracleDbFor } from "./db-effect";
-import { syncOne, syncRound, warmTokensForUser } from "./sync-fns";
+import { refreshCatalogueFor, syncOne, syncRound } from "./sync-fns";
 
 // 写路径切到 mint 的端到端测试(#200):喂 provider 余额 → 落库 → 快照行带正确的 token_id。
 //
@@ -351,7 +351,7 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
 });
 
 // 目录唯一主动跟进的那条路。**断言看 blob 有没有被换掉**,不看网络调用数 ——
-// `warmTokensForUser` 里还有旧参考层的预热也在打 `/coins/markets`,按 URL 数数分不清是谁打的。
+// 按 URL 数数会把别的 `/coins/markets` 调用也算进来,分不清是谁打的。
 describe("同步后的预热把目录刷上(#216)", () => {
   const blobAsOf = async (): Promise<number | undefined> => {
     const hit = await dbFor(USER).cache.get("warm");
@@ -362,16 +362,15 @@ describe("同步后的预热把目录刷上(#216)", () => {
   const LINK = [{ id: "chainlink", symbol: "LINK", rank: 15 }];
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-  // **差分**,不是绝对数:`warmTokensForUser` 里还有旧参考层的预热也在打 `/coins/markets`,
-  // 按 URL 数绝对值分不清是谁打的。两次跑只有目录的 asOf 不同 → 差出来的那几次就是它。
+  // **差分**,不是绝对数:两次跑只有目录的 asOf 不同 → 差出来的那几次就是它。
   it("目录旧了会去刷,还新就不刷", async () => {
     await seedWarm(LINK, Date.now());
-    await warmTokensForUser(USER);
+    await refreshCatalogueFor(USER);
     const fresh = marketsCalls();
 
     outbound.length = 0;
     await seedWarm(LINK, Date.now() - WEEK_MS - 1);
-    await warmTokensForUser(USER);
+    await refreshCatalogueFor(USER);
     const stale = marketsCalls();
 
     expect(stale).toBeGreaterThan(fresh);
@@ -381,16 +380,16 @@ describe("同步后的预热把目录刷上(#216)", () => {
     const fresh = Date.now();
     await seedWarm(LINK, fresh);
 
-    await warmTokensForUser(USER);
+    await refreshCatalogueFor(USER);
 
     expect(await blobAsOf()).toBe(fresh);
   });
 
-  it("预热去刷但上游挂了 → 旧目录保住,同步收尾不抛(它在 waitUntil 里)", async () => {
+  it("预热去刷但上游挂了 → 旧目录保住,这条活不抛(它是尽力而为的预热)", async () => {
     const stale = Date.now() - WEEK_MS - 1;
     await seedWarm(LINK, stale);
 
-    await expect(warmTokensForUser(USER)).resolves.toBeUndefined();
+    await expect(refreshCatalogueFor(USER)).resolves.toBeUndefined();
 
     expect(await blobAsOf()).toBe(stale); // 上游被打桩成抛错 → SWR 保留旧值、不写回
   });

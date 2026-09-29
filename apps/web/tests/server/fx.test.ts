@@ -1,5 +1,7 @@
 import { env } from "cloudflare:test";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { consumeMessage, type QueueMessage } from "@/lib/server/jobs/consume";
 import { handleGetCurrencyPreference } from "@/lib/server/preferences/currency";
 import { displayRate as rateOf } from "@/lib/server/preferences/fx";
 import { runEffect } from "@/lib/server/runtime";
@@ -15,6 +17,23 @@ import { runEffect } from "@/lib/server/runtime";
 
 const displayRate = (userId: string, code: string) =>
   runEffect(() => rateOf(code))({ data: undefined, context: { userId } });
+
+// 汇率的唯一写入口:队列的 `fx` 活(FOL-88)。走生产那条 consumer 路,期望它 ack(上游挂了也 ack ——
+// 参考层自己降级,不交给队列重投)。
+const warmFx = async (userId: string): Promise<void> => {
+  let acked = false;
+  const message: QueueMessage = {
+    id: "m-fx",
+    body: { kind: "fx", userId },
+    attempts: 1,
+    ack: () => {
+      acked = true;
+    },
+    retry: () => {},
+  };
+  await Effect.runPromise(consumeMessage(message));
+  expect(acked).toBe(true);
+};
 
 const USER = "user-fx";
 const OTHER = "user-fx-other";
@@ -69,65 +88,56 @@ describe("USD", () => {
   });
 });
 
-describe("冷缓存 —— 「第一次切币种」那一档", () => {
-  it("库里什么都没有 → 拉一次 → 立刻拿到汇率", async () => {
-    expect(await displayRate(USER, "EUR")).toBeCloseTo(100000 / 92000, 6);
-    expect(outbound).toHaveLength(1);
-    expect(outbound[0]).toContain("/exchange_rates");
-  });
-
-  it("第二次问同一个币种 → 命中缓存,零请求", async () => {
-    await displayRate(USER, "EUR");
+describe("暖过之后(汇率只由队列的 fx 活刷,FOL-88)", () => {
+  it("fx 活暖过 → 读得到汇率,读这一下零出网", async () => {
+    await warmFx(USER);
     outbound = [];
-
     expect(await displayRate(USER, "EUR")).toBeCloseTo(100000 / 92000, 6);
     expect(outbound).toEqual([]);
   });
 
-  it("那一次是一把全拉 → 换个币种也已经是热的(同一份响应顺手写全了)", async () => {
-    await displayRate(USER, "EUR");
+  it("那一次是一把全拉 → 别的币种也已经是热的(同一份响应顺手写全了)", async () => {
+    await warmFx(USER);
     outbound = [];
-
     expect(await displayRate(USER, "JPY")).toBeCloseTo(100000 / 15000000, 9);
     expect(outbound).toEqual([]);
   });
 
   it("真落进了这个用户的缓存(而不是只在内存里)", async () => {
-    await displayRate(USER, "EUR");
+    await warmFx(USER);
     const row = await env.DB.prepare("SELECT v FROM user_cache WHERE user_id = ? AND k = ?")
       .bind(USER, "fx:EUR")
       .first<{ v: string }>();
     expect(Number(row?.v)).toBeCloseTo(100000 / 92000, 6);
   });
 
-  // **隔离的证据是「它得自己出一趟网」**,不是「它拿不到」。
-  //
-  // 这条用例原来是拿一个**不存在的 user** 去问的:写缓存撞外键 → D1 抛 → `displayRate` 那个
-  // 包住一切的 `try/catch` 吞掉 → `undefined`。也就是说它断言的其实是「D1 报错会被吞」。
-  // #362 第 4 站把那个 catch-all 拆了(store 的失败是 defect,一路冒到 `runPromise` —— 与迁移前
-  // 「没人 catch 它」的实际行为一致,只是不再被这一层顺手吞掉),于是这条用例得回到它本来的意思:
-  // 两个**都存在**的用户各有一份缓存,后来的那个蹭不到前一个的。
-  it("按用户隔离:另一个用户问同一个币种,得自己出一趟网", async () => {
+  // 隔离的证据:两个**都存在**的用户各有一份缓存,没暖过的那个蹭不到前一个的(以前的证据是
+  // 「它得自己出一趟网」—— 读路径不出网之后,它就是拿不到)。
+  it("按用户隔离:另一个用户没暖过 → 拿不到,也不出网", async () => {
     await insertUser(OTHER);
-    await displayRate(USER, "EUR");
+    await warmFx(USER);
     outbound = [];
-
-    expect(await displayRate(OTHER, "EUR")).toBeCloseTo(100000 / 92000, 6);
-    expect(outbound).toHaveLength(1); // 它自己出网了一趟,没蹭到别人的缓存
+    expect(await displayRate(OTHER, "EUR")).toBeUndefined();
+    expect(outbound).toEqual([]);
   });
 });
 
 describe("拿不到的时候", () => {
-  it("上游没收录这个币种 → undefined(调用方回退 USD)", async () => {
-    // KRW 不在那份响应里 —— 拉过一次也还是没有,而且不写脏值。
-    expect(await displayRate(USER, "KRW")).toBeUndefined();
-    expect(outbound).toHaveLength(1);
+  it("缓存冷 → undefined,**不出网**(读端点不回源,FOL-88)", async () => {
+    expect(await displayRate(USER, "EUR")).toBeUndefined();
+    expect(outbound).toEqual([]);
   });
 
-  it("上游挂了 → undefined,**不抛** —— 认证区不该因为拿不到汇率而加载失败", async () => {
+  it("上游没收录这个币种 → 暖过也还是 undefined(调用方回退 USD),而且不写脏值", async () => {
+    await warmFx(USER);
+    expect(await displayRate(USER, "KRW")).toBeUndefined();
+  });
+
+  it("上游挂了 → fx 活照样 ack(参考层降级),读 undefined,**不抛**", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
       throw new Error("network down");
     });
+    await warmFx(USER);
     expect(await displayRate(USER, "EUR")).toBeUndefined();
   });
 
@@ -139,13 +149,14 @@ describe("拿不到的时候", () => {
           headers: { "content-type": "application/json" },
         }),
     );
+    await warmFx(USER);
     expect(await displayRate(USER, "EUR")).toBeUndefined();
   });
 });
 
 describe("软过期", () => {
   it("缓存过期了照样给旧值,而且不出网 —— 旧汇率比没汇率好", async () => {
-    await displayRate(USER, "EUR");
+    await warmFx(USER);
     // 把过期戳推到过去(模拟隔了很久没预热)。
     await env.DB.prepare("UPDATE user_cache SET expires_at = 1 WHERE user_id = ? AND k = ?")
       .bind(USER, "fx:EUR")
@@ -165,12 +176,14 @@ describe("getCurrencyPreference", () => {
     runEffect(handleGetCurrencyPreference)({ data: { code }, context: { userId } });
 
   it("支持的币种 + 汇率可得 → 就是那个币种和它的汇率", async () => {
+    await warmFx(USER);
     const pref = await preferenceOf(USER, "EUR");
     expect(pref.currency.code).toBe("EUR");
     expect(pref.rate).toBeCloseTo(100000 / 92000, 6);
   });
 
   it("取不到汇率 → 整体回退 USD(不是「EUR 按 1 算」)", async () => {
+    await warmFx(USER);
     const pref = await preferenceOf(USER, "KRW");
     expect(pref).toMatchObject({ currency: { code: "USD" }, rate: 1 });
   });

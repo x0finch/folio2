@@ -8,6 +8,7 @@ import {
 import { useMemo } from "react";
 import { accountsMatchingPin, toTabPin } from "@/lib/core/accounts-in-view";
 import {
+  type AccountSnapshotEntry,
   assemblePortfolioSnapshotData,
   floorToHour,
   isFirstSyncPending,
@@ -25,7 +26,6 @@ import { valuationSettingsQuery } from "@/lib/queries/settings";
 import { accountTagLinksQuery } from "@/lib/queries/tags";
 import { tokenEnrichmentQuery } from "@/lib/queries/tokens";
 import { getFiatRefs, resolvePlatformMeta } from "@/lib/server/portfolio";
-import type { AccountSnapshot } from "@/lib/server/portfolio/snapshots";
 import { accountHoldingsSnapshotQueries } from "./snapshots";
 
 // 首页总览:原子资源在浏览器合并(FOL-54 / FOL-56)。key 用 hour-floor 锚;当下快照 `at` 用墙钟。
@@ -65,7 +65,7 @@ export function usePortfolioOverview(portfolioId: string, pin?: PinScopeKey): Po
       {
         ...snapshotQueries.now,
         refetchInterval: (query: {
-          state: { dataUpdateCount: number; data?: AccountSnapshot[] };
+          state: { dataUpdateCount: number; data?: AccountSnapshotEntry[] };
         }) => {
           const rows = queryClient.getQueryData(accountListQuery(portfolioId).queryKey);
           if (!rows) return false;
@@ -77,7 +77,7 @@ export function usePortfolioOverview(portfolioId: string, pin?: PinScopeKey): Po
             {
               accounts: active,
               snapshots: (query.state.data ?? []).map(
-                (s: AccountSnapshot) =>
+                (s: AccountSnapshotEntry) =>
                   [s.accountId, { takenAt: s.takenAt, balances: s.balances }] as const,
               ),
               prevSnapshots: [],

@@ -35,7 +35,7 @@ const BUCKET_LADDER = [
 const TARGET_MAX_POINTS = 40;
 
 export type { HistoryRange } from "./history-range";
-export { isLongHistoryRange, rangeSince } from "./history-range";
+export { rangeSince } from "./history-range";
 
 // 自适应降采样:按数据【实际跨度】选桶,每桶保留最后一个点(该桶收盘值),压掉"日内手动多次
 // 同步"造成的密集簇,同时让粒度随数据量自适应 —— 约 1 天数据 → 小时级点,约 30 天 → 日级点。
@@ -54,6 +54,52 @@ export function downsampleSeries(
   const byBucket = new Map<number, HistoryPoint>();
   for (const p of series) byBucket.set(Math.floor(p.t / bucket), p); // 升序 → 后写覆盖 = 该桶最后一个
   return [...byBucket.values()].sort((a, b) => a.t - b.t);
+}
+
+// 长窗(1 年 / 全部)的 min-max 降采样(FOL-46;FOL-92 起在浏览器跑)。按时间把序列切成
+// `buckets` 个桶,每桶留**最低与最高**那两点(同值取更早的)—— 与「每桶留收盘」的 `downsampleSeries`
+// 不同,它保住的是形状里的尖峰和深谷:一年的图只画几十个点,只留收盘会把一次闪崩整个抹掉。
+//
+// **端点强制保留**:首桶 / 末桶的极值不一定落在真正的首 / 末点上。manual 账户各自降采样后要和别的
+// 账户拼起来逐 takenAt 求和,某条序列若缺了窗口起点那个点,别人在更早时刻求和时它会被整个漏掉,
+// 画出假凹口;锚住首末点让每条序列覆盖到窗口两端。末点也是实时净值覆写的那一个。
+//
+// 服务端只剩 manual 账本现算那一处还在用它(那条序列在服务端现造,FOL-90 会接手)。
+export function minMaxDownsampleHistory(
+  points: readonly HistoryPoint[],
+  buckets = TARGET_MAX_POINTS,
+): HistoryPoint[] {
+  if (points.length <= 1) return [...points];
+  const sorted = [...points].sort((a, b) => a.t - b.t);
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const tMin = first.t;
+  const tMax = last.t;
+  if (tMax === tMin) return [first];
+
+  const byBucket = new Map<number, { min: HistoryPoint; max: HistoryPoint }>();
+  for (const p of sorted) {
+    const bucket = Math.min(
+      Math.floor(((p.t - tMin) * (buckets - 1)) / (tMax - tMin)),
+      buckets - 1,
+    );
+    const cur = byBucket.get(bucket);
+    if (!cur) {
+      byBucket.set(bucket, { min: p, max: p });
+      continue;
+    }
+    if (p.total < cur.min.total) cur.min = p;
+    if (p.total > cur.max.total) cur.max = p;
+  }
+
+  const out: HistoryPoint[] = [];
+  for (const { min, max } of byBucket.values()) {
+    out.push(min);
+    if (max !== min) out.push(max);
+  }
+  if (!out.some((p) => p.t === first.t)) out.push(first);
+  if (!out.some((p) => p.t === last.t)) out.push(last);
+  return out.sort((a, b) => a.t - b.t);
 }
 
 // Insights 的走势图专用:**粒度不细于一天**。
@@ -133,11 +179,17 @@ export interface AccountTotals {
 // 逐个对 `liveAccountIds` 取值,**少一个就不换末点**(留住那个冻结值)。于是拿错了顶多是
 // 「末点没跟上实时」,不会是「末点是个错的数」。
 // 顺带也接住了两条查询之间的时间差(中途新建的账户总览里还没有)—— 同样只是这一帧不换。
+//
+// 长窗(`sampled`,FOL-92)的原料是服务端 SQL 在组合时间线上按桶挑出的时刻(每桶最低 / 最高 / 最后),
+// 每个时刻带各账户(手记账户也在那条时间线里,review R2-#5)在那一刻的值(review #2,`@folio/db` 的
+// `querySampledSteps`)—— 所以这里阶梯重建出
+// 的每个点都是真实组合值、极值都在;再 min-max 降采样到屏幕上那几十个点。以前那一步在 Worker 里做。
 export function toPortfolioCurve(
   raw: PortfolioHistoryRaw,
   overview: AccountTotals,
 ): HistoryPoint[] {
-  const series = buildPortfolioHistory(raw.rows, new Map(raw.archivedAt));
+  const rebuilt = buildPortfolioHistory(raw.rows, new Map(raw.archivedAt));
+  const series = raw.sampled ? minMaxDownsampleHistory(rebuilt) : rebuilt;
   if (series.length === 0) return series;
   const byAccount = new Map(overview.accountTotals.map((a) => [a.account.id, a.totalUsd]));
   let live = 0;
@@ -176,7 +228,9 @@ export function buildAccountValueHistory(
     totalUsd: s.totalUsd,
   }));
   const base = buildPortfolioHistory(rows);
-  const series = opts?.sampled ? base : downsampleSeries(base);
+  // 长窗(`sampled`)的原料是服务端按桶封顶过的开 / 低 / 高 / 收(每账户 ≤ 400 点,FOL-92),
+  // 在这里 min-max 降采样;短窗照旧按跨度自适应。
+  const series = opts?.sampled ? minMaxDownsampleHistory(base) : downsampleSeries(base);
   if (live == null || series.length === 0) return series;
   const last = series[series.length - 1];
   if (last.t >= live.t) series[series.length - 1] = { t: last.t, total: live.total };
