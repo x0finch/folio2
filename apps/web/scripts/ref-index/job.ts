@@ -2,7 +2,7 @@ import { GlobalDatabase, provideRemoteDbClient, type RemoteSql } from "@folio/db
 import { GlobalRefIndexService } from "@folio/oracle";
 import { type CoinGeckoConfig, coinGeckoUpstreamLayers } from "@folio/oracle-upstream-coingecko";
 import { Cause, Effect, Exit, Layer, Option } from "effect";
-import { toError } from "../../src/lib/server/errors";
+import { toError } from "@/lib/server/errors";
 
 // 刷全局映射表的**第二个装配点**(FOL-85,ADR 0056)。第一个曾是 Worker 的 23:00 cron —— 同一个
 // `GlobalRefIndexService`、同一张 `GlobalDatabase` 门票、同一个 CoinGecko adapter,只是:

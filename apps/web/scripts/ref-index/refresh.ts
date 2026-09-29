@@ -16,7 +16,7 @@
 // 退出码:0 成功;1 失败(上游 / D1 / 参数)。
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { coinGeckoConfigOf } from "../../src/lib/server/coingecko-config";
+import { coinGeckoConfigOf } from "@/lib/server/coingecko-config";
 import { createD1HttpSql } from "./d1-http";
 import { refreshRefIndex, tallied } from "./job";
 import { openSqliteFile, resolveLocalDb } from "./sqlite-file";
