@@ -172,7 +172,7 @@ export const readSnapshotData = async (userId: string, data: PortfolioScope = {}
  * 读总览 —— 改完数据之后想看「屏幕上是什么」就用它。
  *
  * **走的是首页那条真链路**(FOL-54):原子原料在浏览器算成总览;测试侧用 `overviewFromSnapshotData`
- * 照抄前端合并那一行(不复刻业务逻辑),所以总额 / 持仓 / 小计 / pricesStale 与屏幕上完全同源。
+ * 照抄前端合并那一行(不复刻业务逻辑),所以总额 / 持仓 / 小计与屏幕上完全同源。
  */
 export const readOverview = async (userId: string, data: PortfolioScope = {}) =>
   overviewFromSnapshotData(await readSnapshotData(userId, data));

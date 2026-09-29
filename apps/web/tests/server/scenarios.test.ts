@@ -7,11 +7,9 @@ import {
   buildOverview,
   deriveLiveAccountTotals,
   overviewChainIds,
-  overviewEligibleBalances,
   overviewEnrichIds,
   toTokenView,
 } from "@/lib/core/portfolio";
-import { refreshableTokenIds } from "@/lib/core/token-model";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 import type { AppError } from "@/lib/server/errors";
 import { NAMER } from "@/lib/server/oracle";
@@ -108,14 +106,10 @@ async function overview() {
         enriched,
         settings.valuationMode,
       );
-      const refreshableIds = new Set(
-        refreshableTokenIds(overviewEligibleBalances(accounts, byAccount)),
-      );
       return buildOverview(accounts, byAccount, {
         enriched,
         liveTotals,
         platformMeta,
-        refreshableIds,
         connectorMeta: connectorPlatformMeta,
         mode: settings.valuationMode,
       });

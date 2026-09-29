@@ -168,7 +168,6 @@ describe("portfolio/account-holdings-compose", () => {
       viaHelper.rows[0]?.gain24h?.amount ?? 0,
       6,
     );
-    expect(composed.pricesStale).toBe(viaHelper.pricesStale);
   });
 });
 

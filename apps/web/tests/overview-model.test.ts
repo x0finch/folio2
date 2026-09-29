@@ -11,24 +11,19 @@ import {
   isFirstSyncPending,
   type OverviewInput,
   overviewChainIds,
-  overviewEligibleBalances,
   overviewEnrichIds,
   type PortfolioSnapshotData,
   toTokenView,
 } from "@/lib/core/portfolio";
-import { refreshableTokenIds } from "@/lib/core/token-model";
 import { type OracleStub, runWithOracle } from "./oracle-stub";
 
 // 纯 buildOverview 可脱离 server fn 测(依赖注入)—— 这是 #3 抽读模型的收益。
 // 用假 tokens/platforms + 最小 fixture,覆盖:eligible 过滤 → enrich 附回 → 聚合 → 平台装饰 → 总额。
 //
-// FOL-45 起 buildOverview 是**纯函数**:富化 / 现推净值 / 平台元数据 / 刷价集合都由调用点在
+// FOL-45 起 buildOverview 是**纯函数**:富化 / 现推净值 / 平台元数据都由调用点在
 // Effect 里备好再传进去。这个 `overviewEffect` 就是那层薄适配(与生产总览装配逐字同款),
 // 让每条用例仍旧 `runWithOracle(stub, …)`,只是被测的算术已从 Effect 里拆出来了。
-type OverviewDeps = Omit<
-  OverviewInput,
-  "enriched" | "liveTotals" | "platformMeta" | "refreshableIds"
->;
+type OverviewDeps = Omit<OverviewInput, "enriched" | "liveTotals" | "platformMeta">;
 const overviewEffect = (
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
@@ -48,15 +43,11 @@ const overviewEffect = (
       enriched,
       deps.mode ?? "self-first",
     );
-    const refreshableIds = new Set(
-      refreshableTokenIds(overviewEligibleBalances(accounts, byAccount)),
-    );
     return buildOverview(accounts, byAccount, {
       ...deps,
       enriched,
       liveTotals,
       platformMeta,
-      refreshableIds,
     });
   });
 
@@ -162,75 +153,7 @@ describe("buildOverview", () => {
 
     expect(view.totalUsd).toBe(150);
     expect(view.holdingsSubtotal).toBe(150);
-    // 这个 fake 不给价 → 「有身份、无价」= 该刷(见下面单独一条)。
-    expect(view.pricesStale).toBe(true);
     expect(view.sections).toHaveLength(0); // 无 defi/perp
-  });
-
-  // pricesStale 的口径:有 token_id **却拿不到新鲜价**就该让客户端刷一次。
-  // 新层刚 mint 出的行正是这样(有身份、无价),漏掉它首屏就永远没价而且没人去取。
-  it("价新鲜 → 不标 stale;有身份但没价 / 价过期 → 标 stale", async () => {
-    const accounts = [account("a1", "W")];
-    const one = (over: Partial<OverviewBalance>) =>
-      new Map([["a1", snap("a1", 100, [bal({ amount: 100, usdValue: 100, ...over })])]]);
-    const withPrice = (stale: boolean) => ({
-      enrich: (ids: readonly string[]) =>
-        Effect.succeed(
-          new Map(
-            ids.map((id) => [id, { ...record(id), price: { unitPrice: 1, asOf: 0, stale } }]),
-          ),
-        ),
-    });
-
-    expect(
-      (
-        await runWithOracle(
-          { ...stub, tokens: withPrice(false) },
-          overviewEffect(accounts, one({}), {}),
-        )
-      ).pricesStale,
-    ).toBe(false);
-    expect(
-      (
-        await runWithOracle(
-          { ...stub, tokens: withPrice(true) },
-          overviewEffect(accounts, one({}), {}),
-        )
-      ).pricesStale,
-    ).toBe(true);
-    // 没有身份的行不算 stale —— 刷了也没用(它压根没有可查的键)。
-    expect(
-      (
-        await runWithOracle(
-          { ...stub, tokens: withPrice(false) },
-          overviewEffect(accounts, one({ tokenId: null }), {}),
-        )
-      ).pricesStale,
-    ).toBe(false);
-  });
-
-  // #245 Part 2:dust(几乎 $0 的空投/貔貅币)刷价那侧会被跳过,故这侧也不能标脏 —— 否则
-  // pricesStale 永清不掉(与队列 `prices` 活同用 refreshableTokenIds)。
-  it("dust(值 < 阈值)且无价 → 不标 stale(刷价那侧会跳过它)", async () => {
-    const accounts = [account("a1", "W")];
-    // 无价的 fake tokens(record 不带 price → stale=true 的口径)。
-    const noPrice = {
-      enrich: (ids: readonly string[]) =>
-        Effect.succeed(new Map(ids.map((id) => [id, record(id)]))),
-    };
-
-    // 真持仓(值够)无价 → 该刷;dust(值几乎 0)无价 → 不该刷。
-    const real = new Map([["a1", snap("a1", 100, [bal({ usdValue: 100 })])]]);
-    const dust = new Map([["a1", snap("a1", 0, [bal({ usdValue: 0.0001 })])]]);
-
-    expect(
-      (await runWithOracle({ ...stub, tokens: noPrice }, overviewEffect(accounts, real, {})))
-        .pricesStale,
-    ).toBe(true);
-    expect(
-      (await runWithOracle({ ...stub, tokens: noPrice }, overviewEffect(accounts, dust, {})))
-        .pricesStale,
-    ).toBe(false);
   });
 
   it("场馆键(= connectorId)走 connectorMeta 装饰,不进 platforms.resolve(#52)", async () => {
