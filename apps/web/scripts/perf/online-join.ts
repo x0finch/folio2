@@ -12,7 +12,7 @@ export interface LogEvent {
   source?: { properties?: Record<string, unknown> };
 }
 
-export interface NamedCpuRow {
+interface NamedCpuRow {
   name: string;
   n: number;
   p50: number;
