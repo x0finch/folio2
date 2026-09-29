@@ -15,6 +15,7 @@
     "db:migrate:local": "wrangler d1 migrations apply folio --local",
     "db:migrate:e2e": "wrangler d1 migrations apply folio-e2e --local --env test",
     "db:migrate:remote": "wrangler d1 migrations apply folio --remote",
+    "db:backfill-daily-totals": "node scripts/backfill-daily-totals.mjs",
     "db:migrate:preview": "wrangler d1 migrations apply folio-preview --remote --env preview",
     "db:reset:preview": "node scripts/reset-preview-db.mjs",
     "ref-index:refresh": "tsx --disable-warning=ExperimentalWarning scripts/ref-index/refresh.ts",

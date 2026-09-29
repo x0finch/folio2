@@ -81,6 +81,19 @@ check which side you are on, look for `edge cache: hit` in `wrangler tail` — o
 
 **Existing deployment upgrading past FOL-86:** run step 3b once before the next deploy.
 
+**Existing deployment upgrading past FOL-91 (migration `0009_account_daily_totals`):** run this
+once, **right after that deploy finishes** (manual or CI):
+
+```sh
+cd apps/web && pnpm run db:backfill-daily-totals   # re-runs 0009's backfill on the remote D1
+```
+
+Why: the migration backfills the daily rollup from snapshots, but it runs *before* the deploy, and
+the old Worker keeps writing snapshots (hourly cron, manual sync) until the new one is live — and
+the old code doesn't maintain the rollup. Those in-between snapshots would otherwise stay out of
+the 30d/1y/all charts for good. The statement is read straight from the migration file,
+`INSERT OR REPLACE`, so it's safe to run again any time (append `-- --local` for the dev DB).
+
 ## Updating later (manual)
 
 ```sh
@@ -88,6 +101,7 @@ cd apps/web
 # if schema changed: pnpm --filter @folio/db exec drizzle-kit generate, then:
 pnpm exec wrangler d1 migrations apply folio --remote
 pnpm run deploy
+# first deploy past FOL-91 only: pnpm run db:backfill-daily-totals (see "Verify" above)
 ```
 
 ## Auto-deploy (CI, on tag)
