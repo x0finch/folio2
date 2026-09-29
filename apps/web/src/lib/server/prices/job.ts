@@ -1,4 +1,4 @@
-import { Database, type DbRequest, type NotFound, type SnapshotWithBalances } from "@folio/db";
+import { type BalanceRawRow, Database, type DbRequest, type NotFound } from "@folio/db";
 import { Oracle, type RefreshStaleReport } from "@folio/oracle";
 import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
@@ -22,16 +22,17 @@ const log = getLogger(["folio", "jobs", "prices"]);
 /**
  * 这个用户此刻「在看的币」:最新快照 + 手记合成余额,过同一道 dust 门(`refreshableTokenIds`)。
  * **三门同源**:展示侧标 stale 的集合必须是这里的子集,否则标了 stale 的币永远刷不到。
- * 快照由调用方给(`runPricesJob` 跑的那一刻读一次)。
+ * 快照余额由调用方给(`runPricesJob` 跑的那一刻读一次):**原料元组**(`latestRaw`),不经 drizzle
+ * 映射、不解析 note —— 这里只要四列(code review #1)。
  */
 const heldTokenIdsOf = (
-  snapshots: SnapshotWithBalances[],
+  snapshotRows: readonly BalanceRawRow[],
 ): Effect.Effect<string[], NotFound, Database | DbRequest> =>
   Effect.gen(function* () {
     const accounts = yield* (yield* Database).accounts.list();
     // manual 已退出快照(ADR 0018)→ 从手记的 creds 现造合成余额,否则纯手记用户的币永远暖不到价。
     const manualBalances = yield* manualBalancesForWarm(accounts);
-    return refreshableTokenIds(userDisplayBalances(snapshots, manualBalances));
+    return refreshableTokenIds(userDisplayBalances(snapshotRows, manualBalances));
   });
 
 /**
@@ -77,8 +78,8 @@ export const runPricesJob = (job: PricesJob): Effect.Effect<void, Error> =>
         yield* refreshPricesOf(job.tokenIds);
         return;
       }
-      const snapshots = yield* (yield* Database).snapshots.latest();
-      const [head = [], ...rest] = chunkTokenIds(yield* heldTokenIdsOf(snapshots));
+      const { balances } = yield* (yield* Database).snapshots.latestRaw();
+      const [head = [], ...rest] = chunkTokenIds(yield* heldTokenIdsOf(balances));
       yield* refreshPricesOf(head);
       if (rest.length === 0) return;
       log.info("held prices split across messages", { messages: rest.length + 1 });

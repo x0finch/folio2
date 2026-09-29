@@ -1,4 +1,4 @@
-import type { SnapshotWithBalances } from "@folio/db";
+import type { BalanceRawRow } from "@folio/db";
 import { type TokenRecord, tokenTicket, type UpstreamToken } from "@folio/oracle-basic";
 import { ZERO_DISPLAY_USD } from "@/lib/core/account-view";
 import { isFungible, viewKind } from "@/lib/core/balance-kind";
@@ -160,11 +160,22 @@ export interface TokenOption {
 // `heldTokenIdsOf`,队列 `prices` 活用它)必须喂**同一集合** —— 否则 enrich 标了 stale 的
 // manual 行刷价够不到,价永远旧着(见 lib/tokens.ts 同门注)。都经本函数,保证结构一致,而非各自手拼
 // (手拼正是 T2 首版漏掉 refresh 的成因)。
+//
+// 快照那半收的是**原料元组**(`snapshots.latestRaw()` 的余额行):刷价只看 kind / token_id / platform /
+// usd_value 四列,不需要 drizzle 逐行映射成对象、也不需要解析每行的 note JSON —— 那两步是 `prices`
+// 那条活本机 profile 里可省的一截(code review #1)。
 export function userDisplayBalances(
-  snapshots: SnapshotWithBalances[],
+  snapshotRows: readonly BalanceRawRow[],
   manualBalances: BalanceLike[],
 ): BalanceLike[] {
-  return [...snapshots.flatMap((s) => s.balances), ...manualBalances];
+  const out: BalanceLike[] = snapshotRows.map((r) => ({
+    kind: r[4],
+    usdValue: r[3],
+    platform: r[6],
+    tokenId: r[7],
+  }));
+  for (const b of manualBalances) out.push(b);
+  return out;
 }
 
 // 上游结果 → 下拉项。**logo 是上游直链,不走 folio 代理**:代理端点按内部代币行 id 读库
