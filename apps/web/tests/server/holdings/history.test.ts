@@ -91,7 +91,7 @@ describe("getTokenValueHistory", () => {
 
   it("长窗(all):SQL 按桶封顶(行数与历史长度脱钩),浏览器 min-max 后极值原样", async () => {
     const acc = await seedAccount(USER, "甲");
-    // 400 天、每天一张 → 原样是 400 行;长窗每账户 ≤ 200 行。
+    // 400 天、每天一张 → 原样是 400 行;长窗每账户 ≤ 3 × 100 + 1 = 301 行(review #2)。
     for (let i = 0; i < 400; i++) {
       await seedSnapshot(USER, acc.id, NOW - i * DAY, [
         { tokenId: BTC, amount: 1, usdValue: 100 + (i % 7) * 10 },
@@ -102,9 +102,11 @@ describe("getTokenValueHistory", () => {
 
     expect(raw.sampled).toBe(true);
     expect(raw.rows.length).toBeGreaterThan(0);
-    expect(raw.rows.length).toBeLessThanOrEqual(200);
+    expect(raw.rows.length).toBeLessThanOrEqual(301);
     const series = tokenValueHistoryFromRaw(raw);
     expect(series.length).toBeLessThanOrEqual(82);
+    expect(Math.min(...series.map((p) => p.total))).toBe(100);
+    expect(Math.max(...series.map((p) => p.total))).toBe(160);
     // 末点是最后一张快照(i = 0 → 100)。
     expect(series.at(-1)).toEqual({ t: NOW, total: 100 });
   }, 120_000);
