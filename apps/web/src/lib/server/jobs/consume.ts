@@ -9,7 +9,8 @@ import { JOB_MAX_RETRIES } from "./constants";
 import { decodeJob, type Job } from "./message";
 
 // **队列 consumer 的分派**(FOL-86)。`src/server.ts` 的 `queue()` 每条消息调一次 `consumeMessage`,
-// 在 isolate 运行时上跑(`runAtEdge`)—— 与 server fn / cron 同一张服务图,不另起一张。
+// 经 `runAtEdge` 跑在 `dbRuntime` 上;要参考层 / connector 的活由`forUser`(整张图)/ `forUserDb`(只要 db)
+// 在同一个 isolate 的服务图里补上 —— 不另起一张图(见 runtime.ts 顶部)。
 
 /** 一条活真正要干的事。**穷尽 switch**:加了 kind 忘了接,这里编译不过。 */
 const runJob = (job: Job): Effect.Effect<void, Error> => {
