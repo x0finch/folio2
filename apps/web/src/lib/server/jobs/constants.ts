@@ -67,7 +67,8 @@ export const REFERENCE_JOB_UPSTREAM_CALLS = {
  * 在免费计划一次调用 50 个外部 subrequest 之内,留 10 发余量。
  *
  * 那两个数住在 adapter 里(app 不认识 CoinGecko),所以这里是**抄过来的推导**;
- * 它们变了这里要跟着算一遍 —— `tests/server/sync/prices.cases.ts` 按真出网数钉着「≤ 50」。
+ * 它们变了这里要跟着算一遍 —— `tests/server/sync/prices.cases.ts` 按真出网数钉着「≤ 50」,
+ * 包括每一发都把重试用满的最坏情形(尝试次数由测试从 adapter 的真实行为量出来,不抄这里的数)。
  */
 export const PRICES_IDS_PER_MESSAGE = 1000;
 
@@ -80,7 +81,8 @@ export const PRICES_IDS_PER_MESSAGE = 1000;
  * 365 行要写(多行 INSERT,见 db 的 `writeDaily`)。8 发 ≈ 3k 行,是按「宁可多一条后续消息」
  * 拍的保守值,**没实测过**;FOL-84 的本地 profile 可以校准它。法币一窗两条腿(BTC 该币 + BTC
  * 美元),按 2 发记账。三年的回填一个币是 3 发,几个币一条消息装得下;装不下的由 consumer
- * 投一条带剩余 id 的后续消息接着补。`tests/server/sync/daily-prices.cases.ts` 按真 fetch 数钉着。
+ * 投一条带剩余 id 的后续消息接着补。`tests/server/sync/daily-prices.cases.ts` 按真 fetch 数钉着
+ * (含每窗重试用满的最坏情形)。
  */
 export const DAILY_PRICES_CALLS_PER_MESSAGE = 8;
 

@@ -69,11 +69,18 @@ describe("jobs/prices", () => {
 
   // 每个被问到的 coin id 都给一个价;`/coins/markets`(元信息那半)给空表。
   // `stubOutbound` 只认「片段 → 固定响应」,这里要按 URL 里的 ids 回价,所以自己 spy 一个。
-  const pricedUpstream = (): { calls: string[] } => {
+  //
+  // `failFirst`:同一个 URL 的前 k 次答 503(可重试),第 k+1 次才给 —— 让 adapter 的每一发都
+  // 把重试用满再成功,那才是一条消息的**最坏**出网数(code review #21)。`Infinity` = 一直挂。
+  const pricedUpstream = (opts: { failFirst?: number } = {}): { calls: string[] } => {
     const calls: string[] = [];
+    const seen = new Map<string, number>();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input instanceof Request ? input.url : input);
       calls.push(url);
+      const tries = (seen.get(url) ?? 0) + 1;
+      seen.set(url, tries);
+      if (tries <= (opts.failFirst ?? 0)) return json({ error: "down" }, 503);
       const u = new URL(url);
       if (u.pathname.endsWith("/simple/price")) {
         const ids = (u.searchParams.get("ids") ?? "").split(",").filter(Boolean);
@@ -160,6 +167,31 @@ describe("jobs/prices", () => {
     expect(priced.size).toBe(n);
     // 造 1200 行币 + 快照在 workerd 的 D1 里要几秒,不是被测代码慢。
   }, 30_000);
+
+  // 上面几条的上游从不失败,每发一次就成 —— 预算的推导里那个「× 尝试次数」从没被走到。这条
+  // 让每一发都把重试用满:先用一直挂的上游量出 adapter 实际肯试几次(同一个 URL 被打了几遍),
+  // 再让每个 URL 前 (N − 1) 次失败、第 N 次成功。1000 个币 → (10 + 10) × N 发;adapter 哪天
+  // 把尝试次数调大,这条就会越过 50 而红,而不是像只测顺利路径那样照绿。
+  it("最坏情形(每一发都把重试用满)→ 一条消息仍 ≤ 50 发", async () => {
+    await hold(PRICES_IDS_PER_MESSAGE);
+
+    const down = pricedUpstream({ failFirst: Number.POSITIVE_INFINITY });
+    const probe = await consume({ kind: "prices", userId: USER });
+    expect(probe.state).toEqual({ acked: true, retried: false }); // 上游挂了不是消息失败
+    const [firstUrl] = down.calls;
+    const attempts = down.calls.filter((u) => u === firstUrl).length;
+    expect(attempts).toBeGreaterThan(1); // 真在重试(否则这条测不到它要测的)
+
+    const flaky = pricedUpstream({ failFirst: attempts - 1 });
+    const { state, sent } = await consume({ kind: "prices", userId: USER });
+    expect(state).toEqual({ acked: true, retried: false });
+    expect(sent).toEqual([]);
+    const batches = PRICES_IDS_PER_MESSAGE / 100;
+    expect(count(flaky.calls, "/simple/price")).toBe(batches * attempts);
+    expect(count(flaky.calls, "/coins/markets")).toBe(batches * attempts);
+    expect(flaky.calls.length).toBeLessThanOrEqual(FREE_PLAN_SUBREQUESTS);
+    // 造 1000 行币 + 每发一次退避(250ms 起)的真等待。
+  }, 60_000);
 
   it("没有持仓 → 一发都不出,照样 ack", async () => {
     const outbound = blockOutbound();

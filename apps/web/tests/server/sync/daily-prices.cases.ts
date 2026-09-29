@@ -61,8 +61,12 @@ describe("jobs/daily-prices", () => {
   };
 
   // `/coins/{id}/market_chart/range`:区间里每个 UTC 日起点一个点(币价 = 100,BTC 的欧元价 = 80)。
-  const rangeUpstream = (opts: { fail?: boolean } = {}): { calls: string[] } => {
+  // `failFirst`:同一个 URL 的前 k 次答 503(可重试),之后才给 —— 见最坏情形那条(code review #21)。
+  const rangeUpstream = (
+    opts: { fail?: boolean; failFirst?: number } = {},
+  ): { calls: string[] } => {
     const calls: string[] = [];
+    const seen = new Map<string, number>();
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input instanceof Request ? input.url : input);
       calls.push(url);
@@ -70,7 +74,9 @@ describe("jobs/daily-prices", () => {
       if (!u.pathname.endsWith("/market_chart/range")) {
         throw new Error(`没有为这个 URL 准备答案:${url}`);
       }
-      if (opts.fail) return json({ error: "down" }, 503);
+      const tries = (seen.get(url) ?? 0) + 1;
+      seen.set(url, tries);
+      if (opts.fail || tries <= (opts.failFirst ?? 0)) return json({ error: "down" }, 503);
       const fromMs = Number(u.searchParams.get("from")) * 1000;
       const toMs = Number(u.searchParams.get("to")) * 1000;
       const price = u.searchParams.get("vs_currency") === "eur" ? 80 : 100;
@@ -92,8 +98,15 @@ describe("jobs/daily-prices", () => {
     ticket: tokenTicket.encode(tokenRef.issued(FIAT_NAMER, "EUR")),
   };
 
-  /** 一个手记账户,三个认得出来的币 + 欧元现金,首笔活动都在 `daysAgo` 天前。 */
-  const manualAccount = async (daysAgo: number) => {
+  /**
+   * 一个手记账户,三个认得出来的币 + 欧元现金,首笔活动都在 `daysAgo` 天前。
+   * `coins` / `cash` 可换:日价表是全局的、不随用户清(别的用例、别的测试文件会补同名币),
+   * 要量「真回源多少发」的用例得用只有它自己用的币。
+   */
+  const manualAccount = async (
+    daysAgo: number,
+    { coins = ["bitcoin", "ethereum", "solana"], cash = true } = {},
+  ) => {
     const account = await db(USER).accounts.create({
       connectorId: "manual",
       label: "M",
@@ -107,7 +120,7 @@ describe("jobs/daily-prices", () => {
         handleCreateManualActivitiesAndRefill({
           accountId: account.id,
           drafts: [
-            ...["bitcoin", "ethereum", "solana"].map((coin) => ({
+            ...coins.map((coin) => ({
               token: {
                 symbol: coin.slice(0, 3).toUpperCase(),
                 unitPrice: 1,
@@ -118,7 +131,9 @@ describe("jobs/daily-prices", () => {
               occurredAt: at,
               price: 1,
             })),
-            { token: eurCash, kind: "set" as const, amount: 100, occurredAt: at, price: 1.1 },
+            ...(cash
+              ? [{ token: eurCash, kind: "set" as const, amount: 100, occurredAt: at, price: 1.1 }]
+              : []),
           ],
         }),
       ),
@@ -205,6 +220,29 @@ describe("jobs/daily-prices", () => {
     expect(state).toEqual({ acked: true, retried: false });
     expect(sent).toEqual([]);
   });
+
+  // 其余用例的上游一次就成,「每发 × 尝试次数」那一半推导从没被走到。这条先用一直挂的上游量出
+  // adapter 实际肯试几次(同一个 URL 被打了几遍 = N),再让每个 URL 前 (N − 1) 次失败:
+  // 一条消息把 `DAILY_PRICES_CALLS_PER_MESSAGE` 窗全花掉、每窗都试满 N 次,仍须 ≤ 50。
+  it("最坏情形(每一窗都把重试用满)→ 一条消息仍 ≤ 50 发", async () => {
+    // 只有这条用的四个币(日价表全局共享,表里有整窗就不出网 —— 用常见币会量到别人补过的)。
+    // 4 币 × 3 窗 = 12 窗 > 一条消息的 8 窗 → 预算必然花满。
+    await manualAccount(YEARS_3, { coins: ["wa1x", "wb2x", "wc3x", "wd4x"], cash: false });
+
+    const down = rangeUpstream({ fail: true });
+    await consume({ kind: "daily-prices", userId: USER });
+    const [firstUrl] = down.calls;
+    const attempts = down.calls.filter((u) => u === firstUrl).length;
+    expect(attempts).toBeGreaterThan(1); // 真在重试
+
+    const flaky = rangeUpstream({ failFirst: attempts - 1 });
+    const { state, sent } = await consume({ kind: "daily-prices", userId: USER });
+    expect(state).toEqual({ acked: true, retried: false });
+    expect(sent.length).toBeGreaterThan(0); // 三年的量一条装不下 → 预算确实花满了
+    expect(rangeCalls(flaky.calls)).toBe(DAILY_PRICES_CALLS_PER_MESSAGE * attempts);
+    expect(flaky.calls.length).toBeLessThanOrEqual(DAILY_PRICES_UPSTREAM_CALLS);
+    expect(flaky.calls.length).toBeLessThanOrEqual(FREE_PLAN_SUBREQUESTS);
+  }, 60_000);
 
   it("读图表的三个端点对手记账户**一发都不出网**(补没补齐都一样)", async () => {
     const { account } = await manualAccount(YEARS_3);
