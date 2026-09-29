@@ -48,8 +48,8 @@ function fakeFx(rates: Record<string, number> = {}) {
   return { fx, asked, warmed };
 }
 
-const run = (stub: OracleStub, tickets: readonly string[], warmFiat = false) =>
-  runWithOracleAt(NOW, stub, priceTickets(tickets, { namers: NAMERS, warmFiat }));
+const run = (stub: OracleStub, tickets: readonly string[]) =>
+  runWithOracleAt(NOW, stub, priceTickets(tickets, { namers: NAMERS }));
 
 describe("priceTickets —— 法币走 FX、其余走代币源", () => {
   it("加密币票:走代币源,价映射回票(unitPrice/change24h/asOf)", async () => {
@@ -62,14 +62,14 @@ describe("priceTickets —— 法币走 FX、其余走代币源", () => {
     ]);
   });
 
-  it("法币票:走 FX,无 24h、asOf=now;命中的 code 先 warm 过", async () => {
+  it("法币票:走 FX 缓存,无 24h、asOf=now;**从不 warm**(请求里不出网,FOL-88)", async () => {
     const eur = fiatTicket("EUR");
     const { fx, warmed } = fakeFx({ EUR: 1.15 });
     const { tokens, calls } = fakeCrypto({});
-    expect(await run({ tokens, fx }, [eur], true)).toEqual([
+    expect(await run({ tokens, fx }, [eur])).toEqual([
       { ticket: eur, unitPrice: 1.15, change24h: null, asOf: NOW },
     ]);
-    expect(warmed).toEqual([["EUR"]]); // 先暖再 resolve
+    expect(warmed).toEqual([]); // 汇率由 `fx` 队列活暖着,请求只读
     expect(calls).toEqual([]); // 法币不惊动代币源
   });
 
@@ -111,14 +111,5 @@ describe("priceTickets —— 法币走 FX、其余走代币源", () => {
     const other = tokenTicket.encode(tokenRef.issued("binance", "USDC")); // 命名者不在 namers
     expect(await run({ tokens }, ["!!!not-a-ticket!!!", other])).toEqual([]);
     expect(calls).toEqual([]);
-  });
-
-  it("不开 warmFiat(单条预填那路)也照常出价、不炸", async () => {
-    const eur = fiatTicket("EUR");
-    const { fx, warmed } = fakeFx({ EUR: 1.15 });
-    expect(await run({ fx }, [eur])).toEqual([
-      { ticket: eur, unitPrice: 1.15, change24h: null, asOf: NOW },
-    ]);
-    expect(warmed).toEqual([]); // 没暖过 —— 那一路靠 loader 已暖的缓存
   });
 });

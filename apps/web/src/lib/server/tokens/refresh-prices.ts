@@ -21,8 +21,8 @@ export const handleRefreshTokenPrices = Effect.fn("refreshTokenPrices")(function
   // 票携带当前上游(加密币)或 `fiat`(法币)命名者,两者都放行(同 getTokenPrice / mintHolding)——
   // 只收 NAMER 的话「已有代币」组里的法币持仓会被丢掉、价格列恒显 "—"(法币无代币市价,得走 FX)。
   // 分流(法币走 FX / 其余走代币源)在纯函数 priceTickets 里,两个选币端点共用、可单测。
-  // `warmFiat` 开着:冷则一把拉全支持币种;通常已暖 → no-op。
-  const out = yield* priceTickets(data.tickets, { namers: [NAMER, FIAT_NAMER], warmFiat: true });
+  // 法币只读汇率缓存(`fx` 队列活暖着它),请求里不 `fx.warm`(FOL-88)。
+  const out = yield* priceTickets(data.tickets, { namers: [NAMER, FIAT_NAMER] });
   tokenLog.debug("refreshTokenPrices: ok", { asked: data.tickets.length, got: out.length });
   return out;
 });
