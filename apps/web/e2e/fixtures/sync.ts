@@ -206,12 +206,19 @@ export async function clickSyncPill(page: Page) {
   }).toPass({ timeout: 30_000 });
 }
 
+/**
+ * 本地队列串行消费(Miniflare 不认 `max_concurrency`),同步消息前面可能排着刷价 / 汇率任务;
+ * 它们打的是假 CoinGecko,回得飞快,但 CoinGecko client 自带的限速闸(没 key 时每分钟只放几发)
+ * 照样把每发隔开约 6 秒 —— 一轮下来同步消息要等十几秒才轮到。线上是并发消费,不排这个队。
+ */
+const UPSTREAM_HIT_TIMEOUT_MS = 45_000;
+
 /** 等假上游真的开始收请求 —— 服务端这一轮在干活了。配合 `setUpstream(request, { hits: 0 })` 用。 */
 export async function waitForUpstreamHit(request: APIRequestContext) {
   await expect
     .poll(async () => (await upstream(request)).hits, {
       message: "假上游一个请求都没收到 —— 服务端这一轮没起跑",
-      timeout: 15_000,
+      timeout: UPSTREAM_HIT_TIMEOUT_MS,
     })
     .toBeGreaterThan(0);
 }
