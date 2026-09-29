@@ -246,7 +246,13 @@ Metadata Read-Only);个人 token 加 Workers Observability 权限也读不了日
 - **按调用类型 / cron 的两张表是全量统计**:`exceededCpu` 的次数可以直接引用。
 - **按 server fn 的那张是抽样的**:TanStack 的路径在日志里是 `REDACTED`,只能把
   `withServerFnTiming` 打的「server fn」那行(带 `handler`)与同一个 requestId 的调用日志对上,
-  而事件接口按自适应采样只回一部分。`n` 就是样本数,别拿它算总量。
+  而事件接口按自适应采样只回一部分。`n` 就是样本数,别拿它算总量。列里有 P99(FOL-84 验收要的),
+  但样本少时它≈ max,只当尾部的粗看;p90 更稳。
+- **队列按任务种类的那张同样是抽样的**:一次 queue 调用本身不带「这是哪件活」,把 `jobs/consume.ts`
+  每条消息收尾打的 `job done` / `job failed…` 行(带 `kind`)与同一个 requestId 的 queue 调用对上
+  (`max_batch_size: 1`,一个 requestId 就是一件活)。**因 CPU 超限被掐断的调用来不及打这行**,只会
+  算进 unmatched —— 超限的总次数看上面「按调用类型」那张全量表的 `queue · exceededCpu`。
+  对法在 `online-join.ts`(`tests/perf-online-join.test.ts` 钉着)。
 - 默认只看**当前线上版本**:换过版本后旧数字不代表现在。新版本刚上线、还没有请求时表是空的。
 
 ## perf:requests —— 开一次页面发多少请求

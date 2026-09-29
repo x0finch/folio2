@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { DAY_MS, WEB_ROOT } from "./constants.mjs";
-import { quantile } from "./report.mjs";
+import { cpuByName, handlerOf, jobKindOf } from "./online-join.ts";
 
 const API = "https://api.cloudflare.com/client/v4";
 const DEFAULT_TOKEN_ENV = "CLOUDFLARE_OBSERVABILITY_TOKEN";
@@ -23,6 +23,8 @@ const EVENTS_LIMIT = 2000;
 const GROUPS_LIMIT = 100;
 /** `runtime.ts` 的 `withServerFnTiming` 每个 server fn 打的那行日志:带 `handler`,和调用日志同一个 requestId。 */
 const SERVER_FN_MESSAGE = "server fn";
+/** `jobs/consume.ts` 每条消息收尾打的那行(`job done` / `job failed…`)的开头:带 `kind`,和队列调用同一个 requestId。 */
+const JOB_MESSAGE_PREFIX = "job ";
 /** 免费档每次调用的 CPU 上限。 */
 const BUDGET_MS = 10;
 
@@ -149,49 +151,51 @@ async function events(api, sc, extraFilters) {
 }
 
 /**
- * 按 server fn 拆:TanStack 的路径在日志里是 REDACTED,只能把「server fn」那行日志(带 handler)
- * 和同一个 requestId 的调用日志(带 cpuTimeMs)对上。**事件接口是抽样的**,所以这张表给的是
- * 样本内的分布,n 就是样本数。
+ * 按名字拆 CPU(server fn / 后台任务种类):调用事件不带名字,只能把我们自己打的那行日志
+ * (带名字)与同一个 requestId 的调用事件(带 cpuTimeMs)对上 —— 对法见 `online-join.ts`。
+ * **事件接口是抽样的**,所以这两张表给的是样本内的分布,n 就是样本数;P99 在小样本上接近 max,
+ * 只当尾部的粗看。
  */
-async function byServerFn(api, sc) {
+async function byName(api, sc, { message, invocation, nameOf }) {
   const [named, invocations] = await Promise.all([
+    events(api, sc, [message]),
     events(api, sc, [
-      { key: "$metadata.message", operation: "eq", type: "string", value: SERVER_FN_MESSAGE },
-    ]),
-    events(api, sc, [
-      { key: "$metadata.trigger", operation: "includes", type: "string", value: "/_serverFn/" },
+      invocation,
       { key: "$workers.cpuTimeMs", operation: "exists", type: "number" },
     ]),
   ]);
-  const handlerOf = new Map(
-    named.map((e) => [e.$metadata?.requestId, e.source?.properties?.handler]).filter(([, h]) => h),
-  );
-  const groups = new Map();
-  let unmatched = 0;
-  for (const e of invocations) {
-    const handler = handlerOf.get(e.$metadata?.requestId);
-    const cpu = e.$workers?.cpuTimeMs;
-    if (!handler || cpu == null) {
-      unmatched++;
-      continue;
-    }
-    const g = groups.get(handler) ?? { handler, cpus: [], exceeded: 0 };
-    g.cpus.push(cpu);
-    if (e.$workers.outcome === "exceededCpu") g.exceeded++;
-    groups.set(handler, g);
-  }
-  const rows = [...groups.values()]
-    .map((g) => ({
-      handler: g.handler,
-      n: g.cpus.length,
-      p50: quantile(g.cpus, 0.5),
-      p90: quantile(g.cpus, 0.9),
-      max: Math.max(...g.cpus),
-      exceeded: g.exceeded,
-    }))
-    .sort((a, b) => b.p50 - a.p50);
-  return { rows, unmatched, sampled: invocations.length };
+  return { ...cpuByName(named, invocations, nameOf), sampled: invocations.length };
 }
+
+const byServerFn = (api, sc) =>
+  byName(api, sc, {
+    message: {
+      key: "$metadata.message",
+      operation: "eq",
+      type: "string",
+      value: SERVER_FN_MESSAGE,
+    },
+    invocation: {
+      key: "$metadata.trigger",
+      operation: "includes",
+      type: "string",
+      value: "/_serverFn/",
+    },
+    nameOf: handlerOf,
+  });
+
+// 队列一次调用只装一条消息(wrangler.jsonc `max_batch_size: 1`),所以一个 requestId 就是一件活。
+const byJobKind = (api, sc) =>
+  byName(api, sc, {
+    message: {
+      key: "$metadata.message",
+      operation: "includes",
+      type: "string",
+      value: JOB_MESSAGE_PREFIX,
+    },
+    invocation: { key: "$workers.eventType", operation: "eq", type: "string", value: "queue" },
+    nameOf: jobKindOf,
+  });
 
 const cell = (x) => (x == null ? "—" : typeof x === "number" ? String(Math.round(x)) : String(x));
 
@@ -227,7 +231,7 @@ async function main() {
   const to = Date.now();
   const sc = scope({ script, version, from: to - opts.days * DAY_MS, to });
 
-  const [invocations, crons, serverFns] = await Promise.all([
+  const [invocations, crons, serverFns, jobs] = await Promise.all([
     cpuBy(api, sc, ["$workers.eventType", "$workers.outcome"]),
     cpuBy(
       api,
@@ -236,6 +240,7 @@ async function main() {
       [{ key: "$workers.eventType", operation: "eq", type: "string", value: "scheduled" }],
     ),
     byServerFn(api, sc),
+    byJobKind(api, sc),
   ]);
 
   console.log(`Workers Logs cpuTimeMs — ${script}, last ${opts.days} day(s), ${versionNote}`);
@@ -246,15 +251,23 @@ async function main() {
   console.log(table(cpuHeader("event · outcome"), invocations.map(cpuRow)));
   console.log("\nscheduled, by cron (full counts)");
   console.log(table(cpuHeader("cron · outcome"), crons.map(cpuRow)));
+  const namedHeader = (first) => [
+    first,
+    "n",
+    "p50 ms",
+    "p90 ms",
+    "p99 ms",
+    "max ms",
+    "exceededCpu",
+  ];
+  const namedRow = (r) => [r.name, r.n, r.p50, r.p90, r.p99, r.max, r.exceeded];
+  const sampledNote = (x) => `sampled: ${x.sampled} invocations, ${x.unmatched} unmatched`;
+  console.log(`\nby server fn (${sampledNote(serverFns)}; p99 on small n ≈ max)`);
+  console.log(table(namedHeader("handler"), serverFns.rows.map(namedRow)));
   console.log(
-    `\nby server fn (sampled: ${serverFns.sampled} invocations, ${serverFns.unmatched} unmatched)`,
+    `\nqueue, by job kind (${sampledNote(jobs)}; killed invocations log no kind → unmatched)`,
   );
-  console.log(
-    table(
-      ["handler", "n", "p50 ms", "p90 ms", "max ms", "exceededCpu"],
-      serverFns.rows.map((r) => [r.handler, r.n, r.p50, r.p90, r.max, r.exceeded]),
-    ),
-  );
+  console.log(table(namedHeader("kind"), jobs.rows.map(namedRow)));
 }
 
 main().catch((err) => {
