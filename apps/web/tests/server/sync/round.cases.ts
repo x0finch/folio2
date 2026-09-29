@@ -223,6 +223,81 @@ describe("sync/round", () => {
       expect(queue.sent).toHaveLength(sentBefore);
     });
 
+    // 活轮只装一个账户(另一个设备加了账户 / 在详情侧栏点了同步,FOL-89):手动 / 自动那一轮不能原样
+    // 让开 —— 其余账户就这么被漏掉了。与 cron 同一条路(review R2-#2):把缺的拉进那一轮、只投它们。
+    it("活轮只装一个账户 → 把其余账户拉进那一轮、只投它们", async () => {
+      const busy = await cex("正在单独同步的");
+      const other = await cex("其余的");
+      const pf = await db(USER).portfolios.ensureDefault();
+      await db(USER).syncRounds.open({
+        portfolioId: pf.id,
+        roundId: "single",
+        trigger: "manual",
+        accounts: [{ id: busy.id, label: busy.label }],
+        ttlMs: ROUND_HEARTBEAT_MS,
+      });
+
+      const { opened, round } = await start();
+
+      expect(opened).toBe(false);
+      expect(round.roundId).toBe("single");
+      // 回包是此刻的样子:拉进去的那个已经在名单里了。
+      expect(round.accounts[other.id]?.status).toBe("pending");
+      expect(round.accounts[busy.id]?.status).toBe("pending");
+      expect(queue.syncJobs().map((j) => [j.roundId, j.accountId])).toEqual([["single", other.id]]);
+    });
+
+    it("自动轮撞上单账户的轮 → 拉进去的里头刚同步过的记 skipped、不投", async () => {
+      const busy = await cex("正在单独同步的");
+      const fresh = await cex("刚同步过");
+      const stale = await cex("很久没同步");
+      await db(USER).snapshots.write(fresh.id, { takenAt: Date.now(), totalUsd: 1, balances: [] });
+      const pf = await db(USER).portfolios.ensureDefault();
+      await db(USER).syncRounds.open({
+        portfolioId: pf.id,
+        roundId: "single",
+        trigger: "manual",
+        accounts: [{ id: busy.id, label: busy.label }],
+        ttlMs: ROUND_HEARTBEAT_MS,
+      });
+
+      const { round } = await start(true);
+
+      expect(round.roundId).toBe("single");
+      expect(round.accounts[fresh.id]?.status).toBe("skipped");
+      expect(round.accounts[busy.id]?.status).toBe("pending");
+      expect(queue.syncJobs().map((j) => j.accountId)).toEqual([stale.id]);
+    });
+
+    it("撞上单账户的轮、投递失败 → 拉进去的记 failed,那个账户自己的不动", async () => {
+      const busy = await cex("正在单独同步的");
+      const other = await cex("其余的");
+      const pf = await db(USER).portfolios.ensureDefault();
+      await db(USER).syncRounds.open({
+        portfolioId: pf.id,
+        roundId: "single",
+        trigger: "manual",
+        accounts: [{ id: busy.id, label: busy.label }],
+        ttlMs: ROUND_HEARTBEAT_MS,
+      });
+
+      const exit = await call(
+        USER,
+        Effect.exit(
+          startSyncRound({ auto: false }).pipe(
+            Effect.provideService(JobQueue, { send: () => Effect.die(new Error("queue down")) }),
+          ),
+        ),
+      );
+
+      expect(exit._tag).toBe("Failure");
+      const back = Option.getOrNull(await db(USER).syncRounds.get(pf.id));
+      expect(back?.roundId).toBe("single");
+      expect(back?.accounts[other.id]?.status).toBe("failed");
+      expect(back?.accounts[busy.id]?.status).toBe("pending");
+      expect(back?.finishedAt).toBeNull();
+    });
+
     it("空组合 → 当场收官,一条消息都不投", async () => {
       await manual("手记");
       const { round } = await start();

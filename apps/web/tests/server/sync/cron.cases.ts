@@ -1,3 +1,4 @@
+import { env } from "cloudflare:test";
 import { Effect, Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { type Enqueued, JobQueue } from "@/lib/server/jobs/queue";
@@ -197,6 +198,36 @@ describe("sync/cron(fan-out)", () => {
     expect(theirs?.accounts[joined.id]?.status).toBe("failed");
     expect(theirs?.accounts[busy.id]?.status).toBe("pending");
     expect(theirs?.finishedAt).toBeNull();
+  });
+
+  // 投递之前就炸了(review R2-#4):后面那个组合开轮时 D1 出错,前面已经开了的轮不能挂着 pending
+  // 等 120s 再念成没有原因的「中断」—— 与投递失败同一个收尾。用一个只拦那个组合的触发器造这次 D1 失败。
+  it("后面的组合开轮时炸了 → 前面已开的轮带一句话收官;这个用户计 failed", async () => {
+    await db(USER).portfolios.ensureDefault();
+    const watch = await db(USER).portfolios.create({ name: "看单" });
+    await cex("默认组合里的");
+    const there = await cex("看单里的");
+    await db(USER).portfolios.assignAccount(there.id, watch.id);
+    const order = (await db(USER).portfolios.list()).map((p) => p.id);
+    const [first, last] = [order[0], order[order.length - 1]];
+    if (!first || !last || first === last) throw new Error("need two portfolios");
+    await env.DB.prepare(
+      `CREATE TRIGGER fail_open_last BEFORE INSERT ON user_cache WHEN NEW.k LIKE '%${last}%'
+       BEGIN SELECT RAISE(ABORT, 'd1 down'); END`,
+    ).run();
+    try {
+      const result = await fanOut();
+      expect(result).toMatchObject({ users: 1, failed: 1, jobs: 0 });
+    } finally {
+      await env.DB.prepare("DROP TRIGGER fail_open_last").run();
+    }
+
+    expect(sent).toEqual([]);
+    const opened = await roundOf(first);
+    expect(opened?.trigger).toBe("cron");
+    expect(opened?.finishedAt).not.toBeNull();
+    expect(opened?.error).toBeTruthy();
+    expect(await roundOf(last)).toBeNull();
   });
 
   // 开了轮就必须收官,空组合也不例外 —— 没有消息会去收它,120s 后面板会挂着一句「中断」。
