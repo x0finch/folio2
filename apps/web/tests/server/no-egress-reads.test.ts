@@ -1,5 +1,6 @@
-import type { Effect } from "effect";
+import { Cause, type Effect, Exit } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
+import { type HistoryRange, rangeSince } from "@/lib/core/history";
 import { floorToHour, GAIN_START_FLOOR_MS, GAIN_WINDOW_MS } from "@/lib/core/portfolio";
 import { handleGetAccountHistory } from "@/lib/server/accounts/history";
 import { handleListAccounts } from "@/lib/server/accounts/list";
@@ -97,6 +98,20 @@ const NOT_RUN_HERE: Record<string, string> = {
 
 type Run = () => Effect.Effect<unknown, AppError, UserServices>;
 
+/**
+ * 一个用例 = 一次调用 + **它成功了、而且走到了该走的那条分支**的断言。
+ *
+ * 为什么「成功」要单独断言(review #11):只数出网的话,一个在开头就失败的 handler(参数不对、
+ * 归属校验拒了、fixture 没料)零出网照样绿 —— 它根本没走到可能出网的那段代码。所以每个用例先要
+ * 成功,再用 `check` 钉住它确实拿到了料(例如长窗真的走了 `sampled` 那支),然后才看出网。
+ */
+interface Case {
+  name: string;
+  fn: string;
+  run: Run;
+  check?: (value: unknown) => void;
+}
+
 interface Fixture {
   portfolioId: string;
   syncedId: string;
@@ -106,14 +121,40 @@ interface Fixture {
 const NOW = floorToHour(Date.now());
 const BTC = "token-btc";
 
+/** 曲线原料:有料,且走的是期望的那一档(长窗 = `sampled`)。 */
+const historyCheck =
+  (sampled: boolean) =>
+  (value: unknown): void => {
+    const raw = value as { rows: unknown[]; sampled?: boolean };
+    expect(raw.rows.length).toBeGreaterThan(0);
+    expect(raw.sampled ?? false).toBe(sampled);
+  };
+
+const portfolioHistoryCase = (range: HistoryRange): Case => ({
+  name: `getPortfolioHistory(${range})`,
+  fn: "getPortfolioHistory",
+  run: () => handleGetPortfolioHistory({ range }),
+  check: historyCheck(range === "1y" || range === "all"),
+});
+
+const accountHistoryCase = (
+  label: string,
+  accountId: string,
+  connectorId: string,
+  range: HistoryRange,
+): Case => ({
+  name: `getAccountHistory(${label}, ${range})`,
+  fn: "getAccountHistory",
+  run: () =>
+    handleGetAccountHistory({ accountId, connectorId, range, since: rangeSince(range, NOW) }),
+  check: historyCheck(range === "1y" || range === "all"),
+});
+
+const RANGES: HistoryRange[] = ["7d", "30d", "1y", "all"];
+
 /** 每个 GET server fn 的一组(或几组)代表性调用。键 = 用例名,`fn` = 源码里的 server fn 名。 */
-const cases = (f: Fixture): { name: string; fn: string; run: Run }[] => [
+const cases = (f: Fixture): Case[] => [
   { name: "listPortfolios", fn: "listPortfolios", run: () => handleListPortfolios() },
-  {
-    name: "getManualAccount",
-    fn: "getManualAccount",
-    run: () => handleGetManualAccount({ accountId: f.manualId ?? f.syncedId }),
-  },
   { name: "getSnapshots(now)", fn: "getSnapshots", run: () => handleGetSnapshots({ at: NOW }) },
   {
     name: "getSnapshots(prev)",
@@ -126,21 +167,7 @@ const cases = (f: Fixture): { name: string; fn: string; run: Run }[] => [
     fn: "resolvePlatformMeta",
     run: () => handleResolvePlatformMeta({ chainIds: ["bitcoin", "ethereum"] }),
   },
-  {
-    name: "getPortfolioHistory(7d)",
-    fn: "getPortfolioHistory",
-    run: () => handleGetPortfolioHistory({ range: "7d" }),
-  },
-  {
-    name: "getPortfolioHistory(30d)",
-    fn: "getPortfolioHistory",
-    run: () => handleGetPortfolioHistory({ range: "30d" }),
-  },
-  {
-    name: "getPortfolioHistory(1y)",
-    fn: "getPortfolioHistory",
-    run: () => handleGetPortfolioHistory({ range: "1y" }),
-  },
+  ...RANGES.map(portfolioHistoryCase),
   { name: "getDataStats", fn: "getDataStats", run: () => handleGetDataStats() },
   { name: "getDataVersion", fn: "getDataVersion", run: () => handleGetDataVersion() },
   {
@@ -152,11 +179,13 @@ const cases = (f: Fixture): { name: string; fn: string; run: Run }[] => [
     name: "getTokenValueHistory(30d)",
     fn: "getTokenValueHistory",
     run: () => handleGetTokenValueHistory({ key: BTC, range: "30d", since: NOW - 30 * DAY }),
+    check: historyCheck(false),
   },
   {
     name: "getTokenValueHistory(all)",
     fn: "getTokenValueHistory",
     run: () => handleGetTokenValueHistory({ key: BTC, range: "all" }),
+    check: historyCheck(true),
   },
   {
     name: "getPortfolioTabPins",
@@ -181,24 +210,22 @@ const cases = (f: Fixture): { name: string; fn: string; run: Run }[] => [
     run: () => handleListFiatOptions({ locale: "en" }),
   },
   { name: "listAccounts", fn: "listAccounts", run: () => handleListAccounts({}) },
-  {
-    name: "getAccountHistory(synced)",
-    fn: "getAccountHistory",
-    run: () =>
-      handleGetAccountHistory({ accountId: f.syncedId, connectorId: "bitcoin", range: "30d" }),
-  },
+  ...RANGES.map((range) => accountHistoryCase("synced", f.syncedId, "bitcoin", range)),
+  // 手记账户那几条只在有手记账户时跑:拿同步账户的 id 去调,归属 / 查找那一步就拒了,
+  // 后面可能出网的那段代码根本没走到(review #11)。
   ...(f.manualId
     ? [
         {
-          name: "getAccountHistory(manual)",
-          fn: "getAccountHistory",
-          run: () =>
-            handleGetAccountHistory({
-              accountId: f.manualId as string,
-              connectorId: "manual",
-              range: "30d",
-            }),
+          name: "getManualAccount",
+          fn: "getManualAccount",
+          run: () => handleGetManualAccount({ accountId: f.manualId as string }),
+          check: (value: unknown) => {
+            expect((value as { tokens: unknown[] }).tokens.length).toBeGreaterThan(0);
+          },
         },
+        ...RANGES.map((range) =>
+          accountHistoryCase("manual", f.manualId as string, "manual", range),
+        ),
       ]
     : []),
   { name: "listTags", fn: "listTags", run: () => handleListTags({}) },
@@ -212,20 +239,37 @@ const plainCases: { name: string; fn: string; run: () => unknown }[] = [
 
 const USER = "h-no-egress";
 
-/** 逐个跑,记下每一个用例打出去的 URL(失败的 handler 也算 —— 要的是「有没有出网」)。 */
-const egressByCase = async (outbound: Outbound, f: Fixture): Promise<Map<string, string[]>> => {
-  const out = new Map<string, string[]>();
+/**
+ * 逐个跑,记下每一个用例打出去的 URL,以及**没成功 / 没走到该走的分支**的用例(`failed`)。
+ * 冷缓存那几条在断网的 fetch 底下本来就会失败(它们要出网才填得上),不算。
+ */
+const egressByCase = async (
+  outbound: Outbound,
+  f: Fixture,
+): Promise<{ egress: Map<string, string[]>; failed: string[] }> => {
+  const egress = new Map<string, string[]>();
+  const failed: string[] = [];
   for (const c of cases(f)) {
     const before = outbound.calls.length;
-    await callExit(USER, c.run());
-    out.set(c.name, outbound.calls.slice(before));
+    const exit = await callExit(USER, c.run());
+    egress.set(c.name, outbound.calls.slice(before));
+    if (c.fn in COLD_CACHE_FILL) continue;
+    if (Exit.isFailure(exit)) {
+      failed.push(`${c.name}: ${Cause.pretty(exit.cause).split("\n")[0]}`);
+      continue;
+    }
+    try {
+      c.check?.(exit.value);
+    } catch (e) {
+      failed.push(`${c.name}: ${(e as Error).message.split("\n")[0]}`);
+    }
   }
   for (const c of plainCases) {
     const before = outbound.calls.length;
     c.run();
-    out.set(c.name, outbound.calls.slice(before));
+    egress.set(c.name, outbound.calls.slice(before));
   }
-  return out;
+  return { egress, failed };
 };
 
 const seedSynced = async (): Promise<Fixture> => {
@@ -272,7 +316,8 @@ describe("GET server fn 不出网(FOL-92)", () => {
 
   it("只有同步账户:一发都没有", async () => {
     const f = await seedSynced();
-    const egress = await egressByCase(outbound, f);
+    const { egress, failed } = await egressByCase(outbound, f);
+    expect(failed).toEqual([]);
     const offenders = [...egress].filter(
       ([name, urls]) => urls.length > 0 && !(name in COLD_CACHE_FILL),
     );
@@ -308,12 +353,15 @@ describe("GET server fn 不出网(FOL-92)", () => {
       occurredAt: NOW - 40 * DAY,
     });
     outbound.calls.length = 0;
-    const egress = await egressByCase(outbound, { ...f, manualId: manual.id });
+    const { egress, failed } = await egressByCase(outbound, { ...f, manualId: manual.id });
+    expect(failed).toEqual([]);
     const offenders = [...egress].filter(
       ([name, urls]) => urls.length > 0 && !(name in COLD_CACHE_FILL),
     );
     expect(offenders).toEqual([]);
-    // 手记那几条确实跑到了(没有手记账户时它们走的是另一条路,零出网不说明什么)。
-    expect(egress.has("getAccountHistory(manual)")).toBe(true);
+    // 手记那几条确实跑到了、而且成功了(上面 `failed` 为空):没有手记账户时它们不跑,零出网不说明什么。
+    for (const range of RANGES)
+      expect(egress.has(`getAccountHistory(manual, ${range})`)).toBe(true);
+    expect(egress.has("getManualAccount")).toBe(true);
   }, 120_000);
 });
