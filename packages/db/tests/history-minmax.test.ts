@@ -2,6 +2,7 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
+import { HISTORY_SAMPLED_BUCKETS } from "../src/domains/history-minmax";
 import { user } from "../src/schema/auth";
 import { forDomain } from "./effect";
 
@@ -9,6 +10,7 @@ const snapshotsOf = forDomain((db) => db.snapshots);
 const accounts = forDomain((db) => db.accounts);
 
 const USER = "user-minmax";
+const HOUR = 3_600_000;
 const DAY = 86_400_000;
 
 function buildPortfolioTimeline(
@@ -72,6 +74,20 @@ async function seedManySnapshots(
   }
 }
 
+// 每天一张快照直接灌 SQL(几百行,走 write 太慢),再跑迁移里那条回填把日汇总补上 —— 与生产
+// 迁移同一条路(同 `daily-totals.test.ts` 的 `seedHourly`)。
+async function seedDaily(accountId: string, startAt: number, values: number[]) {
+  const stmt = env.DB.prepare(
+    "INSERT INTO snapshots (id, account_id, taken_at, total_usd) VALUES (?, ?, ?, ?)",
+  );
+  await env.DB.batch(
+    values.map((v, i) => stmt.bind(`${accountId}-${i}`, accountId, startAt + i * DAY, v)),
+  );
+  const migration = env.TEST_MIGRATIONS.find((m) => m.name.includes("account_daily_totals"));
+  const backfill = migration?.queries.find((q) => q.includes("INSERT OR REPLACE"));
+  await env.DB.prepare(backfill as string).run();
+}
+
 beforeEach(async () => {
   await resetUser(USER);
 });
@@ -115,30 +131,106 @@ describe("history sampled (FOL-92)", () => {
     expect(second.length).toBeLessThanOrEqual(10 * 4);
   }, 30_000);
 
-  it("listSampledTotals:每账户每桶一行真实收盘,只含请求的账户;组合的最后一点是真值", async () => {
+  it("listSampledTotals:只含请求的账户、每账户行数有上界,组合的极值与最后一点都是真值", async () => {
     const a1 = await accounts(USER).create({ connectorId: "binance", label: "A1", creds: "x" });
     const a2 = await accounts(USER).create({ connectorId: "binance", label: "A2", creds: "x" });
     const other = await accounts(USER).create({ connectorId: "binance", label: "X", creds: "x" });
     const start = 3_000_000;
-    await seedManySnapshots(a1.id, 100, start, DAY, (i) => 10 + (i % 5));
-    await seedManySnapshots(a2.id, 50, start + 50 * DAY, DAY, () => 90);
-    await seedManySnapshots(other.id, 100, start, DAY, () => 999);
+    // a1 在 10 上下;a2 前 50 天缺席,第 50 天起 +90 → 组合的最高点是 a2 入场后 a1 的峰 14 + 90。
+    await seedDaily(
+      a1.id,
+      start,
+      Array.from({ length: 100 }, (_, i) => 10 + (i % 5)),
+    );
+    await seedDaily(
+      a2.id,
+      start + 50 * DAY,
+      Array.from({ length: 50 }, () => 90),
+    );
+    await seedDaily(
+      other.id,
+      start,
+      Array.from({ length: 100 }, () => 999),
+    );
 
     const raw = (await snapshotsOf(USER).listTotals()).filter((r) => r.accountId !== other.id);
     const rows = await snapshotsOf(USER).listSampledTotals([a1.id, a2.id], undefined, 10);
     expect(rows.every((r) => r.accountId === a1.id || r.accountId === a2.id)).toBe(true);
     for (const id of [a1.id, a2.id]) {
-      expect(rows.filter((r) => r.accountId === id).length).toBeLessThanOrEqual(10);
+      expect(rows.filter((r) => r.accountId === id).length).toBeLessThanOrEqual(3 * 10 + 1);
     }
-    const rawSet = new Set(raw.map((r) => `${r.accountId}:${r.takenAt}:${r.totalUsd}`));
-    expect(rows.every((r) => rawSet.has(`${r.accountId}:${r.takenAt}:${r.totalUsd}`))).toBe(true);
 
     const series = buildPortfolioTimeline(rows);
     const last = series.at(-1);
     expect(last?.total).toBe(trueValueAt(raw, last?.t ?? 0));
-    // a2 入场之后组合才有 +90 —— 这一段在曲线里。
-    expect(Math.max(...series.map((p) => p.total))).toBeGreaterThanOrEqual(100);
+    expect(Math.max(...series.map((p) => p.total))).toBe(104);
+    expect(Math.min(...series.map((p) => p.total))).toBe(10);
   }, 40_000);
+
+  it("listSampledTotals:重建后每个点都等于真实组合净值(交错时间戳不产生假凹口 / 尖峰)", async () => {
+    const a1 = await accounts(USER).create({ connectorId: "binance", label: "A1", creds: "x" });
+    const a2 = await accounts(USER).create({ connectorId: "binance", label: "A2", creds: "x" });
+    const start = 5_000_000;
+    // 两账户都在变、且 takenAt 交错半天:某账户的行若按它自己的时刻发出,那一刻另一账户会被求成
+    // 更旧的值。发出的行都落在候选时刻上、每个候选时刻各账户的值都在 → 每点必等于真值。
+    await seedDaily(
+      a1.id,
+      start,
+      Array.from({ length: 60 }, (_, i) => 100 + Math.round(Math.sin(i / 2) * 40)),
+    );
+    await seedDaily(
+      a2.id,
+      start + DAY / 2,
+      Array.from({ length: 60 }, (_, i) => 200 + Math.round(Math.cos(i / 3) * 80)),
+    );
+
+    const raw = await snapshotsOf(USER).listTotals();
+    const series = buildPortfolioTimeline(
+      await snapshotsOf(USER).listSampledTotals([a1.id, a2.id], undefined, 5),
+    );
+    const truth = buildPortfolioTimeline(raw);
+
+    expect(series.length).toBeGreaterThan(4);
+    for (const p of series) expect(p.total).toBe(trueValueAt(raw, p.t));
+    expect(Math.min(...series.map((p) => p.total))).toBe(Math.min(...truth.map((p) => p.total)));
+    expect(Math.max(...series.map((p) => p.total))).toBe(Math.max(...truth.map((p) => p.total)));
+  }, 40_000);
+
+  // review #2:一天的闪崩落在多天一桶的中间 —— 上一版「每账户每桶留最后一个收盘」会把它整个丢掉。
+  it("单日 40% 闪崩落在多天一桶的中间,1 年与全部窗口里都还在", async () => {
+    const a1 = await accounts(USER).create({ connectorId: "binance", label: "A1", creds: "x" });
+    const a2 = await accounts(USER).create({ connectorId: "binance", label: "A2", creds: "x" });
+    const start = 7 * DAY;
+    const DAYS = 420;
+    const CRASH = 203;
+    const wiggle = (i: number) => (i * 37) % 11;
+    await seedDaily(
+      a1.id,
+      start,
+      Array.from({ length: DAYS }, (_, i) => (i === CRASH ? 600 : 1000 + wiggle(i))),
+    );
+    await seedDaily(
+      a2.id,
+      start + HOUR,
+      Array.from({ length: DAYS }, (_, i) => (i === CRASH ? 300 : 500 + wiggle(i + 3))),
+    );
+    const raw = await snapshotsOf(USER).listTotals();
+    const crashTotal = 600 + 300;
+
+    const now = start + DAYS * DAY;
+    for (const since of [undefined, now - 365 * DAY]) {
+      for (const buckets of [10, undefined]) {
+        const rows = await snapshotsOf(USER).listSampledTotals([a1.id, a2.id], since, buckets);
+        const cap = 3 * (buckets ?? HISTORY_SAMPLED_BUCKETS) + 1;
+        for (const id of [a1.id, a2.id]) {
+          expect(rows.filter((r) => r.accountId === id).length).toBeLessThanOrEqual(cap);
+        }
+        const series = buildPortfolioTimeline(rows);
+        expect(Math.min(...series.map((p) => p.total))).toBe(crashTotal);
+        for (const p of series) expect(p.total).toBe(trueValueAt(raw, p.t));
+      }
+    }
+  }, 60_000);
 
   it("listTotals:裁窗口时补 carry-in(停更账户不从曲线消失)", async () => {
     const a = await accounts(USER).create({ connectorId: "binance", label: "A", creds: "x" });

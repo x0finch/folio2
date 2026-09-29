@@ -38,7 +38,7 @@ export const handleGetPortfolioHistory = Effect.fn("getPortfolioHistory")(functi
   const snapAccountIds = memberAccounts.filter((a) => !isManual(a.connectorId)).map((a) => a.id);
 
   // 三档原料(FOL-91,见 `historyResolution`):≤ 7 天读原始快照;更长的窗口读日汇总 ——
-  // 30 天原样发日收盘;1 年 / 全部在 SQL 里按桶封顶(每账户 ≤ 200 行收盘,FOL-92)。重建与
+  // 30 天原样发日收盘;1 年 / 全部在 SQL 里按桶挑保极值的时刻(每账户 ≤ 301 行,review #2)。重建与
   // min-max 降采样都在浏览器(`toPortfolioCurve`)。
   const snapRows =
     resolution === "sampled"

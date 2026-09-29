@@ -359,7 +359,8 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
 // (`SnapshotTotalRow` 形状,与组合曲线同一种)。归属(token_id)与入选口径(只数现货,
 // `viewKind === "spot"`)在 SQL 里判,合计也在那儿算 —— 浏览器拿到的已经是「某账户某时刻这个币值多少」。
 //   · 短窗(≤ 7 天每张快照一行 / 30 天每天一行):阶梯重建 + 自适应降采样。
-//   · 长窗(1y/all,`sampled`):每账户 ≤ 200 行(桶收盘),阶梯重建 + min-max 降采样。
+//   · 长窗(1y/all,`sampled`):SQL 按桶挑出的最低 / 最高 / 最后时刻,每账户 ≤ 301 行(review #2),
+//     阶梯重建 + min-max 降采样。
 export interface TokenValueHistoryRaw {
   rows: SnapshotTotalRow[];
   sampled?: boolean;

@@ -32,6 +32,7 @@ import {
   queryCarryInTotals,
   queryDailyTotalsInScope,
   querySampledPointsByAccount,
+  querySampledSteps,
   querySampledTotalsInScope,
 } from "./history-minmax";
 import { assertAccountOwned } from "./ownership";
@@ -447,8 +448,9 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
       client.query((db) => queryDailyTotalsInScope(db, userId, accountIds, since)),
 
     /**
-     * 组合长窗(1 年 / 全部,FOL-92):carry-in + 每账户每桶最后一个日收盘,每账户 ≤ `buckets` 行。
-     * 形状与 `listTotals` 相同;重建与 min-max 降采样在浏览器做。
+     * 组合长窗(1 年 / 全部,FOL-92):日收盘 + carry-in,在组合时间线上按桶挑最低 / 最高 / 最后的
+     * 时刻,发各账户在那些时刻的值(review #2,见 `querySampledSteps`),每账户 ≤ `3 × buckets + 1` 行。
+     * 形状与 `listTotals` 相同;重建与 min-max 降采样在浏览器做,重建出的每点都是真实组合值。
      */
     listSampledTotals: (
       accountIds: readonly string[],
@@ -459,7 +461,7 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
 
     /**
      * 单币价值历史的原料(FOL-92):某 token_id 每 (账户 × 快照) 的现货价值合计,再按 `bucket`
-     * 每账户每桶留最后一行,升序。形状与 `listTotals` 相同,浏览器照组合曲线那样阶梯重建。
+     * 合并,升序。形状与 `listTotals` 相同,浏览器照组合曲线那样阶梯重建。
      *
      * **合计与「是不是现货」都在 SQL 里判**,以前是把窗口内每一条余额行(带 `meta_json`)原样读进
      * Worker、在 JS 里逐行 `viewKind` + 归组 —— 一年逐小时就是每账户 8760 行起。现货的判据与
@@ -469,7 +471,8 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
      * `bucket`:
      *   · `"snapshot"` —— 不合并,每张快照一行(≤ 7 天的窗口,本来就 ≤ 每小时一行)。
      *   · `"day"`      —— 每 UTC 日最后一行(浏览器在这个跨度上画的就是每日收盘,取的点完全相同)。
-     *   · `"sampled"`  —— 把窗口切成 `HISTORY_SAMPLED_BUCKETS` 个桶,每桶最后一行(1 年 / 全部)。
+     *   · `"sampled"`  —— 1 年 / 全部:`querySampledSteps`,在跨账户合计的时间线上按桶挑最低 / 最高 /
+     *     最后的时刻,发各账户在那些时刻的值(每账户 ≤ 3 × `HISTORY_SAMPLED_BUCKETS` + 1 行)。
      */
     listTokenValueTotals: (
       tokenId: string,
@@ -477,33 +480,39 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
       bucket: "snapshot" | "day" | "sampled",
     ): Effect.Effect<SnapshotTotal[]> =>
       client.query(async (db) => {
+        // 某 token 每 (账户 × 快照) 的现货合计。
+        const perSnapshot = sql`
+          SELECT s.account_id, s.taken_at, SUM(b.usd_value) AS total
+          FROM ${snapshotBalances} b
+          JOIN ${snapshots} s ON s.id = b.snapshot_id
+          JOIN ${accounts} a ON a.id = s.account_id
+          WHERE a.user_id = ${userId}
+            AND b.token_id = ${tokenId}
+            AND b.kind NOT IN (${sql.join(
+              NON_SPOT_KINDS.map((k) => sql`${k}`),
+              sql`, `,
+            )})${since != null ? sql` AND s.taken_at >= ${since}` : sql``}
+          GROUP BY s.id`;
+        // 长窗:与组合曲线同一套「在组合时间线上挑候选时刻」(review #2)—— 每账户每桶只留最后一行
+        // 会把落在桶中间的尖峰 / 深谷丢掉。
+        if (bucket === "sampled") {
+          return querySampledSteps(
+            db,
+            sql`tp AS (${perSnapshot}),
+            p AS (SELECT account_id, taken_at AS t, total AS v, 1 AS ord FROM tp)`,
+            HISTORY_SAMPLED_BUCKETS,
+          );
+        }
         const bucketExpr =
-          bucket === "snapshot"
-            ? sql`p.taken_at`
-            : bucket === "day"
-              ? sql`CAST(p.taken_at / ${DAY_MS} AS INTEGER)`
-              : sql`CAST((p.taken_at - bounds.lo) * ${HISTORY_SAMPLED_BUCKETS} / bounds.span AS INTEGER)`;
+          bucket === "snapshot" ? sql`p.taken_at` : sql`CAST(p.taken_at / ${DAY_MS} AS INTEGER)`;
         const rows = await db.values<[string, number, number]>(sql`
-          WITH p AS (
-            SELECT s.account_id, s.taken_at, SUM(b.usd_value) AS total
-            FROM ${snapshotBalances} b
-            JOIN ${snapshots} s ON s.id = b.snapshot_id
-            JOIN ${accounts} a ON a.id = s.account_id
-            WHERE a.user_id = ${userId}
-              AND b.token_id = ${tokenId}
-              AND b.kind NOT IN (${sql.join(
-                NON_SPOT_KINDS.map((k) => sql`${k}`),
-                sql`, `,
-              )})${since != null ? sql` AND s.taken_at >= ${since}` : sql``}
-            GROUP BY s.id
-          ),
-          bounds AS (SELECT MIN(taken_at) AS lo, MAX(taken_at) - MIN(taken_at) + 1 AS span FROM p),
+          WITH p AS (${perSnapshot}),
           ranked AS (
             SELECT p.account_id, p.taken_at, p.total,
               ROW_NUMBER() OVER (
                 PARTITION BY p.account_id, ${bucketExpr} ORDER BY p.taken_at DESC
               ) AS rn
-            FROM p, bounds
+            FROM p
           )
           SELECT account_id, taken_at, total FROM ranked WHERE rn = 1 ORDER BY taken_at
         `);
