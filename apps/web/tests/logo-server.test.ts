@@ -186,6 +186,8 @@ describe("serveLogo 边缘缓存(按上游 URL)", () => {
       private: true,
     });
     expect(new Uint8Array(await first.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+    // 命中与否回在响应头上(review #15):生产日志不出 debug,验「第二次不再回源」看它。
+    expect(first.headers.get("x-folio-logo-cache")).toBe("miss");
     await settle();
 
     const second = await serveLogo(resolving("https://cgk/usdc.png"), "token", "b", {
@@ -201,6 +203,7 @@ describe("serveLogo 边缘缓存(按上游 URL)", () => {
       "private, max-age=86400, stale-while-revalidate=2592000",
     );
     expect(second.headers.get("cache-tag")).toBe("logo:token:b");
+    expect(second.headers.get("x-folio-logo-cache")).toBe("hit");
   });
 
   it("缓存键只由上游 URL 派生:不含 userId / Cookie / 会话,键请求不带任何头", async () => {

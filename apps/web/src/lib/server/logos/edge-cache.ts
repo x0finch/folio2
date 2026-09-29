@@ -19,6 +19,12 @@ const logoLog = getLogger(["folio", "web", "logos"]);
 //
 // 与 `tokens/edge-cache.ts` 同一个前提:**`*.workers.dev` 上 Cache API 是静默空转**,只在自定义域
 // 生效(见 DEPLOY.md)。空转不抛错 → 只见 `stored` 不见 `hit` 就是没生效。
+//
+// **在生产里怎么看得见**(review #15):生产 `LOG_LEVEL` 是 info,debug 不出。
+// · `stored` 记 **info** —— 每个上游 URL 每个机房三十天才一行,量不成问题。
+// · 命中与否**不打日志**,而是回在响应头 `x-folio-logo-cache: hit|miss` 上(`serve.ts`):
+//   命中是每张图每次请求都发生的事,记 info 会让日志量跟着页面上的图标数涨;响应头零成本,
+//   浏览器开发者工具里点开任一张 logo 就看得到。`hit` 那行 debug 留给本地排查。
 // 读写失败一律不阻断:退化成每次回源,只慢不错。
 
 // 30 天:与浏览器侧的 SWR 窗(`serve.ts` 的 CACHE_HIT)同长。logo 几乎不变;缓存满了 CF 会自己逐出。
@@ -72,7 +78,7 @@ export async function storeLogo(
         },
       }),
     );
-    logoLog.debug("logo edge cache: stored");
+    logoLog.info("logo edge cache: stored");
   } catch (err) {
     logoLog.warn("logo edge cache: write failed", { error: reason(err) });
   }

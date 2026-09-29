@@ -15,6 +15,9 @@ const CACHE_HIT = "public, max-age=86400, stale-while-revalidate=2592000"; // 1d
 const CACHE_HIT_PRIVATE = "private, max-age=86400, stale-while-revalidate=2592000";
 const CACHE_404 = "public, max-age=3600"; // 短负缓存:图确实没了
 const NO_STORE = "no-store"; // 瞬时故障,可重试
+// 这次的字节是不是边缘缓存给的(review #15 —— 生产里验「第二次不再回源」看这个头,见 `./edge-cache`)。
+// 只加在真要看缓存的那条路上:回源 / 命中的 200。data: 内嵌图与 404 / 502 不经缓存,不带。
+const EDGE_CACHE_HEADER = "x-folio-logo-cache";
 
 // 只透传栅格图类型;svg/html 等能在本域内联执行脚本的一律降级为 octet-stream(配合 nosniff
 // → 浏览器直下载不渲染,挡住"上游被投毒 → 我方 origin XSS")。真实 logo 都是 png/webp,无损。
@@ -35,7 +38,7 @@ const okHeaders = (
   kind: "token" | "platform" | "defi",
   id: string,
   opts?: { private?: boolean },
-): HeadersInit => ({
+): Record<string, string> => ({
   "content-type": safeContentType(ct),
   "x-content-type-options": "nosniff",
   "cache-control": opts?.private ? CACHE_HIT_PRIVATE : CACHE_HIT,
@@ -95,7 +98,10 @@ export async function serveLogo(
   if (hit) {
     return new Response(hit.body, {
       status: 200,
-      headers: okHeaders(hit.headers.get("content-type"), kind, id, opts),
+      headers: {
+        ...okHeaders(hit.headers.get("content-type"), kind, id, opts),
+        [EDGE_CACHE_HEADER]: "hit",
+      },
     });
   }
 
@@ -120,5 +126,8 @@ export async function serveLogo(
   }
 
   // body 是 ReadableStream,按引用交出去 → 字节流式透传。
-  return new Response(body, { status: 200, headers: okHeaders(ct, kind, id, opts) });
+  return new Response(body, {
+    status: 200,
+    headers: { ...okHeaders(ct, kind, id, opts), [EDGE_CACHE_HEADER]: "miss" },
+  });
 }
