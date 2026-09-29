@@ -25,6 +25,9 @@ export const STALE_TIME = {
   settings: 60 * 60_000,
   // 代币目录、法币清单、凭据字段规格:跟着部署走,一天里基本不动。
   catalogue: 60 * 60_000,
+  // 数据版本号(FOL-94):本来是「每次都问」,这几秒只是去重窗 —— 缓存里没有号时路由鉴权会赶在
+  // 数据请求之前先问一次(review #24),紧接着挂上的监视器不必再问第二遍。定时轮询不看它。
+  dataVersion: 5_000,
   // 连接器清单:**部署内静态**,同一个进程里问第二次没有意义。
   deployment: Number.POSITIVE_INFINITY,
 } as const;

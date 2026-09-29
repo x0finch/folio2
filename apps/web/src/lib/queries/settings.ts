@@ -35,11 +35,12 @@ export const dataStatsQuery = () =>
     staleTime: STALE_TIME.settings,
   });
 
-// 数据版本号(FOL-94,判据与比较在 `data-version.ts`)。`staleTime: 0`:它就是用来「每次都问」的 ——
-// 回到页面(`refetchOnWindowFocus` 缺省开)与可见时每分钟一次。
+// 数据版本号(FOL-94,判据与比较在 `data-version.ts`)。它就是用来「每次都问」的 —— 回到页面
+// (`refetchOnWindowFocus` 缺省开)与可见时每分钟一次;`staleTime` 只是几秒的去重窗
+// (`STALE_TIME.dataVersion`),见那里。
 export const dataVersionQuery = (): DataVersionOptions => ({
   queryKey: dataVersionKeys.all,
   queryFn: () => getDataVersion(),
-  staleTime: 0,
+  staleTime: STALE_TIME.dataVersion,
   refetchInterval: POLL_INTERVAL.dataVersion,
 });

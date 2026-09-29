@@ -102,11 +102,13 @@ function LockOverlay({ onUnlock }: { onUnlock: () => void }) {
   async function onSignOut() {
     setBusy(true);
     clearIdleLockState();
-    // 内存与 IndexedDB 里的查询缓存一起清(FOL-94),并且忘掉是谁 —— 之后卸载时的 `resume` 不再写。
-    await forgetQueryCache(queryClient);
     try {
       await signOut();
     } finally {
+      // 内存与 IndexedDB 里的查询缓存一起清(FOL-94),并且忘掉是谁 —— 之后卸载时的 `resume` 不再写。
+      // **排在 signOut 之后**:清的同时会广播给别的标签页(review #3),它们随即重新鉴权 —— 会话
+      // 那时还没销毁的话,它们会以为还登录着、重新开始写盘。
+      await forgetQueryCache(queryClient);
       navigate({ to: "/login" });
     }
   }

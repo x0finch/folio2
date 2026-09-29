@@ -5,6 +5,7 @@ import {
   Outlet,
   redirect,
   retainSearchParams,
+  useNavigate,
 } from "@tanstack/react-router";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
@@ -22,6 +23,7 @@ import {
 } from "@/lib/hooks/use-prefer-currency";
 import { RETRY, withRetry } from "@/lib/queries/constants";
 import { watchDataVersion } from "@/lib/queries/data-version";
+import { dataVersionKeys } from "@/lib/queries/keys";
 import { forgetQueryCache, queryPersistence } from "@/lib/queries/persist";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
@@ -82,10 +84,16 @@ export const Route = createFileRoute("/_authed")({
     }
     // **先把上次的查询缓存恢复进内存,再让 loader 跑**(FOL-94,`lib/queries/persist.ts`):loader 里的
     // `ensureQueryData` 命中恢复出来的数据就不发请求 —— 重开页面只剩版本号那一发。同一个用户第二次
-    // 走到这里是 no-op。锁着的时候不恢复:锁屏挂上去之后本来就要清掉。
+    // 走到这里是 no-op。锁着的时候不恢复、也不开写(锁屏期间的导航同样走到这里,review #14)。
     await queryPersistence().start(context.queryClient, current.user.id, {
-      restore: !readLockFlag(),
+      locked: readLockFlag(),
     });
+    // 缓存里没有版本号(头一回打开 / 锁着重开过)时,**赶在 loader 的数据请求之前**先把它问出去
+    // (review #24):版本号的监视器会把第一次读到的号当基准、不失效 —— 这只在「那个号不晚于数据」
+    // 时才对。先发它,数据就是在这个号或更新的号上读到的;中间有人写了,下一次问号时号变了,照常失效。
+    if (!context.queryClient.getQueryData(dataVersionKeys.all)) {
+      void context.queryClient.prefetchQuery(dataVersionQuery());
+    }
     return { user: current.user };
   },
   // **这里故意不声明 `loaderDeps`**(与 home / insights 相反),尽管 loader 读了地址里的组合参数:
@@ -188,6 +196,13 @@ function ShellWithSync({ userName, children }: { userName: string; children: Rea
 
 function AuthedLayout() {
   const { user } = Route.useRouteContext();
+  const navigate = useNavigate();
+  // 别的标签页登出了(review #3):本页的持久化已经停写、内存已清空(`persist.ts`),会话是整个浏览器
+  // 共用的 cookie、已经没了 —— 直接送回登录页。挂在锁屏**之外**:锁着的标签页也得走。
+  useEffect(
+    () => queryPersistence().onSignedOutElsewhere(() => void navigate({ to: "/login" })),
+    [navigate],
+  );
   const currencyCode = useStoredCurrency();
   const { data: preferCurrency } = useSuspenseQuery(currencyPreferenceQuery(currencyCode));
   const { data: portfolios } = useSuspenseQuery(portfolioListQuery());

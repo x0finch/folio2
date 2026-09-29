@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POLL_INTERVAL, STALE_TIME } from "@/lib/queries/constants";
 import { type DataVersionOptions, watchDataVersion } from "@/lib/queries/data-version";
 import { accountKeys, dataVersionKeys, portfolioKeys } from "@/lib/queries/keys";
+import { lockQueryCache } from "@/lib/queries/persist";
 
 // 数据版本号驱动的刷新(FOL-94)。钉三件事:
 //   ① 回到页面 / 定时 → **只问版本号**,挂着的数据查询一发都不重拉(它们的 staleTime 还没到);
@@ -133,5 +134,28 @@ describe("数据版本号驱动的刷新", () => {
 
     expect(versionFetches).toBe(1);
     expect(dataFetches).toEqual({ accounts: 0, snapshots: 0 });
+  });
+
+  it("锁屏扔内存缓存时留下版本号 → 解锁后第一次读到的号变了就失效(review #24)", async () => {
+    queryClient.setQueryData(dataVersionKeys.all, { version: 1 });
+    mountDataQueries();
+    const stopWatching = watchDataVersion(queryClient, versionOptions());
+    await flush();
+
+    // 锁上:页面(连同监视器)卸载,没人挂着的查询被扔掉 —— 版本号除外。
+    stopWatching();
+    for (const u of unsubs.splice(0)) u();
+    await lockQueryCache(queryClient);
+    expect(queryClient.getQueryData(dataVersionKeys.all)).toEqual({ version: 1 });
+    expect(queryClient.getQueryData([...accountKeys.list(PF)])).toBeUndefined();
+
+    // 解锁:页面重挂、重新拉数据(那一刻号还是 1),而监视器第一次问到的号已经是 2 了
+    // (解锁那一瞬后台同步落了一笔)—— 必须失效,不能把 2 当基准吞掉。
+    mountDataQueries();
+    serverVersion = 2;
+    unsubs.push(watchDataVersion(queryClient, versionOptions()));
+    await flush();
+
+    expect(dataFetches).toEqual({ accounts: 1, snapshots: 1 });
   });
 });

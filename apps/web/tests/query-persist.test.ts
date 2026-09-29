@@ -1,12 +1,19 @@
 import type { PersistedClient } from "@tanstack/query-persist-client-core";
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { accountKeys, dataVersionKeys, syncKeys, tokenKeys } from "@/lib/queries/keys";
+import {
+  accountKeys,
+  dataVersionKeys,
+  portfolioKeys,
+  syncKeys,
+  tokenKeys,
+} from "@/lib/queries/keys";
 import {
   createQueryPersistence,
   isPersistedKey,
   type PersistStorage,
   type QueryPersistence,
+  type SignOutChannel,
 } from "@/lib/queries/persist";
 
 // 查询缓存落盘(FOL-94)。生产是 IndexedDB,这里换一个内存的 `PersistStorage` —— 要验的是
@@ -19,20 +26,46 @@ const THROTTLE = 1_000;
 const USER_A = "user-a";
 const USER_B = "user-b";
 
+const OWNER = "owner";
+
+// 内存版 `PersistStorage`:户主标记与记录同住一张表,`clear` 一起抹掉 —— 与 IndexedDB 那份同形。
 const memoryStorage = () => {
   const map = new Map<string, PersistedClient>();
+  let owner: string | undefined;
   const storage: PersistStorage = {
     get: async (k) => map.get(k),
-    set: async (k, v) => {
-      map.set(k, v);
+    put: async (k, v, who) => {
+      if (owner === who) map.set(k, v);
+    },
+    claim: async (who) => {
+      owner = who;
     },
     del: async (k) => {
       map.delete(k);
     },
-    keys: async () => [...map.keys()],
-    clear: async () => map.clear(),
+    keys: async () => [...map.keys(), ...(owner ? [OWNER] : [])],
+    clear: async () => {
+      map.clear();
+      owner = undefined;
+    },
   };
-  return { map, storage };
+  return { map, storage, owner: () => owner };
+};
+
+// 假 BroadcastChannel:同一个 hub 上的频道互相送达,不回送给自己;送达是异步的(与真的一样)。
+const channelHub = () => {
+  const listeners: { self: object; fn: () => void }[] = [];
+  return (): SignOutChannel => {
+    const self = {};
+    return {
+      announce: () => {
+        for (const l of listeners) if (l.self !== self) setTimeout(l.fn, 0);
+      },
+      listen: (fn) => {
+        listeners.push({ self, fn });
+      },
+    };
+  };
 };
 
 const persistedKeys = (client: PersistedClient | undefined) =>
@@ -40,8 +73,8 @@ const persistedKeys = (client: PersistedClient | undefined) =>
 
 let mem: ReturnType<typeof memoryStorage>;
 let persistence: QueryPersistence;
-const make = (buster = "build-1") =>
-  createQueryPersistence({ storage: mem.storage, buster, throttleMs: THROTTLE });
+const make = (buster = "build-1", channel?: SignOutChannel) =>
+  createQueryPersistence({ storage: mem.storage, buster, channel, throttleMs: THROTTLE });
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -73,6 +106,7 @@ describe("存什么", () => {
     await vi.advanceTimersByTimeAsync(THROTTLE);
 
     expect([...mem.map.keys()]).toEqual([`user:${USER_A}`]);
+    expect(mem.owner()).toBe(USER_A);
     expect(persistedKeys(mem.map.get(`user:${USER_A}`))).toEqual([accountKeys.list("pf")]);
   });
 });
@@ -115,10 +149,10 @@ describe("恢复", () => {
     expect(qc.getQueryData([...accountKeys.list("pf")])).toBeUndefined();
   });
 
-  it("锁着开页面(restore: false)→ 不恢复,并把那份记录删掉", async () => {
+  it("锁着开页面(locked)→ 不恢复,并把那份记录删掉", async () => {
     await seedA();
     const qc = new QueryClient();
-    await make().start(qc, USER_A, { restore: false });
+    await make().start(qc, USER_A, { locked: true });
 
     expect(qc.getQueryData([...accountKeys.list("pf")])).toBeUndefined();
     expect(mem.map.size).toBe(0);
@@ -172,5 +206,134 @@ describe("锁屏 / 登出", () => {
     qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
     await vi.advanceTimersByTimeAsync(THROTTLE);
     expect(mem.map.size).toBe(0);
+  });
+});
+
+describe("锁着的时候导航(review #14)", () => {
+  it("锁屏后同一个用户再走一遍 start(浏览器后退 / 换组合参数)→ 不重新开写;解锁才写", async () => {
+    const qc = new QueryClient();
+    await persistence.start(qc, USER_A);
+    await persistence.clear(); // 锁上
+
+    await persistence.start(qc, USER_A, { locked: false }); // 锁标志已被别的标签页解锁清掉也一样
+    qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
+    await vi.advanceTimersByTimeAsync(THROTTLE * 2);
+    expect(mem.map.size).toBe(0);
+
+    persistence.resume(qc);
+    qc.setQueryData([...accountKeys.list("pf")], [{ id: "a2" }]);
+    await vi.advanceTimersByTimeAsync(THROTTLE);
+    expect(mem.map.has(`user:${USER_A}`)).toBe(true);
+  });
+
+  it("锁着开页面 → 之后的导航也不开写,直到解锁", async () => {
+    const qc = new QueryClient();
+    await persistence.start(qc, USER_A, { locked: true });
+    await persistence.start(qc, USER_A, { locked: true });
+    qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
+    await vi.advanceTimersByTimeAsync(THROTTLE * 2);
+    expect(mem.map.size).toBe(0);
+
+    persistence.resume(qc);
+    qc.setQueryData([...accountKeys.list("pf")], [{ id: "a2" }]);
+    await vi.advanceTimersByTimeAsync(THROTTLE);
+    expect(mem.map.has(`user:${USER_A}`)).toBe(true);
+  });
+});
+
+describe("多个标签页(review #3)", () => {
+  const openTabs = async () => {
+    const hub = channelHub();
+    const a = { qc: new QueryClient(), p: make("build-1", hub()) };
+    const b = { qc: new QueryClient(), p: make("build-1", hub()) };
+    await a.p.start(a.qc, USER_A);
+    await b.p.start(b.qc, USER_A);
+    for (const tab of [a, b]) tab.qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
+    await vi.advanceTimersByTimeAsync(THROTTLE);
+    expect(mem.map.has(`user:${USER_A}`)).toBe(true);
+    return { a, b };
+  };
+
+  it("A 登出 → B 停写、清空内存、通知路由;之后 B 的缓存事件写不回盘", async () => {
+    const { a, b } = await openTabs();
+    const toLogin = vi.fn();
+    b.p.onSignedOutElsewhere(toLogin);
+
+    b.qc.setQueryData([...accountKeys.list("pf")], [{ id: "a2" }]); // B 节流窗口里挂着一次写
+    await a.p.forget();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(toLogin).toHaveBeenCalledTimes(1);
+    expect(b.qc.getQueryCache().getAll()).toHaveLength(0);
+
+    // B 的版本号轮询失败 / 聚焦重拉:缓存事件照来,盘上仍然没有这个用户。
+    b.qc.setQueryData([...accountKeys.list("pf")], [{ id: "a3" }]);
+    await vi.advanceTimersByTimeAsync(THROTTLE * 3);
+    expect(mem.map.size).toBe(0);
+  });
+
+  it("收到广播的那一页后来自己发现会话没了(路由鉴权)→ 不再回送广播", async () => {
+    const { a, b } = await openTabs();
+    const aHeard = vi.fn();
+    a.p.onSignedOutElsewhere(aHeard);
+    await a.p.forget();
+    await vi.advanceTimersByTimeAsync(0);
+
+    await b.p.forget();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(aHeard).not.toHaveBeenCalled();
+  });
+
+  it("广播还没到(或浏览器不支持)→ 户主检查兜住:A 登出之后 B 挂着的那次写也落不下", async () => {
+    const a = { qc: new QueryClient(), p: make() };
+    const b = { qc: new QueryClient(), p: make() }; // 没有频道
+    await a.p.start(a.qc, USER_A);
+    await b.p.start(b.qc, USER_A);
+
+    b.qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
+    await a.p.forget();
+    await vi.advanceTimersByTimeAsync(THROTTLE * 2);
+    b.qc.setQueryData([...accountKeys.list("pf")], [{ id: "a2" }]);
+    await vi.advanceTimersByTimeAsync(THROTTLE * 2);
+
+    expect(mem.map.size).toBe(0);
+  });
+
+  it("解锁后户主记回来,接着写得下", async () => {
+    const qc = new QueryClient();
+    await persistence.start(qc, USER_A);
+    await persistence.clear();
+    expect(mem.owner()).toBeUndefined();
+
+    persistence.resume(qc);
+    qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
+    await vi.advanceTimersByTimeAsync(THROTTLE);
+    expect(mem.owner()).toBe(USER_A);
+    expect(mem.map.has(`user:${USER_A}`)).toBe(true);
+  });
+});
+
+describe("恢复出来的新不新鲜(review #13)", () => {
+  it("版本号担保得了的记成现在;带现价的富化字典保留原来的时间戳", async () => {
+    vi.setSystemTime(new Date("2026-09-28T18:00:00Z"));
+    const qc = new QueryClient();
+    await persistence.start(qc, USER_A);
+    qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
+    qc.setQueryData([...portfolioKeys.list()], { portfolios: [] });
+    qc.setQueryData([...tokenKeys.enrichment()], { prices: {} });
+    qc.setQueryData(dataVersionKeys.all, { version: 7 });
+    await vi.advanceTimersByTimeAsync(THROTTLE);
+    const savedAt = Date.now() - THROTTLE;
+
+    vi.setSystemTime(new Date("2026-09-29T09:00:00Z")); // 第二天早上重开
+    const reopened = new QueryClient();
+    await make().start(reopened, USER_A);
+    const updatedAt = (key: readonly unknown[]) => reopened.getQueryState(key)?.dataUpdatedAt;
+
+    expect(updatedAt(accountKeys.list("pf"))).toBe(Date.now());
+    expect(updatedAt(portfolioKeys.list())).toBe(Date.now());
+    expect(updatedAt(tokenKeys.enrichment())).toBe(savedAt);
+    // 版本号自己也不动 —— 它得照旧过期,挂上时去问服务端。
+    expect(updatedAt(dataVersionKeys.all)).toBe(savedAt);
   });
 });

@@ -5,8 +5,29 @@ import {
   KEYS,
   lockNow,
   readLockState,
+  signUpAndLogin,
 } from "./fixtures/app";
 import { expect, test } from "./fixtures/test";
+
+/** 查询缓存那个 IndexedDB 库里按用户存的记录键(`user:<id>`,见 lib/queries/persist.ts)。 */
+const persistedUserKeys = (page: import("@playwright/test").Page) =>
+  page.evaluate(
+    () =>
+      new Promise<string[]>((resolve, reject) => {
+        const open = indexedDB.open("folio-query-cache");
+        open.onupgradeneeded = () => open.result.createObjectStore("clients");
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const all = db.transaction("clients").objectStore("clients").getAllKeys();
+          all.onsuccess = () => {
+            db.close();
+            resolve(all.result.map(String).filter((k) => k.startsWith("user:")));
+          };
+          all.onerror = () => reject(all.error);
+        };
+      }),
+  );
 
 // 同一个人开着好几个标签 —— 这块之前一条测试都没有,而它正是「换个标签就绕过了」最可能藏身的地方。
 //
@@ -96,6 +117,35 @@ test.describe("多个标签页", () => {
       }
       expect(page.url()).toMatch(/\/login/);
     }).toPass();
+    await other.close();
+  });
+
+  // review #3:以前登出只停了**本页**的写盘。另一个标签页手里还有整份数据,它的版本号轮询 / 聚焦重拉
+  // 一触发缓存事件,就把 `user:<id>` 原样写回刚清空的库 —— 登出了,组合还躺在盘上。
+  test("一个标签登出 → 另一个标签不再把查询缓存写回 IndexedDB", async ({ page }) => {
+    await signUpAndLogin(page);
+    await dismissPasskeyPrompt(page);
+    const other = await page.context().newPage();
+    await gotoHydrated(other, "/settings");
+    await gotoHydrated(page, "/settings");
+    // 两边都在写:库里有这个用户的那条记录。
+    await expect.poll(() => persistedUserKeys(page)).toHaveLength(1);
+
+    await page.getByRole("button", { name: /sign out/i }).click();
+    await page.locator("button.bg-destructive").click();
+    await expect(page).toHaveURL(/\/login/);
+
+    // 另一个标签:回到前台 → 版本号重问、缓存事件照来。写盘节流 1 秒,等到它被送回登录页后再多等
+    // 一个节流窗,确认没有哪次写落下来。
+    await other.bringToFront();
+    await other.evaluate(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    await expect(other).toHaveURL(/\/login/);
+    await other.waitForTimeout(1_500);
+    expect(await persistedUserKeys(other)).toEqual([]);
+    expect(await persistedUserKeys(page)).toEqual([]);
     await other.close();
   });
 
