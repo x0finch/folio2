@@ -91,8 +91,10 @@ type DbServices = Database | GlobalDatabase;
  *     日志转发器(`withLogTapeLogger`,两个 FiberRef 的初值)。cron、剪 note、以及每个入口的
  *     「边缘」(`runAtEdge`)只用它。
  *   · `isolateRuntime` —— 在 `dbRuntime` 之上补参考层与 connector 门票,第一次有活要它们时才建
- *     (见它自己的注释)。db 那两张门票**就是 `dbRuntime` 里那一份**,两个运行时里的 `Database`
- *     是同一个对象,每个 isolate 仍只有一份。
+ *     (见它自己的注释)。`Database` **就是 `dbRuntime` 里那一份**(同一个对象,每个 isolate 一份);
+ *     `GlobalDatabase` 不是 —— `oracleServices()` 自带一份,`Context.merge` 右边赢,于是 isolate
+ *     运行时里的是参考层那份,每个 isolate 两份。两份都是不带用户数据的纯闭包(ADR 0022),无害;
+ *     别拿它俩比引用相等。
  *
  * 从不 `dispose`:它们活到 isolate 被回收为止,而里面没有要收尾的东西(见上面的清单)。
  */
@@ -285,8 +287,9 @@ export const withGlobalDb = <A, E>(
 ): Effect.Effect<A, E> => Effect.provide(provideDbClient(env)(effect), dbRuntime());
 
 /**
- * 边缘:跑一个**已经装配好**的 cron effect。cron 一次调用只经这里一次,跑在与 server fn 同一个
- * isolate 运行时上(日志层在那里)。
+ * 边缘:跑一个**已经装配好**的 effect(cron 本体、队列的每条消息)。一次调用只经这里一次,跑在
+ * **`dbRuntime`**(db 那半 + 日志转发器)上,不是 isolate 运行时:`R = never`,要参考层 / connector
+ * 的活由 `forUser` 自己 provide `isolateRuntime`,这里不为它把整张图建起来。
  */
 export const runAtEdge = <A>(effect: Effect.Effect<A, Error>): Promise<A> =>
   // span 树也在这儿装(#504 T16):cron 一次调用就是一趟,那棵树该按整趟算。
