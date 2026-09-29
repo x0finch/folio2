@@ -126,11 +126,18 @@ const vouchedByVersion = (key: readonly unknown[]): boolean =>
 const shouldDehydrateQuery = (query: Query) =>
   query.state.status === "success" && isPersistedKey(query.queryKey);
 
-/** 刚恢复出来、版本号担保得了的查询:时间戳记成现在(见 `VOUCHED_BY_VERSION`)。 */
+/**
+ * 刚恢复出来、版本号担保得了的查询:时间戳记成现在(见 `VOUCHED_BY_VERSION`)。
+ *
+ * **已经被标过失效的跳过**(review R2-#1):失效只重拉挂着的查询,没挂着的(别的页面、别的区间)
+ * 只打个 `isInvalidated` 标记,就这么连同**新**版本号一起落了盘。`setQueryData` 会把这个标记清掉,
+ * 而版本号又对得上、不会再失效一次 —— 那份已知过期的数据就会被当成新鲜的挂上 15 分钟。
+ */
 function freshenRestored(queryClient: QueryClient) {
   const now = Date.now();
   for (const query of queryClient.getQueryCache().getAll()) {
-    if (query.state.status !== "success" || !vouchedByVersion(query.queryKey)) continue;
+    if (query.state.status !== "success" || query.state.isInvalidated) continue;
+    if (!vouchedByVersion(query.queryKey)) continue;
     queryClient.setQueryData(query.queryKey, query.state.data, { updatedAt: now });
   }
 }

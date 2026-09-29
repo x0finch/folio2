@@ -336,4 +336,38 @@ describe("恢复出来的新不新鲜(review #13)", () => {
     // 版本号自己也不动 —— 它得照旧过期,挂上时去问服务端。
     expect(updatedAt(dataVersionKeys.all)).toBe(savedAt);
   });
+
+  it("落盘前已被标失效的(没挂着、只打了标记)→ 恢复后仍旧过期,挂上就重拉(review R2-#1)", async () => {
+    const qc = new QueryClient();
+    await persistence.start(qc, USER_A);
+    qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
+    qc.setQueryData([...portfolioKeys.list()], { portfolios: [] });
+    // 版本号变了之后的失效:没挂着的查询只被打上标记,不重拉。
+    await qc.invalidateQueries({ queryKey: accountKeys.all });
+    await vi.advanceTimersByTimeAsync(THROTTLE * 2);
+    const saved = mem.map.get(`user:${USER_A}`);
+    const savedState = saved?.clientState.queries.find(
+      (q) => JSON.stringify(q.queryKey) === JSON.stringify(accountKeys.list("pf")),
+    )?.state;
+    expect(savedState?.isInvalidated).toBe(true);
+
+    const reopened = new QueryClient();
+    await make().start(reopened, USER_A);
+    const cache = reopened.getQueryCache();
+    const accounts = cache.find({ queryKey: accountKeys.list("pf"), exact: true });
+    expect(accounts?.state.isInvalidated).toBe(true);
+    expect(accounts?.isStaleByTime(15 * 60_000)).toBe(true);
+
+    // 挂上就重拉。
+    const queryFn = vi.fn(async () => [{ id: "a1" }, { id: "a2" }]);
+    await reopened.fetchQuery({
+      queryKey: [...accountKeys.list("pf")],
+      queryFn,
+      staleTime: 15 * 60_000,
+    });
+    expect(queryFn).toHaveBeenCalledTimes(1);
+    // 没被标过的照旧记成新鲜。
+    const portfolios = cache.find({ queryKey: portfolioKeys.list(), exact: true });
+    expect(portfolios?.isStaleByTime(15 * 60_000)).toBe(false);
+  });
 });
