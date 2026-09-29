@@ -134,6 +134,12 @@ const shouldDehydrateQuery = (query: Query) =>
  * 而版本号又对得上、不会再失效一次 —— 那份已知过期的数据就会被当成新鲜的挂上 15 分钟。
  */
 function freshenRestored(queryClient: QueryClient) {
+  // **版本号反过来:恢复出来的一律过期**,冷开第一件事就是问服务端。光靠「保留原时间戳」不够 ——
+  // 它的去重窗只有几秒(`STALE_TIME.dataVersion`),而写盘是节流的:刚改完就刷新,最后那次写盘
+  // 来不及落,恢复的是改之前的数据 + 几秒前的号,号还在去重窗里就不会去问,旧数据挂到下一次轮询
+  // (CI 的构建产物跑得够快,正好撞上:加完账户立刻 `goto`,页面还是「0 个账户」)。
+  const version = queryClient.getQueryCache().find({ queryKey: dataVersionKeys.all, exact: true });
+  version?.setState({ isInvalidated: true });
   const now = Date.now();
   for (const query of queryClient.getQueryCache().getAll()) {
     if (query.state.status !== "success" || query.state.isInvalidated) continue;

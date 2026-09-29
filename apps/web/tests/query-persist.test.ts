@@ -1,6 +1,7 @@
 import type { PersistedClient } from "@tanstack/query-persist-client-core";
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { STALE_TIME } from "@/lib/queries/constants";
 import {
   accountKeys,
   dataVersionKeys,
@@ -335,6 +336,28 @@ describe("恢复出来的新不新鲜(review #13)", () => {
     expect(updatedAt(tokenKeys.enrichment())).toBe(savedAt);
     // 版本号自己也不动 —— 它得照旧过期,挂上时去问服务端。
     expect(updatedAt(dataVersionKeys.all)).toBe(savedAt);
+  });
+
+  it("版本号恢复出来一律过期 —— 哪怕它才拉了一秒,还在去重窗里", async () => {
+    const qc = new QueryClient();
+    await persistence.start(qc, USER_A);
+    qc.setQueryData([...accountKeys.list("pf")], []);
+    qc.setQueryData(dataVersionKeys.all, { version: 7 });
+    await vi.advanceTimersByTimeAsync(THROTTLE);
+
+    // 紧接着刷新:节流里最后那次写盘(加完账户之后的那份)没落,盘上是改之前的数据 + 几秒前的号。
+    const reopened = new QueryClient();
+    await make().start(reopened, USER_A);
+    const version = reopened.getQueryCache().find({ queryKey: dataVersionKeys.all, exact: true });
+    expect(version?.isStaleByTime(STALE_TIME.dataVersion)).toBe(true);
+
+    const queryFn = vi.fn(async () => ({ version: 8 }));
+    await reopened.fetchQuery({
+      queryKey: dataVersionKeys.all,
+      queryFn,
+      staleTime: STALE_TIME.dataVersion,
+    });
+    expect(queryFn).toHaveBeenCalledTimes(1);
   });
 
   it("落盘前已被标失效的(没挂着、只打了标记)→ 恢复后仍旧过期,挂上就重拉(review R2-#1)", async () => {
