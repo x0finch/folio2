@@ -21,6 +21,13 @@ import { logDegraded } from "./tokens/swr";
 // 每补完一窗就把那一端推过去 —— 预算用完 / 某一窗失败时停在哪儿,下一次就从哪儿接着补。
 // 表里已经有整窗的(别的用户、或 FOL-90 之前读路径落过的)→ 直接算「试过」,不出网。
 //
+// **同一个目标可能有两条消息同时在补**(code review #9):整点 cron 的那条、手记写完的定向补、
+// 接力的后续消息、队列的至少一次重投 —— 队列 `max_concurrency` > 1,它们并不串行。数据写本身
+// 无害(upsert,已有的桶不再写),危险的是「试过的区间」被后写完、进度少的那条**盖小**。所以收尾
+// 那一写是**并集**:写之前再读一次当下存的区间,与自己这趟的相接 / 相交就合成一段(`mergeCoverage`)。
+// 读与写之间仍有一个很窄的窗(没有 compare-and-set);落进去的代价只是下一趟重规划几窗 ——
+// 表里已有数据的窗不出网,只有「上游本就没有点」的窗会白打一发。
+//
 // 某一窗**失败** → 这个目标这一趟停在那儿、区间不推过去,下一次再试(日志里有一行)。
 // 永久失败的那一窗(上游不给那么老的数据)因此每次都会再白打一发 —— 往后的那一段先补,
 // 所以它挡不住「昨天」进表。
@@ -98,6 +105,17 @@ const planFillWindows = (
   return { base, windows };
 };
 
+/**
+ * 两段「试过的区间」合成一段:相交或首尾相接 → 并集;不相接(首笔活动被改过,旧的那段已不可用)
+ * → 取这一趟的 `mine`。空区间(`lo > hi`)不参与合并。
+ */
+const mergeCoverage = (mine: Coverage, other: Coverage | undefined): Coverage => {
+  if (other === undefined || other.lo > other.hi) return mine;
+  if (mine.lo > mine.hi) return other;
+  const touches = other.lo <= mine.hi + 1 && mine.lo <= other.hi + 1;
+  return touches ? { lo: Math.min(mine.lo, other.lo), hi: Math.max(mine.hi, other.hi) } : mine;
+};
+
 const bucketsOf = (fromB: number, toB: number): number[] => {
   const out: number[] = [];
   for (let b = fromB; b <= toB; b++) out.push(b);
@@ -153,6 +171,11 @@ export const fillDaily = (
       cover = w.dir === "up" ? { lo: cover.lo, hi: w.toB } : { lo: w.fromB, hi: cover.hi };
       doneWindows++;
     }
-    if (doneWindows > 0) yield* cache.put(key, cover, COVERAGE_TTL_MS);
+    if (doneWindows > 0) {
+      // 并集写回:另一条同时在补这个目标的消息可能已经推得更远(见文件头)。
+      const latest = Option.flatMap(yield* cache.get(key), (e) => decodeCoverage(e.value));
+      const merged = mergeCoverage(cover, Option.getOrUndefined(latest));
+      yield* cache.put(key, merged, COVERAGE_TTL_MS);
+    }
     return { calls, done: doneWindows === windows.length, failed };
   });
