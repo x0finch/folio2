@@ -2,7 +2,7 @@ import { Oracle } from "@folio/oracle";
 import { Effect, Option } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JOB_MAX_RETRIES } from "@/lib/server/jobs/constants";
-import { consumeMessage, type QueueMessage } from "@/lib/server/jobs/consume";
+import { consumeMessage, type JobMessage } from "@/lib/server/jobs/consume";
 import type { SyncAccountJob } from "@/lib/server/jobs/message";
 import { type Enqueued, JobQueue } from "@/lib/server/jobs/queue";
 import { fanOutAllUsers, ROUND_HEARTBEAT_MS } from "@/lib/server/sync/round";
@@ -25,7 +25,7 @@ describe("jobs/consume", () => {
 
   const fakeMessage = (body: unknown, attempts = 1) => {
     const state = { acked: false, retried: false };
-    const message: QueueMessage = {
+    const message: JobMessage = {
       id: `m-${Math.random()}`,
       body,
       attempts,
@@ -49,6 +49,7 @@ describe("jobs/consume", () => {
     await Effect.runPromise(
       fanOutAllUsers([USER]).pipe(
         Effect.provideService(JobQueue, {
+          poke: Effect.void,
           send: (batch) => Effect.sync(() => void sent.push(...batch)),
         }),
       ),

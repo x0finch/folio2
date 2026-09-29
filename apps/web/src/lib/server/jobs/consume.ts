@@ -5,7 +5,7 @@ import { runDailyPricesJob } from "@/lib/server/prices/daily";
 import { runPricesJob } from "@/lib/server/prices/job";
 import { runReferenceJob } from "@/lib/server/sync/reference";
 import { giveUpQueuedAccount, syncQueuedAccount } from "@/lib/server/sync/round";
-import { JOB_MAX_RETRIES } from "./constants";
+import { isFinalAttempt } from "./constants";
 import { decodeJob, type Job } from "./message";
 
 // **后台活 consumer 的分派**(FOL-86)。运行器那个 DO 的 alarm(`durable.ts`,FOL-100)每件活调一次
@@ -61,7 +61,7 @@ const reasonOf = (cause: Cause.Cause<unknown>): string => {
  * 一条消息里 consumer 用得到的那几样。FOL-86 时它是 Cloudflare 队列 `Message` 的收窄;FOL-100 起由运行器
  * 把自己表里的一行包成这个形状(`runner.ts`)—— consumer 不关心消息从哪来。单测递一个假的就够。
  */
-export interface QueueMessage {
+export interface JobMessage {
   readonly id: string;
   readonly body: unknown;
   /** 第几次投递,从 1 起。 */
@@ -77,7 +77,7 @@ export interface QueueMessage {
  *   · 解不开 → ack + warn。重跑也还是解不开,留着只会烧掉重试次数、再被埋掉。
  *   · 跑成功 → ack。
  *   · 失败,还有重跑机会 → `retry()`(运行器按指数退避排下一次,`jobRetryDelayMs`)。
- *   · 失败,这是最后一次(`attempts > JOB_MAX_RETRIES`)→ `giveUp` 收尾(不管收尾成没成)再 `retry()`:
+ *   · 失败,这是最后一次(`isFinalAttempt`)→ `giveUp` 收尾(不管收尾成没成)再 `retry()`:
  *     次数已用完,运行器把这件活**埋掉**(留在 DO 存储里、标上死亡时间,给人看 —— 等价于以前的死信队列,
  *     FOL-86 验收:失败的活看得见)。收尾先做,所以轮不挂 pending;埋掉的不会再被领。真有人把它挖出来
  *     重跑,`sync-account` 那条也只会被「还 pending 吗」挡下(收尾已把账户记成 failed)。
@@ -87,7 +87,7 @@ export interface QueueMessage {
  * `run` 可注入,只为单测能让一条活失败、走到重试 / 收尾那几支;生产用默认的 `runJob`。
  */
 export const consumeMessage = (
-  message: QueueMessage,
+  message: JobMessage,
   run: (job: Job) => Effect.Effect<void, Error> = runJob,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
@@ -109,7 +109,7 @@ export const consumeMessage = (
       return;
     }
     const error = Cause.pretty(exit.cause);
-    if (message.attempts <= JOB_MAX_RETRIES) {
+    if (!isFinalAttempt(message.attempts)) {
       log.warn("job failed, will retry", { ...meta, error });
       message.retry();
       return;
@@ -122,4 +122,25 @@ export const consumeMessage = (
       log.error("job give-up failed", { ...meta, error: Cause.pretty(settled.cause) });
     }
     message.retry();
+  });
+
+/**
+ * **不跑,只收尾**:上一次本该是最后一次,却没跑完(DO 在跑的中途没了 —— 超 CPU、实例重启),运行器领到它时
+ * 次数已经超了(`runner.ts`)。再跑一遍多半还是同样的下场,所以直接走 `giveUp`(`sync-account`:账户记
+ * failed、够了就收官),然后由运行器埋掉。永不失败;解不开的消息体没有可收的尾,只记一条 warn。
+ */
+export const abandonMessage = (message: JobMessage, reason: string): Effect.Effect<void> =>
+  Effect.gen(function* () {
+    const log = getLogger(["folio", "jobs"]);
+    const decoded = decodeJob(message.body);
+    if (Either.isLeft(decoded)) {
+      log.warn("invalid job abandoned", { messageId: message.id, error: decoded.left });
+      return;
+    }
+    const meta = { kind: decoded.right.kind, messageId: message.id, attempts: message.attempts };
+    log.error("job never finished its final attempt, burying it", meta);
+    const settled = yield* Effect.exit(giveUp(decoded.right, reason));
+    if (Exit.isFailure(settled)) {
+      log.error("job give-up failed", { ...meta, error: Cause.pretty(settled.cause) });
+    }
   });

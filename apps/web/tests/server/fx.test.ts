@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { consumeMessage, type QueueMessage } from "@/lib/server/jobs/consume";
+import { consumeMessage, type JobMessage } from "@/lib/server/jobs/consume";
 import { handleGetCurrencyPreference } from "@/lib/server/preferences/currency";
 import { displayRate as rateOf } from "@/lib/server/preferences/fx";
 import { runEffect } from "@/lib/server/runtime";
@@ -22,7 +22,7 @@ const displayRate = (userId: string, code: string) =>
 // 参考层自己降级,不交给队列重投)。
 const warmFx = async (userId: string): Promise<void> => {
   let acked = false;
-  const message: QueueMessage = {
+  const message: JobMessage = {
     id: "m-fx",
     body: { kind: "fx", userId },
     attempts: 1,

@@ -36,7 +36,9 @@ pnpm exec wrangler d1 migrations apply folio --remote
 # 3b. Background jobs need no setup step (FOL-100 / ADR 0058). They run in a SQLite-backed
 #     Durable Object (`JobRunner`) that `wrangler deploy` creates from wrangler.jsonc → migrations.
 #     (The old Cloudflare Queues `folio-jobs` / `folio-jobs-dlq` are no longer used; if you created
-#     them for the FOL-86 version you can delete them: `wrangler queues delete folio-jobs` etc.)
+#     them for the FOL-86 version you can delete them: `wrangler queues delete folio-jobs` etc.
+#     Messages still sitting in that queue at switch-over are dropped — at most an hour of jobs,
+#     which the next hourly cron re-enqueues.)
 
 # 4. Set secrets (each prompts for the value — never written to git)
 pnpm exec wrangler secret put SECRETS_KEY

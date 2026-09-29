@@ -2,7 +2,7 @@ import { Oracle } from "@folio/oracle";
 import { Effect, Either } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PRICES_IDS_PER_MESSAGE } from "@/lib/server/jobs/constants";
-import { consumeMessage, type QueueMessage } from "@/lib/server/jobs/consume";
+import { consumeMessage, type JobMessage } from "@/lib/server/jobs/consume";
 import { decodeJob, type Job } from "@/lib/server/jobs/message";
 import { type Enqueued, JobQueue } from "@/lib/server/jobs/queue";
 import { fanOutAllUsers } from "@/lib/server/sync/round";
@@ -25,7 +25,7 @@ describe("jobs/prices", () => {
   const consume = async (body: Job) => {
     const sent: Enqueued[] = [];
     const state = { acked: false, retried: false };
-    const message: QueueMessage = {
+    const message: JobMessage = {
       id: `m-${Math.random()}`,
       body,
       attempts: 1,
@@ -39,6 +39,7 @@ describe("jobs/prices", () => {
     await Effect.runPromise(
       consumeMessage(message).pipe(
         Effect.provideService(JobQueue, {
+          poke: Effect.void,
           send: (batch) => Effect.sync(() => void sent.push(...batch)),
         }),
       ),
@@ -108,6 +109,7 @@ describe("jobs/prices", () => {
     await Effect.runPromise(
       fanOutAllUsers([USER]).pipe(
         Effect.provideService(JobQueue, {
+          poke: Effect.void,
           send: (batch) => Effect.sync(() => void sent.push(...batch)),
         }),
       ),

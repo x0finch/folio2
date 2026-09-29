@@ -32,6 +32,7 @@ describe("sync/cron(fan-out)", () => {
     Effect.runPromise(
       fanOutAllUsers([USER]).pipe(
         Effect.provideService(JobQueue, {
+          poke: Effect.void,
           send: (batch) => Effect.sync(() => void sent.push(...batch)),
         }),
       ),
@@ -184,7 +185,10 @@ describe("sync/cron(fan-out)", () => {
 
     const result = await Effect.runPromise(
       fanOutAllUsers([USER]).pipe(
-        Effect.provideService(JobQueue, { send: () => Effect.die(new Error("queue down")) }),
+        Effect.provideService(JobQueue, {
+          poke: Effect.void,
+          send: () => Effect.die(new Error("queue down")),
+        }),
       ),
     );
 

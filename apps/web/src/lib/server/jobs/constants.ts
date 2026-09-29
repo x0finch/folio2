@@ -9,6 +9,12 @@ import { DEFAULT_TOP_N } from "@folio/oracle-basic";
  */
 export const JOB_MAX_RETRIES = 3;
 
+/**
+ * 这是不是**最后一次**(`attempts` 从 1 起)。consumer 据此先收尾、运行器据此埋掉 —— 同一个判断只写这一处,
+ * 两边不会各算各的。
+ */
+export const isFinalAttempt = (attempts: number): boolean => attempts > JOB_MAX_RETRIES;
+
 /** 第一次重跑前等多久(毫秒)。之后每次翻倍(指数退避,见 `jobRetryDelayMs`)。 */
 const JOB_RETRY_BASE_DELAY_MS = 30_000;
 
@@ -36,8 +42,8 @@ export const REDELIVERY_SLACK_MS = 10_000;
 
 /**
  * 一件活被领走之后「锁」多久(毫秒)。领的那一刻就把次数 +1、把到点时间推到这么久以后:DO 在跑的中途
- * 被驱逐(超 CPU、实例重启)时,这件活不会丢,过了租期照样再跑,而且**那一次算数** —— 一件每次都把 DO
- * 跑崩的活,跑满次数也会被埋掉,不会无限循环。取一次投递的最坏耗时再留余量。
+ * 被驱逐(超 CPU、实例重启)时,这件活不会丢,过了租期照样再领,而且**那一次算数** —— 最后一次也没跑完的,
+ * 下次领到时直接收尾埋掉(`runner.ts`),不会每个租期重来一遍。取一次投递的最坏耗时再留余量。
  */
 export const JOB_LEASE_MS = SYNC_ATTEMPT_BUDGET_MS + REDELIVERY_SLACK_MS;
 
@@ -64,8 +70,8 @@ export const RUNNER_ALARMS_PER_JOB = 1;
 export const DEAD_JOB_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * 有到点的活、却这么久(毫秒)没跑过一次 alarm,cron 的戳一下就记一条 warn —— 运行器可能卡住了。
- * 取一次投递最坏耗时的几倍:正常积压到不了这么久。
+ * 有到点的活、而运行器自己定的那个 alarm 过了这么久(毫秒)还没被下一次刷新,cron 的戳一下就记 warn、
+ * 强制重定 —— 运行器可能卡住了。取一次投递最坏耗时的几倍:正常跑着的 alarm 链每件活都会刷新它。
  */
 export const RUNNER_STALL_MS = 15 * 60 * 1000;
 

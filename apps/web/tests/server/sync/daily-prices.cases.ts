@@ -8,7 +8,7 @@ import {
   DAILY_PRICES_CALLS_PER_MESSAGE,
   DAILY_PRICES_UPSTREAM_CALLS,
 } from "@/lib/server/jobs/constants";
-import { consumeMessage, type QueueMessage } from "@/lib/server/jobs/consume";
+import { consumeMessage, type JobMessage } from "@/lib/server/jobs/consume";
 import { decodeJob, type Job } from "@/lib/server/jobs/message";
 import { type Enqueued, JobQueue } from "@/lib/server/jobs/queue";
 import { loadManualAccountSeries } from "@/lib/server/manual/store";
@@ -39,7 +39,7 @@ describe("jobs/daily-prices", () => {
   const consume = async (body: Job) => {
     const sent: Enqueued[] = [];
     const state = { acked: false, retried: false };
-    const message: QueueMessage = {
+    const message: JobMessage = {
       id: `m-${Math.random()}`,
       body,
       attempts: 1,
@@ -53,6 +53,7 @@ describe("jobs/daily-prices", () => {
     await Effect.runPromise(
       consumeMessage(message).pipe(
         Effect.provideService(JobQueue, {
+          poke: Effect.void,
           send: (batch) => Effect.sync(() => void sent.push(...batch)),
         }),
       ),
