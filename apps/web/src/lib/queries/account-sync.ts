@@ -19,8 +19,9 @@ import { syncRoundQuery } from "./sync-round";
 export type AccountSyncOutcome = Extract<SyncAccountStart, { queued: false }>["result"];
 
 /**
- * 等多久就不等了(毫秒)。正常是秒级;最坏是队列重投三次(`retry_delay` 30s)再加心跳过期 ——
- * 那时服务端的轮早已念成「中断」,这里读得到。这条上限只防服务端一直不给答案时前端永远挂着。
+ * 等多久就不等了(毫秒)。正常是秒级;最坏是队列重投三次(`retry_delay` 30s)—— 消费者每次尝试前
+ * 都续心跳,重投期间轮不会被念成「中断」,最后一次失败时账户落成 failed,这里读得到。
+ * 这条上限只防服务端一直不给答案时前端永远挂着。
  */
 const ACCOUNT_SYNC_TIMEOUT_MS = 5 * 60_000;
 
