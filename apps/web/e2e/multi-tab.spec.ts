@@ -92,7 +92,7 @@ test.describe("多个标签页", () => {
   });
 
   test("锁屏摆着,在另一个标签登出 → 不会卡在解不开也退不出的锁屏", async ({ page, addAuth }) => {
-    await addAuth();
+    const auth = await addAuth();
     await enableLock(page);
     await page.goto("/");
     await lockNow(page);
@@ -102,6 +102,11 @@ test.describe("多个标签页", () => {
     // 另一个标签此刻也是锁屏(上一条测过)。**先等锁屏真的出现**再点登出:设置页自己也有一个同名的
     // 登出按钮(用户卡里那个),服务端就渲染出来了 —— 不等的话可能点在那一个上,而它要弹二次确认。
     await expect(other.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
+    // 登出之后两个标签都会落到登录页,而登录页挂着 passkey 的 autofill(conditional UI)——
+    // 虚拟认证器「自动按下」,会把它当场批掉、又登回去(CI 上抓到过:登出 150ms 后第一个标签
+    // 就拿到了新会话,于是停在 `/`)。真人不会替自己按这一下,所以先把凭据清掉:这条测的是「走得掉」,
+    // 不是「autofill 会不会自动登录」。
+    await auth.clearCredentials();
     await other.getByRole("button", { name: /sign out/i }).click();
     await expect(other).toHaveURL(/\/login/);
 
