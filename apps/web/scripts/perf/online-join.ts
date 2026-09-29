@@ -1,6 +1,6 @@
 // perf:cpu:online 的「按名字拆 CPU」:Workers Logs 里,带 `cpuTimeMs` 的调用事件不知道自己是哪个
 // server fn / 哪件后台活;知道名字的是**同一个 requestId** 下我们自己打的那行日志
-// (`server fn` 带 `handler`,队列消费的 `job done` / `job failed…` 带 `kind`)。这里把两边按
+// (`server fn` 带 `handler`,运行器 alarm 里 consumer 打的 `job done` / `job failed…` 带 `kind`)。这里把两边按
 // requestId 对上,再按名字出分布。纯函数,online.mjs 取数、tests/perf-online-join.test.ts 钉逻辑。
 //
 // 纯 TS、无 import:online.mjs 经 Node 22.18+ 的类型擦除直接加载它。
@@ -89,6 +89,6 @@ const stringProp = (e: LogEvent, key: string): string | undefined => {
 /** `withServerFnTiming`(runtime.ts)打的 `server fn` 行 → handler 名。 */
 export const handlerOf = (e: LogEvent) => stringProp(e, "handler");
 
-/** 队列消费(jobs/consume.ts)的 `job done` / `job failed…` 行 → 任务种类。 */
+/** consumer(jobs/consume.ts)的 `job done` / `job failed…` 行 → 任务种类。运行器自己的 `job buried…` 不带 kind,不算。 */
 export const jobKindOf = (e: LogEvent) =>
   e.$metadata?.message?.startsWith("job ") ? stringProp(e, "kind") : undefined;

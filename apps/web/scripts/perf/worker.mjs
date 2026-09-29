@@ -3,7 +3,15 @@
 // 测的是 `dist/server` —— `wrangler deploy` 原样发出去的那份(含 run_worker_first、资源路由),
 // 不是 `vite dev` 的逐模块转译:后者的形状和线上不是一回事。
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { connect } from "node:net";
 import { join } from "node:path";
 import {
@@ -107,19 +115,75 @@ function run(cmd, args, { logFile, env } = {}) {
   }
 }
 
+/** `--cron-only` 顶替运行器的那个 worker 的名字(第二个 `-c`,见 stubRunnerConfigs)。 */
+const RUNNER_STUB_NAME = "folio-perf-runner-stub";
 /**
- * 构建产物的配置去掉 `queues.consumers`(生产者照留)—— `perf:cpu:jobs --cron-only` 用:只量 cron
- * 那一次调用,投出去的消息没人消费,不会在采样窗口里跟 cron 叠在一起。写在 `wrangler.json` 旁边,
- * 相对路径(`main` 等)与 `.dev.vars` 照旧对得上。
+ * 顶替运行器的 DO:收活、戳一下都照答,什么都不存、不定 alarm。形状对着 `jobs/durable.ts` 的
+ * `enqueue` / `poke`(RPC 那头只看这两个方法)。
  */
-function producerOnlyConfig() {
+const RUNNER_STUB_SOURCE = `import { DurableObject } from "cloudflare:workers";
+export class JobRunner extends DurableObject {
+  async enqueue() {}
+  async poke() { return { pending: 0, dead: 0 }; }
+}
+export default { fetch: () => new Response(null, { status: 404 }) };
+`;
+
+/**
+ * `perf:cpu:jobs --cron-only` 用:只量 cron 那一次调用。alarm 关不掉(workerd 自己调度,到点就响),
+ * 所以把 JOB_RUNNER 绑到**另一个 worker** 里的空壳 DO 上(`script_name`)—— cron 照样走 RPC 投活
+ * (调用方那一侧的序列化照算),投的活却没人跑,不会和 cron 叠在同一个采样窗里。空壳在另一个 isolate,
+ * 采样器看不见它;/proc 那一格照算(它只收一次 RPC,可忽略)。
+ * 两份配置都写在 `wrangler.json` 旁边,相对路径(`main` 等)与 `.dev.vars` 照旧对得上。
+ * 返回 `-c` 的顺序:第一个是主 worker(inspector 与 `--port` 都归它)。
+ */
+function stubRunnerConfigs() {
   const config = builtConfig();
-  const file = join(DIST_SERVER_DIR, "wrangler.producer-only.json");
+  const main = join(DIST_SERVER_DIR, "wrangler.cron-only.json");
+  const stub = join(DIST_SERVER_DIR, "wrangler.runner-stub.json");
+  writeFileSync(join(DIST_SERVER_DIR, "runner-stub.mjs"), RUNNER_STUB_SOURCE);
+  const bindings = config.durable_objects?.bindings ?? [];
   writeFileSync(
-    file,
-    JSON.stringify({ ...config, queues: { ...config.queues, consumers: undefined } }, null, 2),
+    stub,
+    JSON.stringify(
+      {
+        name: RUNNER_STUB_NAME,
+        main: "runner-stub.mjs",
+        compatibility_date: config.compatibility_date,
+        durable_objects: {
+          bindings: bindings.map(({ name, class_name }) => ({ name, class_name })),
+        },
+        migrations: config.migrations,
+      },
+      null,
+      2,
+    ),
   );
-  return file;
+  writeFileSync(
+    main,
+    JSON.stringify(
+      {
+        ...config,
+        durable_objects: {
+          bindings: bindings.map((b) => ({ ...b, script_name: RUNNER_STUB_NAME })),
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  return [main, stub];
+}
+
+/**
+ * 清掉某个 DO 类在 perf 库里的本地存储(Miniflare 按 `<persist>/v3/do/<worker 名>-<类名>/` 落盘)。
+ * worker 停着时调 —— perf:cpu:jobs 用它把运行器表里上一次剩下的活清掉。
+ */
+export function clearDurableObjectState(className) {
+  rmSync(join(PERF_STATE_DIR, "v3", "do", `${builtConfig().name}-${className}`), {
+    recursive: true,
+    force: true,
+  });
 }
 
 /** 构建出的 wrangler.json(`wrangler deploy` 发的就是它)。 */
@@ -202,7 +266,7 @@ export async function startWorker({
   logFile,
   probePath = READY_PROBE_PATH,
   vars,
-  noQueueConsumers = false,
+  stubRunner = false,
 }) {
   for (const p of [port, inspectorPort]) {
     if (await portInUse(p))
@@ -214,8 +278,7 @@ export async function startWorker({
     join(BIN, "wrangler"),
     [
       "dev",
-      "--config",
-      noQueueConsumers ? producerOnlyConfig() : BUILT_CONFIG,
+      ...(stubRunner ? stubRunnerConfigs() : [BUILT_CONFIG]).flatMap((c) => ["--config", c]),
       "--ip",
       HOST,
       "--port",
