@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { JOB_LEASE_MS, JOB_MAX_RETRIES, jobRetryDelayMs } from "@/lib/server/jobs/constants";
 import type { JobMessage } from "@/lib/server/jobs/consume";
-import { type JobHandlers, runOneDueJob } from "@/lib/server/jobs/runner";
+import { alarmToSet, isStalled, type JobHandlers, runOneDueJob } from "@/lib/server/jobs/runner";
 import { createJobStore, type JobStore, type SqlLike } from "@/lib/server/jobs/store";
 
 // 后台任务运行器(FOL-100,ADR 0058)的排队 / 重试 / 埋掉。**跑在真 SQLite 上**(`node:sqlite` 的内存库):
@@ -41,7 +41,7 @@ const add = (body: unknown, delayMs = 0) =>
 // handlers:把收到的消息记下来,consume 按 `act` 决定下场;abandon 只记。
 const recording = (act: (m: JobMessage) => void | Promise<void>) => {
   const seen: JobMessage[] = [];
-  const abandoned: { message: JobMessage; reason: string }[] = [];
+  const abandoned: { message: Omit<JobMessage, "ack" | "retry">; reason: string }[] = [];
   const handlers: JobHandlers = {
     consume: async (m) => {
       seen.push(m);
@@ -191,8 +191,42 @@ describe("租期:跑到一半 DO 没了", () => {
         throw new Error("give-up exploded");
       },
     };
-    expect((await runOneDueJob(store, handlers)).ran?.outcome).toBe("buried");
+    const { ran } = await runOneDueJob(store, handlers);
+    expect(ran?.outcome).toBe("buried");
+    expect(ran?.abandonError).toBe("give-up exploded"); // 原因带出去,由 DO 记日志
     expect(store.counts().dead).toBe(1);
+  });
+});
+
+describe("该把 alarm 定到几点(alarmToSet)", () => {
+  const now = T0;
+  it("没活 → 不定", () => {
+    expect(alarmToSet({ due: null, current: null, now })).toBeNull();
+  });
+  it("没有 alarm(或正在 alarm 里,getAlarm 为 null)→ 定到最早那件,但不早于现在", () => {
+    expect(alarmToSet({ due: now + 5_000, current: null, now })).toBe(now + 5_000);
+    expect(alarmToSet({ due: now - 5_000, current: null, now })).toBe(now);
+  });
+  it("已有一个不晚于它的 → 不动;已有的更晚 → 提前", () => {
+    expect(alarmToSet({ due: now + 5_000, current: now + 1_000, now })).toBeNull();
+    expect(alarmToSet({ due: now + 5_000, current: now + 5_000, now })).toBeNull();
+    expect(alarmToSet({ due: now + 5_000, current: now + 60_000, now })).toBe(now + 5_000);
+  });
+});
+
+describe("是不是卡住了(isStalled)", () => {
+  const now = T0;
+  const stallMs = 15 * 60_000;
+  it("有到点的活,自己定的 alarm 早该响过、过了窗口还没刷新 → 卡住", () => {
+    expect(isStalled({ due: now - 1, armedAt: now - stallMs, now, stallMs })).toBe(true);
+  });
+  it("从没定过 alarm、却有到点的活 → 卡住", () => {
+    expect(isStalled({ due: now, armedAt: null, now, stallMs })).toBe(true);
+  });
+  it("窗口之内 / 活还没到点 / 没活 → 没卡", () => {
+    expect(isStalled({ due: now - 1, armedAt: now - stallMs + 1, now, stallMs })).toBe(false);
+    expect(isStalled({ due: now + 1, armedAt: now - 2 * stallMs, now, stallMs })).toBe(false);
+    expect(isStalled({ due: null, armedAt: null, now, stallMs })).toBe(false);
   });
 });
 

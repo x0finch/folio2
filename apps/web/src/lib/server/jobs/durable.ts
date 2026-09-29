@@ -5,7 +5,7 @@ import { runAtEdge } from "@/lib/server/runtime";
 import { DEAD_JOB_RETENTION_MS, RUNNER_STALL_MS } from "./constants";
 import { abandonMessage, consumeMessage } from "./consume";
 import type { Enqueued } from "./queue";
-import { runOneDueJob } from "./runner";
+import { alarmToSet, errorText, isStalled, runOneDueJob } from "./runner";
 import { createJobStore, type JobStore } from "./store";
 
 // **后台任务运行器**(FOL-100,ADR 0058):一个 SQLite 存储的 Durable Object,取代 FOL-86 的 Cloudflare 队列。
@@ -25,8 +25,6 @@ import { createJobStore, type JobStore } from "./store";
 // 这是可接受的;真到了排不过来的那天,按用户分片是换个 `idFromName` 的事。
 
 const log = getLogger(["folio", "jobs", "runner"]);
-
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export class JobRunner extends DurableObject<Cloudflare.Env> {
   private readonly store: JobStore;
@@ -60,13 +58,16 @@ export class JobRunner extends DurableObject<Cloudflare.Env> {
     const now = Date.now();
     this.store.pruneDead(now - DEAD_JOB_RETENTION_MS);
     const due = this.store.nextRunAt();
-    const armedAt = this.store.alarmAt();
-    const stalled =
-      due !== null && due <= now && (armedAt === null || armedAt <= now - RUNNER_STALL_MS);
+    const stalled = isStalled({
+      due,
+      armedAt: this.store.alarmAt(),
+      now,
+      stallMs: RUNNER_STALL_MS,
+    });
     if (stalled) {
       log.warn("job runner looks stalled, re-arming", {
         ...this.store.counts(),
-        overdueMs: now - due,
+        overdueMs: now - (due ?? now),
       });
     }
     await this.arm({ force: stalled });
@@ -83,7 +84,9 @@ export class JobRunner extends DurableObject<Cloudflare.Env> {
         consume: (message) => runAtEdge(consumeMessage(message)),
         abandon: (message, reason) => runAtEdge(abandonMessage(message, reason)),
       });
-      if (ran?.outcome === "buried") log.error("job buried after final attempt", { ...ran });
+      // 埋掉这件事 consumer 已经记过一条 error(`job failed on final attempt…` / `…never finished…`);
+      // 这里只补它看不见的那一种:收尾那一步自己没跑成。
+      if (ran?.abandonError) log.error("job give-up could not run", { ...ran });
     } catch (err) {
       // 走到这里只可能是 store 自己的 SQL 或日志初始化出错(consumer 的异常 `runOneDueJob` 已经兜住)。
       log.error("job runner step threw", { error: errorText(err) });
@@ -97,16 +100,15 @@ export class JobRunner extends DurableObject<Cloudflare.Env> {
   }
 
   /**
-   * 让 alarm 不晚于最早那件活。已经有一个更早的就不动(`force` 时照定);一件活都没有就不设。
-   * 在 alarm 里调时 `getAlarm()` 是 `null`,于是照设 —— 那正是「跑完一件、接着下一件」要的。
+   * 让 alarm 不晚于最早那件活(判据见 `alarmToSet`;`force` 时不看 `getAlarm()`)。
    * 真定了才记下时刻 —— 没变化就不写。
    */
   private async arm({ force = false }: { force?: boolean } = {}): Promise<void> {
     const due = this.store.nextRunAt();
     if (due === null) return;
-    const at = Math.max(due, Date.now());
     const current = force ? null : await this.ctx.storage.getAlarm();
-    if (current !== null && current <= at) return;
+    const at = alarmToSet({ due, current, now: Date.now() });
+    if (at === null) return;
     await this.ctx.storage.setAlarm(at);
     this.store.noteAlarm(at);
   }

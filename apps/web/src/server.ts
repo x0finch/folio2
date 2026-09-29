@@ -1,7 +1,7 @@
 import { GlobalDatabase } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
-import { Effect } from "effect";
+import { Cause, Effect, Exit } from "effect";
 import { withDefaultNoStore } from "./lib/server/entry/cache-headers";
 import { configureLogging } from "./lib/server/entry/log";
 import { pokeRunner } from "./lib/server/jobs/queue";
@@ -90,7 +90,7 @@ export default {
   // 全局代币映射表不在这里刷了(FOL-85,见 DAILY_CRON 上面那段)。
   // 两条都**顺手戳一下运行器**(`pokeRunner`):投活本身已经会定 alarm,戳这一下是兜底 —— alarm 链
   // 万一断了,表里还排着的活最迟一小时后被捡起来(ADR 0058「不只靠 getAlarm」)。投活那一步失败了
-  // 也照戳(`ensuring`),戳本身出错不盖掉投活的那个错(`exit` 把它收住)。
+  // 也照戳(`ensuring`),戳本身出错不盖掉投活的那个错(`exit` 把它收住、记一条 error —— 兜底坏了要看得见)。
   // waitUntil 保证跑完才结束本次调用。env/ctx 由运行时传入;env 不单独取用
   // (configureLogging / fanOutAllUsers 都走 cloudflare:workers 全局)。
   async scheduled(controller: ScheduledController, _env: Cloudflare.Env, ctx: ExecutionContext) {
@@ -104,7 +104,22 @@ export default {
             (controller.cron === DAILY_CRON
               ? enqueueDailyJobs(controller.cron)
               : sweepAllUsers(controller.cron)
-            ).pipe(Effect.ensuring(Effect.exit(pokeRunner))),
+            ).pipe(
+              Effect.ensuring(
+                Effect.exit(pokeRunner).pipe(
+                  Effect.tap((exit) =>
+                    Exit.isFailure(exit)
+                      ? Effect.sync(() =>
+                          cronLog.error("runner poke failed", {
+                            cron: controller.cron,
+                            error: Cause.pretty(exit.cause),
+                          }),
+                        )
+                      : Effect.void,
+                  ),
+                ),
+              ),
+            ),
           );
         } catch (err) {
           // waitUntil 里的抛错会变成静默的 unhandled rejection —— 集中打日志再上抛,cron 失败才可见。

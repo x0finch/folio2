@@ -13,8 +13,7 @@ import { z } from "zod";
 import { dataFreshness } from "@/lib/core/sync-status";
 import {
   JOB_RETRY_MAX_DELAY_MS,
-  REDELIVERY_SLACK_MS,
-  RUNNER_ALARMS_PER_JOB,
+  SCHEDULING_SLACK_MS,
   SYNC_ATTEMPT_BUDGET_MS,
 } from "@/lib/server/jobs/constants";
 import type { SyncAccountJob } from "@/lib/server/jobs/message";
@@ -52,7 +51,7 @@ import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
  * **刻意不随名单大小变**:让它跟名单挂钩就等于每加一个账户都放宽一次「多久算死」。
  */
 export const ROUND_HEARTBEAT_MS =
-  SYNC_ATTEMPT_BUDGET_MS + JOB_RETRY_MAX_DELAY_MS + REDELIVERY_SLACK_MS;
+  SYNC_ATTEMPT_BUDGET_MS + JOB_RETRY_MAX_DELAY_MS + SCHEDULING_SLACK_MS;
 
 /**
  * 收官后的保留期。一轮收官之后它就只是「上一轮的报告」,而**下一轮开轮即覆盖** ——
@@ -471,8 +470,8 @@ export interface FanOutResult {
   /** 投出去的消息总数(`sync-account` + 每个用户的 `hourlyUserJobs`)。 */
   jobs: number;
   /**
-   * 这一趟会花掉的运行器 alarm 次数估算(`jobs × RUNNER_ALARMS_PER_JOB`,FOL-86「日志里记一次估算」)。
-   * 免费计划 DO 一天 10 万次请求;手动 / 单账户同步另算,不在这一行里。
+   * 这一趟至少会花掉的运行器 alarm 次数(一件活一次;FOL-86「日志里记一次估算」)。是**下限**:
+   * 失败重跑的每一次另算一次 alarm。免费计划 DO 一天 10 万次请求;手动 / 单账户同步另算,不在这一行里。
    */
   alarms: number;
 }
@@ -521,7 +520,7 @@ export const fanOutAllUsers = (
       accounts: per.reduce((n, p) => n + p.accounts, 0),
       failed: per.reduce((n, p) => n + p.failed, 0),
       jobs: per.reduce((n, p) => n + p.jobs, 0),
-      alarms: per.reduce((n, p) => n + p.jobs, 0) * RUNNER_ALARMS_PER_JOB,
+      alarms: per.reduce((n, p) => n + p.jobs, 0),
     })),
   );
 

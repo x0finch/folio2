@@ -177,13 +177,14 @@ const RUNNER_QUIET_MS = 2_000;
 const RUNNER_BINDING = "JOB_RUNNER";
 /**
  * consumer 每件活的收尾日志(`jobs/consume.ts`,都带 `kind`)。`terminal`:这件活不会再跑了。
- * 运行器自己在埋掉之后打的「job buried after final attempt」不单列 —— 它前面必有一行 final attempt,已经记过。
+ * 运行器只在「收尾那一步自己没跑成」时另打一行(`job give-up could not run`),不单列 —— 它前面必有一行埋掉的记录。
  * 每一行也是**一次 alarm 的终点**(一次 alarm 只跑一件,`jobs/runner.ts`),切格就靠它,见 alarmSlots。
  */
 const JOB_LOGS = {
   "job done": { terminal: true, outcome: "done" },
   "job failed, will retry": { terminal: false, outcome: "retried" },
   "job failed on final attempt, burying it": { terminal: true, outcome: "buried" },
+  "job never finished its final attempt, burying it": { terminal: true, outcome: "buried" },
   "invalid job dropped": { terminal: true, outcome: "invalid" },
 };
 /** 跑空轮询的间隔。 */

@@ -20,18 +20,22 @@ import type { JobStore } from "./store";
 export interface JobHandlers {
   /** 跑一件:自己决定 ack 还是 retry。 */
   readonly consume: (message: JobMessage) => Promise<void>;
-  /** 不跑,只收尾(见上)。 */
-  readonly abandon: (message: JobMessage, reason: string) => Promise<void>;
+  /** 不跑,只收尾(见上)。收尾不回 ack / retry —— 下场由运行器定(埋掉)。 */
+  readonly abandon: (message: Omit<JobMessage, "ack" | "retry">, reason: string) => Promise<void>;
 }
 
 type Outcome = "done" | "retry" | "buried";
 
-/** 这一次 alarm 的下场:跑了哪件活(没有到点的 → `null`)。 */
+/**
+ * 这一次 alarm 的下场:跑了哪件活(没有到点的 → `null`)。`abandonError`:收尾那一步自己抛了
+ * (`abandonMessage` 本身不失败,抛了只可能是装配出错)—— 活照样埋掉,原因交给调用方记日志。
+ */
 export interface StepResult {
   readonly ran: {
     readonly id: number;
     readonly attempts: number;
     readonly outcome: Outcome;
+    readonly abandonError?: string;
   } | null;
 }
 
@@ -44,13 +48,14 @@ const parse = (body: string): unknown => {
   }
 };
 
-const errorText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+export const errorText = (err: unknown): string =>
+  err instanceof Error ? err.message : String(err);
 
 export async function runOneDueJob(store: JobStore, handlers: JobHandlers): Promise<StepResult> {
   const job = store.claimNext(Date.now(), JOB_LEASE_MS);
   if (!job) return { ran: null };
-  const step = (outcome: Outcome): StepResult => ({
-    ran: { id: job.id, attempts: job.attempts, outcome },
+  const step = (outcome: Outcome, abandonError?: string): StepResult => ({
+    ran: { id: job.id, attempts: job.attempts, outcome, abandonError },
   });
 
   // 失败后的下场。时刻取**记下场那一刻**:一件跑了 80s 才失败的活,从领的那一刻算 30s 退避,
@@ -70,13 +75,14 @@ export async function runOneDueJob(store: JobStore, handlers: JobHandlers): Prom
   // 上一次(最后一次)没跑完:收尾、埋掉,不再跑。收尾出错也照埋 —— 埋掉才是止损。
   if (isFinalAttempt(job.attempts - 1)) {
     const reason = `attempt ${job.attempts - 1} never finished (runner died mid-job)`;
+    let abandonError: string | undefined;
     try {
-      await handlers.abandon({ ...base, ack: () => {}, retry: () => {} }, reason);
-    } catch {
-      // `abandonMessage` 本身永不失败;真抛了也不挡埋。
+      await handlers.abandon(base, reason);
+    } catch (err) {
+      abandonError = errorText(err);
     }
     store.bury(job.id, Date.now(), reason);
-    return step("buried");
+    return step("buried", abandonError);
   }
 
   // consumer 没表态(既没 ack 也没 retry)或自己抛了 → 按失败算:活不能因为一次意外就悄悄没了。
@@ -98,3 +104,41 @@ export async function runOneDueJob(store: JobStore, handlers: JobHandlers): Prom
   }
   return step(settled.outcome ?? fail("consumer settled neither ack nor retry"));
 }
+
+/**
+ * 该把 alarm 定到几点;不用动 → `null`。
+ *
+ * 不晚于最早那件活(`due`),也不早于现在;已经有一个不晚于它的(`current`)就不动。`current` 为 `null`
+ * 的两种情形都照定:一件活都没排过 alarm,或者**正在 alarm 里**(那段时间 `getAlarm()` 是 `null`)——
+ * 后者正是「跑完一件、接着下一件」要的。要强制重定时调用方传 `current: null`。
+ */
+export const alarmToSet = ({
+  due,
+  current,
+  now,
+}: {
+  due: number | null;
+  current: number | null;
+  now: number;
+}): number | null => {
+  if (due === null) return null;
+  const at = Math.max(due, now);
+  return current !== null && current <= at ? null : at;
+};
+
+/**
+ * 运行器是不是卡住了:有到点的活,而它**自己记下**的 alarm 时刻(`armedAt`)早该响过、过了 `stallMs`
+ * 还没被下一次 alarm 刷新(正常跑着的链每件活都会刷新它)。不看 `getAlarm()` —— 那个在 alarm 跑的
+ * 时候是 `null`,断了的链上它也可能说「有」。
+ */
+export const isStalled = ({
+  due,
+  armedAt,
+  now,
+  stallMs,
+}: {
+  due: number | null;
+  armedAt: number | null;
+  now: number;
+  stallMs: number;
+}): boolean => due !== null && due <= now && (armedAt === null || armedAt <= now - stallMs);

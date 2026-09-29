@@ -38,14 +38,14 @@ export const SYNC_ATTEMPT_BUDGET_MS = 80_000;
  * 到点之后、运行器真把它跑起来之前的调度余量(毫秒;**不含积压**)。运行器是**一个** DO、一次 alarm 跑
  * 一件活,所以排在前面的活会让后面的晚开跑 —— 单用户、个位数账户时是秒级。
  */
-export const REDELIVERY_SLACK_MS = 10_000;
+export const SCHEDULING_SLACK_MS = 10_000;
 
 /**
  * 一件活被领走之后「锁」多久(毫秒)。领的那一刻就把次数 +1、把到点时间推到这么久以后:DO 在跑的中途
  * 被驱逐(超 CPU、实例重启)时,这件活不会丢,过了租期照样再领,而且**那一次算数** —— 最后一次也没跑完的,
  * 下次领到时直接收尾埋掉(`runner.ts`),不会每个租期重来一遍。取一次投递的最坏耗时再留余量。
  */
-export const JOB_LEASE_MS = SYNC_ATTEMPT_BUDGET_MS + REDELIVERY_SLACK_MS;
+export const JOB_LEASE_MS = SYNC_ATTEMPT_BUDGET_MS + SCHEDULING_SLACK_MS;
 
 /**
  * 一条 `sync-account` 从第一次开跑到**最后一次收场**最长多久(毫秒):`JOB_MAX_RETRIES + 1` 次各跑满
@@ -54,17 +54,9 @@ export const JOB_LEASE_MS = SYNC_ATTEMPT_BUDGET_MS + REDELIVERY_SLACK_MS;
  */
 export const SYNC_RETRY_CHAIN_MS =
   (JOB_MAX_RETRIES + 1) * SYNC_ATTEMPT_BUDGET_MS +
-  Array.from({ length: JOB_MAX_RETRIES }, (_, i) => jobRetryDelayMs(i + 1)).reduce(
-    (a, b) => a + b,
-    0,
-  ) +
-  JOB_MAX_RETRIES * REDELIVERY_SLACK_MS;
-
-/**
- * 一件活花几次 DO 请求:它自己那一次 alarm(投递那一次 RPC 按批算,不按件)。免费计划一天 10 万次;
- * cron 那一行日志按它记一个估算。
- */
-export const RUNNER_ALARMS_PER_JOB = 1;
+  // 30 + 60 + … 的等比数列求和:第 1 … n 次退避之和 = base × (2^n − 1)。
+  JOB_RETRY_BASE_DELAY_MS * (2 ** JOB_MAX_RETRIES - 1) +
+  JOB_MAX_RETRIES * SCHEDULING_SLACK_MS;
 
 /** 埋掉的活在 DO 存储里留多久(毫秒)。够人来看一眼,又不让死活无限堆。 */
 export const DEAD_JOB_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;

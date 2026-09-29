@@ -115,21 +115,36 @@ export const consumeMessage = (
       return;
     }
     log.error("job failed on final attempt, burying it", { ...meta, error });
-    const settled = yield* Effect.exit(
-      giveUp(job, `failed ${message.attempts} times: ${reasonOf(exit.cause)}`),
-    );
-    if (Exit.isFailure(settled)) {
-      log.error("job give-up failed", { ...meta, error: Cause.pretty(settled.cause) });
-    }
+    yield* settleGiveUp(job, `failed ${message.attempts} times: ${reasonOf(exit.cause)}`, meta);
     message.retry();
   });
+
+/** 收尾(`giveUp`),收尾自己失败了只记一条 error —— 活照样要被埋掉,收尾不挡它。永不失败。 */
+const settleGiveUp = (
+  job: Job,
+  reason: string,
+  meta: Record<string, unknown>,
+): Effect.Effect<void> =>
+  Effect.flatMap(Effect.exit(giveUp(job, reason)), (settled) =>
+    Effect.sync(() => {
+      if (Exit.isFailure(settled)) {
+        getLogger(["folio", "jobs"]).error("job give-up failed", {
+          ...meta,
+          error: Cause.pretty(settled.cause),
+        });
+      }
+    }),
+  );
 
 /**
  * **不跑,只收尾**:上一次本该是最后一次,却没跑完(DO 在跑的中途没了 —— 超 CPU、实例重启),运行器领到它时
  * 次数已经超了(`runner.ts`)。再跑一遍多半还是同样的下场,所以直接走 `giveUp`(`sync-account`:账户记
  * failed、够了就收官),然后由运行器埋掉。永不失败;解不开的消息体没有可收的尾,只记一条 warn。
  */
-export const abandonMessage = (message: JobMessage, reason: string): Effect.Effect<void> =>
+export const abandonMessage = (
+  message: Omit<JobMessage, "ack" | "retry">,
+  reason: string,
+): Effect.Effect<void> =>
   Effect.gen(function* () {
     const log = getLogger(["folio", "jobs"]);
     const decoded = decodeJob(message.body);
@@ -139,8 +154,5 @@ export const abandonMessage = (message: JobMessage, reason: string): Effect.Effe
     }
     const meta = { kind: decoded.right.kind, messageId: message.id, attempts: message.attempts };
     log.error("job never finished its final attempt, burying it", meta);
-    const settled = yield* Effect.exit(giveUp(decoded.right, reason));
-    if (Exit.isFailure(settled)) {
-      log.error("job give-up failed", { ...meta, error: Cause.pretty(settled.cause) });
-    }
+    yield* settleGiveUp(decoded.right, reason, meta);
   });
