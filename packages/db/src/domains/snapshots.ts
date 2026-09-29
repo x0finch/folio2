@@ -116,17 +116,6 @@ export interface SnapshotTotal {
   totalUsd: number;
 }
 
-export interface SnapshotBalanceHistoryRow {
-  accountId: string;
-  takenAt: number;
-  amount: number;
-  usdValue: number;
-  kind: BalanceKind;
-  tokenId: string | null; // 归并身份(写快照时 mint 定死);单币历史按它归属(#201)
-  platform: string | null;
-  metaJson: string | null;
-}
-
 /**
  * 读模型「快照原料」的紧凑形状(FOL-92):位置元组,列就是 D1 回来的那几列,note / meta 仍是
  * **原样 JSON 字符串** —— 解析与校验在浏览器做(`apps/web/src/lib/core/snapshot-wire.ts`)。
@@ -546,34 +535,6 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
         const carryIn = await queryCarryInTotals(db, userId, null, since);
         return [...carryIn, ...windowRows];
       }),
-
-    /** 全历史余额(跨所有快照):单币价值历史用。可选 since(epoch ms)裁窗口。 */
-    // app 侧按代币身份归属 + 阶梯式重建(见 apps/web buildTokenValueHistory)。每行带其快照的
-    // accountId/takenAt + 该余额的冻结口径列。snapshot_balances 仅按 snapshotId 建索引 → 跨快照全扫;
-    // 自托管单用户量级可接受(见 #121 备注),量大再议加 (account_id, taken_at) 复合索引。
-    listBalanceHistory: (since?: number): Effect.Effect<SnapshotBalanceHistoryRow[]> =>
-      client.query((db) =>
-        db
-          .select({
-            accountId: snapshots.accountId,
-            takenAt: snapshots.takenAt,
-            amount: snapshotBalances.amount,
-            usdValue: snapshotBalances.usdValue,
-            kind: snapshotBalances.kind,
-            tokenId: snapshotBalances.tokenId,
-            platform: snapshotBalances.platform,
-            metaJson: snapshotBalances.metaJson,
-          })
-          .from(snapshotBalances)
-          .innerJoin(snapshots, eq(snapshots.id, snapshotBalances.snapshotId))
-          .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
-          .where(
-            since != null
-              ? and(eq(accounts.userId, userId), gte(snapshots.takenAt, since))
-              : eq(accounts.userId, userId),
-          )
-          .orderBy(asc(snapshots.takenAt)),
-      ),
 
     /** 每个账户的最新快照 + 其余额(总览数据源)。 */
     latest: (): Effect.Effect<SnapshotWithBalances[]> => latestWithBalances(),

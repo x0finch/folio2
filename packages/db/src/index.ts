@@ -67,7 +67,6 @@ export type { PortfolioMembership } from "./domains/portfolios";
 export type { UserSettingsView } from "./domains/settings";
 export type {
   BalanceRawRow,
-  SnapshotBalanceHistoryRow,
   SnapshotBalanceInput,
   SnapshotBalanceView,
   SnapshotRawRow,
