@@ -243,6 +243,48 @@ describe("逐账户结果", () => {
     });
     expect(Object.keys((await read(USER_A)).accounts).sort()).toEqual(["acc-1", "acc-2"]);
   });
+
+  // 同一个账户两条消息并发越过 consumer 的「还 pending 吗」(at-least-once 重投 / enlist 已 pending 的):
+  // 先落的那一下算数,后到的不改写它。
+  it("已落过账的账户 → 第二个下场落空,不改写状态与原话", async () => {
+    await open(USER_A, "r1");
+    const settle = (at: number, status: "synced" | "failed", error?: string) =>
+      rounds(USER_A, at).settle({
+        portfolioId: PF,
+        roundId: "r1",
+        accountId: "acc-1",
+        status,
+        error,
+        ttlMs: TTL,
+      });
+    await settle(NOW + 1, "synced");
+    await settle(NOW + 2, "failed", "flake");
+    const round = await read(USER_A);
+    expect(round.accounts["acc-1"]).toEqual({ label: "Binance spot", status: "synced" });
+    expect(round.expiresAt).toBe(NOW + 1 + TTL);
+  });
+
+  // 收官写下的是最终报告 + 7 天保留期。晚到的 settle 若还能匹配,会把报告改掉、把保留期改回 120 秒
+  // (两分钟后「上一轮的报告」凭空消失)。
+  it("已收官的轮 → 落空,报告与保留期都不动", async () => {
+    await open(USER_A, "r1");
+    await rounds(USER_A, NOW + 1).finish({
+      portfolioId: PF,
+      roundId: "r1",
+      retentionMs: RETENTION,
+    });
+    await rounds(USER_A, NOW + 2).settle({
+      portfolioId: PF,
+      roundId: "r1",
+      accountId: "acc-1",
+      status: "failed",
+      error: "late",
+      ttlMs: TTL,
+    });
+    const round = await read(USER_A);
+    expect(round.accounts["acc-1"]?.status).toBe("pending");
+    expect(round.expiresAt).toBe(NOW + 1 + RETENTION);
+  });
 });
 
 describe("心跳续期(touch)", () => {

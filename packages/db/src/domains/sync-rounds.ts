@@ -202,8 +202,14 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
     /**
      * 记一个账户的下场,并把心跳续到 `now + ttl`。
      *
-     * **认不出的 accountId 不往明细里凭空加一条**(`json_type(…) IS NOT NULL` 那一句):
-     * 开轮那一刻的名单就是这一轮的分母,事后长出一条会让 `x / N` 里的 N 自己变大。
+     * **只有 `pending → 终态` 这一步**(`status = 'pending'` 那一句):认不出的 accountId 因此不往
+     * 明细里凭空加一条(开轮那一刻的名单就是这一轮的分母,事后长出一条会让 `x / N` 里的 N 自己变大),
+     * 已落过账的也不被第二个下场改写 —— 同一个账户的两条消息(at-least-once 重投、enlist 已 pending
+     * 的那个)可能**并发**越过 consumer 的「还 pending 吗」(那一读在一次几十秒的同步之前),先落的算数。
+     *
+     * **已收官的轮一个字都不改**(`finishedAt is null` 那一句,与 `touch` / `enlist` 同款):
+     * 收官那一刻写下的是 7 天保留期与最终报告,晚到的一次 settle 既不该改报告,也不该把保留期
+     * 改回心跳的 120 秒。
      */
     settle: (input: SettleSyncRoundInput): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -222,7 +228,8 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
               and(
                 mine(input.portfolioId),
                 sameRound(input.roundId),
-                sql`json_type(${asJson}, ${path}) is not null`,
+                sql`json_extract(${asJson}, '$.finishedAt') is null`,
+                sql`json_extract(${asJson}, ${path} || '.status') = 'pending'`,
               ),
             ),
         );
