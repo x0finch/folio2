@@ -165,6 +165,54 @@ describe("portfolio/get-history", () => {
       expect(curve.length).toBeLessThanOrEqual(82);
     }, 30_000);
 
+    // review R2-#5:混合组合(synced + 手记)的长窗。手记行以前按自己的时刻另发,浏览器在两个 synced
+    // 候选时刻之间的手记时刻上,把 synced 账户那次单日闪崩一直带着 —— 拼出从没存在过的组合值。
+    // 现在手记一起进 SQL:它的行都落在同一批候选时刻上,重建出的每个点都等于真实组合值。
+    it("长窗 all + 手记账户 → 手记一起进候选时刻,每个点都是真值", async () => {
+      vi.useFakeTimers({ now: ago(100 * DAY), toFake: ["Date"] });
+      const manual = await seedManualAccount(USER, "手记", {
+        symbol: "BTC",
+        unitPrice: 100,
+        amount: 2,
+      });
+      vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+      const acc = await seedAccount(USER, "甲", "bitcoin");
+      const start = NOW - 120 * DAY + DAY / 3;
+      const CRASH = 60;
+      // 很早以前的一张:「全部」的跨度拉到四年多,一桶约 25 天 —— 闪崩所在的候选之后,下一个候选
+      // 要隔好几天,中间落着好几个手记时刻。
+      await seedSnapshot(USER, acc.id, start - 1500 * DAY, [
+        { tokenId: BTC, amount: 1, usdValue: 900 },
+      ]);
+      for (let i = 0; i < 120; i++) {
+        await seedSnapshot(USER, acc.id, start + i * DAY, [
+          { tokenId: BTC, amount: 1, usdValue: i === CRASH ? 100 : 1000 + ((i * 37) % 11) },
+        ]);
+      }
+
+      const raw = await call(USER, handleGetPortfolioHistory({ range: "all" }));
+
+      expect(raw.sampled).toBe(true);
+      // 手记账户同样封顶(每账户 ≤ 3 × 66 桶 + 1 = 199 行),不再是它自己那份另发的日线。
+      const manualRows = raw.rows.filter((r) => r.accountId === manual.id);
+      expect(manualRows.length).toBeGreaterThan(0);
+      expect(manualRows.length).toBeLessThanOrEqual(199);
+
+      // 参照系:全量快照 + 全量手记行的阶梯重建。
+      const truthRows = [
+        ...(await db(USER).snapshots.listTotals()),
+        ...(await call(USER, loadManualHistoryRows([manual], NOW))),
+      ];
+      const truth = buildPortfolioHistory(truthRows);
+      const valueAt = (t: number) => truth.filter((p) => p.t <= t).at(-1)?.total;
+      const rebuilt = buildPortfolioHistory(raw.rows);
+      expect(rebuilt.length).toBeGreaterThan(3);
+      for (const p of rebuilt) expect(p.total).toBeCloseTo(valueAt(p.t) ?? Number.NaN, 6);
+      // 闪崩那一天还在,而且只有那一个点是它。
+      const crashValue = Math.min(...truth.map((p) => p.total));
+      expect(rebuilt.filter((p) => p.total === crashValue)).toHaveLength(1);
+    }, 30_000);
+
     it("与老那条服务端算法对拍:同一份数据,曲线一个点都不差", async () => {
       const a = await seedAccount(USER, "甲", "bitcoin");
       const b = await seedAccount(USER, "乙", "binance");

@@ -181,7 +181,8 @@ export interface AccountTotals {
 // 顺带也接住了两条查询之间的时间差(中途新建的账户总览里还没有)—— 同样只是这一帧不换。
 //
 // 长窗(`sampled`,FOL-92)的原料是服务端 SQL 在组合时间线上按桶挑出的时刻(每桶最低 / 最高 / 最后),
-// 每个时刻带各账户在那一刻的值(review #2,`@folio/db` 的 `querySampledSteps`)—— 所以这里阶梯重建出
+// 每个时刻带各账户(手记账户也在那条时间线里,review R2-#5)在那一刻的值(review #2,`@folio/db` 的
+// `querySampledSteps`)—— 所以这里阶梯重建出
 // 的每个点都是真实组合值、极值都在;再 min-max 降采样到屏幕上那几十个点。以前那一步在 Worker 里做。
 export function toPortfolioCurve(
   raw: PortfolioHistoryRaw,

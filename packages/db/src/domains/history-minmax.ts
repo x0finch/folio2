@@ -157,7 +157,8 @@ export async function querySampledSteps(
 }
 
 /**
- * 组合长窗(1 年 / 全部):日收盘 + carry-in 过 `querySampledSteps`,升序。每账户 ≤ `3 × buckets + 1` 行。
+ * 组合长窗(1 年 / 全部):日收盘 + carry-in(+ 调用方给的表外阶梯 `extra`,手记账户用)过
+ * `querySampledSteps`,升序。每账户 ≤ `3 × buckets + 1` 行。
  *
  * 只用日收盘的理由同 `queryDailyCloses`(各账户的日内极值不同时发生,拼起来是假值)。
  * carry-in(窗口前的起点值,见 `queryCarryInTotals`)在同一条语句里补,stamped 到 `since`,
@@ -169,8 +170,9 @@ export async function querySampledTotalsInScope(
   accountIds: readonly string[],
   since?: number,
   buckets = HISTORY_SAMPLED_BUCKETS,
+  extra: readonly HistoryMinMaxAccountRow[] = [],
 ): Promise<HistoryMinMaxAccountRow[]> {
-  if (accountIds.length === 0) return [];
+  if (accountIds.length === 0 && extra.length === 0) return [];
   const carryIn =
     since == null
       ? sql``
@@ -185,22 +187,54 @@ export async function querySampledTotalsInScope(
         ) AS v
         FROM scope
       ) c WHERE c.v IS NOT NULL`;
+  const inScope =
+    accountIds.length === 0
+      ? sql`0`
+      : sql`a.id IN (${sql.join(
+          accountIds.map((id) => sql`${id}`),
+          sql`, `,
+        )})`;
   return querySampledSteps(
     db,
     sql`
     scope AS (
       SELECT a.id FROM ${accounts} a
-      WHERE a.user_id = ${userId} AND a.id IN (${sql.join(
-        accountIds.map((id) => sql`${id}`),
-        sql`, `,
-      )})
+      WHERE a.user_id = ${userId} AND ${inScope}
     ),
     p AS (
       SELECT t.account_id, t.close_at AS t, t.close_usd AS v, 1 AS ord
       FROM ${accountDailyTotals} t JOIN scope ON scope.id = t.account_id
-      WHERE 1 = 1${windowSql(since)}${carryIn}
+      WHERE 1 = 1${windowSql(since)}${carryIn}${extraStepsSql(extra)}
     )`,
     buckets,
+  );
+}
+
+/**
+ * **表外的阶梯观测**(review R2-#5):手记账户的曲线不在快照 / 日汇总里,由 app 从账本算出来
+ * (`loadManualHistoryRows`)。它们必须**进同一条组合时间线**:挑候选时刻要看得见它们的变化,每个
+ * 候选时刻也要带上它们在那一刻的值 —— 否则浏览器在一个手记时刻上会把 synced 账户最多一桶之前的
+ * 值和手记当下的值加在一起,拼出一个从没存在过的组合值,组合的极值也不保证还在。
+ *
+ * 形状:每个账户一个绑定参数,装 `[[t, v], …]` 的 JSON,`json_each` 展开(D1 一条语句最多 100 个绑定
+ * 参数,逐行绑定放不下一年的日线)。值不变的相邻行先去掉 —— 阶梯语义下它们不改变任何时刻的值。
+ * 这些行由调用方给、原样按候选时刻重盖后发回,不读任何表,所以不涉及归属。
+ */
+function extraStepsSql(extra: readonly HistoryMinMaxAccountRow[]): SQL {
+  const byAccount = new Map<string, [number, number][]>();
+  for (const r of [...extra].sort((a, b) => a.takenAt - b.takenAt)) {
+    const steps = byAccount.get(r.accountId) ?? [];
+    if (steps.at(-1)?.[1] !== r.totalUsd) steps.push([r.takenAt, r.totalUsd]);
+    byAccount.set(r.accountId, steps);
+  }
+  return sql.join(
+    [...byAccount].map(
+      ([accountId, steps]) => sql`
+      UNION ALL
+      SELECT ${accountId}, CAST(json_extract(j.value, '$[0]') AS INTEGER),
+        json_extract(j.value, '$[1]'), 1
+      FROM json_each(${JSON.stringify(steps)}) j`,
+    ),
   );
 }
 

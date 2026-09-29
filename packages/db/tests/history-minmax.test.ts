@@ -232,6 +232,76 @@ describe("history sampled (FOL-92)", () => {
     }
   }, 60_000);
 
+  // review R2-#5:手记账户不在表里,由调用方把它的阶梯观测(`extra`)一起递进来。它必须进同一条组合
+  // 时间线 —— 以前手记行按自己的时刻另发,浏览器在两个候选时刻之间的手记时刻上会把 synced 账户那次
+  // 单日闪崩一直带着,闪崩看上去就成了好几天的深坑。
+  it("listSampledTotals + extra(手记):每个点都是真值,闪崩还在,手记也封顶", async () => {
+    const synced = await accounts(USER).create({ connectorId: "binance", label: "S", creds: "x" });
+    const MANUAL = "manual-acc";
+    const start = 9 * DAY;
+    const DAYS = 420;
+    const CRASH = 203;
+    await seedDaily(
+      synced.id,
+      start,
+      Array.from({ length: DAYS }, (_, i) => (i === CRASH ? 400 : 1000 + ((i * 37) % 11))),
+    );
+    // 手记账户:日末一行、值在变(错开半天,落在 synced 的候选之间)。
+    const manual = Array.from({ length: DAYS }, (_, i) => ({
+      accountId: MANUAL,
+      takenAt: start + DAY / 2 + i * DAY,
+      totalUsd: 300 + ((i * 13) % 17),
+    }));
+    const raw = [...(await snapshotsOf(USER).listTotals()), ...manual];
+    const truth = buildPortfolioTimeline(raw);
+
+    const now = start + DAYS * DAY;
+    for (const since of [undefined, now - 365 * DAY]) {
+      for (const buckets of [10, undefined]) {
+        const inWindow =
+          since == null
+            ? manual
+            : [
+                { ...manual.filter((r) => r.takenAt < since).at(-1), takenAt: since },
+                ...manual.filter((r) => r.takenAt >= since),
+              ].map((r) => ({ accountId: MANUAL, takenAt: r.takenAt, totalUsd: r.totalUsd ?? 0 }));
+        const rows = await snapshotsOf(USER).listSampledTotals(
+          [synced.id],
+          since,
+          buckets,
+          inWindow,
+        );
+        const cap = 3 * (buckets ?? HISTORY_SAMPLED_BUCKETS) + 1;
+        for (const id of [synced.id, MANUAL]) {
+          const mine = rows.filter((r) => r.accountId === id);
+          expect(mine.length).toBeGreaterThan(0);
+          expect(mine.length).toBeLessThanOrEqual(cap);
+        }
+        const series = buildPortfolioTimeline(rows);
+        for (const p of series) expect(p.total).toBe(trueValueAt(raw, p.t));
+        const crashTotal = Math.min(
+          ...truth.filter((p) => since == null || p.t >= since).map((p) => p.total),
+        );
+        expect(Math.min(...series.map((p) => p.total))).toBe(crashTotal);
+      }
+    }
+  }, 60_000);
+
+  it("listSampledTotals:只有 extra(纯手记组合)也照样挑候选、发回", async () => {
+    const rows = await snapshotsOf(USER).listSampledTotals([], undefined, 5, [
+      { accountId: "m1", takenAt: 1_000, totalUsd: 10 },
+      { accountId: "m1", takenAt: 2_000, totalUsd: 10 },
+      { accountId: "m1", takenAt: 3_000, totalUsd: 30 },
+      { accountId: "m2", takenAt: 1_500, totalUsd: 5 },
+    ]);
+    // 值不变的相邻行去掉;其余每个点都是真值。
+    expect(buildPortfolioTimeline(rows)).toEqual([
+      { t: 1_000, total: 10 },
+      { t: 1_500, total: 15 },
+      { t: 3_000, total: 35 },
+    ]);
+  });
+
   it("listTotals:裁窗口时补 carry-in(停更账户不从曲线消失)", async () => {
     const a = await accounts(USER).create({ connectorId: "binance", label: "A", creds: "x" });
     const cold = await accounts(USER).create({ connectorId: "binance", label: "C", creds: "x" });

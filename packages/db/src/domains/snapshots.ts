@@ -440,13 +440,19 @@ export const makeSnapshotStore = (client: DbClient, userId: string) => {
      * 组合长窗(1 年 / 全部,FOL-92):日收盘 + carry-in,在组合时间线上按桶挑最低 / 最高 / 最后的
      * 时刻,发各账户在那些时刻的值(review #2,见 `querySampledSteps`),每账户 ≤ `3 × buckets + 1` 行。
      * 形状与 `listTotals` 相同;重建与 min-max 降采样在浏览器做,重建出的每点都是真实组合值。
+     *
+     * `extra`:表外账户(手记)的阶梯观测,**一起**参与挑候选时刻、一起按候选时刻发回(review R2-#5)——
+     * 混合组合里每个重建点也都是真值。它们原样来原样回,不读任何表。
      */
     listSampledTotals: (
       accountIds: readonly string[],
       since?: number,
       buckets = HISTORY_SAMPLED_BUCKETS,
+      extra: readonly SnapshotTotal[] = [],
     ): Effect.Effect<SnapshotTotal[]> =>
-      client.query((db) => querySampledTotalsInScope(db, userId, accountIds, since, buckets)),
+      client.query((db) =>
+        querySampledTotalsInScope(db, userId, accountIds, since, buckets, extra),
+      ),
 
     /**
      * 单币价值历史的原料(FOL-92):某 token_id 每 (账户 × 快照) 的现货价值合计,再按 `bucket`

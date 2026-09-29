@@ -13,7 +13,6 @@ import { dayBucketOf, FIAT_NAMER, fiatCodeOf, tokenTicket } from "@folio/oracle-
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect } from "effect";
 import type { SnapshotTotalRow } from "@/lib/core/history";
-import { minMaxDownsampleHistory } from "@/lib/core/history";
 import type { CredsToken } from "@/lib/core/manual";
 import {
   buildManualAccountSeries,
@@ -528,7 +527,7 @@ export const loadManualAccountLiveTotal = (
 export const loadManualHistoryRows = (
   accounts: AccountSafe[],
   now: number = Date.now(),
-  opts?: { since?: number; sampled?: boolean },
+  opts?: { since?: number },
 ): Effect.Effect<SnapshotTotalRow[], NotFound, Database | Oracle | DbRequest> =>
   Effect.map(
     Effect.forEach(
@@ -552,12 +551,8 @@ export const loadManualHistoryRows = (
               ? [{ ...lastBefore, takenAt: since }, ...inWindow]
               : inWindow;
         }
-        if (!opts?.sampled || clipped.length === 0) return clipped;
-        const accountId = clipped[0]?.accountId;
-        if (accountId == null) return clipped;
-        return minMaxDownsampleHistory(
-          clipped.map((r) => ({ t: r.takenAt, total: r.totalUsd })),
-        ).map((p) => ({ accountId, takenAt: p.t, totalUsd: p.total }));
+        // 长窗不在这里降采样(review R2-#5):手记行要整条进 SQL 的组合时间线(`listSampledTotals`)。
+        return clipped;
       }),
   );
 
