@@ -10,7 +10,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:triggers": "node scripts/data-version-triggers.ts"
   },
   "dependencies": {
     "@cloudflare/workers-types": "catalog:",

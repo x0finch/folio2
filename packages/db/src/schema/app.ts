@@ -467,6 +467,9 @@ export const manualActivity = sqliteTable(
 //
 // 删用户时各表级联删,触发器里的 `EXISTS (SELECT 1 FROM user …)` 让这些级联不再往回插版本行
 // (否则撞本表的外键,整次删用户失败)。
+//
+// **重建(drizzle 的 `__new_X`)触发器引用到的表会在 RENAME 处失败** —— 迁移开头删光、末尾建回
+// 全部触发器(`pnpm db:triggers` 生成),见 ADR 0057。
 export const userDataVersion = sqliteTable("user_data_version", {
   userId: text("user_id")
     .primaryKey()
