@@ -17,6 +17,24 @@ export const JOB_MAX_RETRIES = 3;
 export const JOB_RETRY_DELAY_SECONDS = 30;
 
 /**
+ * 一条 `sync-account` 跑一遍(一次投递)最长多久(毫秒):同步内核对上游 3 次尝试 × 20s 超时 + 退避 ≈ 70s,
+ * 留 10s 给 D1 读写与估值。
+ */
+export const SYNC_ATTEMPT_BUDGET_MS = 80_000;
+
+/** 重投到点之后、队列真把它派出去之前的调度余量(毫秒;不含积压)。 */
+export const REDELIVERY_SLACK_MS = 10_000;
+
+/**
+ * 一条 `sync-account` 从第一次投递开跑到**最后一次投递收场**最长多久(毫秒):`JOB_MAX_RETRIES + 1` 次投递
+ * 各跑满 `SYNC_ATTEMPT_BUDGET_MS`,中间隔 `JOB_MAX_RETRIES` 个重投间隔(`retry_delay` + 调度余量)——
+ * 4 × 80 + 3 × (30 + 10) = 440s。前端等单账户同步的上限从它推(`queries/account-sync.ts`,review R2-#3)。
+ */
+export const SYNC_RETRY_CHAIN_MS =
+  (JOB_MAX_RETRIES + 1) * SYNC_ATTEMPT_BUDGET_MS +
+  JOB_MAX_RETRIES * (JOB_RETRY_DELAY_SECONDS * 1000 + REDELIVERY_SLACK_MS);
+
+/**
  * 一条消息大约花几次队列操作(写 / 读 / 删各一次)。免费计划一天 10k 次;cron 那一行日志按它记一个估算。
  */
 export const QUEUE_OPS_PER_MESSAGE = 3;

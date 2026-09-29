@@ -11,7 +11,12 @@ const { syncAccount, getSyncRound } = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/server/sync", () => ({ syncAccount, getSyncRound }));
 
-const { accountOutcomeIn, syncAccountAndWait } = await import("@/lib/queries/account-sync");
+const { ACCOUNT_SYNC_TIMEOUT_MS, accountOutcomeIn, syncAccountAndWait } = await import(
+  "@/lib/queries/account-sync"
+);
+const { JOB_MAX_RETRIES, JOB_RETRY_DELAY_SECONDS, SYNC_RETRY_CHAIN_MS } = await import(
+  "@/lib/server/jobs/constants"
+);
 const { syncKeys } = await import("@/lib/queries/keys");
 
 const ACC = "acc-1";
@@ -157,5 +162,16 @@ describe("syncAccountAndWait", () => {
   it("发起本身失败 → reject(调用方的 onError 那一支)", async () => {
     syncAccount.mockRejectedValue(new Error("network"));
     await expect(syncAccountAndWait(new QueryClient(), ACC)).rejects.toThrow("network");
+  });
+});
+
+// 前端等多久(review R2-#3):消费者每次投递前都续心跳,重投链走完之前轮一直「在跑」—— 前端先放弃
+// 就会报一句通用失败,而服务端过后才把账户落成 synced / failed。上限必须比整条重投链长。
+describe("ACCOUNT_SYNC_TIMEOUT_MS", () => {
+  it("比队列重投链的最坏耗时长(4 次投递 × 80s + 3 × (30s + 10s) = 440s)", () => {
+    expect(JOB_MAX_RETRIES).toBe(3);
+    expect(JOB_RETRY_DELAY_SECONDS).toBe(30);
+    expect(SYNC_RETRY_CHAIN_MS).toBe(440_000);
+    expect(ACCOUNT_SYNC_TIMEOUT_MS).toBeGreaterThan(SYNC_RETRY_CHAIN_MS);
   });
 });

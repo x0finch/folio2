@@ -11,7 +11,12 @@ import { getLogger } from "@logtape/logtape";
 import { Cause, Clock, Effect, Option } from "effect";
 import { z } from "zod";
 import { dataFreshness } from "@/lib/core/sync-status";
-import { JOB_RETRY_DELAY_SECONDS, QUEUE_OPS_PER_MESSAGE } from "@/lib/server/jobs/constants";
+import {
+  JOB_RETRY_DELAY_SECONDS,
+  QUEUE_OPS_PER_MESSAGE,
+  REDELIVERY_SLACK_MS,
+  SYNC_ATTEMPT_BUDGET_MS,
+} from "@/lib/server/jobs/constants";
 import type { SyncAccountJob } from "@/lib/server/jobs/message";
 import { type Enqueued, enqueue } from "@/lib/server/jobs/queue";
 import { hourlyUserJobs } from "@/lib/server/jobs/schedule";
@@ -23,15 +28,6 @@ import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 // 一轮同步的**服务端事实**(ADR 0048):开轮、读进度,前端与 cron 共用这两个方法。
 // 存哪儿、怎么写(带轮 id 条件的单语句)归 `@folio/db` 的 `syncRounds`;这里管的是
 // 「一轮包含谁」「什么算活着」「怎么念给人听」。
-
-/**
- * 一条 `sync-account` 跑一遍(一次投递)最长多久:同步内核对上游 3 次尝试 × 20s 超时 + 退避 ≈ 70s,
- * 留 10s 给 D1 读写与估值。
- */
-const SYNC_ATTEMPT_BUDGET_MS = 80_000;
-
-/** 重投到点之后、队列真把它派出去之前的调度余量(不含积压 —— 积压见下面「收下这个」)。 */
-const REDELIVERY_SLACK_MS = 10_000;
 
 /**
  * 心跳时长 —— **超时这件事只有这一个旋钮**。
