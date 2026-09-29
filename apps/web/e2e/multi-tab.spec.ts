@@ -137,11 +137,14 @@ test.describe("多个标签页", () => {
 
     // 另一个标签:回到前台 → 版本号重问、缓存事件照来。写盘节流 1 秒,等到它被送回登录页后再多等
     // 一个节流窗,确认没有哪次写落下来。
+    //
+    // 它的请求**挂住不回**:会话没了之后重拉会失败,失败状态里带着一个结构化克隆不了的跳转对象,
+    // 那次写盘本来就会失败 —— 验的就成了巧合,不是守卫。挂住时缓存里是「成功 + 正在重拉」,写得进去
+    // (没修之前这里就会留下 `user:<id>`)。
+    await other.route("**/_serverFn/**", () => {});
     await other.bringToFront();
-    await other.evaluate(() => {
-      document.dispatchEvent(new Event("visibilitychange"));
-      window.dispatchEvent(new Event("focus"));
-    });
+    // react-query 的聚焦监听挂在 window 上;手造的事件不冒泡,所以直接发给 window。
+    await other.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
     await expect(other).toHaveURL(/\/login/);
     await other.waitForTimeout(1_500);
     expect(await persistedUserKeys(other)).toEqual([]);
