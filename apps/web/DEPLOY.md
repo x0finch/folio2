@@ -77,7 +77,7 @@ check which side you are on, look for `edge cache: hit` in `wrangler tail` — o
 1. Open the URL → **sign up** → you land on the overview.
 2. Add a **manual** account (symbol/amount/usd) → **Sync now** → it appears with a total.
 3. (Optional) add an on-chain wallet (EVM needs no key) → Sync.
-4. Logs: `pnpm exec wrangler tail` — structured JSON lines (`account synced` with `userId`/`accountId`/`type`, etc.). The daily cron (`0 0 * * *` UTC) auto-runs; trigger it manually from the dashboard (Workers → folio-web → Triggers / Cron) to see a `cron sweep enqueued` line, followed (one queue-consumer invocation per account) by `account synced` lines and a `queued round done` line per portfolio. Dead-lettered jobs (rare: only when even the give-up step failed) sit in `folio-jobs-dlq` — inspect them under Queues in the dashboard.
+4. Logs: `pnpm exec wrangler tail` — structured JSON lines (`account synced` with `userId`/`accountId`/`type`, etc.). Two crons auto-run: the hourly sync sweep (`30 * * * *` UTC) and the daily jobs (`0 23 * * *` UTC). Trigger the **hourly** one manually from the dashboard (Workers → folio-web → Triggers / Cron) to see a `cron sweep enqueued` line (with `jobs` and a `queueOps` estimate), followed (one queue-consumer invocation per account) by `account synced` lines and a `queued round done` line per portfolio. The daily one logs `daily jobs enqueued`. Jobs that still fail on their last retry are sent to `folio-jobs-dlq` (the sync round is marked failed first) — inspect them under Queues in the dashboard; nothing consumes that queue.
 
 **Existing deployment upgrading past FOL-86:** run step 3b once before the next deploy.
 

@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { PortfolioSelectInput } from "@/lib/server/portfolio/scope";
-import { runEffect, runEffectJson, runTimedForUser } from "@/lib/server/runtime";
+import { runEffect, runEffectJson } from "@/lib/server/runtime";
 import { requireAuth } from "@/lib/server/session/require-auth";
 import { ArchiveAccountInput, handleArchiveAccount } from "./archive";
-import { CreateAccountInput, handleCreateAccountFor } from "./create";
+import { CreateAccountInput, handleCreateAccountAndRefill } from "./create";
 import { handleReplaceAccountCredentials, ReplaceCredentialsInput } from "./credentials";
 import { AccountHistoryInput, handleGetAccountHistory } from "./history";
 import { handleListAccounts } from "./list";
@@ -23,10 +23,8 @@ export const listAccounts = createServerFn({ method: "GET" })
 export const createAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(CreateAccountInput)
-  // 不走 `runEffect`:建手记账户之后要投一条带 userId 的 `daily-prices`(FOL-90,见 ./create)。
-  .handler(({ data, context }) =>
-    runTimedForUser(context.userId, "createAccount", handleCreateAccountFor(context.userId, data)),
-  );
+  // 建手记账户之后投一条 `daily-prices`(FOL-90,见 ./create);消息里的 userId 由装配点填。
+  .handler(runEffect(handleCreateAccountAndRefill));
 
 export const replaceAccountCredentials = createServerFn({ method: "POST" })
   .middleware([requireAuth])

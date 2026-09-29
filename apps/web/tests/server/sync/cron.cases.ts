@@ -102,7 +102,13 @@ describe("sync/cron(fan-out)", () => {
       ["platforms", true],
       ["defi-logos", true],
     ]);
-    expect(result).toEqual({ users: 1, accounts: 2, failed: 0, jobs: 2 + 5 });
+    expect(result).toEqual({
+      users: 1,
+      accounts: 2,
+      failed: 0,
+      jobs: 2 + 5,
+      queueOps: (2 + 5) * 3,
+    });
     // 轮开着、还没收官 —— 收官是最后一个 consumer 的事。
     expect(mine?.finishedAt).toBeNull();
   });
@@ -131,6 +137,66 @@ describe("sync/cron(fan-out)", () => {
     expect(back?.roundId).toBe(manualRound.round.roundId);
     expect(back?.trigger).toBe("manual");
     expect(syncJobs()).toEqual([]);
+  });
+
+  // 活轮只装一个账户(加账户 / 详情侧栏点同步开的,FOL-89):cron 不能整组合跳过 —— 其余账户会
+  // 缺这一小时的快照。把名单里缺的拉进那一轮、只投它们;活轮里已有的那个不重投。
+  it("活轮只装一个账户 → 把其余账户拉进那一轮、只投它们", async () => {
+    const def = await db(USER).portfolios.ensureDefault();
+    const busy = await cex("正在单独同步的");
+    const other = await cex("其余的");
+    const single = await db(USER).syncRounds.open({
+      portfolioId: def.id,
+      roundId: "single",
+      trigger: "manual",
+      accounts: [{ id: busy.id, label: busy.label }],
+      ttlMs: 120_000,
+    });
+    expect(single.opened).toBe(true);
+
+    const result = await fanOut();
+
+    const back = await roundOf(def.id);
+    expect(back?.roundId).toBe("single");
+    expect(back?.accounts[other.id]?.status).toBe("pending");
+    expect(back?.accounts[busy.id]?.status).toBe("pending");
+    expect(syncJobs().map((j) => [j.roundId, j.accountId])).toEqual([["single", other.id]]);
+    expect(result.accounts).toBe(1);
+  });
+
+  // 投递炸了(队列没建 / 配额用完):开了的轮别挂着 pending 干等 120s 再念成没有原因的「中断」,
+  // 与手动那条同一个口径 —— 带一句话收官。拉进别人轮的那几个记成 failed。
+  it("投递失败 → 自己开的轮带一句话收官,拉进别人轮的账户记 failed;这个用户计 failed", async () => {
+    const def = await db(USER).portfolios.ensureDefault();
+    const watch = await db(USER).portfolios.create({ name: "看单" });
+    const busy = await cex("正在单独同步的");
+    const joined = await cex("被拉进去的");
+    const there = await cex("看单里的");
+    await db(USER).portfolios.assignAccount(there.id, watch.id);
+    await db(USER).syncRounds.open({
+      portfolioId: def.id,
+      roundId: "single",
+      trigger: "manual",
+      accounts: [{ id: busy.id, label: busy.label }],
+      ttlMs: 120_000,
+    });
+
+    const result = await Effect.runPromise(
+      fanOutAllUsers([USER]).pipe(
+        Effect.provideService(JobQueue, { send: () => Effect.die(new Error("queue down")) }),
+      ),
+    );
+
+    expect(result).toMatchObject({ users: 1, failed: 1, jobs: 0 });
+    const mine = await roundOf(watch.id);
+    expect(mine?.trigger).toBe("cron");
+    expect(mine?.finishedAt).not.toBeNull();
+    expect(mine?.error).toBeTruthy();
+    const theirs = await roundOf(def.id);
+    expect(theirs?.roundId).toBe("single");
+    expect(theirs?.accounts[joined.id]?.status).toBe("failed");
+    expect(theirs?.accounts[busy.id]?.status).toBe("pending");
+    expect(theirs?.finishedAt).toBeNull();
   });
 
   // 开了轮就必须收官,空组合也不例外 —— 没有消息会去收它,120s 后面板会挂着一句「中断」。

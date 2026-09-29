@@ -50,9 +50,11 @@
   //   · `max_batch_size: 1` —— 一次调用只处理一条,预算按「一个账户」算,而不是「一批账户」。
   //   · `max_retries: 3` + `retry_delay: 30` —— 只有 defect(D1 瞬时错之类)才走重试;上游失败
   //     已在同步内核里重试过、收成「这个账户失败」,不再经队列重来。**最后一次仍失败时 consumer
-  //     自己收尾(把账户记成 failed、够了就收官)再 ack**,所以轮状态不会挂着 pending。
-  //     这个数与 jobs/constants.ts 的 `JOB_MAX_RETRIES` 由 tests/queue-config.test.ts 锁成一致。
-  //   · 死信队列只接「连收尾都失败了」的那种,没有 consumer —— 在 Dashboard 里看。
+  //     先收尾(把账户记成 failed、够了就收官)再 retry() 送进死信**,所以轮状态不会挂着 pending,
+  //     失败的消息也看得见。两个数与 jobs/constants.ts 的 `JOB_MAX_RETRIES` / `JOB_RETRY_DELAY_SECONDS`
+  //     由 tests/queue-config.test.ts 锁成一致(轮的心跳按后者倒推)。
+  //   · 死信队列接每一条最终失败的消息(连同 exceededCpu 被杀满四次的),**没有 consumer**
+  //     (测试钉着)—— 在 Dashboard 里看,不会被原样再跑一遍。
   //   · `max_concurrency: 6` = `SYNC_CONCURRENCY`:以前「每用户同时最多 6 发上游」由一把进程内的闸
   //     拦着,拆成一条消息一次调用后闸递不过去,由这里的并发上限顶上。
   // 队列要先建一次(`wrangler queues create`,见 DEPLOY.md)。env 里不继承,test / preview 各有一份。

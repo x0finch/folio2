@@ -4,10 +4,22 @@ import { DEFAULT_TOP_N } from "@folio/oracle-basic";
 
 /**
  * 一条消息最多重投几次 —— **与 wrangler.jsonc 各 env 的 `queues.consumers[].max_retries` 必须逐字一致**
- * (tests/queue-config.test.ts 锁着)。consumer 靠它判断「这是最后一次投递」:到了这一次还失败,就不再
- * `retry()`(那会把消息扔进死信队列、轮里那个账户永远 pending),而是自己收尾后 ack。
+ * (tests/queue-config.test.ts 锁着)。consumer 靠它判断「这是最后一次投递」:到了这一次还失败,先自己
+ * 收尾(轮里那个账户记成 failed,别让它挂着 pending),再 `retry()` —— 重投次数已经用完,这一下把消息
+ * 送进死信队列,留给人看(FOL-86 验收:失败消息进死信可见)。
  */
 export const JOB_MAX_RETRIES = 3;
+
+/**
+ * 两次投递之间隔多久(秒)—— **与 wrangler.jsonc 各 env 的 `queues.consumers[].retry_delay` 逐字一致**
+ * (tests/queue-config.test.ts 锁着)。轮的心跳按它倒推(`sync/round.ts` 的 `ROUND_HEARTBEAT_MS`)。
+ */
+export const JOB_RETRY_DELAY_SECONDS = 30;
+
+/**
+ * 一条消息大约花几次队列操作(写 / 读 / 删各一次)。免费计划一天 10k 次;cron 那一行日志按它记一个估算。
+ */
+export const QUEUE_OPS_PER_MESSAGE = 3;
 
 /** `Queue.sendBatch` 一次最多收几条(Cloudflare 的硬上限)。超过就分批发。 */
 export const QUEUE_SEND_BATCH_MAX = 100;

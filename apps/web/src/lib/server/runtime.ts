@@ -15,6 +15,7 @@ import type { JsonResponse } from "@/lib/core/json-response";
 import { type ConnectorRegistry, connectorRegistryContext } from "./connectors/registry";
 import { logCategory, withLogTapeLogger } from "./effect-log";
 import { type AppError, toError } from "./errors";
+import { type Enqueued, enqueue } from "./jobs/queue";
 import { oracleServices } from "./oracle";
 import { withSpanTree } from "./tracing";
 
@@ -145,7 +146,29 @@ const isolateRuntime = (): Runtime.Runtime<IsolateServices> => {
  * `ConnectorRegistry` 是第三张(#504 T14):它答的是「这个部署支持哪些上游、字段长什么样、
  * 这份凭据活不活」,与 userId 无关,但取用方式与另外两张一致。
  */
-export type UserServices = Database | OracleServices | ConnectorRegistry | DbRequest;
+export type UserServices = Database | OracleServices | ConnectorRegistry | DbRequest | UserJobs;
+
+/**
+ * **「替这个用户投活」** —— 队列消息要带 userId(consumer 那一侧按它装配),而 handler 收不到 userId
+ * (#504:handler 不收 `context`,人由装配点吃掉)。以前 `syncAccount` 这类要投消息的 server fn 因此
+ * 绕开 `runEffect`、把 `context.userId` 一路递进业务代码;现在人仍只由这个文件给:`asUser` 顺手
+ * provide 这个服务,handler 经 `enqueueForUser` 投,消息里的 userId 由它填。
+ *
+ * **Tag 不出本文件(只出类型)**,与 `CurrentUser` 同一个理由:值一出去,任何一处都能
+ * `Effect.provideService(UserJobs, 随便谁)`,替别人投一条会被 consumer 当成那个人来跑的消息。
+ * 业务代码拿到的只是 `build` 回调里那一个参数 —— 用来往消息体里填,别处看不见它。
+ */
+class UserJobs extends Context.Tag("web/UserJobs")<
+  UserJobs,
+  { readonly enqueue: (build: (userId: string) => readonly Enqueued[]) => Effect.Effect<void> }
+>() {}
+
+export type { UserJobs };
+
+/** 替当前用户投一批活(`build` 拿到的 userId 只用来填消息体)。投递失败走 defect,同 `enqueue`。 */
+export const enqueueForUser = (
+  build: (userId: string) => readonly Enqueued[],
+): Effect.Effect<void, never, UserJobs> => Effect.flatMap(UserJobs, (jobs) => jobs.enqueue(build));
 
 /**
  * **「这段活是这个用户的」—— 一次请求要给的全部就是这两样。**
@@ -159,7 +182,11 @@ export type UserServices = Database | OracleServices | ConnectorRegistry | DbReq
 const asUser =
   (userId: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    effect.pipe(provideCurrentUser(userId), provideDbClient(env));
+    effect.pipe(
+      Effect.provideService(UserJobs, { enqueue: (build) => enqueue(build(userId)) }),
+      provideCurrentUser(userId),
+      provideDbClient(env),
+    );
 
 // 一个用户的活:给这个用户的两样、错误映射、挂上下文。**顺序是有讲究的** —— 注解挂在给值的
 // **外面**,所以连那一步本身打的日志也带得上;挂在里面就只覆盖被包住那段。
@@ -168,7 +195,7 @@ const asUser =
 const inRequest = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
-): Effect.Effect<A, Error, Exclude<Exclude<R, CurrentUser>, DbClient>> =>
+): Effect.Effect<A, Error, Exclude<Exclude<Exclude<R, UserJobs>, CurrentUser>, DbClient>> =>
   effect.pipe(
     asUser(userId), // ← 注入发生在这一行
     Effect.mapError(toError), // ← 失败变成人话的唯一一处(见 ./errors)
@@ -198,14 +225,14 @@ export const forUser = <A, E extends AppError>(
  */
 export const forUserDb = <A, E extends AppError>(
   userId: string,
-  effect: Effect.Effect<A, E, Database | DbRequest>,
+  effect: Effect.Effect<A, E, Database | DbRequest | UserJobs>,
 ): Effect.Effect<A, Error> => Effect.provide(inRequest(userId, effect), dbRuntime());
 
 /**
  * **发动点** —— 在 `forUser` 之上补只有「跑」才需要的:span 树。
  *
- * 路由 / 测试 / 需要显式 userId 的 server fn 都走这里。server fn 的标准装配另有
- * `runEffect`,在它之上再挂 `handler` 日志注解。
+ * 路由 / 测试走这里。server fn 的标准装配另有 `runEffect`,在它之上再挂 `handler` 日志注解。
+ * (要投队列消息的 server fn 也走 `runEffect`:消息里的 userId 经 `enqueueForUser` 由这里填。)
  *
  * 两条路唯一的差别是**「谁认的人」** —— server fn 有 `requireAuth` 中间件把 userId 放进
  * context,路由自己调 `resolveAuth`。认完之后要做的事一模一样,所以只能有一份。
@@ -222,13 +249,6 @@ export const runForUser = <A, E extends AppError>(
   // 「开销与开关」)。装在这儿而不是 `forUser` 里:cron 那条路把 N 个用户拼成**一个** effect,
   // 树该按那一整趟算,由它自己的边缘装(`runAtEdge`)。
   Runtime.runPromise(isolateRuntime())(withSpanTree(inRequest(userId, effect)));
-
-/** `runEffect` 的 timing 壳,给必须走 `runForUser` 的 server fn(如 syncAccount)复用。 */
-export const runTimedForUser = <A, E extends AppError>(
-  userId: string,
-  handler: string,
-  effect: Effect.Effect<A, E, UserServices>,
-): Promise<A> => runForUser(userId, withServerFnTiming<A, E>(handler)(effect));
 
 /**
  * **server fn 的发动点 —— handler 只描述,这里负责跑。**

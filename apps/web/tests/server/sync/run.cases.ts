@@ -14,9 +14,8 @@ import { freshUser, otherUser } from "../_kit/user";
 describe("sync/run", () => {
   // #527 · syncAccount
   //
-  // **这是全仓唯一显式收 userId 的 handler**(投的消息要带它),所以它不走 `runEffect`,
-  // 也不能用 kit 里的 `call` —— 那个把 userId 吃在装配点。这里直接用同一个内核 `runForUser`,
-  // 与 `sync/index.ts` 的装配逐字一致;投递换成收进数组的假队列(`captureQueue`)。
+  // 它投的消息要带 userId —— 由装配点经 `enqueueForUser` 填,handler 不收 userId(#504)。
+  // 这里直接用 `runEffect` 底下那个内核 `runForUser`;投递换成收进数组的假队列(`captureQueue`)。
   const USER = "h-sync-run";
   let queue: ReturnType<typeof captureQueue>;
 
@@ -43,7 +42,7 @@ describe("sync/run", () => {
         amount: 1,
       });
 
-      const out = await run(USER, handleSyncAccount(USER, { accountId: acc.id }));
+      const out = await run(USER, handleSyncAccount({ accountId: acc.id }));
 
       expect(out).toEqual({
         queued: false,
@@ -56,7 +55,7 @@ describe("sync/run", () => {
     it("账户不存在 → NotFound,不发请求", async () => {
       const outbound = blockOutbound();
 
-      const exit = await exitOf(USER, handleSyncAccount(USER, { accountId: "没有这个" }));
+      const exit = await exitOf(USER, handleSyncAccount({ accountId: "没有这个" }));
 
       expect(exit._tag).toBe("Failure");
       expect(outbound.calls).toEqual([]);
@@ -70,7 +69,7 @@ describe("sync/run", () => {
         amount: 1,
       });
 
-      const exit = await exitOf(USER, handleSyncAccount(USER, { accountId: theirs.id }));
+      const exit = await exitOf(USER, handleSyncAccount({ accountId: theirs.id }));
 
       expect(exit._tag).toBe("Failure");
       expect(outbound.calls).toEqual([]);
@@ -85,7 +84,7 @@ describe("sync/run", () => {
         creds: JSON.stringify({ apiKey: "只有一半" }),
       });
 
-      const out = await run(USER, handleSyncAccount(USER, { accountId: acc.id }));
+      const out = await run(USER, handleSyncAccount({ accountId: acc.id }));
 
       expect(out).toEqual({
         queued: false,
@@ -108,7 +107,7 @@ describe("sync/run", () => {
         creds: JSON.stringify({ apiKey: "只有一半" }),
       });
 
-      await run(USER, handleSyncAccount(USER, { accountId: acc.id }));
+      await run(USER, handleSyncAccount({ accountId: acc.id }));
 
       expect(outbound.calls).toEqual([]);
       expect(queue.sent).toEqual([]);
@@ -124,7 +123,7 @@ describe("sync/run", () => {
       });
 
     const queued = async (accountId: string) => {
-      const out: SyncAccountStart = await run(USER, handleSyncAccount(USER, { accountId }));
+      const out: SyncAccountStart = await run(USER, handleSyncAccount({ accountId }));
       if (!out.queued) throw new Error(`expected a queued sync, got ${JSON.stringify(out)}`);
       return out;
     };
@@ -187,7 +186,7 @@ describe("sync/run", () => {
     // 同组合正有一轮在跑(另一个设备点了全量、cron 刚开轮):不覆盖它,把这个账户拉进去。
     it("撞上活轮 → 拉进那一轮(名单外的加进来),不另开一轮", async () => {
       await cex("已在轮里的");
-      const full = await run(USER, startSyncRound(USER, { auto: false }));
+      const full = await run(USER, startSyncRound({ auto: false }));
       if (!full.round) throw new Error("no round");
       const late = await cex("轮开了之后才加的");
       queue = captureQueue();

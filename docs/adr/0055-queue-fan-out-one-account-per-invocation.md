@@ -15,7 +15,7 @@
 - **cron(`fanOutAllUsers`)**:逐用户开轮(与以前同一段分区逻辑)→ 每个账户一条 `sync-account` → 每个用户补 `prices` / `fx`(不延后)+ `platforms` / `defi-logos`(延后 120s,FOL-88)→ `sendBatch`。**不出网**(测试钉着)。空组合的轮当场收官。
 - **consumer(`server.ts` 的 `queue()` → `consumeMessage`)**:每条一次 `runAtEdge`,跑在同一个 isolate 运行时上(ADR 0054,不另起服务图)。`sync-account` 用**同一个同步内核**(`Sweep.syncUserStream` + `makeSyncServicesLayer`,`only` 收成那一个账户)→ `settle` → `finishIfSettled`。
 - **「最后一个落账的收官」**:`@folio/db` 新增 `syncRounds.finishIfSettled` —— 一条条件 UPDATE(未收官 ∧ `json_each` 里零个 `pending`),并发的 consumer 只有一个抢得到,最后落账的那个必看得到零个 pending。
-- **ack / retry 只在一处决定**:解不开 → ack + warn(重投也解不开);成功 → ack;失败且还有机会 → `retry()`;**最后一次仍失败 → 把账户记成 failed、够了就收官、ack**,只有连这一步都失败才进死信。`JOB_MAX_RETRIES` 与 wrangler 的 `max_retries` 由 `tests/queue-config.test.ts` 锁成一致。
+- **ack / retry 只在一处决定**:解不开 → ack + warn(重投也解不开);成功 → ack;失败且还有机会 → `retry()`;**最后一次仍失败 → 先收尾(`sync-account`:把账户记成 failed、够了就收官),再 `retry()` 送进死信**(重投次数已用完,这一下就是进死信;FOL-86 验收「失败消息进死信可见」)。收尾失败也照样进死信。死信队列**没有 consumer**,不会被原样再跑一遍;有人手动把它重放回主队列,`sync-account` 也会被「还 pending 吗」挡下。`JOB_MAX_RETRIES` / `JOB_RETRY_DELAY_SECONDS` 与 wrangler 的 `max_retries` / `retry_delay` 由 `tests/queue-config.test.ts` 锁成一致(它也钉着「死信没有 consumer」)。(这一条原先写的是「收尾后 ack、只有收尾失败才进死信」,#571 review 改,见文末补记。)
 - **上游失败不走队列重试**:同步内核自己已经重试、并把失败收成「这个账户 failed」。队列重试只接 defect(D1 瞬时错这类)。
 
 ## 为什么是队列,不是别的
@@ -26,10 +26,10 @@
 
 ## 代价(收下的)
 
-- **队列跑的轮没有 keepalive**:没有一条任务从头跑到尾,续期全靠每次落账。积压超过 120s(`ROUND_HEARTBEAT_MS`)时面板会先说「中断」;晚到的落账带着同一个轮 id,照样落得上、续期、收官 —— 只是那段时间里一次手动同步可以覆盖它。单用户、个位数账户,正常延迟是秒级。
+- **队列跑的轮没有定时 keepalive**:没有一条任务从头跑到尾,续期挂在每次落账与每次投递开跑前(`touch`)。`ROUND_HEARTBEAT_MS` 由重投链倒推:一次投递最坏 80s + `retry_delay` 30s + 调度余量 10s = 120s,所以重投还没用完时轮不会被念成「中断」(#571 review 补上开跑前那次续期)。积压到一条消息排队超过 120s 才被派出去时面板仍会先说「中断」;晚到的落账带着同一个轮 id,照样落得上、续期、收官 —— 只是那段时间里一次手动同步可以覆盖它。单用户、个位数账户,正常延迟是秒级。
 - **每用户并发闸没了**:以前 cron 一次调用里多轮共用一把进程内信号量(`SyncScope.gate`),拆成多次调用后递不过去,已删;上限改由 `max_concurrency: 6`(= `SYNC_CONCURRENCY`)给,且是**全队列**的上限,不是每用户。
 - **cron 那一行日志不再有 ok / failed 小计**:同步还没跑。小计挪到收官那一刻(`queued round done`,每组合一行)。
-- **队列操作计数**:每条消息约 3 次操作(写 / 读 / 删),免费计划一天 10k。每小时 (账户数 + 1) 条 × 24。
+- **队列操作计数**:每条消息约 3 次操作(写 / 读 / 删,`QUEUE_OPS_PER_MESSAGE`),免费计划一天 10k。**今天的数**(FOL-90 之后):cron 每用户每小时 (账户数 + 5) 条(`sync-account` × N + `prices` / `daily-prices` / `fx` / `platforms` / `defi-logos`),每天另 2 条(`prune-notes` / `catalogue`);每次手动全量同步另 (N + 5) 条、每次单账户同步另 (1 + 5) 条,手记写完的定向 `daily-prices` 各 1 条;失败重投每次再 +1 条。单用户 5 个账户:cron 一天 (5 + 5) × 24 + 2 = 242 条 ≈ 730 次操作,离 10k 很远 —— 真正吃配额的是手动同步的频率。cron 那一行日志(`cron sweep enqueued`)带 `queueOps` 字段 = 这一趟投的条数 × 3,手动 / 单账户那几条不在里面。(原先这里写「(账户数 + 1) 条 × 24」,FOL-88 / FOL-90 两次加 kind 没跟着改,#571 review 更正。)
 - **部署多一步**:`wrangler queues create` 一次(DEPLOY.md 3b);不建,`wrangler deploy` 直接失败。
 
 ## 补记:持仓价拆成 `prices` 活,同步只读价表(FOL-87)
@@ -80,7 +80,7 @@
 - **新 kind `daily-prices { userId, tokenIds? }`**(`apps/web/src/lib/server/prices/daily.ts`)。目标 = 用户所有手记账户(含归档)里会画出来的币(`manualDailyPriceTargets`:与曲线同一个 `loadHistoryTokens`、同一道 recognized 门),各从最早一笔活动那天起;法币补日汇率(`fx.fillDaily`,BTC 两腿反算,落 `fiat/issued:<CODE>`),其余补币价(`tokens.fillDaily`)。两者共用 `packages/oracle/entry/src/daily-fill.ts`。
 - **只补过去日**,补到昨天为止。一发区间请求覆盖 ≤ `DAILY_FILL_DAYS_PER_CALL`(365)天(长于三个月上游按日给点,解析便宜)。**「试过哪一段」记在 per-user 缓存**(`daily-cover:<目标>` → `{ lo, hi }`,连续闭区间):只看表的话,上游**就是没有点**的日子(币还没上线、断档)每小时都算「缺」、每小时白打一发。先往后补(`hi` 之后到昨天,升序),再往前补(降序);表里已有整窗的(别的用户补过、FOL-90 之前读路径落过的)直接算试过、不出网。
 - **预算**:一条消息 ≤ `DAILY_PRICES_CALLS_PER_MESSAGE`(8)发区间请求,法币一窗按 2 发记账;× 2 次尝试 = 最坏 16 发 ≤ 50。没取到 25 是因为 10ms CPU 先到(一发一年 = 365 个点解析 + 365 行写;日价写入顺手改成多行 INSERT,30 行一条语句)。8 是**没实测**的保守值,FOL-84 的本地 profile 可以校准。预算用完还有没补完的 → 投**一条**带剩余 id 的后续消息(串行接力,同一个目标的区间不会被两条消息同时推);一发都没花出去(全失败)就不投,等下一个整点。测试按真 fetch 数钉着:三年 × 3 币 + 欧元 → 多条消息、每条 ≤ 16 发,补完重跑零出网。
-- **谁投**:每小时 cron(`hourlyUserJobs`,不延后)—— 过了零点那一小时补一窗「昨天」,其余时候几次缓存读、零出网。外加手记写完之后定向投一条带**这个账户的币 id** 的:加活动(`createManualActivities`)、改活动(`updateManualActivity`,改日期可能把首笔挪早)、建手记账户(`createAccount`)。这三个 server fn 因此与 `syncAccount` 一样走 `runTimedForUser`(`runEffect` 不把 userId 交给 handler);投递失败只记一行,不让已落库的写失败。
+- **谁投**:每小时 cron(`hourlyUserJobs`,不延后)—— 过了零点那一小时补一窗「昨天」,其余时候几次缓存读、零出网。外加手记写完之后定向投一条带**这个账户的币 id** 的:加活动(`createManualActivities`)、改活动(`updateManualActivity`,改日期可能把首笔挪早)、建手记账户(`createAccount`)。消息里的 userId 经 `enqueueForUser` 由装配点填(见文末补记;原先这三个与 `syncAccount` 一样绕开 `runEffect`、手递 `context.userId`);投递失败只记一行,不让已落库的写失败。
 - **读路径只读表**:`priceSeries` / `rateSeries` 零网络 —— 过去日读 `token_daily_prices`;**今天读现价**(代币价表 / 汇率缓存,每小时的 `prices` / `fx` 活在刷)。**不往日价表写今天**:明天它就成了一个「不可变的过去日」,而那其实是某个钟点的价。回源只剩 `fillDaily`。
 - **缺的日子前向填充**(`buildHistoricalPriceAt`,不落库):沿用之前最近一个有价的日子(还没补上的昨天、今天还没现价、上游断档)。第一个有价的日子之前(新币、活还没跑)→ 纯层降级链落账本价②/③,与以前「上游没给」同一条路。
 
@@ -89,3 +89,12 @@
 ## 补记:`sync-account` 不再经 Layer 与 Stream(FOL-83 第二轮)
 
 上文「`sync-account` 用同一个同步内核(`Sweep.syncUserStream` + `makeSyncServicesLayer`)」改成:**`Sweep.syncOne(userId, accountId)` + `makeSyncServices({ only })`**。内核仍是同一个 —— `syncOne` 做的是 `syncUserStream` 同样的两次读(账户、凭据)、调同一个 `Account.syncAccount`,只是一个账户不走有界并发的流;`makeSyncServices` 是同一份接线造成一份 `Context`,`makeSyncServicesLayer` 就是它外面一层 `Layer.effectContext`(测试照旧用 layer)。省掉的是每条消息一遍的五层 `Layer.mergeAll` 与 Stream 的机器。同一轮还做了:刷价那一批改成一条 `UPDATE … FROM json_each(?)`(`prices` 本机 66 → 39ms)、目录那条活先看 `asOf` 再决定要不要解码整份目录、交易所 note 的数字格式不再拉起 ICU(一个 isolate 里第一次用 Intl 数字格式 ≈15ms)。数字与仍超 10ms 的原因见 `apps/web/scripts/perf/baselines/before-after-2026-09-28.md` 的「第二轮」。
+
+## 补记:#571 review 收掉的几处
+
+- **cron 撞上单账户的轮也不再整组合跳过**(`claimPortfolio`):FOL-89 之后活轮可能只装一个账户(加账户 / 详情侧栏点同步)。cron 开不动轮时,把名单里有、活轮里没有的账户 `enlist` 进那一轮,只投它们;活轮里已有的不动(还 pending 的有人在跑,落过账的刚同步过)。撞上全量轮时一个都不缺,什么都不做 —— 与以前「让开」同一个下场。第一下 enlist 落空(活轮恰好收官 / 过期)再开一次。
+- **cron 投递失败也收尾**:与手动 / 单账户同一个口径 —— 自己开的轮带 `could not queue the sync` 收官,拉进别人轮的账户记 failed。以前只记一行 warn,轮挂着 pending 120s 后念成没有原因的「中断」。
+- **`settle` 只做 pending → 终态,且不碰已收官的轮**(`finishedAt is null` + `status = 'pending'`,与 `touch` / `enlist` 同款):同一个账户两条消息可能并发越过 consumer 的「还 pending 吗」(那一读在几十秒的同步之前),后到的那条以前会改写状态、把收官写下的 7 天保留期改回 120 秒。现在先落的算数,测试按真并发钉着。
+- **最终失败进死信**(见上文「ack / retry」那一条)。
+- **consumer 每次投递开跑前续心跳**,`ROUND_HEARTBEAT_MS` 改由重投链倒推(见上文「代价」第一条)。
+- **要投消息的 server fn 不再收 `context`**:`runtime.ts` 新增 `enqueueForUser(build)` —— `asUser` 顺手 provide 一个 `UserJobs` 服务(Tag 不出文件,只出类型,与 `CurrentUser` 同理),`build` 拿到的 userId 只用来填消息体。`syncAccount` / `createAccount` / `createManualActivities` / `updateManualActivity` 回到 `runEffect`,`runTimedForUser` 删除;`startSyncRound` / `startAccountRound` / `refillDailyPrices` 签名里不再有 userId。cron 的 `fanOutUserRounds` 仍自己拿 userId —— 它就是装配点(逐用户 `forUserDb`)。

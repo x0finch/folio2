@@ -2,7 +2,7 @@ import { FIAT_NAMER, MS_PER_DAY, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { Effect, Either } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { handleCreateAccountFor } from "@/lib/server/accounts/create";
+import { handleCreateAccountAndRefill } from "@/lib/server/accounts/create";
 import { handleGetAccountHistory } from "@/lib/server/accounts/history";
 import {
   DAILY_PRICES_CALLS_PER_MESSAGE,
@@ -12,8 +12,8 @@ import { consumeMessage, type QueueMessage } from "@/lib/server/jobs/consume";
 import { decodeJob, type Job } from "@/lib/server/jobs/message";
 import { type Enqueued, JobQueue } from "@/lib/server/jobs/queue";
 import { loadManualAccountSeries } from "@/lib/server/manual/store";
-import { handleCreateManualActivitiesFor } from "@/lib/server/manual-activities/create";
-import { handleUpdateManualActivityFor } from "@/lib/server/manual-activities/update";
+import { handleCreateManualActivitiesAndRefill } from "@/lib/server/manual-activities/create";
+import { handleUpdateManualActivityAndRefill } from "@/lib/server/manual-activities/update";
 import { handleGetPortfolioHistory } from "@/lib/server/portfolio/get-history";
 import { handleGetSnapshots } from "@/lib/server/portfolio/snapshots";
 import { db } from "../_kit/db";
@@ -104,7 +104,7 @@ describe("jobs/daily-prices", () => {
     await call(
       USER,
       queue.provide(
-        handleCreateManualActivitiesFor(USER, {
+        handleCreateManualActivitiesAndRefill({
           accountId: account.id,
           drafts: [
             ...["bitcoin", "ethereum", "solana"].map((coin) => ({
@@ -256,7 +256,7 @@ describe("jobs/daily-prices", () => {
     await call(
       USER,
       edited.provide(
-        handleUpdateManualActivityFor(USER, {
+        handleUpdateManualActivityAndRefill({
           activityId: first.id,
           patch: { occurredAt: first.occurredAt - 10 * MS_PER_DAY },
         }),
@@ -268,7 +268,7 @@ describe("jobs/daily-prices", () => {
     const out = await call(
       USER,
       rejected.provide(
-        handleCreateManualActivitiesFor(USER, {
+        handleCreateManualActivitiesAndRefill({
           accountId: account.id,
           drafts: [
             {
@@ -290,7 +290,7 @@ describe("jobs/daily-prices", () => {
       USER,
       registry,
       created.provide(
-        handleCreateAccountFor(USER, {
+        handleCreateAccountAndRefill({
           connectorId: "manual",
           label: "手记 2",
           values: {

@@ -32,11 +32,8 @@ export type SyncAccountStart =
       round: SyncRoundView;
     };
 
-// **userId 是显式参数,不是从 context 摸出来的。** 投的消息要带它(consumer 那一侧按它装配),
-// 而 `runEffect` 刻意不把 userId 交给 handler。与其为这一处把它重新放进**全部** handler 的可见面,
-// 不如这里显式接一次 —— 装配点因此走 `runTimedForUser`(与 `runEffect` 同一个内核,见 ./index)。
+// 投的消息要带 userId(consumer 那一侧按它装配),由装配点经 `enqueueForUser` 填 —— handler 不收它(#504)。
 export const handleSyncAccount = Effect.fn("syncAccount")(function* (
-  userId: string,
   data: z.infer<typeof SyncAccountInput>,
 ) {
   const accounts = (yield* Database).accounts;
@@ -64,7 +61,7 @@ export const handleSyncAccount = Effect.fn("syncAccount")(function* (
       skipReason: "missing-credentials",
     });
   }
-  const round = yield* startAccountRound(userId, { id: account.id, label: account.label });
+  const round = yield* startAccountRound({ id: account.id, label: account.label });
   return {
     queued: true,
     accountId: account.id,

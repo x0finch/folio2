@@ -1,11 +1,11 @@
 import { Oracle } from "@folio/oracle";
 import { Effect, Option } from "effect";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { JOB_MAX_RETRIES } from "@/lib/server/jobs/constants";
 import { consumeMessage, type QueueMessage } from "@/lib/server/jobs/consume";
 import type { SyncAccountJob } from "@/lib/server/jobs/message";
 import { type Enqueued, JobQueue } from "@/lib/server/jobs/queue";
-import { fanOutAllUsers } from "@/lib/server/sync/round";
+import { fanOutAllUsers, ROUND_HEARTBEAT_MS } from "@/lib/server/sync/round";
 import { db } from "../_kit/db";
 import { blockOutbound, json, stubOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
@@ -230,18 +230,120 @@ describe("jobs/consume", () => {
       expect((await roundOf(job.portfolioId))?.accounts[job.accountId]?.status).toBe("pending");
     });
 
-    // 不收尾的话那个账户永远 pending,面板要等心跳过期才说「中断」。
-    it("最后一次投递仍失败 → 记 failed、收官、ack(不进死信)", async () => {
+    // 不收尾的话那个账户永远 pending,面板要等心跳过期才说「中断」。收完尾照样送进死信
+    // (重投次数已用完,`retry()` 就是进死信)—— FOL-86 验收:失败消息进死信可见。
+    it("最后一次投递仍失败 → 记 failed、收官,再 retry() 送进死信(不 ack)", async () => {
       await cex("a");
       const [job] = await fanOut();
       if (!job) throw new Error("no job enqueued");
       const { message, state } = fakeMessage(job, JOB_MAX_RETRIES + 1);
       await Effect.runPromise(consumeMessage(message, boom));
-      expect(state).toEqual({ acked: true, retried: false });
+      expect(state).toEqual({ acked: false, retried: true });
       const round = await roundOf(job.portfolioId);
       expect(round?.accounts[job.accountId]?.status).toBe("failed");
       expect(round?.accounts[job.accountId]?.error).toContain("D1 hiccup");
       expect(round?.finishedAt).not.toBeNull();
     });
+
+    // 刷价这类活没有收尾可做,但最终失败一样要在死信里看得见,不能 ack 掉只剩一行日志。
+    it("没有收尾的活最后一次失败 → 同样送进死信", async () => {
+      const { message, state } = fakeMessage({ kind: "prices", userId: USER }, JOB_MAX_RETRIES + 1);
+      await Effect.runPromise(consumeMessage(message, boom));
+      expect(state).toEqual({ acked: false, retried: true });
+    });
+
+    // 死信里的那条要是被人重放回主队列:收尾已把账户记成 failed,「还 pending 吗」挡下它,不再出网。
+    it("送进死信的 sync-account 再被投一次 → 空跑,不出网、不改写", async () => {
+      await cex("a");
+      const [job] = await fanOut();
+      if (!job) throw new Error("no job enqueued");
+      await Effect.runPromise(consumeMessage(fakeMessage(job, JOB_MAX_RETRIES + 1).message, boom));
+      const outbound = blockOutbound();
+      expect(await consume(job)).toEqual({ acked: true, retried: false });
+      expect(outbound.calls).toEqual([]);
+      expect((await roundOf(job.portfolioId))?.accounts[job.accountId]?.error).toContain(
+        "D1 hiccup",
+      );
+    });
+  });
+
+  // —— 两条投递同时在跑(at-least-once 重投、enlist 已 pending 的账户)——
+  //
+  // 上游那一发挂起,直到两条都进了同步(= 都越过了「还 pending 吗」),再一起放行。
+  const gatedBlockbook = (inFlightTarget: number) => {
+    let inFlight = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    // 兜底:另一条没进来(被「还 pending 吗」挡下)时别把用例挂死 —— 放行后由断言报出来。
+    const timer = setTimeout(() => release(), 5_000);
+    const reached = { max: 0 };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.includes("/api/v2/address/")) throw new Error(`没有为这个 URL 准备答案:${url}`);
+      inFlight++;
+      reached.max = Math.max(reached.max, inFlight);
+      if (inFlight >= inFlightTarget) release();
+      await gate;
+      clearTimeout(timer);
+      return json({ address: BTC_ADDRESS, balance: "150000000", unconfirmedBalance: "0" });
+    });
+    return { reached, release };
+  };
+
+  const bitcoin = () =>
+    db(USER).accounts.create({
+      connectorId: "bitcoin",
+      label: "cold",
+      creds: JSON.stringify({ addressOrXpub: BTC_ADDRESS }),
+    });
+
+  // #571 review:后到的那条 settle 以前照样匹配 —— 把收官写下的 7 天保留期改回 120 秒,
+  // 状态也听后到的。现在只有 pending → 终态那一步,且收官的轮一个字都不改。
+  it("同一个账户两条投递并发 → 两条都跑,但只落一次账;收官的保留期不被改短", async () => {
+    await bitcoin();
+    const [job] = await fanOut();
+    if (!job) throw new Error("no job enqueued");
+    const gate = gatedBlockbook(2);
+
+    const [a, b] = await Promise.all([consume(job), consume(job)]);
+
+    expect(gate.reached.max).toBe(2); // 两条都越过了「还 pending 吗」
+    expect(a).toEqual({ acked: true, retried: false });
+    expect(b).toEqual({ acked: true, retried: false });
+    const round = await roundOf(job.portfolioId);
+    expect(round?.accounts[job.accountId]?.status).toBe("synced");
+    expect(round?.finishedAt).not.toBeNull();
+    expect(round?.expiresAt).toBeGreaterThan(Date.now() + ROUND_HEARTBEAT_MS);
+  });
+
+  // #571 review:重投之间没有落账,心跳只靠 consumer 开跑前那一下续。上游挂起时读一眼:已续到
+  // now + ROUND_HEARTBEAT_MS,而不是还停在开轮那一刻。
+  it("每次投递开跑前续心跳 —— 重投链上的轮不会先被念成「中断」", async () => {
+    await bitcoin();
+    await cex("另一个"); // 让这一条落账后轮还不收官
+    const jobs = await fanOut();
+    const btcJob = (
+      await Promise.all(
+        jobs.map(async (j) => ({ j, a: await db(USER).accounts.getById(j.accountId) })),
+      )
+    ).find((x) => x.a?.connectorId === "bitcoin")?.j;
+    if (!btcJob) throw new Error("no bitcoin job");
+    // 模拟「上一次投递以 defect 收场、隔了一个重投间隔」:心跳只剩 1 秒。
+    await db(USER).syncRounds.touch({
+      portfolioId: btcJob.portfolioId,
+      roundId: btcJob.roundId,
+      ttlMs: 1_000,
+    });
+    const gate = gatedBlockbook(1);
+    const running = consume(btcJob);
+    // 等上游那一发真挂起(= 已越过开跑前那一步)再读。
+    while (gate.reached.max < 1) await new Promise((r) => setTimeout(r, 5));
+    const seen = (await roundOf(btcJob.portfolioId))?.expiresAt;
+    gate.release();
+    await running;
+
+    expect(seen).toBeGreaterThan(Date.now() + ROUND_HEARTBEAT_MS - 10_000);
   });
 });

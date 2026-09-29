@@ -50,7 +50,7 @@ export const Route = createFileRoute("/api/sync")({
 
         const { portfolioId, auto } = await parseBody(request);
         // 自动补的那一轮按新鲜度跳过刚同步过的(FOL-18 子票 4);手动点同步强制全量。
-        const out = await runForUser(userId, startSyncRound(userId, { portfolioId, auto }));
+        const out = await runForUser(userId, startSyncRound({ portfolioId, auto }));
         // 没抢到、现场也读不到轮:那一行在两句之间被删了(级联删用户)。**别递一个幽灵轮回去**
         // 让前端对着一个不存在的键轮询 —— 如实报冲突,面板走「发起失败」那一句。
         if (out.round == null) {

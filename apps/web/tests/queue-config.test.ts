@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { JOB_MAX_RETRIES } from "@/lib/server/jobs/constants";
+import { JOB_MAX_RETRIES, JOB_RETRY_DELAY_SECONDS } from "@/lib/server/jobs/constants";
 
 // 队列的配置约束(FOL-86)。它们是**配置**,没有别的地方会验:
 //   · 每个 env 的 consumer 都得是「一次调用一条」—— 批大于 1,一次调用的 10ms CPU / 50 subrequest
@@ -33,6 +33,7 @@ interface Queues {
     queue: string;
     max_batch_size?: number;
     max_retries?: number;
+    retry_delay?: number;
     dead_letter_queue?: string;
   }[];
 }
@@ -52,12 +53,23 @@ describe("队列配置", () => {
     expect(queues?.consumers.map((c) => c.queue)).toEqual([producer?.queue]);
   });
 
-  it.each(all())("%s:一次调用一条,重试次数与 JOB_MAX_RETRIES 一致,有死信队列", (_n, queues) => {
+  it.each(all())("%s:一次调用一条,重试次数 / 间隔与常量一致,有死信队列", (_n, queues) => {
     for (const c of queues?.consumers ?? []) {
       expect(c.max_batch_size).toBe(1);
       expect(c.max_retries).toBe(JOB_MAX_RETRIES);
+      // 轮的心跳按它倒推(`ROUND_HEARTBEAT_MS`):配置改长了而常量没跟,重投没用完轮就被念成「中断」。
+      expect(c.retry_delay).toBe(JOB_RETRY_DELAY_SECONDS);
       expect(c.dead_letter_queue).toBeTruthy();
       expect(c.dead_letter_queue).not.toBe(c.queue);
+    }
+  });
+
+  // 最后一次失败的消息被送进死信(FOL-86 验收)。死信队列要是有 consumer —— 尤其是同一个 `queue()` ——
+  // 它就会被原样再跑一遍:死信成了第五次重投,而不是「留给人看」。
+  it.each(all())("%s:死信队列没有 consumer", (_n, queues) => {
+    const consumed = new Set(queues?.consumers.map((c) => c.queue));
+    for (const c of queues?.consumers ?? []) {
+      expect(consumed.has(c.dead_letter_queue ?? "")).toBe(false);
     }
   });
 

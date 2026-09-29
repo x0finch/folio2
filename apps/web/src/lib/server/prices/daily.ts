@@ -9,7 +9,7 @@ import {
 import type { DailyPricesJob } from "@/lib/server/jobs/message";
 import { type Enqueued, enqueue } from "@/lib/server/jobs/queue";
 import { manualAccountTokenIds, manualDailyPriceTargets } from "@/lib/server/manual/store";
-import { forUser, type UserServices } from "@/lib/server/runtime";
+import { enqueueForUser, forUser, type UserServices } from "@/lib/server/runtime";
 
 // **手记历史曲线的日价回源处**(FOL-90)。
 //
@@ -82,16 +82,12 @@ export const runDailyPricesJob = (job: DailyPricesJob): Effect.Effect<void, Erro
  * 手记写完之后,给这个账户的币投一条定向的 `daily-prices`。**尽力而为**:投递失败只记一行,
  * 不让已经落库的写失败(下一个整点的 cron 照样会补)。
  *
- * userId 是显式参数(同 `sync/run` 的 `handleSyncAccount`):投的消息要带它,而 `runEffect`
- * 刻意不把 userId 交给 handler。
+ * 消息要带的 userId 由装配点填(`enqueueForUser`,#504:handler 不收 userId)。
  */
-export const refillDailyPrices = (
-  userId: string,
-  accountId: string,
-): Effect.Effect<void, never, UserServices> =>
+export const refillDailyPrices = (accountId: string): Effect.Effect<void, never, UserServices> =>
   Effect.gen(function* () {
     const ids = yield* manualAccountTokenIds(accountId);
-    yield* enqueue(jobsFor(userId, ids));
+    yield* enqueueForUser((userId) => jobsFor(userId, ids));
   }).pipe(
     Effect.catchAllCause((cause) =>
       Effect.sync(() =>

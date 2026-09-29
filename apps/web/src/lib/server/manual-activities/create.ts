@@ -38,12 +38,11 @@ export const handleCreateManualActivities = Effect.fn("createManualActivities")(
 });
 
 // server fn 的那一层:写成功之后给这个账户的币投一条定向的 `daily-prices`(FOL-90),新币的历史
-// 曲线不必等下一个整点。userId 显式接(投的消息要带它,理由见 `prices/daily` 的 `refillDailyPrices`)。
-export const handleCreateManualActivitiesFor = Effect.fn("createManualActivities")(function* (
-  userId: string,
+// 曲线不必等下一个整点。消息里的 userId 由装配点填(`enqueueForUser`)。
+export const handleCreateManualActivitiesAndRefill = Effect.fn("createManualActivities")(function* (
   data: Parameters<typeof handleCreateManualActivities>[0],
 ) {
   const result = yield* handleCreateManualActivities(data);
-  if (result.ok) yield* refillDailyPrices(userId, data.accountId);
+  if (result.ok) yield* refillDailyPrices(data.accountId);
   return result;
 });

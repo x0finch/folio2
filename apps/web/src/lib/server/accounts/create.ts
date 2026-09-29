@@ -78,12 +78,11 @@ export const handleCreateAccount = Effect.fn("createAccount")(function* (
 });
 
 // server fn 的那一层:建的是手记账户 → 投一条定向的 `daily-prices`(FOL-90),首币的历史曲线
-// 不必等下一个整点。userId 显式接(理由同 `prices/daily` 的 `refillDailyPrices`)。
-export const handleCreateAccountFor = Effect.fn("createAccount")(function* (
-  userId: string,
+// 不必等下一个整点。消息里的 userId 由装配点填(`enqueueForUser`)。
+export const handleCreateAccountAndRefill = Effect.fn("createAccount")(function* (
   data: z.infer<typeof CreateAccountInput>,
 ) {
   const account = yield* handleCreateAccount(data);
-  if (isManual(account.connectorId)) yield* refillDailyPrices(userId, account.id);
+  if (isManual(account.connectorId)) yield* refillDailyPrices(account.id);
   return account;
 });

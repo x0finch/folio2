@@ -63,7 +63,22 @@ describe("给 user 的材料只在装配点", () => {
     expect(typeof db.provideCurrentUser).toBe("function");
   });
 
-  it("app 源码里提到 `CurrentUser`(含 `provideCurrentUser`、Tag 的键)或 `provideDbClient` 的只有 runtime.ts", () => {
+  // 投队列消息要带 userId(#571 review):handler 经 `enqueueForUser` 投,userId 由装配点填。
+  // 给这个服务的材料同样收在 runtime.ts —— Tag 当值拿不到,就没法替别人投一条消息。
+  // (这个文件跑在 node 池里,import 不了 runtime.ts 的值,所以查的是模块的**类型**与源码。)
+  it("`UserJobs` 出 runtime.ts 只是类型 —— 包外只有 `enqueueForUser`,没有能 provide 的 Tag", () => {
+    type Runtime = typeof import("@/lib/server/runtime");
+    // @ts-expect-error `UserJobs` 是 `export type`:模块上没有这个值
+    type Tag = Runtime["UserJobs"];
+    const enqueueForUser: keyof Runtime = "enqueueForUser";
+    expect(enqueueForUser).toBe("enqueueForUser");
+    expect<Tag | undefined>(undefined).toBeUndefined();
+    const src = readFileSync(join(__dirname, "../src/lib/server/runtime.ts"), "utf8");
+    expect(src).toMatch(/^class UserJobs extends Context\.Tag\("web\/UserJobs"\)/m);
+    expect(src).toMatch(/^export type \{ UserJobs \};$/m);
+  });
+
+  it("app 源码里提到 `CurrentUser`(含 `provideCurrentUser`、Tag 的键)、`provideDbClient` 或 `UserJobs` 的 Tag 键的只有 runtime.ts", () => {
     const src = join(__dirname, "../src");
     const walk = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -74,7 +89,7 @@ describe("给 user 的材料只在装配点", () => {
             : [],
       );
     const offenders = walk(src)
-      .filter((f) => /CurrentUser|provideDbClient/.test(readFileSync(f, "utf8")))
+      .filter((f) => /CurrentUser|provideDbClient|web\/UserJobs/.test(readFileSync(f, "utf8")))
       .map((f) => relative(src, f));
     // 查的是子串,所以 `provideCurrentUser`、`"db/CurrentUser"`(自造一个同键的 Tag 顶上去)
     // 都算在内;`provideDbClient` 同理 —— 两个 provide 都只许出现在发动点。**名单只许短不许长**:要给 user 的新地方,该去 runtime.ts 里拿现成的发动点。

@@ -131,7 +131,7 @@ describe("sync/round", () => {
     let queue: ReturnType<typeof captureQueue>;
 
     const start = async (auto = false, portfolioId?: string) => {
-      const out = await call(USER, queue.provide(startSyncRound(USER, { portfolioId, auto })));
+      const out = await call(USER, queue.provide(startSyncRound({ portfolioId, auto })));
       if (out.round == null) throw new Error("start returned no round");
       return { opened: out.opened, round: out.round };
     };
@@ -306,7 +306,7 @@ describe("sync/round", () => {
       const exit = await call(
         USER,
         Effect.exit(
-          startSyncRound(USER, { auto: false }).pipe(
+          startSyncRound({ auto: false }).pipe(
             Effect.provideService(JobQueue, { send: () => Effect.die(new Error("queue down")) }),
           ),
         ),
