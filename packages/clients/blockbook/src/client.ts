@@ -12,8 +12,9 @@ import {
   DEFAULT_XPUB_TOKENS,
   UPSTREAM,
   USER_AGENT,
+  XPUB_SUMMARY_DETAILS,
 } from "./constants";
-import { AddressResponse, XpubResponse } from "./types";
+import { AddressResponse, XpubResponse, XpubSummary } from "./types";
 
 export interface BlockbookConfig {
   // 覆盖端点列表(测试 / 自托管节点);缺省用内置的 btc2–btc5。
@@ -21,8 +22,9 @@ export interface BlockbookConfig {
   readonly userAgent?: string;
 }
 
+// `basic` 不在这里:那一档回的形状不同(没有 `unconfirmedBalance`),走 `xpubSummary`。
 export interface XpubQuery {
-  readonly details?: "basic" | "tokens" | "tokenBalances";
+  readonly details?: "tokens" | "tokenBalances";
   readonly tokens?: "nonzero" | "used" | "derived";
 }
 
@@ -36,6 +38,8 @@ export interface BlockbookClientApi {
     token: string,
     query?: XpubQuery,
   ) => Effect.Effect<XpubResponse, UpstreamError, Outbound>;
+  // 只要账户汇总(`details=basic`):探活用,不拉各地址明细。
+  readonly xpubSummary: (token: string) => Effect.Effect<XpubSummary, UpstreamError, Outbound>;
   // 单地址余额。
   readonly address: (address: string) => Effect.Effect<AddressResponse, UpstreamError, Outbound>;
 }
@@ -144,6 +148,9 @@ export function make(config: BlockbookConfig = {}): BlockbookClientApi {
         details: query?.details ?? DEFAULT_XPUB_DETAILS,
         tokens: query?.tokens ?? DEFAULT_XPUB_TOKENS,
       }),
+
+    xpubSummary: (token) =>
+      request(`/xpub/${encodePath(token)}`, XpubSummary, { details: XPUB_SUMMARY_DETAILS }),
 
     address: (address) => request(`/address/${encodePath(address)}`, AddressResponse),
   };
