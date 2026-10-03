@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 后台写路径的 CPU:一次 `scheduled()`(以及它投出去的队列消息,如果有)吃多少服务端 CPU。
+// 后台写路径的 CPU:一次 `scheduled()`(以及它投给运行器的活,如果有)吃多少服务端 CPU。
 //
 //   pnpm --filter @folio/web perf:cpu:jobs                         # 构建、灌数据、两个 cron 各量一轮
 //   pnpm --filter @folio/web perf:cpu:jobs --no-build --only cron-sweep --reps 3
@@ -14,10 +14,12 @@
 // 多半落在一个没热过这条路径的 isolate 上;连着在同一个 isolate 里触发,第二次起 JIT 与模块级缓存
 // (Rabby 的链表、各家的闸)都是热的,量小了。重起之间还把代币价标成过期,理由见 expirePrices。
 //
-// 队列(FOL-86 起两个 cron 都只投活,真活在 consumer 里):一次触发之后接着等**它投的每一条消息**都
-// 跑完(cron 那行日志报了投几条,consumer 每条收尾打一行带 kind 的日志),再等一段安静(接力投的
-// 后续消息)。每一次消费从 wrangler 的 `QUEUE <name> a/b (Nms)` 日志行认出来,按时间窗把采样拆给它,
-// 按 kind 汇总成表里的一行一件活。构建产物里没有 `queues.consumers` → 这一截整个跳过。
+// 运行器(FOL-100 起两个 cron 都只投活,真活在 `JobRunner` 这个 DO 的 alarm 里、一次 alarm 一件):
+// 一次触发之后接着等**它投的每一件活**都跑完(cron 那行日志报了投几件,consumer 每件收尾打一行带 kind
+// 的日志),再等一段安静(接力投的后续活)。**本地 alarm 没有逐次调用的日志行**(队列时代有 miniflare 的
+// `QUEUE <name> a/b (Nms)`;alarm 由 workerd 自己调度,wrangler dev 什么都不打),所以按 app 自己的
+// 收尾行切:一件活那一格 = 上一件收尾(第一件从 cron 投完那行起)到它自己收尾,见 alarmSlots。
+// DO 与 worker 同一个 isolate,采样器看得见它。构建产物里没有 JOB_RUNNER 这个 DO 绑定 → 这一截整个跳过。
 //
 // 为什么要它、怎么读输出:见 scripts/perf/README.md。
 import { execFile } from "node:child_process";
@@ -56,6 +58,7 @@ import {
   build,
   builtConfig,
   checkDevVars,
+  clearDurableObjectState,
   migrate,
   originOf,
   startWorker,
@@ -68,8 +71,8 @@ import {
  * `resultOf`:从这次调用的日志里读出「它干成了什么」—— 量到的若是报错路径,数字作废。
  */
 const SCENARIOS = [
-  // 两条都只投活:`enqueued` 是 cron 投完那行日志的 message,它的 `jobs` 字段 = 投了几条 —— 等队列
-  // 排空时就等这么多条收尾(`settleQueue`)。
+  // 两条都只投活:`enqueued` 是 cron 投完那行日志的 message,它的 `jobs` 字段 = 投了几件 —— 等运行器
+  // 跑空时就等这么多件收尾(`settleRunner`)。
   //
   // 每天那条只投活(prune-notes / catalogue,FOL-88)。**全局映射表不在这里刷了**(FOL-85):它挪到了
   // GitHub Actions 里的 Node 脚本,不再吃 Worker 的预算,所以这里没有 `cron-ref-index` 那一格了。
@@ -88,14 +91,14 @@ const SCENARIOS = [
       return {
         ok: drained.ok,
         text: `users ${done.users}, ${drained.text}`,
-        detail: { ...done, queue: settled?.summary },
+        detail: { ...done, runner: settled?.summary },
       };
     },
   },
   // 整点 sweep(FOL-86):cron 那一次只开轮 + 投消息;每个账户一条 `sync-account`,每个用户再补
-  // `hourlyUserJobs`(prices / daily-prices / fx 立即,platforms / defi-logos 延后 120s —— 所以排空
-  // 不能只靠「安静了几秒」,要等投的条数收完)。**干成没有**看两处:每一轮的收官日志
-  // (`queued round done`,最后一个 consumer 打)里 synced == total,以及每条消息都 ack 了。
+  // `hourlyUserJobs`(prices / daily-prices / fx 立即,platforms / defi-logos 延后 120s —— 所以跑空
+  // 不能只靠「安静了几秒」,要等投的件数收完)。**干成没有**看两处:每一轮的收官日志
+  // (`queued round done`,最后一件 sync-account 打)里 synced == total,以及每件活都 done 了。
   {
     key: "cron-sweep",
     cron: "30 * * * *",
@@ -111,19 +114,19 @@ const SCENARIOS = [
       const synced = rounds.reduce((n, r) => n + r.synced, 0);
       const drained = drainedResult(settled);
       return {
-        // `--cron-only`:没等队列(`settled.summary` 为空),只看 cron 自己投成了没有。
+        // `--cron-only`:没等运行器(`settled.summary` 为空),只看 cron 自己投成了没有。
         ok:
           done.failed === 0 &&
           (!settled?.summary || (rounds.length > 0 && synced === total && drained.ok)),
         text: `synced ${synced}/${total}, ${drained.text}`,
-        detail: { ...done, rounds, queue: settled?.summary },
+        detail: { ...done, rounds, runner: settled?.summary },
       };
     },
   },
 ];
 
 /**
- * 队列扇出之前(FOL-86 / FOL-88 之前)的代码没有「enqueued」那行:cron 自己把活干完,收尾各打一行。
+ * 扇出之前(FOL-86 / FOL-88 之前)的代码没有「enqueued」那行:cron 自己把活干完,收尾各打一行。
  * 留着它们,是为了拿同一个 harness 量改动前的那份代码做前后对比(那时每天那条还在 Worker 里刷映射表)。
  */
 function legacyDailyResult(logs) {
@@ -147,14 +150,14 @@ function legacySweepResult(logs) {
   };
 }
 
-/** 队列那半干成没有:投的每一条都收尾了、没有一条放弃 / 进死信 / 解不开。没有队列 → 不判。 */
+/** 运行器那半干成没有:投的每一件都收尾了、没有一件埋掉 / 解不开。没有运行器 → 不判。 */
 function drainedResult(settled) {
-  if (!settled?.summary) return { ok: true, text: "no queue" };
-  const { expected, done, gaveUp, retried, invalid, timedOut } = settled.summary;
-  const ok = !timedOut && expected !== null && done >= expected && gaveUp === 0 && invalid === 0;
+  if (!settled?.summary) return { ok: true, text: "no runner" };
+  const { expected, done, buried, retried, invalid, timedOut } = settled.summary;
+  const ok = !timedOut && expected !== null && done >= expected && buried === 0 && invalid === 0;
   const extra = [
     retried && `${retried} retried`,
-    gaveUp && `${gaveUp} gave up`,
+    buried && `${buried} buried`,
     timedOut && "timeout",
   ]
     .filter(Boolean)
@@ -166,26 +169,33 @@ const SCENARIO_KEYS = SCENARIOS.map((s) => s.key);
 /** 一次触发最多等多久(cron 自己有闸在排队,首轮要翻目录、写几万行)。 */
 const INVOCATION_TIMEOUT_MS = 10 * 60_000;
 /**
- * 队列排空的判据:cron 投的条数都收尾了之后,再这么久没有新的消费日志(接力投的
- * 后续消息 —— `prices` 超预算拆条、`daily-prices` 补不完再投一条 —— 不带延迟,落在这段安静里)。
+ * 运行器跑空的判据:cron 投的件数都收尾了之后,再这么久没有新的收尾日志(接力投的后续活 ——
+ * `prices` 超预算拆件、`daily-prices` 补不完再投一件 —— 不带延迟,落在这段安静里)。
  */
-const QUEUE_QUIET_MS = 2_000;
+const RUNNER_QUIET_MS = 2_000;
+/** 运行器的 DO 绑定名(wrangler.jsonc `durable_objects`,`jobs/queue.ts` 按它取)。 */
+const RUNNER_BINDING = "JOB_RUNNER";
 /**
- * consumer 每条消息的收尾日志(`jobs/consume.ts`,都带 `kind`)。`terminal`:这条消息不会再投了。
- * 最后一次失败之后的「give-up failed」那行不单列 —— 它前面必有一行 final attempt,已经记过。
+ * consumer 每件活的收尾日志(`jobs/consume.ts`,都带 `kind`)。`terminal`:这件活不会再跑了。
+ * 运行器只在「收尾那一步自己没跑成」时另打一行(`job give-up could not run`),不单列 —— 它前面必有一行埋掉的记录。
+ * 每一行也是**一次 alarm 的终点**(一次 alarm 只跑一件,`jobs/runner.ts`),切格就靠它,见 alarmSlots。
  */
 const JOB_LOGS = {
   "job done": { terminal: true, outcome: "done" },
   "job failed, will retry": { terminal: false, outcome: "retried" },
-  "job failed on final attempt, giving up": { terminal: true, outcome: "gaveUp" },
+  "job failed on final attempt, burying it": { terminal: true, outcome: "buried" },
+  "job never finished its final attempt, burying it": { terminal: true, outcome: "buried" },
   "invalid job dropped": { terminal: true, outcome: "invalid" },
 };
-/** 本地队列默认的攒批上限(秒)—— wrangler 的默认值;配置里写了就用配置的。 */
-const DEFAULT_MAX_BATCH_TIMEOUT_S = 5;
-/** 排空轮询的间隔。 */
+/** 跑空轮询的间隔。 */
 const SETTLE_POLL_MS = 50;
-/** wrangler 打给每一批队列消费的那一行(miniflare 的 formatQueueResponse),去掉颜色后匹配。 */
-const QUEUE_LINE = /QUEUE (\S+) (\d+)\/(\d+)(?: \((\d+)ms\))?/;
+/**
+ * 日志时间戳(LogTape JSON 行的 `@timestamp`,墙钟毫秒)→ 本机单调时钟(微秒,profile 用的那个)。
+ * 两边同一台机器,差一个常数;起跑时量一次。精度是毫秒,且 workerd 的 `Date.now()` 只在 I/O 边界前进 ——
+ * 收尾行紧跟在一件活最后一次 I/O 之后打,所以记下的时刻 ≈ 那件活真的收尾的时刻(之后那点同步 CPU 落进下一格)。
+ */
+const EPOCH_OFFSET_US = Date.now() * 1000 - Number(process.hrtime.bigint() / 1000n);
+const monoUsOf = (epochMs) => epochMs * 1000 - EPOCH_OFFSET_US;
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
 const USAGE = `usage: perf:cpu:jobs [options]
@@ -203,8 +213,8 @@ const USAGE = `usage: perf:cpu:jobs [options]
   --port N               worker port (default ${DEFAULT_PORT})
   --inspector-port N     inspector port (default ${DEFAULT_INSPECTOR_PORT})
   --upstream-port N      fake upstream port (default ${DEFAULT_FAKE_UPSTREAM_PORT})
-  --cron-only            measure the scheduled() invocation only: stop once the cron has enqueued,
-                         don't wait for (or measure) the queue consumers
+  --cron-only            measure the scheduled() invocation only: JOB_RUNNER is bound to a no-op
+                         stub DO in a second worker, so no alarm runs inside the sampled window
   --warm                 keep one worker per scenario (default: restart before every invocation);
                          shows how much of an invocation is cold-isolate cost
   --out DIR              output dir (default ${join(PERF_STATE_DIR, "runs", "jobs-<timestamp>")})`;
@@ -277,7 +287,7 @@ function readFileFrom(file, from) {
   return buf.toString("utf8");
 }
 
-/** 日志的增量读者:每次调用返回上次之后新写进来的部分(排空时认队列消费行用)。 */
+/** 日志的增量读者:每次调用返回上次之后新写进来的部分(跑空时认收尾行用)。 */
 function logCursor(file) {
   let offset = statSync(file).size;
   return () => {
@@ -287,15 +297,22 @@ function logCursor(file) {
   };
 }
 
-/** 一行日志若是 LogTape 的 JSON 行(生产格式,JSON Lines)→ `{ message, properties }`;否则 undefined。 */
+/**
+ * 一行日志若是 LogTape 的 JSON 行(生产格式,JSON Lines)→ `{ message, properties, atMs }`;否则 undefined。
+ * `atMs`:`@timestamp` 的墙钟毫秒(没有 / 解不开 → null)。
+ */
 function logRecord(line) {
   const at = line.indexOf("{");
   if (at < 0 || !line.includes('"message"')) return undefined;
   try {
     const rec = JSON.parse(line.slice(at));
-    return typeof rec.message === "string"
-      ? { message: rec.message, properties: rec.properties ?? {} }
-      : undefined;
+    if (typeof rec.message !== "string") return undefined;
+    const atMs = Date.parse(rec["@timestamp"]);
+    return {
+      message: rec.message,
+      properties: rec.properties ?? {},
+      atMs: Number.isFinite(atMs) ? atMs : null,
+    };
   } catch {
     return undefined; // 半行 / 不是 JSON —— 跳过
   }
@@ -317,45 +334,58 @@ function logEvent(text, message) {
   return logEvents(text, message).at(-1);
 }
 
-/** 构建产物里的队列配置(消费者 + 攒批上限)。没有 → null,整段队列逻辑跳过。 */
-function queueConfig() {
-  const consumers = builtConfig().queues?.consumers ?? [];
-  if (consumers.length === 0) return null;
-  const timeoutS = Math.max(
-    ...consumers.map((c) => c.max_batch_timeout ?? DEFAULT_MAX_BATCH_TIMEOUT_S),
-  );
-  return {
-    queues: consumers.map((c) => c.queue),
-    quietMs: Math.max(QUEUE_QUIET_MS, timeoutS * 1000 + 1000),
-  };
+/** 构建产物里的运行器(`durable_objects` 里绑成 JOB_RUNNER 的那个类)。没有 → null,整段运行器逻辑跳过。 */
+function runnerConfig() {
+  const binding = builtConfig().durable_objects?.bindings?.find((b) => b.name === RUNNER_BINDING);
+  return binding ? { binding: binding.name, className: binding.class_name } : null;
 }
 
 /**
- * 触发一次之后等后续调用跑完。没队列 → 立刻返回(scheduled 那一发答了就是跑完了)。
- *
- * 有队列 → 边读日志边记三样,**按日志里出现的顺序**:
- *   · cron 投完那一行(`scenario.enqueued`)的 `jobs` —— 要等收尾的条数;
- *   · consumer 每条消息的收尾行(`JOB_LOGS`)—— 记下它的 kind,排进一个先进先出的队;
- *   · wrangler 每次消费打的 `QUEUE <name> a/b (Nms)` —— 这是一次 consumer 调用的边界:从队头取走
- *     它那几条的 kind(`max_batch_size: 1`,通常就是一条),起点 = 看到那行的时刻 − 它自报的耗时
- *     (那行在一批跑完之后才打)。
- * 停下来的条件:收尾的条数 ≥ 投的条数,**并且**之后 quietMs 内没有新的消费行 / 收尾行。
- * 只靠「安静了几秒」是不够的 —— `platforms` / `defi-logos` 延后 120s 才投递,中间整段是安静的。
- *
- * **不拿 workerd 的 CPU 判「安静」**(以前是):开着采样器的 workerd 空转本身每 50ms 就有 5–10ms CPU、
- * 还上下抖,固定门槛判不出安静,每次触发都白等到 10 分钟超时。条数收齐之后只剩接力投的后续消息,
- * 它们在 quietMs 之内开跑、跑完各打一行,靠日志就够了。
- *
- * consumer 并发(`max_concurrency`)时,两次调用的日志会交错,kind 与时间窗都可能配错到相邻那一次:
- * 逐 kind 的数是**近似**,整段窗口的总数是准的。
+ * 把收尾行切成逐 alarm 的格。**本地没有 alarm 自己的起止**(workerd 调度 alarm 时 wrangler dev 一行都不打,
+ * 实测;队列时代靠的 `QUEUE …` 行没有对应物),能用的只有 app 自己的收尾行 —— 一次 alarm 只跑一件
+ * (`jobs/runner.ts`),所以一行收尾 = 一次 alarm 的终点:
+ *   第 k 格 = [第 k−1 件收尾, 第 k 件收尾),第一格从 cron 投完那行(`enqueuedUs`)起。
+ * 于是一格里除了这件活,还有上一次 alarm 收尾之后那点尾巴(ack 删行、再定 alarm)与这一次 alarm 进门的
+ * 开销 —— 都是「一次 alarm」该付的,只是记错了一格,量级在亚毫秒。中间的空等(延后 120s 的活、重试退避)
+ * 不进 CPU:isolate 闲着时采样器是停的,恢复后那个样本按 maxSampleUs 封顶,与 cron 一格同一个口径。
+ * cron 本身在投完之后还有一小截(`pokeRunner`),落在第一格;sweep 多用户时逐用户投活,前面用户的活会与
+ * 后面用户的投活交错 —— 那样的话逐 kind 是**近似**,整段窗口的总数是准的。
  */
-async function settleQueue(queue, readLog, scenario) {
-  if (!queue) return { invocations: [], queueLines: 0, summary: null };
-  const invocations = [];
-  const kinds = []; // 收尾了、还没配上 QUEUE 行的消息的 kind(先进先出)
-  // 反过来:QUEUE 行先到、收尾行还没读到的那几次调用(两路输出进同一个日志,先后不保证)。
-  const unlabeled = [];
-  const tally = { expected: null, done: 0, retried: 0, gaveUp: 0, invalid: 0, timedOut: false };
+function alarmSlots(completions, enqueuedUs, fallbackUs) {
+  let prev = enqueuedUs ?? fallbackUs;
+  return completions
+    .toSorted((a, b) => a.atUs - b.atUs)
+    .map((c) => {
+      const startUs = Math.min(prev, c.atUs);
+      prev = Math.max(prev, c.atUs);
+      return {
+        startUs,
+        kind: c.kind,
+        outcome: c.outcome,
+        attempts: c.attempts,
+        // 两次收尾之间的墙钟不是这次 alarm 的墙钟(可能含 120s 的延后),不报。
+        wallMs: null,
+        alarm: true,
+      };
+    });
+}
+
+/**
+ * 触发一次之后等运行器把这次投的活跑完。没运行器(或 `--cron-only`)→ 立刻返回(scheduled 那一发答了就是跑完了)。
+ *
+ * 有运行器 → 边读日志边记两样,**按日志里出现的顺序**:
+ *   · cron 投完那一行(`scenario.enqueued`)的 `jobs` —— 要等收尾的件数,和它的时间戳(第一格的起点);
+ *   · consumer 每件活的收尾行(`JOB_LOGS`)—— kind、下场、时间戳(这一格的终点)。
+ * 停下来的条件:收尾的件数 ≥ 投的件数,**并且**之后 RUNNER_QUIET_MS 内没有新的收尾行。
+ * 只靠「安静了几秒」是不够的 —— `platforms` / `defi-logos` 延后 120s 才到点,中间整段是安静的。
+ * 不拿 workerd 的 CPU 判「安静」:开着采样器的 workerd 空转本身每 50ms 就有 5–10ms CPU、还上下抖。
+ */
+async function settleRunner(runner, readLog, scenario) {
+  if (!runner) return { invocations: [], summary: null };
+  const settleFromUs = nowUs();
+  const completions = [];
+  let enqueuedUs = null;
+  const tally = { expected: null, done: 0, retried: 0, buried: 0, invalid: 0, timedOut: false };
   let terminal = 0;
   let lastActive = nowUs();
   const deadline = Date.now() + INVOCATION_TIMEOUT_MS;
@@ -367,47 +397,31 @@ async function settleQueue(queue, readLog, scenario) {
     await sleep(SETTLE_POLL_MS);
     const seenUs = nowUs();
     for (const raw of readLog().split("\n")) {
-      const line = raw.replace(ANSI, "");
-      const m = QUEUE_LINE.exec(line);
-      if (m && queue.queues.includes(m[1])) {
-        const wallMs = m[4] === undefined ? 0 : Number(m[4]);
-        const messages = Number(m[3]);
-        const batchKinds = kinds.splice(0, Math.max(1, messages));
-        const inv = {
-          startUs: seenUs - wallMs * 1000,
-          queue: m[1],
-          kind: batchKinds.length ? [...new Set(batchKinds)].join("+") : "?",
-          acked: Number(m[2]),
-          messages,
-          wallMs,
-          queueBatch: true,
-        };
-        if (batchKinds.length === 0) unlabeled.push(inv);
-        invocations.push(inv);
-        lastActive = seenUs;
-        continue;
-      }
-      const rec = logRecord(line);
+      const rec = logRecord(raw.replace(ANSI, ""));
       if (!rec) continue;
+      // 时间戳缺了就退回「读到它的时刻」(晚最多一个轮询间隔)。
+      const atUs = rec.atMs === null ? seenUs : monoUsOf(rec.atMs);
       if (rec.message === scenario.enqueued) {
         tally.expected = Number(rec.properties.jobs ?? 0);
+        enqueuedUs = atUs;
         continue;
       }
       const job = JOB_LOGS[rec.message];
       if (!job) continue;
-      const kind = rec.properties.kind ?? "invalid";
-      const waiting = unlabeled.shift();
-      if (waiting) waiting.kind = kind;
-      else kinds.push(kind);
+      completions.push({
+        atUs,
+        kind: rec.properties.kind ?? "invalid",
+        outcome: job.outcome,
+        attempts: rec.properties.attempts ?? null,
+      });
       tally[job.outcome]++;
       if (job.terminal) terminal++;
       lastActive = seenUs;
     }
     const allSettled = tally.expected !== null && terminal >= tally.expected;
-    if (allSettled && seenUs - lastActive > queue.quietMs * 1000) break;
+    if (allSettled && seenUs - lastActive > RUNNER_QUIET_MS * 1000) break;
   }
-  invocations.sort((a, b) => a.startUs - b.startUs);
-  return { invocations, queueLines: invocations.length, summary: tally };
+  return { invocations: alarmSlots(completions, enqueuedUs, settleFromUs), summary: tally };
 }
 
 const execFileAsync = promisify(execFile);
@@ -461,14 +475,22 @@ function fetchesPerSlot(hits, starts) {
  * 量一次调用:(worker 停着)beforeEach → 起 worker → 开采样 → 触发 → 等排空 → 停采样 → 停 worker。
  */
 async function measureOnce(ctx, scenario, tag) {
-  const { opts, workerOpts, fake, queue, userId } = ctx;
+  const { opts, workerOpts, fake, runner, userId } = ctx;
   scenario.beforeEach({ userId });
-  if (opts.cronOnly) clearSyncRounds(userId);
+  // 同步轮与运行器的表是一对:清了表里剩下的活(见下面 start),没收官的轮就再没人收 —— 下一次 cron 在
+  // 心跳期内看到「活轮还在」就不投 `sync-account`(踩过:`--cron-only` 之后接着跑默认口径,sweep 投了 0 个账户)。
+  // `--cron-only` 本来就不跑活,每次都清。
+  if (opts.cronOnly || (runner && !ctx.worker)) clearSyncRounds(userId);
   // 每次都重起 worker,所以「这次启动之后写进日志的」就是这次调用的全部日志。
   const logFrom = statSync(workerOpts.logFile).size;
   // `--warm`:一个场景一个 worker,后面几次落在同一个(热的)isolate 上 —— 与默认口径对照,
   // 就知道一次调用里有多少是冷 isolate 的首跑开销。
-  const start = () => startWorker({ ...workerOpts, noQueueConsumers: opts.cronOnly });
+  // 运行器的 SQLite 跟着 perf 库落盘,上一次没跑完的活(超时、Ctrl-C、重试退避)会在这一次里冒出来 ——
+  // 起之前清掉(worker 停着才能清;`--warm` 只在第一次起之前清)。
+  const start = () => {
+    if (runner) clearDurableObjectState(runner.className);
+    return startWorker({ ...workerOpts, stubRunner: opts.cronOnly });
+  };
   ctx.worker ??= opts.warm ? await start() : undefined;
   const w = ctx.worker ?? (await start());
   try {
@@ -478,11 +500,11 @@ async function measureOnce(ctx, scenario, tag) {
       profileWindow(cdp, {
         cpuNs: w.cpuNs,
         trigger: () => fireScheduled(originOf(opts.port), scenario.cron),
-        settle: () => settleQueue(opts.cronOnly ? null : queue, readLog, scenario),
+        settle: () => settleRunner(opts.cronOnly ? null : runner, readLog, scenario),
       }),
     );
     writeFileSync(join(opts.out, `${scenario.key}-${tag}.cpuprofile`), JSON.stringify(run.profile));
-    // 每次调用的时间窗(第 0 格是 cron 本身,其后每次 consumer 调用一格):`analyze.mjs` 靠它把
+    // 每次调用的时间窗(第 0 格是 cron 本身,其后每次 alarm 一格):`analyze.mjs` 靠它把
     // profile 拆成逐调用、逐函数的 top-N。
     writeFileSync(
       join(opts.out, `${scenario.key}-${tag}.slots.json`),
@@ -519,12 +541,10 @@ async function measureOnce(ctx, scenario, tag) {
       fetches: fetches.counts[0],
       fetchesByRoute: fetches.byRoute,
       upstreamErrors: fetches.errors,
-      queueBatches: run.requests.slice(1).map((r, i) => ({
-        queue: r.queue,
+      alarms: run.requests.slice(1).map((r, i) => ({
         kind: r.kind,
-        messages: r.messages,
-        acked: r.acked,
-        wallMs: r.wallMs,
+        outcome: r.outcome,
+        attempts: r.attempts,
         cpuMs: perSlotMs[i + 1] ?? null,
         fetches: fetches.counts[i + 1],
       })),
@@ -576,12 +596,12 @@ function rowOf(key, label, runs, { pick = (r) => r.cpuMs } = {}) {
 }
 
 /**
- * 队列那几行:所有次、所有批摊平,**按 kind 一行**(每次 consumer 调用一个样本)。免费计划的 10ms 是
- * 按一次调用算的,所以要看的是「哪件活的一次调用」超了,不是整段的总数。
+ * 运行器那几行:所有次、所有 alarm 摊平,**按 kind 一行**(每次 alarm 一个样本)。预算是按一次调用算的,
+ * 所以要看的是「哪件活的一次 alarm」超了,不是整段的总数。
  */
-function queueRowsOf(key, runs) {
+function alarmRowsOf(key, runs) {
   const byKind = new Map();
-  for (const b of runs.flatMap((r) => r.queueBatches)) {
+  for (const b of runs.flatMap((r) => r.alarms)) {
     const list = byKind.get(b.kind) ?? [];
     list.push(b);
     byKind.set(b.kind, list);
@@ -590,22 +610,21 @@ function queueRowsOf(key, runs) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([kind, batches]) => {
       const cpu = batches.map((b) => b.cpuMs).filter((x) => x != null);
-      const ok = batches.every((b) => b.acked === b.messages);
+      const ok = batches.every((b) => b.outcome === "done" || b.outcome === "invalid");
+      const buried = batches.some((b) => b.outcome === "buried");
       return {
-        key: `${key}:queue:${kind}`,
-        label: `queue consumer, ${kind} (per invocation, split by log timing — approximate)`,
+        key: `${key}:alarm:${kind}`,
+        label: `runner alarm, ${kind} (per invocation, split by job log timing — approximate)`,
         n: batches.length,
-        status: ok ? "acked" : "retried",
+        status: ok ? "done" : buried ? "buried" : "retried",
         ok,
         result: `${(batches.length / runs.length).toFixed(1)} per trigger`,
         meanCpuMs: mean(cpu),
         p50CpuMs: quantile(cpu, 0.5),
         maxCpuMs: cpu.length ? Math.max(...cpu) : null,
         procCpuMs: null,
-        wallP50Ms: quantile(
-          batches.map((b) => b.wallMs),
-          0.5,
-        ),
+        // 一次 alarm 的墙钟本地量不到(见 alarmSlots)。
+        wallP50Ms: null,
         fetches: mean(batches.map((b) => b.fetches)),
         coarseShare: 0,
         owners: [],
@@ -628,16 +647,16 @@ async function runScenario(ctx, scenario) {
   }
   const rows = [rowOf(`${scenario.key}:first`, `${scenario.label} — first after seed`, [first])];
   if (runs.length) rows.push(rowOf(scenario.key, scenario.label, runs));
-  if (ctx.queue) {
-    // 队列那几行只看稳态那几次(没有就看第一次):一次触发背后的全部 CPU,与逐 kind 的每次调用。
+  if (ctx.runner && !ctx.opts.cronOnly) {
+    // 运行器那几行只看稳态那几次(没有就看第一次):一次触发背后的全部 CPU,与逐 kind 的每次 alarm。
     // `:first` 那一次的逐 kind 在 summary.json 里(目录冷、代币没建行,与稳态不是一回事)。
     const steady = runs.length ? runs : [first];
     rows.push(
-      rowOf(`${scenario.key}:window`, "cron + every queue invocation it caused", steady, {
+      rowOf(`${scenario.key}:window`, "cron + every runner alarm it caused", steady, {
         pick: (r) => r.totalCpuMs,
       }),
     );
-    rows.push(...queueRowsOf(scenario.key, steady));
+    rows.push(...alarmRowsOf(scenario.key, steady));
   }
   if (ctx.worker) {
     await ctx.worker.stop();
@@ -675,13 +694,15 @@ async function main() {
       vars: fake.vars,
     };
     const { userId, counts } = await prepareData({ ...opts, workerOpts, log });
-    const queue = queueConfig();
+    const runner = runnerConfig();
     log(
-      queue
-        ? `queue consumers: ${queue.queues.join(", ")}`
-        : "no queue consumer configured — measuring scheduled() only",
+      !runner
+        ? `no ${RUNNER_BINDING} durable object configured — measuring scheduled() only`
+        : opts.cronOnly
+          ? `job runner: ${runner.className} → no-op stub (--cron-only), measuring scheduled() only`
+          : `job runner: ${runner.className} (durable object alarms, one job per alarm)`,
     );
-    const ctx = { opts, workerOpts, fake, queue, userId };
+    const ctx = { opts, workerOpts, fake, runner, userId };
 
     // sweep 要全局映射表(链上的币靠它认)。表是空的(刚灌过数据)就先刷一次 —— 用生产那个脚本
     // (`scripts/ref-index/refresh.ts --local`,FOL-85),对着 perf 库、指到假上游。worker 此刻是停着的。
@@ -710,7 +731,7 @@ async function main() {
       budgetMs: opts.budgetMs,
       dataset: counts ?? "reused (--no-seed)",
       upstream: fake.stats(),
-      queue: queue ?? "none",
+      runner: runner ? { ...runner, stubbed: opts.cronOnly } : "none",
       host: { before: loadBefore, after: loadAfter },
       rows,
       scenarios: results,

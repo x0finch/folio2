@@ -19,15 +19,15 @@ import { syncRoundQuery } from "./sync-round";
 /** 等到的结果 —— 与 `syncAccount` 当场就答得出的那几种同一个形状。 */
 export type AccountSyncOutcome = Extract<SyncAccountStart, { queued: false }>["result"];
 
-/** 在重投链最坏耗时之外再多等多久:排队派发与轮询间隔的余量。 */
+/** 在重试链最坏耗时之外再多等多久:排队派发与轮询间隔的余量。 */
 const ACCOUNT_SYNC_TIMEOUT_MARGIN_MS = 60_000;
 
 /**
- * 等多久就不等了(毫秒)。正常是秒级;最坏是整条重投链(`SYNC_RETRY_CHAIN_MS`:4 次投递各跑满预算,
- * 中间 3 个重投间隔,约 440s)—— 消费者每次投递前都续心跳,重投期间轮一直是「在跑」,所以这条上限
+ * 等多久就不等了(毫秒)。正常是秒级;最坏是整条重试链(`SYNC_RETRY_CHAIN_MS`:4 次各跑满预算,
+ * 中间 3 个指数退避间隔,约 560s)—— 消费者每次开跑前都续心跳,重试期间轮一直是「在跑」,所以这条上限
  * **必须比整条链长**,否则前端先放弃、报一句通用的失败,服务端过后才把账户落成 synced / failed
- * (review R2-#3)。从服务端同一组常量推,再加一截余量;超过它只可能是服务端一直不给答案(消息丢了、
- * 队列积压),这时别让前端永远挂着。
+ * (review R2-#3)。从服务端同一组常量推,再加一截余量;超过它只可能是服务端一直不给答案(活被埋了、
+ * 运行器积压),这时别让前端永远挂着。
  */
 export const ACCOUNT_SYNC_TIMEOUT_MS = SYNC_RETRY_CHAIN_MS + ACCOUNT_SYNC_TIMEOUT_MARGIN_MS;
 

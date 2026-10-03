@@ -23,7 +23,7 @@ const EVENTS_LIMIT = 2000;
 const GROUPS_LIMIT = 100;
 /** `runtime.ts` 的 `withServerFnTiming` 每个 server fn 打的那行日志:带 `handler`,和调用日志同一个 requestId。 */
 const SERVER_FN_MESSAGE = "server fn";
-/** `jobs/consume.ts` 每条消息收尾打的那行(`job done` / `job failed…`)的开头:带 `kind`,和队列调用同一个 requestId。 */
+/** `jobs/consume.ts` 每件活收尾打的那行(`job done` / `job failed…`)的开头:带 `kind`,和那次 alarm 同一个 requestId。 */
 const JOB_MESSAGE_PREFIX = "job ";
 /** 免费档每次调用的 CPU 上限。 */
 const BUDGET_MS = 10;
@@ -184,7 +184,11 @@ const byServerFn = (api, sc) =>
     nameOf: handlerOf,
   });
 
-// 队列一次调用只装一条消息(wrangler.jsonc `max_batch_size: 1`),所以一个 requestId 就是一件活。
+// 运行器一次 alarm 只跑一件活(`jobs/runner.ts`,FOL-100),所以一个 requestId 就是一件活。
+// `alarm`:Workers Trace Events 的 EventType 取值(fetch | scheduled | alarm | queue | …,
+// developers.cloudflare.com/logs/logpush/logpush-job/datasets/account/workers_trace_events/)。
+// Workers Logs 的 `$workers.eventType` 用的是同一套取值(上面 "scheduled" 就是这么对上的),但 "alarm"
+// 还没对着线上数据验过 —— 表空着就先查这里。一次 alarm 没领到到点的活(`ran: null`)不打收尾行,算进 unmatched。
 const byJobKind = (api, sc) =>
   byName(api, sc, {
     message: {
@@ -193,7 +197,7 @@ const byJobKind = (api, sc) =>
       type: "string",
       value: JOB_MESSAGE_PREFIX,
     },
-    invocation: { key: "$workers.eventType", operation: "eq", type: "string", value: "queue" },
+    invocation: { key: "$workers.eventType", operation: "eq", type: "string", value: "alarm" },
     nameOf: jobKindOf,
   });
 
@@ -265,7 +269,7 @@ async function main() {
   console.log(`\nby server fn (${sampledNote(serverFns)}; p99 on small n ≈ max)`);
   console.log(table(namedHeader("handler"), serverFns.rows.map(namedRow)));
   console.log(
-    `\nqueue, by job kind (${sampledNote(jobs)}; killed invocations log no kind → unmatched)`,
+    `\nrunner alarms, by job kind (${sampledNote(jobs)}; killed invocations log no kind → unmatched)`,
   );
   console.log(table(namedHeader("kind"), jobs.rows.map(namedRow)));
 }

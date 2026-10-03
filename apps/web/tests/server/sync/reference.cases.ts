@@ -4,7 +4,7 @@ import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { Effect, Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { REFERENCE_JOB_UPSTREAM_CALLS } from "@/lib/server/jobs/constants";
-import { consumeMessage, type QueueMessage } from "@/lib/server/jobs/consume";
+import { consumeMessage, type JobMessage } from "@/lib/server/jobs/consume";
 import type { Job } from "@/lib/server/jobs/message";
 import { type Enqueued, JobQueue } from "@/lib/server/jobs/queue";
 import { fanOutDaily } from "@/lib/server/jobs/schedule";
@@ -28,7 +28,7 @@ describe("jobs/reference", () => {
 
   const consume = async (body: Job) => {
     const state = { acked: false, retried: false };
-    const message: QueueMessage = {
+    const message: JobMessage = {
       id: `m-${Math.random()}`,
       body,
       attempts: 1,
@@ -203,6 +203,7 @@ describe("jobs/reference", () => {
       const result = await Effect.runPromise(
         fanOutDaily(["u1", "u2"]).pipe(
           Effect.provideService(JobQueue, {
+            poke: Effect.void,
             send: (batch) => Effect.sync(() => void sent.push(...batch)),
           }),
         ),

@@ -101,7 +101,7 @@ Cloudflare Workers 免费档每个请求只有 **10ms CPU**。做性能的活,�
 - `--cold` 的第一发把模块求值、better-auth / Effect 的首调初始化都算进去了;Cloudflare 把 worker
   启动(模块解析求值)记在另一份约 400ms 的预算里,所以冷启动这个数和线上计费不是一回事。
 
-## perf:cpu:jobs —— 定时任务(和队列)每次调用吃多少 CPU
+## perf:cpu:jobs —— 定时任务(和运行器的 alarm)每次调用吃多少 CPU
 
 ```sh
 pnpm --filter @folio/web perf:cpu:jobs                     # 构建 → 灌数据 → 两个 cron 各量一轮
@@ -113,7 +113,8 @@ pnpm --filter @folio/web perf:cpu:jobs --help
 上面那个 `perf:cpu` 只量读路径。这个量**后台写路径**:整点 sweep(`30 * * * *`,开轮 + 给每个账户投
 一条 `sync-account`、给每个用户投 `prices` / `daily-prices` / `fx` / `platforms` / `defi-logos`)与每天
 那条(`0 23 * * *`,投 `prune-notes` / `catalogue`)。两个 cron 本体都只投活(FOL-86 / FOL-88),真活在
-队列 consumer 里一条一次调用地跑,所以表里分开量:cron 那一次,与**每件活的每一次 consumer 调用**。改 cron 之前、之后各跑一遍,两张表
+运行器(`JobRunner` 这个 Durable Object,FOL-100)的 alarm 里一件一次调用地跑,所以表里分开量:cron 那一次,
+与**每件活的每一次 alarm**。改 cron 之前、之后各跑一遍,两张表
 贴进 PR。基线存在 `baselines/`(`jobs-before-2026-09-28.txt` 是改成队列扇出之前的那一份,里面的
 `cron-ref-index` 行是刷全局映射表还在 Worker 里跑的时候量的)。
 
@@ -149,17 +150,23 @@ pnpm --filter @folio/web perf:cpu:jobs --help
 5. 每个任务先单列一次 **`:first`**(灌完数据后的第一次:目录没缓存 / 代币没建行),
    再量 `--reps` 次稳态(默认 sweep 5、每天那条 3)。映射表是空的就先用 `scripts/ref-index` 刷一次
    (不计时,见上)—— 链上的币靠它认。
-6. **队列**:触发之后接着等**这次投的每一条消息**都收尾。条数来自 cron 投完那行日志的 `jobs`
-   (`cron sweep enqueued` / `daily jobs enqueued`),收尾来自 consumer 每条一行、带 `kind` 的日志
-   (`job done` / `job failed…` / `invalid job dropped`,见 `jobs/consume.ts`);条数收齐之后再等一段
-   安静(没有新的 `QUEUE <name> a/b (Nms)` 行 / 收尾行,阈值随 `max_batch_timeout`),接住
-   接力投的后续消息(`prices` 拆条、`daily-prices` 补不完再投)。**只靠安静不够**:`platforms` /
-   `defi-logos` 延后 120s 才投递,中间整段是安静的 —— 所以一次 sweep 触发本机要两分多钟。
-   多出的行:`<任务>:window`(cron + 它引出的全部 consumer 调用,每次触发的总数)与
-   `<任务>:queue:<kind>`(每件活的**每次调用**一个样本 —— 免费计划的 10ms 是按一次调用算的)。
-   拆法是按时间窗:一次调用的起点 = 看到那行 `QUEUE` 的时刻 − 它自报的耗时,kind 按日志先后配上;
-   consumer 并发(`max_concurrency`)时相邻两次会配错,所以逐 kind 是**近似**,总数是准的。
-   构建产物里没有 `queues.consumers` → 这些行不出现。
+6. **运行器**:触发之后接着等**这次投的每一件活**都收尾。件数来自 cron 投完那行日志的 `jobs`
+   (`cron sweep enqueued` / `daily jobs enqueued`),收尾来自 consumer 每件一行、带 `kind` 的日志
+   (`job done` / `job failed…` / `invalid job dropped`,见 `jobs/consume.ts`);件数收齐之后再等 2 秒
+   安静(没有新的收尾行),接住接力投的后续活(`prices` 拆件、`daily-prices` 补不完再投)。**只靠安静
+   不够**:`platforms` / `defi-logos` 延后 120s 才到点,中间整段是安静的 —— 所以一次 sweep 触发本机要两分多钟。
+   多出的行:`<任务>:window`(cron + 它引出的全部 alarm,每次触发的总数)与
+   `<任务>:alarm:<kind>`(每件活的**每次 alarm** 一个样本 —— 预算是按一次调用算的)。
+   **怎么切成逐次 alarm**:本地的 alarm 没有自己的起止可认 —— workerd 自己调度 alarm,wrangler dev 一行都
+   不打(队列时代有 miniflare 的 `QUEUE <name> a/b (Nms)`,alarm 没有对应物)。能用的只有 app 自己的收尾行:
+   一次 alarm 只跑一件(`jobs/runner.ts`),所以一行收尾 = 一次 alarm 的终点,按它 JSON 里的 `@timestamp`
+   (毫秒;workerd 的 `Date.now()` 只在 I/O 边界前进,收尾行紧跟最后一次 I/O,够用)换到 profile 的时钟上。
+   第 k 格 = [第 k−1 件收尾, 第 k 件收尾),第一格从 cron 投完那行起。一格里因此还带着上一次 alarm 收尾后的
+   那点尾巴(删行、再定 alarm)与这一次进门的开销;中间的空等(延后、退避)不算 CPU(采样器闲时停、恢复样本
+   封顶,见下)。cron 投完之后的 `pokeRunner` 落在第一格;多用户时前面用户的活会和后面用户的投活交错。
+   所以逐 kind 是**近似**,整段窗口(`:window`)的总数是准的。一次 alarm 的墙钟量不到,`wall p50` 空着。
+   DO 与 worker 在同一个 isolate 里(本地),采样器看得见它。运行器的本地存储(`v3/do/<worker>-JobRunner`)
+   每次起 worker 前清掉,上一次没跑完的活不会混进来。构建产物里没有 `JOB_RUNNER` 这个 DO 绑定 → 这些行不出现。
 
 ### 怎么读输出
 
@@ -168,8 +175,8 @@ pnpm --filter @folio/web perf:cpu:jobs --help
 !  cron-sweep:first*              1  200      70.0 …     0  synced 8/8, jobs 13/13  Effect … · app code … · D1 driver …
 !  cron-sweep                     1  200      86.4 …     0  synced 8/8, jobs 13/13  …
 !  cron-sweep:window              1  200     645.5 …     0  synced 8/8, jobs 13/13  …
-!  cron-sweep:queue:prices        1  acked    62.1 …     3  1.0 per trigger
-!  cron-sweep:queue:sync-account  8  acked    59.0 …     3  8.0 per trigger
+!  cron-sweep:alarm:prices        1  done     62.1 …     3  1.0 per trigger
+!  cron-sweep:alarm:sync-account  8  done     59.0 …     3  8.0 per trigger
 ```
 
 - **mean / p50 / max** —— 每次调用的采样 CPU(JS + GC),在 n 次之间比。
@@ -186,12 +193,12 @@ pnpm --filter @folio/web perf:cpu:jobs --help
 - **fetches** —— 这次调用假上游收到几发(按上游 + 路径的明细在 `summary.json` 的 `fetchesByRoute`)。
 - **result** —— 从这次调用自己的日志里读出来的:sweep 是 `synced 同步成功/总数`(各轮收官那行
   `queued round done` 相加)+ `jobs 收尾/投出`;每天那条是用户数 + `jobs 收尾/投出`。没干成(有账户
-  失败、有消息放弃或超时、没见到投递日志)的状态格会标 `✗`,那行数字作废。逐 kind 那几行的 result
-  是「每次触发平均几次这种调用」。
+  失败、有活被埋掉或超时、没见到投递日志)的状态格会标 `✗`,那行数字作废。逐 kind 那几行的 result
+  是「每次触发平均几次这种 alarm」,状态是 `done` / `retried` / `buried`。
 - **owners** —— 同 perf:cpu。
 
 输出目录默认 `.wrangler/perf-state/runs/jobs-<时间戳>/`:每次调用一份 `<任务>-<first|repN>.cpuprofile`、
-`summary.json`(逐次的 CPU / gap / 逐路由的出网数 / 收尾日志的字段 / 队列逐批)、`wrangler.log`,
+`summary.json`(逐次的 CPU / gap / 逐路由的出网数 / 收尾日志的字段 / 逐次 alarm)、`wrangler.log`,
 以及每份 profile 旁边一份 `<任务>-<tag>.slots.json`(这一窗里每次调用的起点与 kind)。
 
 ### 看到函数这一级:`perf:cpu:analyze`
@@ -213,10 +220,12 @@ fiber 是蹦床式的,调用栈里常常只剩 `runLoop` / `evaluateEffect`,认�
 
 - `--warm`:一个场景只起一个 worker,后几次落在热 isolate 上。与默认口径对照,就知道一次调用里
   多少是冷 isolate 的首跑开销(第二轮实测:每天那条 cron 冷 ≈57ms、热 ≈7ms)。
-- `--cron-only`:只量 `scheduled()` 那一次。worker 用去掉 `queues.consumers` 的配置起
-  (`dist/server/wrangler.producer-only.json`),投的消息没人消费,就不会和 cron 叠在同一个采样窗里;
+- `--cron-only`:只量 `scheduled()` 那一次。alarm 关不掉(到点就响),所以 worker 以两份配置起:
+  主 worker 的 `JOB_RUNNER` 改绑到第二个 worker 里的空壳 DO(`dist/server/wrangler.cron-only.json` +
+  `wrangler.runner-stub.json` + `runner-stub.mjs`,`script_name` 跨 worker 绑定)—— cron 照样经 RPC 投活
+  (调用方那一侧照算),活却没人跑,不会和 cron 叠在同一个采样窗里;空壳在另一个 isolate,采样器看不见。
   每次触发前清掉同步轮,免得下一次 cron 在心跳期内因为「活轮还在」不投。默认口径下 cron 那一格的
-  起止靠日志估,consumer 的开头几毫秒常被算进 cron —— 比 cron 本体时用这个。
+  终点是「投完」那行日志,之后的 `pokeRunner` 与 alarm 交错 —— 比 cron 本体时用这个。
 
 ### 局限
 
@@ -248,10 +257,12 @@ Metadata Read-Only);个人 token 加 Workers Observability 权限也读不了日
   `withServerFnTiming` 打的「server fn」那行(带 `handler`)与同一个 requestId 的调用日志对上,
   而事件接口按自适应采样只回一部分。`n` 就是样本数,别拿它算总量。列里有 P99(FOL-84 验收要的),
   但样本少时它≈ max,只当尾部的粗看;p90 更稳。
-- **队列按任务种类的那张同样是抽样的**:一次 queue 调用本身不带「这是哪件活」,把 `jobs/consume.ts`
-  每条消息收尾打的 `job done` / `job failed…` 行(带 `kind`)与同一个 requestId 的 queue 调用对上
-  (`max_batch_size: 1`,一个 requestId 就是一件活)。**因 CPU 超限被掐断的调用来不及打这行**,只会
-  算进 unmatched —— 超限的总次数看上面「按调用类型」那张全量表的 `queue · exceededCpu`。
+- **运行器按任务种类的那张同样是抽样的**:一次 alarm 调用本身不带「这是哪件活」,把 `jobs/consume.ts`
+  每件活收尾打的 `job done` / `job failed…` 行(带 `kind`)与同一个 requestId 的 alarm 调用
+  (`$workers.eventType = "alarm"`)对上(一次 alarm 只跑一件,一个 requestId 就是一件活)。
+  **因 CPU 超限被掐断的调用来不及打这行**,没领到活的 alarm 也不打,都算进 unmatched —— 超限的总次数看
+  上面「按调用类型」那张全量表的 `alarm · exceededCpu`。`"alarm"` 这个取值出自 Workers Trace Events
+  文档的 EventType 枚举,还没对着线上 Workers Logs 验过。
   对法在 `online-join.ts`(`tests/perf-online-join.test.ts` 钉着)。
 - 默认只看**当前线上版本**:换过版本后旧数字不代表现在。新版本刚上线、还没有请求时表是空的。
 

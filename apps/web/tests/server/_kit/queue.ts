@@ -14,6 +14,7 @@ export const captureQueue = () => {
   const provide = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.provideService(effect, JobQueue, {
       send: (batch) => Effect.sync(() => void sent.push(...batch)),
+      poke: Effect.void,
     });
   const syncJobs = (): SyncAccountJob[] =>
     sent.flatMap((m) => (m.job.kind === "sync-account" ? [m.job] : []));

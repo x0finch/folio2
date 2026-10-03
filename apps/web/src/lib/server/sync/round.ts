@@ -12,9 +12,8 @@ import { Cause, Clock, Effect, Option } from "effect";
 import { z } from "zod";
 import { dataFreshness } from "@/lib/core/sync-status";
 import {
-  JOB_RETRY_DELAY_SECONDS,
-  QUEUE_OPS_PER_MESSAGE,
-  REDELIVERY_SLACK_MS,
+  JOB_RETRY_MAX_DELAY_MS,
+  SCHEDULING_SLACK_MS,
   SYNC_ATTEMPT_BUDGET_MS,
 } from "@/lib/server/jobs/constants";
 import type { SyncAccountJob } from "@/lib/server/jobs/message";
@@ -32,25 +31,27 @@ import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 /**
  * 心跳时长 —— **超时这件事只有这一个旋钮**。
  *
- * 「活着 = 不过期」,续期有两条路:**每个账户落账顺手续一次**,以及 **consumer 每次投递开跑前续一次**
- * (`syncQueuedAccount` 的 `touch`)。FOL-86 起 cron 的轮、FOL-89 起手动与单账户的轮都走队列(一个账户
- * 一条消息一次调用),没有一条任务从头跑到尾,所以没有定时 keepalive —— 续期只能挂在这两处。
+ * 「活着 = 不过期」,续期有两条路:**每个账户落账顺手续一次**,以及 **consumer 每次开跑前续一次**
+ * (`syncQueuedAccount` 的 `touch`)。FOL-86 起 cron 的轮、FOL-89 起手动与单账户的轮都走后台活(一个账户
+ * 一件活一次调用;FOL-100 起由运行器 DO 的 alarm 一件件跑),没有一条任务从头跑到尾,所以没有定时
+ * keepalive —— 续期只能挂在这两处。
  *
- * **由队列的重投链倒推**:一次投递最坏 `SYNC_ATTEMPT_BUDGET_MS`,以 defect 收场就等 `retry_delay`
- * (`JOB_RETRY_DELAY_SECONDS`)再投,下一次投递开跑时续期。所以「上一次续期 → 下一次续期」最长是
- * 一次投递 + 一个重投间隔 + 调度余量 = 80 + 30 + 10 = 120s。于是**重投还没用完时轮不会被念成「中断」**
- * (#571 review:以前只按单次投递算,一次晚到的 defect + 30s 重投间隔就能越过 120s,前端先报失败、
+ * **由重试链倒推**:一次投递最坏 `SYNC_ATTEMPT_BUDGET_MS`,以 defect 收场就按指数退避再跑,最长一次间隔
+ * `JOB_RETRY_MAX_DELAY_MS`,下一次开跑时续期。所以「上一次续期 → 下一次续期」最长是
+ * 一次投递 + 最长退避 + 调度余量 = 80 + 120 + 10 = 210s。于是**重试还没用完时轮不会被念成「中断」**
+ * (#571 review:以前只按单次投递算,一次晚到的 defect + 重试间隔就能越过心跳,前端先报失败、
  * 几秒后账户又落成 synced)。
  *
- * 收下这个:队列**积压**到一条消息排队超过 120s 才被派出去,面板仍会先说「中断」;晚到的落账带着
+ * 收下这个:运行器**积压**到一件活排队超过这个时长才开跑,面板仍会先说「中断」;晚到的落账带着
  * 同一个轮 id,照样落得上、照样续期、最后一个照样收官,只是那段时间里再点一次同步可以覆盖它。
- * 单用户、个位数账户、`max_concurrency` 6 的队列,正常延迟是秒级。消息真没了(进了死信、被丢了),
- * 120s 后那一轮自然过期,下一次点同步开得动新轮。
+ * 运行器是单线程的(一个 DO、一次 alarm 一件),但同一轮的账户排在一起、一个接一个地跑,每开跑一个
+ * 就续一次 —— 单用户、个位数账户时间隔是秒级。活真没了(被埋掉了),心跳过期后那一轮自然过期,
+ * 下一次点同步开得动新轮。
  *
  * **刻意不随名单大小变**:让它跟名单挂钩就等于每加一个账户都放宽一次「多久算死」。
  */
 export const ROUND_HEARTBEAT_MS =
-  SYNC_ATTEMPT_BUDGET_MS + JOB_RETRY_DELAY_SECONDS * 1000 + REDELIVERY_SLACK_MS;
+  SYNC_ATTEMPT_BUDGET_MS + JOB_RETRY_MAX_DELAY_MS + SCHEDULING_SLACK_MS;
 
 /**
  * 收官后的保留期。一轮收官之后它就只是「上一轮的报告」,而**下一轮开轮即覆盖** ——
@@ -394,8 +395,8 @@ const abandonClaims = (
 /**
  * cron 扫到一个用户时干的事:**按组合分区,一个组合一轮**(ADR 0048),**只开轮 + 投消息,不跑**(FOL-86)。
  *
- * 一个账户一条 `sync-account`,外加 `hourlyUserJobs` 那几条;真同步在队列 consumer 里一条一次调用地跑
- * (`syncQueuedAccount`),每条各自一份 10ms CPU / 50 subrequest 的预算。以前这里在 cron 那一次
+ * 一个账户一条 `sync-account`,外加 `hourlyUserJobs` 那几条;真同步由运行器的 alarm 一件一次调用地跑
+ * (`syncQueuedAccount`),每件各自一份预算(50 subrequest;CPU 见 ADR 0058)。以前这里在 cron 那一次
  * 调用里把全部账户跑完,生产上 42% 的整点 sweep 死在 exceededCpu。**这一步不出网**
  * (tests/server/sync/cron.cases.ts 钉着)。返回投出去的那一批。
  *
@@ -469,10 +470,10 @@ export interface FanOutResult {
   /** 投出去的消息总数(`sync-account` + 每个用户的 `hourlyUserJobs`)。 */
   jobs: number;
   /**
-   * 这一趟的队列操作估算(`jobs × QUEUE_OPS_PER_MESSAGE`,FOL-86「日志里记一次估算」)。免费计划
-   * 一天 10k;手动 / 单账户同步另算,不在这一行里。
+   * 这一趟至少会花掉的运行器 alarm 次数(一件活一次;FOL-86「日志里记一次估算」)。是**下限**:
+   * 失败重跑的每一次另算一次 alarm。免费计划 DO 一天 10 万次请求;手动 / 单账户同步另算,不在这一行里。
    */
-  queueOps: number;
+  alarms: number;
 }
 
 /**
@@ -519,14 +520,14 @@ export const fanOutAllUsers = (
       accounts: per.reduce((n, p) => n + p.accounts, 0),
       failed: per.reduce((n, p) => n + p.failed, 0),
       jobs: per.reduce((n, p) => n + p.jobs, 0),
-      queueOps: per.reduce((n, p) => n + p.jobs, 0) * QUEUE_OPS_PER_MESSAGE,
+      alarms: per.reduce((n, p) => n + p.jobs, 0),
     })),
   );
 
-// —— 队列 consumer 那一侧(FOL-86)——
+// —— consumer 那一侧(FOL-86;FOL-100 起由运行器 DO 调)——
 
 // 「这条消息还该跑吗」:键上还是这一轮、还没收官、这个账户还没落账。三条都要 ——
-// 队列 at-least-once(同一条可能投两遍)、手动轮可能已经覆盖了键、轮可能已被判中断后重开。
+// 运行器 at-least-once(DO 跑到一半被驱逐,租期过后同一件会再跑一遍)、手动轮可能已经覆盖了键、轮可能已被判中断后重开。
 const stillPending = (round: Option.Option<SyncRoundRecord>, job: SyncAccountJob): boolean =>
   Option.exists(
     round,
@@ -579,8 +580,8 @@ const settleQueued = (
  * `makeSyncServices`,`only` 收口成这一个账户)—— 取余额 / 重试 / 认币 / 重估 / 写快照与手动轮逐字相同,不另写一条单账户的路。
  * 名单里没它了(两次投递之间被归档 / 删掉)→ 记成 `skipped`:它不是失败,只是这一轮没事可做。
  *
- * 逐账户的失败(上游挂了、缺凭据)在内核里已经收成 `failed` / `needs-keys`,**不走队列重试**。
- * 这里只会以 defect 或 `SyncDepError`(取账户 / 取凭据那两步)失败 —— 那种才交给队列重投。
+ * 逐账户的失败(上游挂了、缺凭据)在内核里已经收成 `failed` / `needs-keys`,**不走运行器重试**。
+ * 这里只会以 defect 或 `SyncDepError`(取账户 / 取凭据那两步)失败 —— 那种才交给运行器重跑。
  */
 export const syncQueuedAccount = (job: SyncAccountJob): Effect.Effect<void, Error> =>
   Effect.gen(function* () {
@@ -589,7 +590,7 @@ export const syncQueuedAccount = (job: SyncAccountJob): Effect.Effect<void, Erro
       getLogger(["folio", "jobs"]).info("stale sync job skipped", { accountId: job.accountId });
       return;
     }
-    // 每次投递开跑前续一次心跳:重投(上一次以 defect 收场、隔 `retry_delay` 再来)之间没有落账,
+    // 每次开跑前续一次心跳:重跑(上一次以 defect 收场、隔一个退避间隔再来)之间没有落账,
     // 不续的话重投还没用完,轮就先被念成「中断」(见 `ROUND_HEARTBEAT_MS`)。
     yield* db.syncRounds.touch({ ...slotOf(job), ttlMs: ROUND_HEARTBEAT_MS });
     // 服务造成一份 context 直接给(不经 Layer)、单账户不经 Stream —— 同一套接线、同一个

@@ -285,7 +285,10 @@ describe("sync/round", () => {
         USER,
         Effect.exit(
           startSyncRound({ auto: false }).pipe(
-            Effect.provideService(JobQueue, { send: () => Effect.die(new Error("queue down")) }),
+            Effect.provideService(JobQueue, {
+              poke: Effect.void,
+              send: () => Effect.die(new Error("queue down")),
+            }),
           ),
         ),
       );
@@ -382,7 +385,10 @@ describe("sync/round", () => {
         USER,
         Effect.exit(
           startSyncRound({ auto: false }).pipe(
-            Effect.provideService(JobQueue, { send: () => Effect.die(new Error("queue down")) }),
+            Effect.provideService(JobQueue, {
+              poke: Effect.void,
+              send: () => Effect.die(new Error("queue down")),
+            }),
           ),
         ),
       );
