@@ -1,5 +1,5 @@
-import { getAuth } from "./auth";
 import { resolveAuth } from "./auth-session";
+import { getSessionAuth } from "./session-auth";
 
 // 路由 handler(非 server function)里取当前用户。
 //
@@ -10,13 +10,13 @@ import { resolveAuth } from "./auth-session";
 // 无 session → 返回 undefined(而不是抛),让调用方自己决定给 401 还是给一个「什么都没有」——
 // logo 端点选后者:那条路上「你没登录」和「这个 id 不是你的」应当无从区分。
 export async function userIdOf(request: Request): Promise<string | undefined> {
-  const result = await getAuth().api.getSession({ headers: request.headers });
+  const result = await getSessionAuth().api.getSession({ headers: request.headers });
   return result?.user.id;
 }
 
 // export / import / sync 等必须登录的端点:无 session → 401 Response(与 resolveAuth 同形)。
 export async function requireUserId(request: Request): Promise<string | Response> {
-  const session = await getAuth().api.getSession({ headers: request.headers });
+  const session = await getSessionAuth().api.getSession({ headers: request.headers });
   try {
     return resolveAuth(session).userId;
   } catch (err) {
