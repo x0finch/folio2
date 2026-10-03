@@ -80,10 +80,9 @@ check which side you are on, look for `edge cache: hit` in `wrangler tail` — o
 3. (Optional) add an on-chain wallet (EVM needs no key) → Sync.
 4. Logs: `pnpm exec wrangler tail` — structured JSON lines (`account synced` with `userId`/`accountId`/`type`, etc.). Two crons auto-run: the hourly sync sweep (`30 * * * *` UTC) and the daily jobs (`0 23 * * *` UTC). Trigger the **hourly** one manually from the dashboard (Workers → folio → Triggers / Cron) to see a `cron sweep enqueued` line (with `jobs` and an `alarms` estimate), followed (one `JobRunner` alarm invocation per job) by `job done` / `account synced` lines and a `queued round done` line per portfolio. The daily one logs `daily jobs enqueued`. Jobs that still fail on their last retry are **buried** in the runner's own storage (the sync round is marked failed first) and logged as `job failed on final attempt, burying it` (or `job never finished its final attempt, burying it` if the Durable Object died mid-job); they're kept 7 days and never run again. **First deploy of the runner:** check `pnpm --filter @folio/web perf:cpu:online` (or Workers Logs, filtered to the `JobRunner` alarm invocations) — if they show `exceededCpu`, the free plan's Durable Object CPU limit is lower than documented (ADR 0058 "Premise") and you should revert this change.
 
-**Existing deployment upgrading past FOL-86:** run step 3b once before the next deploy.
-
-**Existing deployment upgrading past FOL-91 (migration `0009_account_daily_totals`):** run this
-once, **right after that deploy finishes** (manual or CI):
+**Existing deployment upgrading past FOL-91 (migration `0009_account_daily_totals`):** the
+Deploy workflow does this automatically as its last step. For a manual deploy, run it once
+**right after that deploy finishes**:
 
 ```sh
 cd apps/web && pnpm run db:backfill-daily-totals   # re-runs 0009's backfill on the remote D1

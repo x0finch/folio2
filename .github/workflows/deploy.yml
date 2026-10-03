@@ -98,6 +98,12 @@ jobs:
       - name: Build & deploy
         run: pnpm --filter @folio/web run deploy
 
+      # 部署后把日汇总(`account_daily_totals`)按全部快照重算一遍(review #10):迁移与部署之间那几分钟,
+      # 旧代码写的快照不维护日汇总、就进不去了。`INSERT OR REPLACE`,幂等,每次部署都跑也只是几千行写。
+      # 语句直接取自迁移 0009,见 apps/web/scripts/backfill-daily-totals.mjs。
+      - name: Backfill daily totals
+        run: pnpm --filter @folio/web run db:backfill-daily-totals
+
       # 部署成功后,给这个版本建一个 GitHub Release(自动从 commit 生成更新日志)——
       # 这样 Releases 页跟着发版走,不必手工补。tag 早已存在(tag job 或 push 触发),这里只挂 Release。
       # 版本号两条路都取:手动触发用输入,tag 触发用 ref_name。已存在则跳过(重跑不报错)。
