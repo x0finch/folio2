@@ -178,22 +178,8 @@ export async function clickSyncPill(page: Page) {
   // 2.6s 起步,开了 page.route 的用例更慢。超过 3 秒时 waitForRequest 在 click 还挂着的时候就 reject 了,
   // 没人接 → unhandled rejection 直接判死整条测试,外面那层 toPass 根本没机会重试。
   //
-  // 第二个坑是 hover 弹层:光标一进胶囊面板就开,而开场那一帧 morph 的裁剪区**正好是胶囊本身**
-  // (popover.tsx 的 insetForProgress,p=0 即 trigger 矩形),内容层 pointer-events 已经打开 ——
-  // mousedown 落在胶囊上、mouseup 落在面板上,click 事件发给了两者的公共祖先,sync() 根本没被调用。
-  // 所以:先 hover、等弹层开完(胶囊中心的命中元素重新是胶囊自己),再点。光标没挪,不会再触发一次打开。
-  await hoverSyncPill(page);
-  await expect
-    .poll(
-      () =>
-        pill.evaluate((el) => {
-          const r = el.getBoundingClientRect();
-          const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-          return hit !== null && el.contains(hit);
-        }),
-      { message: "同步面板的开场动画一直盖着胶囊" },
-    )
-    .toBe(true);
+  // 以前这里还要先 hover、等弹层开完再点:开场那一帧面板内容盖在胶囊上,「移进来立刻点」会被吞掉。
+  // FOL-96 让胶囊压在弹层内容之上(sync-status.tsx),直接点就行;那条行为由 e2e/sync-pill.spec.ts 钉着。
   await expect(async () => {
     // Promise.all 同时挂上两边:任何一边先失败都由这里接住、交给 toPass 重试,不留悬空的 promise。
     await Promise.all([

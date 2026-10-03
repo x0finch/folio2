@@ -439,7 +439,11 @@ export function SyncStatus({
           dotClass={dot}
           busy={busy}
           showRefresh={!action}
-          className={action ? SEGMENT_ACTION : undefined}
+          // z-20:压在弹层内容层(z-10)之上(FOL-96)。面板弹出的开场那一帧,内容层的可见区域正好就是胶囊
+          // 那一块(popover.tsx 的 morph 从触发器矩形起步),内容层又已经能接点击 —— 移进来立刻点,mousedown
+          // 落在胶囊、mouseup 落在面板,click 就丢了。胶囊在上面,那一帧落在它身上的点击归它;面板展开后
+          // 与胶囊不重叠,不受影响。在调用处改而不改 beUI 件内核(原则 #11)。
+          className={cn("z-20", action && SEGMENT_ACTION)}
           onClick={hoverCapable ? sync : undefined}
         />
       </PopoverTrigger>
