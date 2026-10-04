@@ -1,0 +1,15 @@
+{
+  "request": "/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true",
+  "response": {
+    "bitcoin": {
+      "usd": 84894,
+      "usd_24h_change": 0.32034855554572206,
+      "last_updated_at": 1791092360
+    },
+    "ethereum": {
+      "usd": 2694.49,
+      "usd_24h_change": 0.6517622609084992,
+      "last_updated_at": 1791092350
+    }
+  }
+}
