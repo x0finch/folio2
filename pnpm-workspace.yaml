@@ -28,6 +28,7 @@ catalog:
   "@vitest/coverage-istanbul": 4.1.9
   better-auth: ^1.6.25
   effect: ^3.22.1
+  jsdom: ^28.1.0
   lucide-react: ^0.545.0
   motion: ^12.42.2
   react: ^19.2.0

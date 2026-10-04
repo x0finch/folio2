@@ -60,12 +60,11 @@ jobs:
       # 便宜、只读 package.json,让「版本又开始各写一遍」在 review 之前就红。
       - run: pnpm check:catalog
       - run: pnpm build
-      # Two runners, not one: `test:packages` is the root vitest `test.projects`
-      # runner over the library packages; apps/web has its own jsdom suite plus a
-      # D1 workers-pool suite (see its package.json). Together they are the same
-      # total `pnpm test` runs locally.
-      - run: pnpm test:packages
-      - run: pnpm --filter @folio/web test
+      # 跑的就是 `pnpm test` 那三趟(根目录各包 / apps/web 单测 / apps/web 的 D1 workers 池),
+      # 只是带着 istanbul 插桩,跑完合并成一个全仓行覆盖率,**低于 80% 就红**(FOL-103 / FOL-106)。
+      # 不另起一步「先跑测试、再跑覆盖率」—— 那是把整套测试跑两遍。口径与排除清单见
+      # scripts/coverage.mjs 顶上。
+      - run: pnpm coverage --min 80
 
   # Stays its own job, and earns its own minute: it needs a browser and a real server, neither of
   # which the job above wants, and it is the only one that can't run on a 2-core box in under a

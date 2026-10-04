@@ -2,6 +2,7 @@
 //
 //   pnpm coverage            # 跑三趟测试 + 合并 + 打总表(HTML 在 coverage/index.html)
 //   pnpm coverage --no-run   # 只合并上一次各趟留下的 coverage-final.json
+//   pnpm coverage --min 80   # 全仓行覆盖低于 80% 就以非零退出(CI 用这个,FOL-106)
 //
 // **为什么是三趟、再合并**,而不是一份 vitest 配置跑到底:
 //   ① 各包(根目录的 `test.projects`,含 packages/db 的 workers 池)
@@ -118,3 +119,17 @@ for (const [area, a] of [...areas].sort(
 const total = map.getCoverageSummary().lines;
 console.log(`\n全仓行覆盖:${total.pct}%(${total.covered} / ${total.total})`);
 console.log(`HTML 报告:${relative(ROOT, join(OUT, "index.html"))}`);
+
+// 门槛:只看全仓合计这一个数(FOL-103 定的口径),不按包各卡 —— 薄薄一层的小包不该拖住整体。
+const minAt = process.argv.indexOf("--min");
+if (minAt !== -1) {
+  const min = Number(process.argv[minAt + 1]);
+  if (!Number.isFinite(min)) {
+    console.error("[coverage] --min 后面要跟一个百分数,如 --min 80");
+    process.exit(1);
+  }
+  if (total.pct < min) {
+    console.error(`[coverage] 全仓行覆盖 ${total.pct}% 低于门槛 ${min}%`);
+    process.exit(1);
+  }
+}
