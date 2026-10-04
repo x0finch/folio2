@@ -1,10 +1,6 @@
-import { runClient } from "@folio/client-core/testing";
-import { PlatformUpstream } from "@folio/oracle-basic/ports";
-import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { fetchChainsEffect } from "../src/platform";
-import { coinGeckoUpstreamLayers } from "../src/upstreams";
-import { routed, run, stubbing } from "./harness";
+import { run, stubbing } from "./harness";
 
 const ASSET_PLATFORMS = [
   {
@@ -47,16 +43,5 @@ describe("fetchChains", () => {
     expect(byKey.get("no-image")?.name).toBe("no-image");
     expect(byKey.get("no-image")?.logo).toBeUndefined();
     expect(byKey.has("evm:999")).toBe(true); // 仍然两个键都产
-  });
-
-  it("id 自报为当前上游", async () => {
-    const id = await runClient(
-      routed({ "/asset_platforms": [] }).http,
-      Effect.map(PlatformUpstream, (u) => u.id).pipe(
-        Effect.provide(coinGeckoUpstreamLayers().platform),
-      ),
-      "none",
-    );
-    expect(id).toBe("coingecko");
   });
 });

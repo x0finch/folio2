@@ -22,8 +22,9 @@ export const XpubResponse = Schema.Struct({
   address: Schema.String, // 回显的 xpub/descriptor
   balance: Schema.String, // 账户已确认总额(satoshi 串,Blockbook 已汇总)
   unconfirmedBalance: Schema.String, // 账户净未确认(satoshi 串)
-  // **这两个是可选的,不是必填** —— 老那份 `interface` 把它们写成必填,而录制的真实响应里
-  // 压根没有 `unconfirmedTxs`。校验一上来这条谎话当场就现形了(golden fixture 直接红)。
+  // **这几个按可选收** —— 只是展示/计数用的附带字段,读不到不该让整份余额解析失败。
+  // (更正:之前这里说「录制的真实响应里压根没有 `unconfirmedTxs`」—— 那是手写 fixture 的缺字段,
+  // 真实的 tokenBalances 响应是带 `unconfirmedTxs` 的,见 connectors-entry 的 `fixtures/xpub.json`。)
   unconfirmedTxs: maybe(Schema.Number),
   txs: maybe(Schema.Number),
   usedTokens: maybe(Schema.Number),

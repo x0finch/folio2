@@ -6,8 +6,8 @@ import { prefetchBody, readSrc, stripComments } from "./helpers/prefetch-source"
 // 谁把它们重新 await 回去,硬刷新的白屏就回来,而且没有任何运行时报错。
 //
 // FOL-81 后这份 loader 身体搬进了 `lib/queries/prefetch-pages.ts` 的 `prefetchInsights`
-// (四页合成一条 `{-$page}` 路由,预取一份两用:loader 与导航 pointerdown 预热共用),
-// 「没有 pendingComponent」则钉在那条合并路由上。
+// (四页合成一条 `{-$page}` 路由,预取一份两用:loader 与导航 pointerdown 预热共用);
+// 「那条合并路由没有 pendingComponent」钉在 home-progressive.test.ts。
 
 describe("洞察 loader 不再等待慢查询", () => {
   it("发出原子快照和历史,但不 await", () => {
@@ -18,11 +18,6 @@ describe("洞察 loader 不再等待慢查询", () => {
     expect(route).not.toMatch(/await queryClient\.ensureQueryData\(portfolioHistoryQuery/);
     expect(route).not.toContain("portfolioOverviewQuery");
     expect(route).not.toContain("getPortfolioSnapshotData");
-  });
-
-  it("路由没有 pendingComponent", () => {
-    // 文件名里那对花括号是真的(可选路径参数 `{-$page}`),不是模板占位。
-    expect(stripComments(readSrc("routes/_authed/{-$page}.tsx"))).not.toContain("pendingComponent");
   });
 });
 

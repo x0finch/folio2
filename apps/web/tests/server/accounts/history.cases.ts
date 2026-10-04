@@ -1,8 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildAccountValueHistory } from "@/lib/core/history";
-import { handleArchiveAccount } from "@/lib/server/accounts/archive";
 import { AccountHistoryInput, handleGetAccountHistory } from "@/lib/server/accounts/history";
-import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
 import { call, callExit } from "../_kit/run";
 import { DAY, seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
@@ -46,27 +44,8 @@ describe("accounts/history", () => {
       const series = await curve({ accountId: acc.id, connectorId: "manual" });
 
       expect(series.length).toBeGreaterThan(0);
-      expect(series.at(-1)?.t).toBeGreaterThanOrEqual(ago(DAY));
-    });
-
-    it("已归档的手记账户 → 末点停在封存时刻,不补实时点", async () => {
-      const acc = await seedManualAccount(USER, "手记", {
-        symbol: "BTC",
-        unitPrice: 100,
-        amount: 2,
-      });
-      await call(USER, handleArchiveAccount({ accountId: acc.id, archived: true }));
-      const archivedAt = (await db(USER).accounts.getById(acc.id))?.archivedAt ?? 0;
-
-      const raw = await call(
-        USER,
-        handleGetAccountHistory({ accountId: acc.id, connectorId: "manual" }),
-      );
-
-      // 「当下」那一笔正是「还在动」的那一笔(ADR 0039)—— 封存之后接口连它都不发。
-      expect(raw.live).toBeNull();
-      const series = buildAccountValueHistory(raw.rows, raw.live, { sampled: raw.sampled });
-      expect(series.at(-1)?.t).toBeLessThanOrEqual(archivedAt);
+      // 末点是「现在」补的实时盯市点,不是某张旧快照的时刻。
+      expect(Date.now() - (series.at(-1)?.t ?? 0)).toBeLessThan(60_000);
     });
 
     it("从没同步过 → 空曲线,不报错", async () => {

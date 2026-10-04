@@ -44,22 +44,6 @@ describe("骨架与真内容同形", () => {
   });
 });
 
-describe("盈亏骨架三处复用同一元件", () => {
-  // GainSkeleton 是「市值 + 增量位一起加载」的共用元件(行内 ValueDelta 的 loading、列表 / 抽屉的
-  // 值未到骨架)。FOL-51 后 hero 的盈亏随总览一起到、没有独立的「盈亏还在取」态,所以 hero 不再
-  // 用它 —— 元件定义仍在一处(value-delta),别被这条误导成「hero 也该有」。
-  it("增量位骨架元件定义在一处(value-delta),hero 不再单独用它", () => {
-    expect(src("routes/_authed/-home/holdings/value-delta.tsx")).toContain("<GainSkeleton");
-    expect(src("routes/_authed/-home/hero/portfolio-hero.tsx")).not.toContain("<GainSkeleton");
-  });
-
-  it("宽度锁死在一处", () => {
-    expect(src("routes/_authed/-home/holdings/value-delta.tsx")).toMatch(
-      /function GainSkeleton[\s\S]*inline-block h-4 w-28/,
-    );
-  });
-});
-
 describe("回访不闪骨架、数字只滚一次", () => {
   // 缓存命中的后台刷新**不该再出骨架**。以前这条靠「看 isPending 不看 isFetching」保证;
   // 现在盈亏走挂起,而 `useSuspenseQuery` 命中缓存时直接给旧值、后台刷新、**不挂起** ——

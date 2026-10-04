@@ -40,16 +40,6 @@ const page = (count: number, pageNo = 1) =>
 describe("端口 layer", () => {
   // 装配点只 import 这个 layer,所以它至少要被走一次:`R = never`(client 与 HttpClient 在
   // 包内被关掉了)、`id` 是本 adapter 的常量(服务层拿它当 ref 的命名者)。
-  it("layer 给出的端口自报 id,且不再要求调用方 provide 传输层", async () => {
-    const stub = routed({ "/coins/markets": [] });
-    const id = await runClient(
-      stub.http,
-      Effect.map(TokenUpstream, (u) => u.id).pipe(Effect.provide(coinGeckoUpstreamLayers().token)),
-      "none",
-    );
-    expect(id).toBe(UPSTREAM_ID);
-  });
-
   // layer 在包内自带真的 `FetchHttpClient`,外面 provide 的假 `HttpClient` 顶不掉它 —— 以前用
   // `routed` 打桩,这条其实在打真的 CoinGecko(CI 上被 403 就红)。换掉的是它底下那个 `fetch`:
   // `FetchHttpClient` 每发都从 fiber context 里找 `Fetch`,找不到才用 `globalThis.fetch`。

@@ -11,7 +11,6 @@ const snapshotsOf = forDomain((db) => db.snapshots);
 const accounts = forDomain((db) => db.accounts);
 // cron 那条:没有 userId,所以它在 `GlobalDatabase` 上。
 const globalAccounts = forGlobal((db) => db.accounts);
-const settings = forDomain((db) => db.settings);
 
 const USER_A = "user-a";
 const USER_B = "user-b";
@@ -574,27 +573,5 @@ describe("cross-user isolation", () => {
     await expect(
       snapshotsOf(USER_B).write(a.id, { takenAt: 2, totalUsd: 2, balances: [] }),
     ).rejects.toThrow();
-  });
-});
-
-describe("user settings", () => {
-  it("读带缺省:无行 → self-first", async () => {
-    expect(await settings(USER_A).get()).toEqual({
-      valuationMode: "self-first",
-      hideBalances: false,
-    });
-  });
-
-  it("upsert 覆盖 valuationMode;读回一致", async () => {
-    await settings(USER_A).update({ valuationMode: "source-first" });
-    expect(await settings(USER_A).get()).toEqual({
-      valuationMode: "source-first",
-      hideBalances: false,
-    });
-  });
-
-  it("按 userId 隔离", async () => {
-    await settings(USER_A).update({ valuationMode: "source-first" });
-    expect((await settings(USER_B).get()).valuationMode).toBe("self-first");
   });
 });

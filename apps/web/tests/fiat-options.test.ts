@@ -37,10 +37,4 @@ describe("buildFiatOptions", () => {
       expect(tokenTicket.decode(o.ticket, FIAT_NAMER)).toBe(`fiat/issued:${o.symbol}`);
     }
   });
-
-  it("USD 的票精确解回 fiat/issued:USD", () => {
-    const usd = buildFiatOptions("en").find((o) => o.symbol === "USD");
-    expect(usd).toBeDefined();
-    expect(tokenTicket.decode(usd!.ticket, FIAT_NAMER)).toBe("fiat/issued:USD");
-  });
 });

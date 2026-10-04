@@ -7,7 +7,7 @@ import { handleGetManualAccount } from "@/lib/server/manual-tokens/get-account";
 import { countRows, db } from "../_kit/db";
 import { fakeRegistry, validateFails } from "../_kit/fakes";
 import { blockOutbound } from "../_kit/outbound";
-import { callWithRegistry, callWithRegistryExit } from "../_kit/run";
+import { callWithRegistry, callWithRegistryExit, failureOf } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
 // 合并进 accounts/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
@@ -119,7 +119,7 @@ describe("accounts/create", () => {
       expect(where).not.toBe(def.id);
     });
 
-    it("地址写错 / key 是假的 → 探活失败,一行都不许落库", async () => {
+    it("地址写错 / key 是假的 → 探活失败,一行都不许落库,错误原文能传到前端", async () => {
       const { registry } = await fakeRegistry({ validate: validateFails("这个地址不对") });
 
       const exit = await callWithRegistryExit(
@@ -133,21 +133,10 @@ describe("accounts/create", () => {
       );
 
       expect(exit._tag).toBe("Failure");
+      // 类型化失败,不是 defect:前端拿到的是这句原文,而不是一坨 FiberFailure。
+      expect((failureOf(exit) as Error | undefined)?.message).toContain("这个地址不对");
       expect(await countRows("accounts", USER)).toBe(0);
       expect(await callWithRegistry(USER, registry, handleListAccounts())).toEqual([]);
-    });
-
-    it("上游超时(不是凭据错)→ 同样不落库,而且错误原文能传到前端", async () => {
-      const { registry } = await fakeRegistry({ validate: validateFails("upstream timed out") });
-
-      const exit = await callWithRegistryExit(
-        USER,
-        registry,
-        handleCreateAccount({ connectorId: "binance", label: "币安", values: { apiKey: "k" } }),
-      );
-
-      expect(exit._tag).toBe("Failure");
-      expect(await countRows("accounts", USER)).toBe(0);
     });
 
     it("可选字段留空串 → 当作没填,不会被加密进去", async () => {

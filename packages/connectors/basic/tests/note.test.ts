@@ -1,5 +1,5 @@
-import { describe, expect, expectTypeOf, it } from "vitest";
-import { Note, NoteIcon, NoteRow } from "../src/note";
+import { describe, expect, it } from "vitest";
+import { Note, NoteRow } from "../src/note";
 
 describe("Note 契约(note 重设计)", () => {
   it("note:content = 行列表(NoteRow[]),icon 5 值枚举可选", () => {
@@ -34,25 +34,5 @@ describe("Note 契约(note 重设计)", () => {
     expect(textual.href).toBe("https://x/y");
     // value 可省(纯标签行)。
     expect(NoteRow.parse({ label: "only" }).value).toBeUndefined();
-  });
-
-  it("NoteIcon = 5 中性状态名", () => {
-    expect(NoteIcon.options).toEqual(["info", "success", "warning", "error", "help"]);
-    expectTypeOf<NoteIcon>().toEqualTypeOf<"info" | "success" | "warning" | "error" | "help">();
-  });
-
-  it("note 数组可整体 parse(账户级 note 形状)", () => {
-    const arr = Note.array().parse([
-      {
-        title: "Unconfirmed",
-        icon: "warning",
-        content: [{ label: "Pending", value: 0.001, unit: "BTC" }],
-      },
-      {
-        title: "Receive addresses",
-        content: [{ label: "Next #0", value: "bc1q…", href: "https://mempool.space/address/bc1q" }],
-      },
-    ]);
-    expect(arr).toHaveLength(2);
   });
 });

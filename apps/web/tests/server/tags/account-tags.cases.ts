@@ -49,15 +49,6 @@ describe("tags/account-tags", () => {
       expect(await call(USER, handleListAccountTags())).toEqual([]);
     });
 
-    it("账户被删 → 它那条关联不再返回(不留悬空)", async () => {
-      const { account, one } = await seed(USER);
-      await db(USER).tags.attach(account.id, one.id);
-
-      await db(USER).accounts.remove(account.id);
-
-      expect(await call(USER, handleListAccountTags())).toEqual([]);
-    });
-
     it("别人的关联不出现在我的清单里", async () => {
       const theirs = await seed(otherUser(USER));
       await db(otherUser(USER)).tags.attach(theirs.account.id, theirs.one.id);

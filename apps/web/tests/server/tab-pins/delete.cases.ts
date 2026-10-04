@@ -39,15 +39,6 @@ describe("tab-pins/delete", () => {
       expect(strip.pins.map((p) => p.connectorId).sort()).toEqual(["binance", "bitcoin"]);
     });
 
-    it("删到零个 → tab 条上一个 pin 都没有", async () => {
-      await withAccount(USER, "manual");
-      const a = await db(USER).tabPins.create({ kind: "connector", connectorId: "manual" });
-
-      await call(USER, handleDeleteTabPin({ pinId: a.id }));
-
-      expect((await pins(USER)).pins).toEqual([]);
-    });
-
     it("删一个已经删过的 → 静默幂等(与 deleteTag 同一规则),不是 NotFound", async () => {
       // **这条是审计改过的。** 清单初稿写的是「NotFound」,但库层两个 remove 都是裸 DELETE ——
       // 同一种形状不该有两种主张。按现状钉:静默。

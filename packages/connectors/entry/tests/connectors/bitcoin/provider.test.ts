@@ -27,7 +27,11 @@ const ZPUB84 =
   "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
 const RECV0 = "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu";
 const RECV1 = "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g";
-const RECV2 = "bc1qp59yckz4ae5c4efgw2s5wfyvrz0ala7rgvuz8z";
+// 录制响应里外部链最大已用下标是 41(0/28–0/30 未用),change 链只用过 1/0。
+const LAST_USED41 = "bc1q8jkgp7wyyc47h5fj83y3pc5r2n24u6thcdxe04";
+const NEXT42 = "bc1qg6sjfylq0sdj258ghvch4quz9379ajqvqnjtux";
+const NEXT43 = "bc1qa3w5eljjp5ehlmqqj2975nvmnz29q2qprlegd0";
+const CHANGE0 = "bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el";
 const mempool = (a: string) => `https://mempool.space/address/${a}`;
 
 // 新 FetchContext 形状:account.creds(AC:addressOrXpub + scriptType)+ creds(PC:空)。
@@ -91,22 +95,58 @@ describe("blockbookProvider.fetchBalances — 地址模式(golden fixture)", () 
 });
 
 describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbook 服务端派生)", () => {
-  it("录制 xpub 响应 → 预期 spot 行(分布仅非零 + receive/change;收款指引 lastUsed + 本地派生 next)", async () => {
+  // xpub.json 是真实录制的 Blockbook 响应(BIP84 公开测试向量 zpub,`details=tokenBalances&tokens=used`,
+  // 2026-10 录自 btc2.trezor.io):40 个已用地址,账户与各地址余额全为 0。
+  it("录制 xpub 响应(余额 0)→ 无 spot 行;收款指引 lastUsed=外部链最大已用下标 + 本地派生 next", async () => {
     mockBlockbook({ xpub: xpubFixture.response });
     const { balances, note } = await run(
       blockbookProvider.fetchBalances(ctx({ addressOrXpub: xpubFixture.request.addressOrXpub })),
     );
     expect(balances).toEqual(xpubFixture.expected);
-    // account 级 note:无未确认 → 无 Unconfirmed;Receive addresses(lastUsed + 本地派生 next)+
-    // receive/change 派生分布两 section(地址行 value+unit+href)。
+    // 无未确认 → 无 Unconfirmed;各地址余额全 0 → 无 receive/change 分布段。
     expect(note).toEqual([
       {
         title: "Receive addresses",
         icon: "info",
         content: [
-          { label: "Last used #0", value: RECV0, href: mempool(RECV0) },
-          { label: "Next #1", value: RECV1, href: mempool(RECV1) },
-          { label: "Next #2", value: RECV2, href: mempool(RECV2) },
+          { label: "Last used #41", value: LAST_USED41, href: mempool(LAST_USED41) },
+          { label: "Next #42", value: NEXT42, href: mempool(NEXT42) },
+          { label: "Next #43", value: NEXT43, href: mempool(NEXT43) },
+        ],
+      },
+    ]);
+  });
+
+  it("非零余额 + 未确认 → spot 行、Unconfirmed 段、receive/change 分布(仅非零)", async () => {
+    // 录制的那个钱包余额已清零,所以**拷一份真实响应、只改数字**(字段与地址原样不动)来走非零路径:
+    // 账户 80000 sats 已确认 + 10000 未确认;receive 0/0 留 50000、change 1/0 留 30000。
+    const response = structuredClone(xpubFixture.response);
+    response.balance = "80000";
+    response.unconfirmedBalance = "10000";
+    for (const t of response.tokens) {
+      if (t.name === RECV0) t.balance = "50000";
+      if (t.name === CHANGE0) t.balance = "30000";
+    }
+    mockBlockbook({ xpub: response });
+    const { balances, note } = await run(
+      blockbookProvider.fetchBalances(ctx({ addressOrXpub: ZPUB84 })),
+    );
+    expect(balances).toEqual([
+      { symbol: "BTC", amount: 0.0008, value: 0, kind: "spot", tokenRef: "bitcoin/native" },
+    ]);
+    expect(note).toEqual([
+      {
+        title: "Unconfirmed",
+        icon: "warning",
+        content: [{ label: "Pending", value: 0.0001, unit: "BTC" }],
+      },
+      {
+        title: "Receive addresses",
+        icon: "info",
+        content: [
+          { label: "Last used #41", value: LAST_USED41, href: mempool(LAST_USED41) },
+          { label: "Next #42", value: NEXT42, href: mempool(NEXT42) },
+          { label: "Next #43", value: NEXT43, href: mempool(NEXT43) },
         ],
       },
       {
@@ -117,9 +157,7 @@ describe("blockbookProvider.fetchBalances — xpub 模式(golden fixture,Blockbo
       {
         title: "Change distribution",
         icon: "info",
-        content: [
-          { label: "bc1qchange0", value: 0.0003, unit: "BTC", href: mempool("bc1qchange0") },
-        ],
+        content: [{ label: CHANGE0, value: 0.0003, unit: "BTC", href: mempool(CHANGE0) }],
       },
     ]);
   });
@@ -172,19 +210,15 @@ describe("blockbookProvider.fetchBalances — 错误映射", () => {
     });
   });
 
-  it("id=blockbook,PC 只有一个 public 的节点覆盖(公共实例免 key,开箱即用)", () => {
-    expect(blockbookProvider.id).toBe("blockbook");
-    expect(blockbookProvider.creds.map((f) => f.key)).toEqual(["BLOCKBOOK_API_BASE"]);
-    expect(blockbookProvider.creds.every((f) => f.type === "public")).toBe(true);
-  });
-
   it("节点覆盖生效:只打那一个节点,内置的公共节点一个不留", async () => {
+    const overrides = { BLOCKBOOK_API_BASE: "http://127.0.0.1:3399/blockbook" };
+    // PC 只有这一个节点覆盖(公共实例免 key,开箱即用)。
+    // 声明的 key 正是这里注入后真生效的那一个(app 按声明从 env 注入 ctx.creds);全 public(不加密 / 不导出)。
+    expect(blockbookProvider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
+    expect(blockbookProvider.creds.every((f) => f.type === "public")).toBe(true);
+
     mockBlockbook({ status: 500 });
-    await failing(
-      blockbookProvider.fetchBalances(
-        ctx({ addressOrXpub: ADDR }, { BLOCKBOOK_API_BASE: "http://127.0.0.1:3399/blockbook" }),
-      ),
-    );
+    await failing(blockbookProvider.fetchBalances(ctx({ addressOrXpub: ADDR }, overrides)));
     const urls = stub.calls.map((c) => c.request.url.href);
     // 500 本来会换下一个节点 —— 只配了一个,所以恰好一发,且落在覆盖的那个上。
     expect(urls).toEqual([`http://127.0.0.1:3399/blockbook/address/${ADDR}`]);

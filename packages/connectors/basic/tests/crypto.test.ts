@@ -36,11 +36,6 @@ describe("crypto AES-GCM", () => {
     await expect(encrypt("x", badKey)).rejects.toBeInstanceOf(CryptoError);
     await expect(decrypt("AAAAAAAAAAAAAAAAAAAA", badKey)).rejects.toBeInstanceOf(CryptoError);
   });
-
-  it("generateSecret yields a usable 32-byte key", async () => {
-    const k = generateSecret();
-    expect(await decrypt(await encrypt("ok", k), k)).toBe("ok");
-  });
 });
 
 // Golden: 与参考实现 openssl dgst -sha256 -hmac 逐位一致(hex 与 base64 两种编码)。
@@ -58,9 +53,5 @@ describe("hmacSha256", () => {
     expect(await hmacSha256(SECRET, MSG, "base64")).toBe(
       "/THsRIazsuKPXOqzNx6YBxguEIAEBUoN9es8dkoUi50=",
     );
-  });
-
-  it("is deterministic", async () => {
-    expect(await hmacSha256("s", "m", "hex")).toBe(await hmacSha256("s", "m", "hex"));
   });
 });

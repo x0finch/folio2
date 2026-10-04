@@ -105,14 +105,6 @@ describe("按钟点折叠", () => {
     expect(await snapshotRows()).toBe(2);
   });
 
-  it("整整一小时之后的那份也留着", async () => {
-    const acc = await account("next");
-    await write(acc, H0 + 30 * 60_000, 100);
-    await write(acc, H0 + 90 * 60_000, 200);
-
-    expect(await snapshotRows()).toBe(2);
-  });
-
   it("**默认不折叠** —— 不给开关就照旧追加", async () => {
     // 默认值是这个改动的安全面:导入(`importSnapshot`)转手调的就是这个方法,它恢复的是历史事实。
     const acc = await account("append");

@@ -128,18 +128,14 @@ describe("fetchBalances", () => {
     expect(note?.some((n) => n.title === "Futures positions detected")).toBeFalsy();
   });
 
-  it("PC 只声明一个 base URL 覆盖 key", () => {
-    expect(bybitProvider.id).toBe("bybit");
-    expect(bybitProvider.creds.map((f) => f.key)).toEqual(["BYBIT_API_BASE"]);
-    expect(bybitProvider.creds.every((f) => f.type === "public")).toBe(true);
-  });
-
   it("base 覆盖生效,默认 host 一个不留", async () => {
+    const overrides = { BYBIT_API_BASE: "https://px.example/bybit" };
+    // 声明的 key 正是这里注入后真生效的那一个(app 按声明从 env 注入 ctx.creds);全 public(不加密 / 不导出)。
+    expect(bybitProvider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
+    expect(bybitProvider.creds.every((f) => f.type === "public")).toBe(true);
+
     const stub = upstream();
-    await run(
-      stub,
-      bybitProvider.fetchBalances(ctx(CREDS, { BYBIT_API_BASE: "https://px.example/bybit" })),
-    );
+    await run(stub, bybitProvider.fetchBalances(ctx(CREDS, overrides)));
     const urls = stub.calls.map((c) => c.request.url.href);
     expect(urls.every((u) => u.startsWith("https://px.example/bybit"))).toBe(true);
     expect(urls.some((u) => u.includes("bybit.com"))).toBe(false);

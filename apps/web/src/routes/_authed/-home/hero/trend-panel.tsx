@@ -34,7 +34,7 @@ const CHART_FILL_OPACITY = 0.14;
 // 落在这里(只有一张快照),而那是个完全正常的状态 —— 说清楚就好。
 //
 // 只在**确定**只有 0/1 个点时渲染:还在取数的时候什么都不显示,否则会闪一下这句话再被图盖掉。
-export function TrendEmpty({ loading }: { loading: boolean }) {
+function TrendEmpty({ loading }: { loading: boolean }) {
   const t = useTranslations("Overview");
   if (loading) return null;
   // 贴**底部左侧**,不居中:这块容器是「图 + 数字浮层」共用的,正中央正是大号金额所在 ——

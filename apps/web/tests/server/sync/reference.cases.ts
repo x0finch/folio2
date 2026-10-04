@@ -254,8 +254,9 @@ describe("jobs/reference", () => {
       await warmFx();
       const outbound = blockOutbound();
       const out = await call(USER, handleListFiatOptions({ locale: "en" }));
-      const eur = out.find((o) => o.symbol === "EUR") as { price?: number };
+      const eur = out.find((o) => o.symbol === "EUR") as { price?: number; asOf?: number };
       expect(eur.price).toBeCloseTo(EUR_USD, 6);
+      expect(eur.asOf).toBeTruthy(); // 取到的时刻跟着价一起给
       expect(outbound.calls).toEqual([]);
     });
 

@@ -93,19 +93,6 @@ describe("portfolio/overview", () => {
       expect(view.totalUsd).toBe(-500);
     });
 
-    it("带 pin 按 connector 收窄 → 只算那个上游的账户", async () => {
-      const btcAcc = await seedAccount(USER, "链上", "bitcoin");
-      await seedSnapshot(USER, btcAcc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
-      const cexAcc = await seedAccount(USER, "交易所", "binance");
-      await seedSnapshot(USER, cexAcc.id, NOW, [{ tokenId: ETH, amount: 1, usdValue: 900 }]);
-
-      const view = await readOverview(USER, {
-        pin: { kind: "connector", connectorId: "bitcoin" },
-      });
-
-      expect(view.totalUsd).toBe(100);
-    });
-
     it("portfolioId 传别人的 → 静默退回默认视图,一条别人的数据都不出现", async () => {
       const theirPf = await db(otherUser(USER)).portfolios.ensureDefault();
       const theirAcc = await seedAccount(otherUser(USER), "他们的", "bitcoin");
@@ -167,12 +154,13 @@ describe("portfolio/overview", () => {
       const cexAcc = await seedAccount(USER, "交易所", "binance");
       await seedSnapshot(USER, cexAcc.id, NOW, [{ tokenId: ETH, amount: 1, usdValue: 900 }]);
 
-      const raw = await readSnapshotData(USER, {
-        pin: { kind: "connector", connectorId: "bitcoin" },
-      });
+      const scope = { pin: { kind: "connector", connectorId: "bitcoin" } } as const;
+      const raw = await readSnapshotData(USER, scope);
 
       expect(raw.accounts.map((a) => a.label)).toEqual(["链上"]);
       expect(raw.snapshots.map(([id]) => id)).toEqual([btcAcc.id]);
+      // 浏览器算出来的总额也只含那个上游。
+      expect((await readOverview(USER, scope)).totalUsd).toBe(100);
     });
   });
 

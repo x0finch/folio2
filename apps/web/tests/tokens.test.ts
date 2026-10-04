@@ -213,6 +213,7 @@ describe("toEnrichment(logo 一律走代理,不直引第三方 CDN)", () => {
     });
   });
 
+  // 这条与上一条也钉住「没有价 → 价那几项 undefined,不当成 0」。
   it("一张图都没有 → 不给 logo(客户端显首字母,不发请求)", () => {
     expect(toEnrichment(rec())).toEqual({
       symbol: "BTC",
@@ -221,11 +222,5 @@ describe("toEnrichment(logo 一律走代理,不直引第三方 CDN)", () => {
       unitPrice: undefined,
       marketCapRank: undefined,
     });
-  });
-
-  it("没有价 → 价那几项一律 undefined,不当成 0", () => {
-    const e = toEnrichment(rec({ logo: "L" }));
-    expect(e.unitPrice).toBeUndefined();
-    expect(e.marketCapRank).toBeUndefined();
   });
 });

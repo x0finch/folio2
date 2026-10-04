@@ -16,6 +16,8 @@ describe("accountSyncStatus", () => {
     expect(accountSyncStatus({ needsCredentials: false, takenAt: null }, NOW)).toBe("never");
   });
 
+  // 阈值(STALE_SYNC_MS)是 3 天,曾经是 24 小时:同步是手动动作,隔一天不点很正常;且它也决定
+  // 页头徽标变不变琥珀,24 小时会让它几乎天天在提醒。
   it("同步过久(超阈值)→ stale", () => {
     expect(
       accountSyncStatus({ needsCredentials: false, takenAt: NOW - STALE_SYNC_MS - 1 }, NOW),
@@ -30,12 +32,6 @@ describe("accountSyncStatus", () => {
     expect(accountSyncStatus({ needsCredentials: false, takenAt: NOW - STALE_SYNC_MS }, NOW)).toBe(
       "fresh",
     );
-  });
-
-  it("阈值为 3 天 —— 账户行与页头面板共用这一个", () => {
-    // 曾经是 24 小时。改成 3 天有两个理由:同步是手动动作,隔一天不点很正常;而这个阈值现在
-    // 也决定页头徽标变不变琥珀,24 小时会让它几乎天天在提醒。
-    expect(STALE_SYNC_MS).toBe(3 * 24 * HOUR);
   });
 });
 

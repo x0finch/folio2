@@ -130,6 +130,7 @@ describe("manual-activities/update", () => {
     });
 
     it("patch 传空对象 → 什么都不改,不是把字段清空", async () => {
+      // 也钉住「不抛」:drizzle 拿空 set 会抛,库层得先短路。
       const { acc, reduce } = await seedLedger(USER);
 
       await call(USER, handleUpdateManualActivity({ activityId: reduce.id, patch: {} }));

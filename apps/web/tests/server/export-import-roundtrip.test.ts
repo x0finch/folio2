@@ -212,6 +212,7 @@ function normalizeExport(records: unknown[]): Rec[] {
 }
 
 describe("export → import v3 往返(空库重建)", () => {
+  // 逐 Token 比 ref 集合 —— 多链归一(ETH 的 coingecko + evm:1 两条 ref 仍挂同一个 Token)也在这里钉住。
   it("Token(含 ref)完整复现,id 是新的、不跟源库撞", async () => {
     await seedSource();
     await importInto(await exportRecords(SRC));
@@ -310,13 +311,6 @@ describe("export → import v3 往返(空库重建)", () => {
     const dstTokens = await dbFor(DST).transfer.listTokensForExport();
     const mycoin = dstTokens.find((t) => t.symbol === "MYCOIN")!;
     expect(dstAct[0]!.tokenId).toBe(mycoin.id);
-  });
-
-  it("多链归一保持:ETH 的两条 ref(coingecko + evm:1)导入后仍是同一个 Token", async () => {
-    await seedSource();
-    await importInto(await exportRecords(SRC));
-    const eth = (await dbFor(DST).transfer.listTokensForExport()).find((t) => t.symbol === "ETH")!;
-    expect(eth.refs).toHaveLength(2);
   });
 
   it("导入后再导出 ≡ 原导出(格式是不动点:归一掉 id/时间戳后逐条相等)", async () => {

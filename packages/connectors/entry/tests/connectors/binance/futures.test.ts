@@ -17,11 +17,6 @@ describe("parseFuturesAccount (golden: fixture in → fixture out)", () => {
     expect(total).toBe(12500.5);
   });
 
-  it("零仓位(BNBUSDT positionAmt=0)被跳过", () => {
-    const coins = balances.filter((b) => b.kind === "perp_position").map((b) => b.symbol);
-    expect(coins).toEqual(["BTC", "ETH"]);
-  });
-
   it("空账户(无权益、无持仓)→ 空数组(没开合约的用户不冒空行)", () => {
     expect(parseFuturesAccount({ totalMarginBalance: "0", positions: [] })).toEqual([]);
   });

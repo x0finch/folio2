@@ -140,11 +140,6 @@ describe("业务码(HTTP 200 + retCode)", () => {
   const withRetCode = (retCode: number, retMsg = "boom") =>
     stub(() => json({ retCode, retMsg })).fn;
 
-  it("retCode 0 才算成功", async () => {
-    const { fn } = stub(() => json({ retCode: 0, retMsg: "OK", result: { list: [] } }));
-    await expect(withClient(fn, (c) => c.walletBalance(CREDS))).resolves.toBeTruthy();
-  });
-
   it("凭据/签名/权限类 retCode → 凭据问题", async () => {
     // 10003 key 非法 / 10004 签名错 / 10005 权限不足 / 10010 IP 不符 / 33004 key 过期
     for (const code of [10003, 10004, 10005, 10010, 33004]) {

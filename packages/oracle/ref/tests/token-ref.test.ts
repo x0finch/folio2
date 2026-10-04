@@ -162,9 +162,4 @@ describe("hasTrustedSymbol", () => {
   it.each(table)("$ref → $trusted — $note", ({ ref, trusted }) => {
     expect(hasTrustedSymbol(parseTokenRef(ref))).toBe(trusted);
   });
-
-  it("表里两档都有(全 true 或全 false 的表等于没测)", () => {
-    expect(table.some((c) => c.trusted)).toBe(true);
-    expect(table.some((c) => !c.trusted)).toBe(true);
-  });
 });

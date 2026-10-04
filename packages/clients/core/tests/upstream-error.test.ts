@@ -51,12 +51,6 @@ describe("classifyFailure", () => {
     // 藏进配置对象里。归类函数只管**默认规则**,保持一个上游一份判断、看得见。
     expect(classify(http({ status: 400 }))._tag).toBe("UpstreamUnavailableError");
   });
-
-  it("失败信息只带 pathname,不带 query(原则 #5 红线)", () => {
-    // `HttpFailure.where` 就只是 pathname,这里钉的是归类过程没把别的东西塞进来。
-    const err = classify(http({ where: "/v1/t", cause: "boom" }));
-    expect(err.where).toBe("/v1/t");
-  });
 });
 
 describe("值不值得再打一发", () => {

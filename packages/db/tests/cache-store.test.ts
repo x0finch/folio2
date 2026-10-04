@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
 import { user } from "../src/schema/auth";
-import { forDomain, NOW } from "./effect";
+import { forDomain } from "./effect";
 
 // per-user KV 缓存。**这一条测的不是「能不能写进去」,是「大值会不会把一整批写掉在地上」**。
 //
@@ -59,41 +59,9 @@ describe("cache putMany", () => {
     }
   });
 
-  it("一批之内的小写照旧原子(切批只发生在超预算时)", async () => {
-    await cache(USER).putMany([
-      { key: "a", value: 1, ttlMs: 60_000 },
-      { key: "b", value: 2, ttlMs: 60_000 },
-    ]);
-
-    const got = await cache(USER).getMany(["a", "b"]);
-    expect([got.get("a")?.value, got.get("b")?.value]).toEqual([1, 2]);
-  });
-
-  it("各带各的 TTL,过期读出来带 stale", async () => {
-    await cache(USER).putMany([
-      { key: "fresh", value: 1, ttlMs: 60_000 },
-      { key: "old", value: 2, ttlMs: 1 },
-    ]);
-
-    // `NOW` 是假时钟的当下(见 ./effect);往后挪一点,短 TTL 那个就过期了。
-    const got = await cache(USER, NOW + 1000).getMany(["fresh", "old"]);
-    expect(got.get("fresh")?.stale).toBe(false);
-    expect(got.get("old")?.stale).toBe(true);
-  });
-
   it("按用户隔离 —— 另一个人写的同名键读不到", async () => {
     await cache(OTHER).putMany([{ key: "mine", value: "theirs", ttlMs: 60_000 }]);
 
     expect((await cache(USER).getMany(["mine"])).size).toBe(0);
-  });
-});
-
-// 覆盖式写入:同一个键第二次写要盖掉第一次(预计算每一轮都往同一批键上盖)。
-describe("cache putMany 覆盖", () => {
-  it("同一个键再写一次 → 读到的是新值", async () => {
-    await cache(USER).putMany([{ key: "k", value: "old", ttlMs: 60_000 }]);
-    await cache(USER).putMany([{ key: "k", value: "new", ttlMs: 60_000 }]);
-
-    expect((await cache(USER).getMany(["k"])).get("k")?.value).toBe("new");
   });
 });

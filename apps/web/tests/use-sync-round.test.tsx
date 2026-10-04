@@ -129,22 +129,10 @@ describe("useSyncRound", () => {
       expect(invalidate).not.toHaveBeenCalled();
     });
 
-    it("进度前进一格 → 刷一次", async () => {
-      getSyncRound.mockResolvedValue(view({ settled: 1 }));
-      const { api, client } = mountHook();
-      await waitFor(() => expect(api.current.round?.settled).toBe(1));
-      const invalidate = vi.spyOn(client, "invalidateQueries");
-      getSyncRound.mockResolvedValue(view({ settled: 2, synced: 2 }));
-      await act(async () => {
-        await client.refetchQueries();
-      });
-      await waitFor(() => expect(invalidate).toHaveBeenCalled());
-    });
-
     // 刷的是**数据域**,不是轮本身:这个事件就是轮查询自己读到新进度时发的,再把它标旧只会立刻
     // 重读一遍刚读到的东西 —— 每前进一格多一发 `getSyncRound`,而且会把发起回包刚落进缓存的那一轮
     // 换成这一刻 GET 读到的那一份(两者本该一致,不一致时回包那份是更新的)。
-    it("进度前进一格 → 不重读轮本身", async () => {
+    it("进度前进一格 → 刷一次数据域,但不重读轮本身", async () => {
       getSyncRound.mockResolvedValue(view({ settled: 1 }));
       const { api, client } = mountHook();
       await waitFor(() => expect(api.current.round?.settled).toBe(1));

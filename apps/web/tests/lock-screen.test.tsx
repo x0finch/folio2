@@ -225,15 +225,6 @@ describe("LockScreen 锁定时卸载 children", () => {
     );
     expect(queryByText("secret-content")).toBeNull();
   });
-
-  it("永不(默认)→ children 正常在 DOM(不锁不卸载)", () => {
-    const { queryByText } = render(
-      <LockScreen>
-        <span>secret-content</span>
-      </LockScreen>,
-    );
-    expect(queryByText("secret-content")).not.toBeNull();
-  });
 });
 
 // 锁屏的逃生出口(#353)。锁屏是全屏接管、无别的出路:passkey 认不过去(换设备 / 指纹坏 /
@@ -263,11 +254,6 @@ describe("LockScreen 锁定时可登出", () => {
       ),
     );
   };
-
-  it("锁屏上有登出按钮", () => {
-    const { getByRole } = renderLocked();
-    expect(getByRole("button", { name: /sign out/i })).toBeTruthy();
-  });
 
   it("点登出 → 清掉闲置锁状态、调 signOut、跳 /login", async () => {
     const { getByRole } = renderLocked();

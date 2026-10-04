@@ -183,18 +183,14 @@ describe("fetchBalances", () => {
     expect(valuationCall?.request.url.searchParams.get("ccy")).toBe("USD");
   });
 
-  it("PC 只声明一个 base URL 覆盖 key", () => {
-    expect(okxProvider.id).toBe("okx");
-    expect(okxProvider.creds.map((f) => f.key)).toEqual(["OKX_API_BASE"]);
-    expect(okxProvider.creds.every((f) => f.type === "public")).toBe(true);
-  });
-
   it("base 覆盖生效,默认 host 一个不留", async () => {
+    const overrides = { OKX_API_BASE: "https://px.example/okx" };
+    // 声明的 key 正是这里注入后真生效的那一个(app 按声明从 env 注入 ctx.creds);全 public(不加密 / 不导出)。
+    expect(okxProvider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
+    expect(okxProvider.creds.every((f) => f.type === "public")).toBe(true);
+
     const stub = upstream();
-    await run(
-      stub,
-      okxProvider.fetchBalances(ctx(CREDS, { OKX_API_BASE: "https://px.example/okx" })),
-    );
+    await run(stub, okxProvider.fetchBalances(ctx(CREDS, overrides)));
     const urls = stub.calls.map((c) => c.request.url.href);
     expect(urls.every((u) => u.startsWith("https://px.example/okx"))).toBe(true);
     expect(urls.some((u) => u.includes("okx.com"))).toBe(false);

@@ -263,17 +263,6 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       return yield* Fiber.join(fiber);
     }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
 
-  it("重试可重试错误并成功;采用 Retry-After(retryAfterMs)", async () => {
-    const { fetchBalances, calls } = flaky(
-      () => new ConnectorRateLimitError({ message: "rate limited", retryAfterMs: 1234 }),
-      1,
-    );
-    const { layer } = makeServices([account()], { fetch: fetchBalances });
-    const { results } = await runWithClock(syncWith(layer, "u1"));
-    expect(results[0].ok).toBe(true);
-    expect(calls()).toBe(2);
-  });
-
   it("采用 Retry-After 而非自己的指数退避:1233ms 时还没重试,1234ms 后才重试", async () => {
     const { fetchBalances, calls } = flaky(
       () => new ConnectorRateLimitError({ message: "rate limited", retryAfterMs: 1234 }),
@@ -287,8 +276,9 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       expect(calls()).toBe(1);
       // 抖动最多再加一个 baseMs(200ms),推够即可。
       yield* TestClock.adjust(Duration.millis(400));
-      yield* Fiber.join(fiber);
+      const { results } = yield* Fiber.join(fiber);
       expect(calls()).toBe(2);
+      expect(results[0].ok).toBe(true); // 重试之后成功了
     }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
   });
 
@@ -537,14 +527,6 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
     expect(writes[0].input.balances[0].tokenId).toBeUndefined();
     expect(writes[0].input.totalUsd).toBe(100); // 金额没丢
     expect(entries.some((e) => e.level === "warning" && e.msg.includes("mint failed"))).toBe(true);
-  });
-
-  it("没注入 mint(旧装配 / 测试)→ 整条路照跑,token_id 留空", async () => {
-    const { layer, writes } = makeServices([account()], {
-      fetch: () => Effect.succeed(ok([bal("BTC", 100)])),
-    });
-    await runSync(layer, "u1");
-    expect(writes[0].input.balances[0].tokenId).toBeUndefined();
   });
 
   it("认不出来的那条 ref 不进 map → 它的 token_id 留空,别的行不受影响", async () => {

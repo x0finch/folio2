@@ -31,10 +31,6 @@ describe("首页 loader 不再等待慢查询", () => {
     expect(src).not.toMatch(/await queryClient\.ensureQueryData\(tagListQuery/);
   });
 
-  it("不再单独预取 24h 盈亏(它随快照原料在浏览器算)", () => {
-    expect(prefetchBody("prefetchOverview")).not.toContain("portfolioGain24hQuery");
-  });
-
   it("首页从总览读 24h 盈亏(FOL-51:随原料两端相减算好)", () => {
     const hero = stripComments(readSrc("routes/_authed/-home/hero/index.tsx"));
     expect(hero).toMatch(/overview\.gain24h/);

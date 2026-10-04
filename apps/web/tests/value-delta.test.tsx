@@ -25,6 +25,7 @@ function deltaLine(container: HTMLElement): HTMLElement | null {
 }
 
 describe("<ValueDelta> 的三态", () => {
+  // 传参处别写 `?? null`:server 给归档行的是 undefined,一个 `?? null` 就把它压成「算不出」、画出 `—`。
   it("undefined —— 整行省略(归档行:数字冻住,增量无从谈起)", () => {
     const { container } = renderDelta({ delta: undefined });
     expect(deltaLine(container)).toBeNull();
@@ -49,15 +50,10 @@ describe("<ValueDelta> 的三态", () => {
     expect(deltaLine(container)?.textContent).not.toBe(NO_VALUE);
     expect(container.querySelector("[data-slot=skeleton]")).toBeTruthy();
   });
-
-  it("null 与 0 在界面上不是同一个东西", () => {
-    const a = renderDelta({ delta: null });
-    const b = renderDelta({ delta: 0 });
-    expect(deltaLine(a.container)?.textContent).not.toBe(deltaLine(b.container)?.textContent);
-  });
 });
 
 describe("<ValueDelta> 的方向与百分比", () => {
+  // 永续单仓位行传的是 uPnL(number,恒有值),也走这条路 —— 三态改造不该动它。
   it("正数带 + 与上涨色", () => {
     const { container } = renderDelta({ delta: 12.5 });
     const line = deltaLine(container);
@@ -95,35 +91,5 @@ describe("deltaTone", () => {
   it("正负各自带色", () => {
     expect(deltaTone(1)).toContain("pos");
     expect(deltaTone(-1)).toContain("neg");
-  });
-});
-
-describe("永续那条路不受波及", () => {
-  // 永续单仓位行传的是 uPnL(number,恒有值),`ValueDelta` 只是形状共用 —— 三态改造不该动它。
-  it("传入具体数值时渲染与方向不变", () => {
-    const { container } = renderDelta({ delta: -42, pct: 1.5 });
-    const line = deltaLine(container);
-    expect(line?.className).toContain("text-neg");
-    expect(line?.textContent).toContain("1.50%");
-  });
-});
-
-describe("归档账户的三态不能在传参处被抹平", () => {
-  // `?? null` 是这条链上最容易犯的错:server 给归档行的是 `undefined`(封存了,不该有这个数),
-  // 一个 `?? null` 就把它压成「算不出」、画出 `—`。两者在界面上是两种意思,不能互相顶替。
-  it("undefined 与 null 渲染出的东西不同", () => {
-    const omitted = renderDelta({ delta: undefined });
-    const unknown = renderDelta({ delta: null });
-    expect(deltaLine(omitted.container)).toBeNull();
-    expect(deltaLine(unknown.container)?.textContent).toBe(NO_VALUE);
-  });
-
-  it("`?? null` 会把整行省略变成一个 `—` —— 这就是那个 bug 的形状", () => {
-    // 模拟传参处那个 `b.gain24h ?? null`:server 给的是 undefined,落到组件手里成了 null。
-    const fromServer: number | null | undefined = undefined;
-    const flattened = renderDelta({ delta: fromServer ?? null });
-    expect(deltaLine(flattened.container)?.textContent).toBe(NO_VALUE);
-    // 而原样透传应该是整行省略
-    expect(deltaLine(renderDelta({ delta: fromServer }).container)).toBeNull();
   });
 });

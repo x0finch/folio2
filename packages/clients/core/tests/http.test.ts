@@ -202,31 +202,21 @@ describe("makeRequester", () => {
 describe("形状校验", () => {
   const Row = Schema.Struct({ id: Schema.String, rank: Schema.optional(Schema.Number) });
 
-  it("形状对 → 原样通过", async () => {
+  it("**上游多给的字段放行**(只是不出现在结果里)—— 严格校验会让上游加个字段就整批炸", async () => {
     const got = await run(
-      () => json([{ id: "a", rank: 1 }]),
+      () => json([{ id: "a", rank: 1, brandNewField: 42 }]),
       () => req()("/v1/t", Schema.Array(Row)),
     );
     expect(got).toEqual([{ id: "a", rank: 1 }]);
-  });
-
-  it("**上游多给的字段放行**(只是不出现在结果里)—— 严格校验会让上游加个字段就整批炸", async () => {
-    const got = await run(
-      () => json([{ id: "a", brandNewField: 42 }]),
-      () => req()("/v1/t", Schema.Array(Row)),
-    );
-    expect(got).toEqual([{ id: "a" }]);
   });
 
   it("类型变了 → 读不动(不可重试:再拉一次还是同一份坏形状)", async () => {
     // 上游把 id 从字符串改成数字 —— 以前这一发会照常「成功」,拿着数字当字符串用下去。
     const err = await failing(() => json([{ id: 123 }]), req()("/v1/t", Schema.Array(Row)));
     expect(err._tag).toBe("UpstreamParseError");
-  });
-
-  it("整个信封变了(该是数组却给了对象)→ 同样读不动", async () => {
-    const err = await failing(() => json({ id: "a" }), req()("/v1/t", Schema.Array(Row)));
-    expect(err._tag).toBe("UpstreamParseError");
+    // 整个信封变了(该是数组却给了对象)→ 同样读不动
+    const envelope = await failing(() => json({ id: "a" }), req()("/v1/t", Schema.Array(Row)));
+    expect(envelope._tag).toBe("UpstreamParseError");
   });
 
   it("**cause 只说哪一处、哪一类,不带实际值**", async () => {

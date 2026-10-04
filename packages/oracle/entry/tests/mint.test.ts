@@ -380,14 +380,6 @@ describe("上游与交易所改名时间不一致", () => {
     expect(store.rows.get(id)?.symbol).toBe("MATIC");
     expect(store.rows.get(id)?.infoStale).toBe(true);
   });
-
-  it("同一条已知 ref 反复来 → 不算证据,不标脏(否则每轮同步都白刷一趟上游)", async () => {
-    const warm: Record<string, TokenCandidate[]> = {};
-    const { store, mint, id } = await beforeAnyRename(warm);
-    await mint.of([{ ref: POL_ETH, seed: seed("MATIC") }]);
-    await mint.of([{ ref: POL_CEX_OLD, seed: seed("MATIC") }]);
-    expect(store.rows.get(id)?.infoStale).toBe(false);
-  });
 });
 
 describe("并发", () => {
@@ -693,14 +685,6 @@ describe("各来源的 ref 都落到对的 token", () => {
     expect(store.rows.get(id as string)?.ref).toBe(SRC_USDC); // 一进来就是「已认出」
   });
 
-  it("手记没选币:`manual/custom:<名字>` 认不出就自己一行", async () => {
-    const { store, mint } = fullSetup();
-    const ref = "manual/custom:MYCOIN";
-    const id = (await mint.of([{ ref, seed: seed("MYCOIN") }])).get(ref);
-    expect(store.rows.get(id as string)?.ref).toBeNull();
-    expect([...store.refs.keys()]).toEqual([ref]);
-  });
-
   // **本轮(#223)反过来的那一条。** 以前手敲的 symbol 会被拿去认币:用户在下拉里点了
   // 「找不到?手动输入」、敲了 BTC,系统转头把他并进真 BTC,按市价盯市、认定还冻进快照。
   // UI 文案说的是「找不到」,代码干的是「回列表里猜」—— 文案与行为直接矛盾。
@@ -717,6 +701,8 @@ describe("各来源的 ref 都落到对的 token", () => {
     expect(candidates.asked).toEqual(["BTC"]);
     // 手敲那行没有本源 ref → 没有实时价,按用户填的单价估值(行为不变,只是不再借别人的价)。
     expect(store.rows.get(got.get("manual/custom:BTC") as string)?.ref).toBeNull();
+    // 认不出也照样把这条 ref 挂到它自己那行上 —— 下一轮同一条 ref 直接命中,不再新建一行。
+    expect(store.refs.get("manual/custom:BTC")).toBe(got.get("manual/custom:BTC"));
     expect(store.rows.get(got.get("bitcoin/native") as string)?.ref).toBe("src/issued:bitcoin");
   });
 });

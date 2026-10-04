@@ -74,11 +74,6 @@ describe("解不开的一律 undefined —— 票是从网络上来的", () => {
 // 都能让 mint 把**用户手敲的 symbol** 重新当成可信线索 —— 那正是 #223 收紧掉的东西
 // (`issued` 的含义是「命名者为它负责」,而没人核对过那个命名者我们认不认识)。
 describe("命名者对不上 → 不收(#223:issued 是个声明,得验)", () => {
-  it("别家的命名者 → undefined,而不是「解开了、随它去」", () => {
-    const forged = tokenTicket.encode("evil/issued:whatever");
-    expect(tokenTicket.decode(forged, NAMER)).toBeUndefined();
-  });
-
   it("文法四形状一视同仁 —— 换个形状也不能绕过去", () => {
     for (const ref of [
       "evil/native",

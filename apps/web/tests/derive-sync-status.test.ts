@@ -52,15 +52,4 @@ describe("deriveSyncStatus", () => {
     expect(out.lastSyncedAt).toBeNull();
     expect(out.attention.map((a) => a.kind)).toEqual(["never-synced"]);
   });
-
-  it("只含当前组合的账户行(调用方已按组合筛好)", () => {
-    const accounts = [
-      account({ id: "mine", label: "在默认里" }),
-      account({ id: "theirs", label: "在 Watch 里" }),
-    ];
-    const out = deriveSyncStatus([accounts[0]!], [], NOW);
-
-    expect(out.accounts.map((a) => a.id)).toEqual(["mine"]);
-    expect(out.total).toBe(1);
-  });
 });

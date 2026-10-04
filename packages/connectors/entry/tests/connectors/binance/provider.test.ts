@@ -329,34 +329,21 @@ describe("fetchBalances", () => {
     expect(isRetryable(err)).toBe(true);
   });
 
-  it("PC 只声明三个 base URL 覆盖 key(env 注入用,不是账户凭据)", () => {
-    expect(binanceProvider.id).toBe("binance");
-    expect(binanceProvider.creds.map((f) => f.key)).toEqual([
-      "BINANCE_API_BASE",
-      "BINANCE_FAPI_BASE",
-      "BINANCE_DAPI_BASE",
-    ]);
-    // 全 public(不加密 / 不导出),且不进 UI 表单(表单只认 account.creds)。
-    expect(binanceProvider.creds.every((f) => f.type === "public")).toBe(true);
-  });
-
   // #264:出口 IP 被地区封时,app 从 env 把代理 base 注入 ctx.creds。适配层只把它当不透明整串
   // 递给 client,三个 host 各走各的;不设即直连。反查:默认 host 一个不留。
   it("三个 base 覆盖各自生效,默认 host 一个不留", async () => {
+    const overrides = {
+      BINANCE_API_BASE: "https://px.example/s/binance",
+      BINANCE_FAPI_BASE: "https://px.example/s/binance-fapi",
+      BINANCE_DAPI_BASE: "https://px.example/s/binance-dapi",
+    };
+    // 声明的 key 正是这里注入后真生效的那三个(app 按声明从 env 注入 ctx.creds);全 public(不加密 / 不导出)。
+    // 不是账户凭据,不进 UI 表单(表单只认 account.creds)。
+    expect(binanceProvider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
+    expect(binanceProvider.creds.every((f) => f.type === "public")).toBe(true);
+
     const stub = upstream({});
-    await run(
-      stub,
-      binanceProvider.fetchBalances(
-        ctx(
-          { apiKey: "k", secret: "s" },
-          {
-            BINANCE_API_BASE: "https://px.example/s/binance",
-            BINANCE_FAPI_BASE: "https://px.example/s/binance-fapi",
-            BINANCE_DAPI_BASE: "https://px.example/s/binance-dapi",
-          },
-        ),
-      ),
-    );
+    await run(stub, binanceProvider.fetchBalances(ctx({ apiKey: "k", secret: "s" }, overrides)));
 
     const urls = stub.calls.map((c) => c.request.url.href);
     const hit = (prefix: string) => urls.some((u) => u.startsWith(prefix));

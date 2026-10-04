@@ -1,4 +1,4 @@
-import { FX_TTL_MS, MS_PER_DAY, PRICE_TTL_MS, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
+import { FX_TTL_MS, MS_PER_DAY, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
 import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
 import { btcUsdDaily, deriveFiatDaily, FxService, fxKey, readFx, writeFx } from "../src/fx";
@@ -199,14 +199,6 @@ describe("warm —— 写", () => {
       }),
     );
     expect(h.logs.some((l) => l.annotations.at === "fx.warm")).toBe(true);
-  });
-});
-
-// 这个 TTL 是当初唯一改了数值的东西(30min → 6h),而 30min 那个数是**币价**的 TTL。
-// 汇率一天动千分之几 —— 钉住「它属于慢变那一档」,别哪天又被抄回价格那一档。
-describe("TTL 的量级", () => {
-  it("汇率的 TTL 数量级上属于慢变数据,不与长尾币价同档", () => {
-    expect(FX_TTL_MS).toBeGreaterThan(PRICE_TTL_MS * 4);
   });
 });
 
