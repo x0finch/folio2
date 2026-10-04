@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { hyperliquidProvider } from "../../../src/connectors/hyperliquid/provider";
 import fixture from "./fixtures/clearinghouse-state.json";
+import neverTraded from "./fixtures/clearinghouse-state-empty.json";
 
 const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
@@ -76,19 +77,14 @@ describe("fetchBalances", () => {
 });
 
 describe("base 覆盖", () => {
-  it("PC 只声明一个 public 的 base 覆盖 key", () => {
-    expect(hyperliquidProvider.creds.map((f) => f.key)).toEqual(["HYPERLIQUID_API_BASE"]);
-    expect(hyperliquidProvider.creds.every((f) => f.type === "public")).toBe(true);
-  });
-
   it("设了就打覆盖的 base,不设就直连官方", async () => {
+    const overrides = { HYPERLIQUID_API_BASE: "http://127.0.0.1:3399/hyperliquid" };
+    // 声明的 key 正是这里注入后真生效的那一个(app 按声明从 env 注入 ctx.creds);全 public(不加密 / 不导出)。
+    expect(hyperliquidProvider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
+    expect(hyperliquidProvider.creds.every((f) => f.type === "public")).toBe(true);
+
     const stub = httpStub(() => json(fixture));
-    await run(
-      stub,
-      hyperliquidProvider.fetchBalances(
-        ctx(ADDR, { HYPERLIQUID_API_BASE: "http://127.0.0.1:3399/hyperliquid" }),
-      ),
-    );
+    await run(stub, hyperliquidProvider.fetchBalances(ctx(ADDR, overrides)));
     await run(stub, hyperliquidProvider.fetchBalances(ctx()));
     expect(stub.calls.map((c) => c.request.url.href)).toEqual([
       "http://127.0.0.1:3399/hyperliquid/info",
@@ -99,7 +95,8 @@ describe("base 覆盖", () => {
 
 describe("validateAccount", () => {
   it("200 → true(未交易过的地址也是 200 + 空状态)", async () => {
-    const stub = httpStub(() => json({ marginSummary: {}, assetPositions: [] }));
+    // 真实录制:从没交易过的地址(0x…01)也回 200 —— assetPositions 空,只有别人打进来的一点零头权益。
+    const stub = httpStub(() => json(neverTraded));
     expect(await run(stub, hyperliquidProvider.validateAccount(ctx()))).toBe(true);
   });
 

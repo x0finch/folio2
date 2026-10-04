@@ -72,12 +72,6 @@ describe("portfolio/tabs", () => {
       }
     });
 
-    it("没有任何 pin → pins 是空的", async () => {
-      await seedAccount(USER, "甲", "bitcoin");
-
-      expect((await readTabStrip(USER, {})).pins).toEqual([]);
-    });
-
     it("有 perp 仓 → hasPerps 为真;有 DeFi 仓 → hasDefi 为真", async () => {
       const acc = await seedAccount(USER, "永续", "hyperliquid");
       await seedSnapshot(USER, acc.id, NOW, [

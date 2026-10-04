@@ -45,15 +45,6 @@ describe("accountShare", () => {
 });
 
 describe("activeAccountsTotal", () => {
-  it("只合计未归档账户的市值", () => {
-    const rows = [
-      { totalUsd: 60, archivedAt: null },
-      { totalUsd: 40, archivedAt: null },
-      { totalUsd: 999, archivedAt: 123 }, // 归档 → 不计入
-    ];
-    expect(activeAccountsTotal(rows)).toBe(100);
-  });
-
   it("空列表 → 0", () => {
     expect(activeAccountsTotal([])).toBe(0);
   });

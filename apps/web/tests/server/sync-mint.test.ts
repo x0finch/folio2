@@ -144,24 +144,6 @@ describe("落库后快照行带 token_id", () => {
     expect(info?.ref).toBeNull();
   });
 
-  it("多链的同一个币 → 一个 Token + 多条 ref", async () => {
-    await seedRefIndex([
-      { ref: USDC_ETH, localName: "usd-coin" },
-      { ref: USDC_ARB, localName: "usd-coin" },
-    ]);
-    const accountId = await makeAccount();
-
-    const snapshotId = await syncWith([bal(USDC_ETH, "USDC"), bal(USDC_ARB, "USDC")], accountId);
-
-    const rows = await balancesOf(snapshotId);
-    expect(rows).toHaveLength(2);
-    expect(rows[0].tokenId).toBe(rows[1].tokenId); // 同一个 Token
-    const { results } = await env.DB.prepare("SELECT count(*) as n FROM tokens WHERE user_id = ?")
-      .bind(USER)
-      .all<{ n: number }>();
-    expect(results[0].n).toBe(1);
-  });
-
   it("原生币走 symbol 那一档(它按设计不进映射表)", async () => {
     await seedWarm([{ id: "ethereum", symbol: "ETH", rank: 2 }]);
     const accountId = await makeAccount();
@@ -210,7 +192,7 @@ describe("落库后快照行带 token_id", () => {
     expect(results[0].n).toBe(1);
   });
 
-  // 六个来源的 USDC 落一个 Token —— 这一组在内存里测过(mint.test.ts),这里验它在真表上也成立:
+  // 六个来源的 USDC 落一个 Token(含多链同币:一个 Token + 多条 ref)—— 这一组在内存里测过(mint.test.ts),这里验它在真表上也成立:
   // 六条 ref 行、一个 token,而且 `token_refs` 的主键不会在任何一步撞上。
   it("六个来源的 USDC → 一个 Token、六条 ref 行", async () => {
     await seedRefIndex([

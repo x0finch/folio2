@@ -121,21 +121,8 @@ describe("toAccountSections", () => {
     });
   });
 
-  // BTC(utxo/spot 口径)仍进现货表;展示明细(未确认/派生/收款)已提到账户级 note(note 重设计),
-  // 不再由 toAccountSections 从 per-balance meta 抽出。
-  it("BTC 行进现货表(spot 口径)", () => {
-    const s = toAccountSections([
-      b({
-        id: "1",
-        symbol: "BTC",
-        kind: "spot",
-        usdValue: 5000,
-        metaJson: JSON.stringify({ pendingSats: 500000 }),
-      }),
-    ]);
-    expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
-  });
-
+  // BTC 的展示明细(未确认/派生/收款)已提到账户级 note(note 重设计),不再由 toAccountSections
+  // 从 per-balance meta 抽出 —— meta 里的 pendingSats 不影响归表。
   it("遗留 kind=utxo 老化归现货表(ADR 0010:utxo 并回 spot,viewKind default 兜底)", () => {
     const s = toAccountSections([
       b({

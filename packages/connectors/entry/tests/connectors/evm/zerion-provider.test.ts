@@ -30,7 +30,8 @@ function upstream(routes: Record<string, () => Response> = {}): HttpStub {
 }
 
 type Ctx = Parameters<typeof zerionProvider.fetchBalances>[0];
-const ctx = (providerCreds: Record<string, string> = { ZERION_API_KEY: KEY }): Ctx =>
+const PROVIDER_CREDS = { ZERION_API_KEY: KEY };
+const ctx = (providerCreds: Record<string, string> = PROVIDER_CREDS): Ctx =>
   ({
     account: { id: "a1", label: "EVM", connectorId: "evm", creds: { address: ADDR } },
     creds: providerCreds,
@@ -73,6 +74,9 @@ describe("fetchBalances", () => {
     await run(stub, zerionProvider.fetchBalances(ctx()));
     const auth = stub.calls[0].request.headers.authorization;
     expect(auth).toBe(`Basic ${btoa(`${KEY}:`)}`);
+    // 声明的 key 正是这里注入、被读去签头的那一个(app 按声明从 env 注入 ctx.creds)。
+    // (备源 defaultEnabled=false 由 registry.test 钉住。)
+    expect(zerionProvider.creds.map((f) => f.key)).toEqual(Object.keys(PROVIDER_CREDS));
   });
 
   it("**没配 provider key → 归凭据问题,而且一发都不出网**", async () => {
@@ -80,12 +84,6 @@ describe("fetchBalances", () => {
     const err = await failing(stub, zerionProvider.fetchBalances(ctx({})));
     expect(err._tag).toBe("ConnectorAuthError");
     expect(stub.calls).toHaveLength(0);
-  });
-
-  it("是备源:defaultEnabled=false,且声明 ZERION_API_KEY", () => {
-    expect(zerionProvider.id).toBe("zerion");
-    expect(zerionProvider.defaultEnabled).toBe(false);
-    expect(zerionProvider.creds.map((f) => f.key)).toEqual(["ZERION_API_KEY"]);
   });
 });
 

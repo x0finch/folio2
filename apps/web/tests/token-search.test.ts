@@ -51,10 +51,6 @@ describe("本地筛:分档 + 同档按市值", () => {
     ]);
   });
 
-  it("全等压得过市值 —— 敲 ETH 第一行必须是以太坊,不是排名更高的 Tether", () => {
-    expect(searchCatalogue(CATALOGUE, "eth")[0]?.symbol).toBe("ETH");
-  });
-
   it("命中在 symbol 还是名字上不分高下 —— 敲 bitc 第一行是 Bitcoin,不是 Bitcicoin", () => {
     // 两条都是前缀命中(BITCI 命在 symbol、Bitcoin 命在名字),于是市值说了算。
     // 曾经把这两种拆成两档,结果市值第 4 的 BITCI 压过了第 1 的 Bitcoin。
@@ -325,7 +321,8 @@ describe("展示时挑该刷价的票", () => {
   });
 });
 
-// manual「已有代币」组的选项拼装(#269)。**只收有票的、不看余额**(已清仓的旧持仓也留着);
+// manual「已有代币」组的选项拼装(#269)。**只收有票的、不看余额**(已清仓的旧持仓也留着 ——
+// 输入形状本身就不含 amount,清仓与否对这一步透明,留删交给账本层);
 // 服务端那半(loadManualAccountDetail 给票 + 清仓仍返回)在 server/manual-t4.test.ts 端到端钉。
 describe("buildOwnedOptions", () => {
   const meta = new Map([
@@ -356,10 +353,5 @@ describe("buildOwnedOptions", () => {
     );
     expect(owned[0]).toEqual({ ticket: "t-btc", symbol: "btc", name: "Bitcoin", logo: "b.png" });
     expect(owned[1]).toEqual({ ticket: "t-xyz", symbol: "XYZ", name: "XYZ", logo: undefined });
-  });
-
-  it("不看余额:这一步拿不到 amount —— 是否已清仓在此无从判断,故一律收(留给账本层决定留删)", () => {
-    // 输入形状本身就不含 amount:清仓与否对这一步透明,已清仓的持仓照样成 option。
-    expect(buildOwnedOptions([{ ticket: "t-btc", symbol: "BTC" }], meta)).toHaveLength(1);
   });
 });

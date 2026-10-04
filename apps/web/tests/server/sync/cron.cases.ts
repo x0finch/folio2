@@ -104,6 +104,11 @@ describe("sync/cron(fan-out)", () => {
       ["platforms", true],
       ["defi-logos", true],
     ]);
+    // 价那两件不带 id:跑的那一刻才读持仓(带 id 的是写路径定向投的那种)。
+    expect(sent.filter((m) => m.job.kind === "prices" || m.job.kind === "daily-prices")).toEqual([
+      { job: { kind: "prices", userId: USER } },
+      { job: { kind: "daily-prices", userId: USER } },
+    ]);
     expect(result).toEqual({
       users: 1,
       accounts: 2,

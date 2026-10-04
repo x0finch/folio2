@@ -28,17 +28,6 @@ describe("portfolios/list", () => {
       expect(out.defaultId).toBe(out.portfolios[0].id);
     });
 
-    it("第二次调 → 默认 Portfolio 在列表里,且 defaultId 指向它", async () => {
-      // 首访那条挂起了,但「稳定态是对的」这件事仍然要有东西钉住。
-      await call(USER, handleListPortfolios());
-
-      const out = await call(USER, handleListPortfolios());
-
-      expect(out.portfolios).toHaveLength(1);
-      expect(out.portfolios[0].isDefault).toBe(true);
-      expect(out.defaultId).toBe(out.portfolios[0].id);
-    });
-
     it("建过三个 → 三个都在,默认那个标出来", async () => {
       await db(USER).portfolios.ensureDefault();
       await db(USER).portfolios.create({ name: "甲" });

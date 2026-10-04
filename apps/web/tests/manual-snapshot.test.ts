@@ -22,6 +22,7 @@ const tok = (over: Partial<CredsToken>): CredsToken => ({
 });
 
 describe("buildManualSnapshot", () => {
+  // **tokenId 必须带上**(#203):展示富化 / 预热 / 刷价三个门全按它收口,空着就等于这个币不存在。
   it("每个 token 造一条 spot 余额,amount/tokenId 透传(symbol 住 Token,不再合成)", () => {
     const snap = buildManualSnapshot("acc1", [tok({ id: "tk-BTC", amount: 2 })], [undefined], TS);
     expect(snap.balances).toHaveLength(1);
@@ -41,13 +42,6 @@ describe("buildManualSnapshot", () => {
       TS,
     );
     expect(snap.balances[0].usdValue).toBe(150); // 3 × 50
-  });
-
-  // **tokenId 必须带上**(#203 的收尾):展示富化 / 预热 / 刷价三个门全按它收口,
-  // 空着就等于这个币不存在 —— 没有上游名字、没有 logo、也没人去给它取价。
-  it("tokenId = tokens.id,不是 null", () => {
-    const snap = buildManualSnapshot("acc1", [tok({ id: "tk-abc" })], [undefined], TS);
-    expect(snap.balances[0].tokenId).toBe("tk-abc");
   });
 
   it("selfPrice 恒 null、metaJson 恒 null(盯市语义)", () => {
@@ -139,19 +133,6 @@ describe("manualUnitPrices", () => {
     );
     expect(prices).toEqual([1.1]);
     expect(asked).toEqual(["EUR"]);
-  });
-
-  it("非美元法币 → 用注入汇率(不冻价,随汇率)", async () => {
-    const { resolve } = fakeFx({ EUR: 1.1 });
-    const prices = await runWithOracle(
-      { fx: { resolve: resolve } },
-      manualUnitPrices(
-        [fiat({ id: "tk-EUR", symbol: "EUR" })],
-        enrich({}),
-        fiatRefs({ "tk-EUR": "fiat/issued:EUR" }),
-      ),
-    );
-    expect(prices).toEqual([1.1]);
   });
 
   it("非法币 → enrich 现价(不碰 fx)", async () => {

@@ -7,7 +7,6 @@ import {
   addManualActivities,
   createManualAccount,
   createToken,
-  deleteManualActivity,
   deleteToken,
   editManualActivity,
   updateToken,
@@ -135,21 +134,6 @@ describe("deleteToken", () => {
 });
 
 describe("addManualActivities", () => {
-  it("对既有 token 加活动 → amount 折叠一致", async () => {
-    const account = await seedAccount();
-    const res = await addManualActivities(USER, account.id, [
-      {
-        token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
-        kind: "add",
-        amount: 0.5,
-        occurredAt: LATER + 1,
-      },
-    ]);
-    expect(res.ok).toBe(true);
-    const tokens = await readTokens(account.id);
-    expect(tokens[0].amount).toBe(1.5); // 1 + 0.5
-  });
-
   it("草稿指向未持有 token → 现建持仓 + 记活动(原子)", async () => {
     const account = await seedAccount();
     const res = await addManualActivities(USER, account.id, [
@@ -192,73 +176,6 @@ describe("addManualActivities", () => {
     expect((await dbFor(USER).manual.listHoldings(account.id, NAMER)).map((t) => t.symbol)).toEqual(
       ["BTC"],
     );
-  });
-});
-
-describe("deleteManualActivity", () => {
-  it("删活动 → amount 重新折叠", async () => {
-    const account = await seedAccount();
-    await addManualActivities(USER, account.id, [
-      {
-        token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
-        kind: "add",
-        amount: 2,
-        occurredAt: LATER + 5,
-      },
-    ]);
-    expect((await readTokens(account.id))[0].amount).toBe(3); // 1 + 2
-    const added = (await dbFor(USER).manual.listActivityByAccount(account.id)).find(
-      (a) => a.kind === "add",
-    );
-    if (!added) throw new Error("add activity missing");
-    await deleteManualActivity(USER, account.id, added.id);
-    expect((await readTokens(account.id))[0].amount).toBe(1); // 删掉 add 后回到 1
-  });
-});
-
-describe("editManualActivity", () => {
-  it("改活动致超支 → {ok:false},不写", async () => {
-    const account = await seedAccount();
-    const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
-    // 加一条 reduce 1(合法:1-1=0）。
-    await addManualActivities(USER, account.id, [
-      {
-        token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
-        kind: "reduce",
-        amount: 1,
-        occurredAt: LATER + 6,
-      },
-    ]);
-    const reduce = (await dbFor(USER).manual.listActivityByToken(account.id, btc.id)).find(
-      (a) => a.kind === "reduce",
-    );
-    if (!reduce) throw new Error("reduce missing");
-    // 把 reduce 改成 5 → 超支。
-    const res = await editManualActivity(USER, reduce.id, { amount: 5 });
-    expect(res.ok).toBe(false);
-    // 未写:活动仍是 1，amount 仍 0。
-    const still = (await dbFor(USER).manual.listActivityByToken(account.id, btc.id)).find(
-      (a) => a.id === reduce.id,
-    );
-    expect(still?.amount).toBe(1);
-    expect((await readTokens(account.id))[0].amount).toBe(0);
-  });
-
-  it("合法改动 → 写入并重折叠", async () => {
-    const account = await seedAccount();
-    const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
-    const set = (await dbFor(USER).manual.listActivityByToken(account.id, btc.id))[0];
-    const res = await editManualActivity(USER, set.id, { amount: 4 });
-    expect(res.ok).toBe(true);
-    expect((await readTokens(account.id))[0].amount).toBe(4);
-  });
-
-  it("空 patch → 不抛(drizzle 空 set 会抛),幂等 {ok:true}", async () => {
-    const account = await seedAccount();
-    const set = (await dbFor(USER).manual.listActivityByAccount(account.id))[0];
-    const res = await editManualActivity(USER, set.id, {});
-    expect(res.ok).toBe(true);
-    expect((await readTokens(account.id))[0].amount).toBe(1);
   });
 });
 

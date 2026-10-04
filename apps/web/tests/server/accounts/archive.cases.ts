@@ -77,6 +77,7 @@ describe("accounts/archive", () => {
       expect(await snapshotCount(acc.id)).toBe(1);
     });
 
+    // 否则抽屉头显示的是封存值,曲线却还在往今天长 —— 一个抽屉里两个说法。
     it("归档手记账户之后 → 曲线末点停在封存那一刻,不再补实时点", async () => {
       const acc = await seedManualAccount(USER, "手记", {
         symbol: "BTC",

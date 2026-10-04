@@ -167,11 +167,6 @@ describe("jobs/daily-prices", () => {
     await db(USER).portfolios.ensureDefault();
   });
 
-  it("每小时 cron 那一套里有一条不带 id、不延后的 `daily-prices`", async () => {
-    const { hourlyUserJobs } = await import("@/lib/server/jobs/schedule");
-    expect(hourlyUserJobs(USER)).toContainEqual({ job: { kind: "daily-prices", userId: USER } });
-  });
-
   it("没有手记账户 → 零出网、不往下投", async () => {
     const outbound = rangeUpstream();
     const { state, sent } = await consume({ kind: "daily-prices", userId: USER });

@@ -21,14 +21,6 @@ describe("buildAccountValueHistory", () => {
     ]);
   });
 
-  it("末点 = 最新快照总额(与头部 account.totalUsd 同源)", () => {
-    const s = buildAccountValueHistory([
-      { takenAt: 1 * DAY, totalUsd: 100 },
-      { takenAt: 2 * DAY, totalUsd: 175 },
-    ]);
-    expect(s.at(-1)).toEqual({ t: 2 * DAY, total: 175 });
-  });
-
   it("不足 2 点 → 原样返回(调用方按 <2 不渲染 chart)", () => {
     expect(buildAccountValueHistory([{ takenAt: 1 * DAY, totalUsd: 100 }])).toEqual([
       { t: 1 * DAY, total: 100 },

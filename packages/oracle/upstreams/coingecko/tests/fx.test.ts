@@ -55,15 +55,6 @@ describe("fetchRates", () => {
     expect(err._tag).toBe("UpstreamParseError");
     expect(err.cause).toBe("missing/invalid usd rate");
   });
-
-  it("id 自报为当前上游 —— 与代币那面同一个命名者", async () => {
-    const id = await runClient(
-      stubbing(() => ({})).http,
-      Effect.map(FxUpstream, (u) => u.id).pipe(Effect.provide(coinGeckoUpstreamLayers().fx)),
-      "none",
-    );
-    expect(id).toBe("coingecko");
-  });
 });
 
 // 汇率的 BTC 反算基(ADR 0026):历史反算取「BTC 在某币种下的价」走的是 PriceUpstream.fetchPriceSeries

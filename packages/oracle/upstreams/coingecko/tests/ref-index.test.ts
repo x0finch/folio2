@@ -1,7 +1,7 @@
 import type { AssetPlatform, CoinListItem } from "@folio/coingecko-client";
 import { tokenRef } from "@folio/oracle-ref";
 import { describe, expect, it } from "vitest";
-import { NON_EVM_PLATFORMS, toRefIndexRows, UPSTREAM_ID } from "../src";
+import { toRefIndexRows, UPSTREAM_ID } from "../src";
 import assetPlatforms from "./fixtures/asset-platforms.json" with { type: "json" };
 import coinsList from "./fixtures/coins-list.json" with { type: "json" };
 
@@ -89,10 +89,5 @@ describe("链对照失配", () => {
     expect(result.unmatchedPlatforms).toEqual(["sui"]);
     // 这条链的币确实一行都没有了 —— 不喊出来的话,它就这么静默地没价没图。
     expect(result.rows.some((r) => r.chainRef.startsWith("sui"))).toBe(false);
-  });
-
-  it("对照表是「我们的命名者 → CoinGecko 的 id」,三条恰好同名纯属运气", () => {
-    // 写下来是为了改了能被上面那条测试抓到。
-    expect(NON_EVM_PLATFORMS).toEqual({ solana: "solana", sui: "sui", cosmos: "cosmos" });
   });
 });

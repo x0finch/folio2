@@ -63,26 +63,6 @@ describe("summarizeSync", () => {
     expect(s.attention.map((a) => a.kind)).toEqual(["missing-credentials"]);
   });
 
-  // 三种毛病一次到齐 —— 清单按严重程度排,而分母(来源总数)不受任何一种影响。
-  // 这一条要一个**遥远**的当下,才造得出「数旧了」那一档(文件顶上那个 NOW 紧挨着 takenAt)。
-  it("缺凭据 / 从未同步 / 数旧了三种都进清单,顺序按严重程度", () => {
-    const later = STALE_SYNC_MS + 10_000;
-    const s = summarizeSync(
-      [
-        acc({ id: "a", complete: false, takenAt: later - 1000 }),
-        acc({ id: "b", takenAt: null }),
-        acc({ id: "c", takenAt: 4000 }),
-      ],
-      later,
-    );
-    expect(s.attention.map((x) => x.kind)).toEqual([
-      "missing-credentials",
-      "never-synced",
-      "stale",
-    ]);
-    expect(s.total).toBe(3);
-  });
-
   it("excludes archived accounts from every tally", () => {
     const s = summarizeSync(
       [acc({ id: "a", takenAt: 100 }), acc({ id: "z", archivedAt: 5, complete: false })],
@@ -138,6 +118,7 @@ describe("summarizeSync", () => {
       expect(s.attention).toEqual([]);
     });
 
+    // 输入故意倒着给(最轻的在前),排序才真被考到。
     it("清单按严重程度排:缺凭据 → 从未同步 → 数旧了", () => {
       const s = summarizeSync(
         [
@@ -148,6 +129,7 @@ describe("summarizeSync", () => {
         now,
       );
       expect(s.attention.map((a) => a.id)).toEqual(["creds", "never", "stale"]);
+      expect(s.total).toBe(3); // 分母(来源总数)不受任何一种毛病影响
     });
 
     it("同档内越旧的越前", () => {

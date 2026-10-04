@@ -66,7 +66,7 @@ type InMemory<S> = {
 };
 
 // —— per-user:代币行的 info facet + ref 行 ——
-export interface FakeTokenStore extends InMemory<TokenStore> {
+interface FakeTokenStore extends InMemory<TokenStore> {
   readonly rows: Map<string, TokenInfo>;
   readonly refs: Map<TokenRef, string>;
   // 历史快照的 token_id —— merge 要把它们一并改指,测试据此验「身份可变、金额不变」。
@@ -74,7 +74,7 @@ export interface FakeTokenStore extends InMemory<TokenStore> {
   namer: string; // 判 `linked` 用:哪个命名者算「已认出」
 }
 
-export function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
+function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
   const rows = new Map<string, TokenInfo>(seed.map((r) => [r.id, r]));
   const refs = new Map<TokenRef, string>();
   const snapshotTokenIds: string[] = [];
@@ -212,7 +212,7 @@ export function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeToken
 const clone = (row: TokenInfo): TokenInfo => ({ ...row });
 
 // —— per-user:价 facet + 历史日价 ——
-export interface FakeTokenPriceStore extends InMemory<TokenPriceStore> {
+interface FakeTokenPriceStore extends InMemory<TokenPriceStore> {
   readonly current: Map<string, { price: TokenPrice; expiresAt: number }>;
   readonly daily: Map<string, Map<number, number>>;
   // 按 ref 直存的历史日价(与 `daily` 分开:那个键是 tokenId,这个键是 ref —— 真表里两者
@@ -220,7 +220,7 @@ export interface FakeTokenPriceStore extends InMemory<TokenPriceStore> {
   readonly dailyByRef: Map<string, Map<number, number>>;
 }
 
-export function fakeTokenPriceStore(): FakeTokenPriceStore {
+function fakeTokenPriceStore(): FakeTokenPriceStore {
   const current = new Map<string, { price: TokenPrice; expiresAt: number }>();
   const daily = new Map<string, Map<number, number>>();
   const dailyByRef = new Map<string, Map<number, number>>();
@@ -293,7 +293,7 @@ export function fakeTokenPriceStore(): FakeTokenPriceStore {
 // —— 全局映射表 ——
 // 契约来自 `@folio/db` 的那张门票(它没有「谁的」这回事,所以不是参考层的端口)——
 // 取字段类型而不是另抄一份签名。
-export interface FakeGlobalRefIndexStore extends InMemory<GlobalRefIndexStore> {
+interface FakeGlobalRefIndexStore extends InMemory<GlobalRefIndexStore> {
   // 测试用它直接塞一条映射(模拟 cron 刷完表)。**不暴露内部键格式** ——
   // 让测试自己拼键的话,键格式一改测试就静默失配(踩过一次)。
   // chainRef → 整条 upstreamRef(#228:值是整条,不是裸 id)。
@@ -304,7 +304,7 @@ export interface FakeGlobalRefIndexStore extends InMemory<GlobalRefIndexStore> {
 
 const idxKey = (upstream: string, chainRef: string) => `${upstream} ${chainRef}`;
 
-export function fakeGlobalRefIndexStore(
+function fakeGlobalRefIndexStore(
   seed: Record<string, TokenRef> = {}, // chainRef → 整条 upstreamRef
   upstream = "src",
 ): FakeGlobalRefIndexStore {

@@ -465,9 +465,6 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
-      '@effect/platform':
-        specifier: 'catalog:'
-        version: 0.97.1(effect@3.22.1)
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

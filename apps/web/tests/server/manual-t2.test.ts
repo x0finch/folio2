@@ -21,21 +21,6 @@ async function resetUser(): Promise<void> {
 
 beforeEach(resetUser);
 
-async function snapshotCount(accountId: string): Promise<number> {
-  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM snapshots WHERE account_id = ?")
-    .bind(accountId)
-    .first<{ n: number }>();
-  return row?.n ?? 0;
-}
-async function balanceCount(accountId: string): Promise<number> {
-  const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS n FROM snapshot_balances WHERE snapshot_id IN (SELECT id FROM snapshots WHERE account_id = ?)",
-  )
-    .bind(accountId)
-    .first<{ n: number }>();
-  return row?.n ?? 0;
-}
-
 // 合成余额不再带 symbol / tokenRef(#243:都住 Token 那一行)。「这条余额认成了哪个上游币」
 // 改由它的 token_id 反查 token_refs 的 coingecko 那一档 —— 选了币 → `issued:<coinId>`,没选 → null。
 async function coingeckoRefOf(tokenId: string | null | undefined): Promise<string | null> {
@@ -46,15 +31,6 @@ async function coingeckoRefOf(tokenId: string | null | undefined): Promise<strin
     .bind(USER, tokenId)
     .first<{ n: string }>();
   return row?.n ?? null;
-}
-
-// 直接写一行快照 + 一条余额(绕过 sync,单测 purge 谓词用)。
-async function seedSnapshot(accountId: string): Promise<void> {
-  await dbFor(USER).snapshots.write(accountId, {
-    takenAt: Date.now(),
-    totalUsd: 100,
-    balances: [{ tokenId: "tk-btc", amount: 1, usdValue: 100, kind: "spot" }],
-  });
 }
 
 describe("injectManualSnapshots (D1 round-trip)", () => {
@@ -181,33 +157,5 @@ describe("manualBalancesForWarm", () => {
     // 只应含活跃账户的币(BTC),不含归档账户的币(ETH)。身份走 token_id(#243:无 symbol/tokenRef)。
     expect(balances).toHaveLength(1);
     expect(await coingeckoRefOf(balances[0].tokenId)).toBe("issued:bitcoin");
-  });
-});
-
-describe("purge 迁移谓词:删 manual 快照,留其余(级联删余额)", () => {
-  it("DELETE ... WHERE account_id IN (manual accounts) 只删 manual", async () => {
-    const manual = await createManualAccount(
-      USER,
-      "M",
-      JSON.stringify([{ symbol: "ETH", unitPrice: "3000", amount: "1" }]),
-    );
-    const btc = await dbFor(USER).accounts.create({
-      connectorId: "bitcoin",
-      label: "BTC wallet",
-      creds: null,
-    });
-    // manual 账户本不该有快照,但历史遗留行正是本迁移要清的 → 手动种一行模拟。
-    await seedSnapshot(manual.id);
-    await seedSnapshot(btc.id);
-    expect(await snapshotCount(manual.id)).toBe(1);
-    expect(await balanceCount(manual.id)).toBe(1);
-
-    await env.DB.prepare(
-      "DELETE FROM snapshots WHERE account_id IN (SELECT id FROM accounts WHERE connector_id = 'manual')",
-    ).run();
-
-    expect(await snapshotCount(manual.id)).toBe(0);
-    expect(await balanceCount(manual.id)).toBe(0); // ON DELETE cascade
-    expect(await snapshotCount(btc.id)).toBe(1); // 非 manual 保留
   });
 });

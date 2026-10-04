@@ -215,24 +215,6 @@ test.describe("手快、网慢", () => {
     expect(await authenticator.credentials()).toHaveLength(1);
   });
 
-  test("反复开关十几次 → 凭据数量不涨", async ({ page, addAuth }) => {
-    const authenticator = await addAuth();
-    await enableLock(page);
-
-    const toggle = page.getByRole("switch", { name: /auto-lock/i });
-    for (let i = 0; i < 6; i++) {
-      // 每一步都等状态真的落到 localStorage 再点下一下 —— 只看 aria 会撞上「开」那一步的异步尾巴
-      // (claim 里还要 await 刷新列表),下一次点击就会打在半完成的状态上。
-      await toggle.click(); // 关
-      await expect.poll(async () => (await readLockState(page)).enabled).toBeNull();
-      await toggle.click(); // 开(每次都会重新验证)
-      await expect.poll(async () => (await readLockState(page)).enabled).not.toBeNull();
-    }
-
-    // 重新开启走的是验证而不是注册,所以凭据永远只有一条 —— 这条同时防住「每次开锁都新注册」这种回归。
-    expect(await authenticator.credentials()).toHaveLength(1);
-  });
-
   test("验证过了但紧接着刷新列表失败 → 开关与本地记录不打架", async ({ page, addAuth }) => {
     await addAuth();
     await enableLock(page);

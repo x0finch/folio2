@@ -1,10 +1,5 @@
 import { env } from "cloudflare:test";
-import type { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildAccountValueHistory } from "@/lib/core/history";
-import { loadAccountHistory } from "@/lib/server/accounts/history";
-import type { AppError } from "@/lib/server/errors";
-import { runForUser, type UserServices } from "@/lib/server/runtime";
 import { readAccountHoldingsView } from "./_kit/run";
 import { dbFor } from "./db-effect";
 import { createManualAccount, sealManualAccount } from "./manual-fns";
@@ -15,16 +10,10 @@ import { ticketOf } from "./ticket";
 //
 // 这些用例都打真 D1:封存跨了账本、参考层、快照三处,而「有没有真落一行」只有在库里看得出来。
 // 出网一律打桩成抛错 —— 封存按设计不出网(价取自本地参考层缓存,取不到回退用户自填价)。
-// **#527 后续件 4:三条摘去了新家** —— 「再封存不落第二张」「归档后末点停在封存」「不补实时
-// 盯市末点」现在住 `accounts/archive.cases.ts` 与 `accounts/history.cases.ts`(同层、断言相同)。
+// **#527 后续件 4:曲线那几条摘去了新家** —— 「再封存不落第二张」「归档后末点停在封存」「活跃时
+// 末点到现在」现在住 `accounts/archive.cases.ts` 与 `accounts/history.cases.ts`(同层、断言相同)。
 // 留在这里的是那边没有的:封存金额取自账本、非 manual 不落、取消归档后数字回实时。
 const USER = "user-archive-seal";
-
-// 生产那条路的把手 —— 底下就是 server fn / 路由用的那个内核(#504 T13)。
-const run = <A, E extends AppError, R extends UserServices>(
-  userId: string,
-  effect: Effect.Effect<A, E, R>,
-): Promise<A> => runForUser(userId, effect);
 
 let outbound: string[] = [];
 
@@ -53,11 +42,7 @@ const manualWithBtc = (label = "M") =>
   );
 
 describe("归档 manual 账户 = 落一张封存快照", () => {
-  it("封存之前:一张快照都没有(这正是本片存在的理由)", async () => {
-    const account = await manualWithBtc();
-    expect(await dbFor(USER).snapshots.listByAccount(account.id)).toEqual([]);
-  });
-
+  // manual 从不写快照(ADR 0018),封存之前这里一张都没有 —— 所以「多了一张」就是封存落的。
   it("封存之后:库里真的多了一张,金额取自账本", async () => {
     const account = await manualWithBtc();
 
@@ -115,24 +100,5 @@ describe("归档 manual 账户 = 落一张封存快照", () => {
     expect(row?.takenAt).not.toBe(1_700_000_000_000);
     // 快照没被删
     expect(await dbFor(USER).snapshots.listByAccount(account.id)).toHaveLength(1);
-  });
-});
-
-// —— 单账户曲线画到哪儿为止(片 5)——
-//
-// manual 的单账户曲线走账本 compute-on-read,末点原本恒是「现在」并且再补一个实时盯市点。
-// 归档之后抽屉头显示的是封存值,曲线却还在往今天长 —— 一个抽屉里两个说法。
-describe("归档 manual 账户的单账户曲线", () => {
-  it("活跃时:末点到「现在」,而且补了实时盯市点", async () => {
-    const account = await manualWithBtc();
-
-    const raw = await run(
-      USER,
-      loadAccountHistory({ accountId: account.id, connectorId: "manual" }),
-    );
-    const series = buildAccountValueHistory(raw.rows, raw.live);
-
-    expect(series.length).toBeGreaterThan(0);
-    expect(Date.now() - series[series.length - 1].t).toBeLessThan(60_000);
   });
 });

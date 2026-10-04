@@ -17,15 +17,9 @@ describe("pickSelectedPortfolio", () => {
     expect(pickSelectedPortfolio(undefined, LIST, DEFAULT)).toBe(DEFAULT);
   });
 
-  it("认不出的 id → 安静回默认(过期的收藏链接不该给空视图)", () => {
+  // 别人的 id 在这一层就是「认不出的 id」(列表只有本人的组合)—— 同一个结果,越权探测无回应差异。
+  it("认不出的 id(含别人的)→ 安静回默认(过期的收藏链接不该给空视图)", () => {
     expect(pickSelectedPortfolio("pf-deleted", LIST, DEFAULT)).toBe(DEFAULT);
-  });
-
-  it("别人的 id 与不存在的 id **完全同一个结果**(越权探测无回应差异)", () => {
-    const someoneElses = pickSelectedPortfolio("pf-of-another-user", LIST, DEFAULT);
-    const neverExisted = pickSelectedPortfolio("pf-never-existed", LIST, DEFAULT);
-    expect(someoneElses).toBe(neverExisted);
-    expect(someoneElses).toBe(DEFAULT);
   });
 
   // 这几种进不来 route 的校验器(那边 `.catch(undefined)` 兜住了),但 `_authed` 的 loader 读的是

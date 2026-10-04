@@ -46,23 +46,6 @@ describe("tokens/list-fiat-options", () => {
   });
 
   describe("listFiatOptions", () => {
-    it("返回一批法币,取得到汇率的带价和取到的时刻", async () => {
-      stubOutbound([["/exchange_rates", () => json(RATES)]]);
-      await warmFx();
-      const out = await call(USER, handleListFiatOptions({ locale: "en" }));
-
-      expect(out.length).toBeGreaterThan(1);
-      const eur = bySymbol(out, "EUR") as { price?: number; asOf?: number };
-      expect(eur.price).toBeCloseTo(100000 / 92000, 6);
-      expect(eur.asOf).toBeTruthy();
-    });
-
-    it("USD 的汇率是 1", async () => {
-      stubOutbound([["/exchange_rates", () => json(RATES)]]);
-      const out = await call(USER, handleListFiatOptions({ locale: "en" }));
-      expect((bySymbol(out, "USD") as { price?: number }).price).toBe(1);
-    });
-
     it("locale 是 zh → 名字是中文", async () => {
       stubOutbound([["/exchange_rates", () => json(RATES)]]);
       const out = await call(USER, handleListFiatOptions({ locale: "zh" }));

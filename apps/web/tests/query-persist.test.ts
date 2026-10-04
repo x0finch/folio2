@@ -172,6 +172,7 @@ describe("锁屏 / 登出", () => {
     await persistence.clear();
     await vi.advanceTimersByTimeAsync(THROTTLE * 2);
     expect(mem.map.size).toBe(0);
+    expect(mem.owner()).toBeUndefined(); // 清盘连户主一起抹
 
     qc.setQueryData([...accountKeys.list("pf")], [{ id: "a3" }]);
     await vi.advanceTimersByTimeAsync(THROTTLE);
@@ -180,6 +181,7 @@ describe("锁屏 / 登出", () => {
     persistence.resume(qc);
     qc.setQueryData([...accountKeys.list("pf")], [{ id: "a4" }]);
     await vi.advanceTimersByTimeAsync(THROTTLE);
+    expect(mem.owner()).toBe(USER_A); // 解锁后户主记回来,写才落得下
     expect(mem.map.has(`user:${USER_A}`)).toBe(true);
   });
 
@@ -298,19 +300,6 @@ describe("多个标签页(review #3)", () => {
     await vi.advanceTimersByTimeAsync(THROTTLE * 2);
 
     expect(mem.map.size).toBe(0);
-  });
-
-  it("解锁后户主记回来,接着写得下", async () => {
-    const qc = new QueryClient();
-    await persistence.start(qc, USER_A);
-    await persistence.clear();
-    expect(mem.owner()).toBeUndefined();
-
-    persistence.resume(qc);
-    qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
-    await vi.advanceTimersByTimeAsync(THROTTLE);
-    expect(mem.owner()).toBe(USER_A);
-    expect(mem.map.has(`user:${USER_A}`)).toBe(true);
   });
 });
 

@@ -89,30 +89,9 @@ describe("warm 走 SWR,一次整份写", () => {
 
 // 同一份 blob 的另一个读者。**它在写路径上**(mint 的 symbol 那一档),所以判据完全不同:
 // 有就用,多旧都用。这是 #216 的核心 —— 不让「哪个币叫 POL」这种几乎不变的数据把用户
-// 卡在 4 次目录请求上。
+// 卡在 4 次目录请求上。「多旧都不回源 / 冷启取一次 / 冷启挂了给空」经 `CandidateSource`
+// 在 candidates.test 里测;这里只留它与橱窗共用一份 blob 的那条。
 describe("目录读者:有就用,只有完全没有才取一次", () => {
-  it("blob 再旧也不回源 —— 隔了一年照样零请求", async () => {
-    const h = setup([coin("bitcoin", "BTC", 1)]);
-    await h.run(
-      Effect.gen(function* () {
-        yield* warmCatalogue(h.cache, h.upstream, 50); // 冷 → 取一次
-        yield* TestClock.adjust(Duration.millis(365 * 24 * 60 * 60 * 1000));
-        expect(yield* warmCatalogue(h.cache, h.upstream, 50)).toHaveLength(1);
-        expect(h.upstream.calls).toEqual(["fetchMarkets:50"]); // 仍然只有那一次
-      }),
-    );
-  });
-
-  it("完全没有 → 取一次(躲不掉:候选集为空 = 按 symbol 认的币全认不出来)", async () => {
-    const h = setup([coin("bitcoin", "BTC", 1)]);
-    await h.run(
-      Effect.gen(function* () {
-        expect(yield* warmCatalogue(h.cache, h.upstream, 50)).toHaveLength(1);
-        expect(h.upstream.calls).toHaveLength(1);
-      }),
-    );
-  });
-
   it("橱窗刷过之后,目录读者读到的是新的那份(同一个键,不是两份缓存)", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
@@ -127,12 +106,6 @@ describe("目录读者:有就用,只有完全没有才取一次", () => {
         expect([...h.cache.entries.keys()]).toEqual(["warm"]);
       }),
     );
-  });
-
-  it("上游冷启动就挂了 → 空候选,不抛(认不出来总好过同步崩)", async () => {
-    const h = setup();
-    h.upstream.fail = upstreamDown();
-    expect(await h.run(warmCatalogue(h.cache, h.upstream, 50))).toEqual([]);
   });
 });
 
@@ -255,14 +228,6 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
       { ref: "src/issued:fake-usdc", marketCapRank: 4200 },
     ]);
     expect([...h.cache.entries.keys()]).toEqual(["warm"]);
-  });
-
-  it("symbol 归一同口径(大小写/空白不影响命中)", async () => {
-    const h = setup([coin("bitcoin", "btc", 1)]);
-    const rows = await h.run(warmMarkets(h.cache, h.upstream, 50));
-    expect(candidatesBySymbol(rows, "  BTC ")).toEqual([
-      { ref: "src/issued:bitcoin", marketCapRank: 1 },
-    ]);
   });
 
   // 目录里混进同一个币两次(上游分页来自不同快照,见 coingecko adapter)。**不去重的后果是

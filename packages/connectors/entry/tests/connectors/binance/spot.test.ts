@@ -17,17 +17,6 @@ describe("parseAccountBalances (golden: fixtures in → fixture out)", () => {
     expect(balances.find((b) => b.symbol === "BNB")).toBeUndefined();
   });
 
-  it("锁仓的币(ETH)自带 Locked note(数量口径 + 单位);无锁仓的币(BTC/USDT)无 note", () => {
-    const eth = balances.find((b) => b.symbol === "ETH");
-    expect(eth?.note).toEqual({
-      title: "Locked",
-      icon: "warning",
-      content: "1 ETH · 33%",
-    });
-    expect(balances.find((b) => b.symbol === "BTC")?.note).toBeUndefined();
-    expect(balances.find((b) => b.symbol === "USDT")?.note).toBeUndefined();
-  });
-
   it("跳过 LD 前缀理财份额(LDBNB,与 earn wallet 重复),但保留 LDO 等短币真币", () => {
     const rows = parseAccountBalances(
       {

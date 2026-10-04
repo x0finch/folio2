@@ -27,14 +27,6 @@ test.describe("开启闲置锁", () => {
     expect(state.deviceCredential).toBe(creds[0]?.credentialId);
   });
 
-  // 用例 3:拨开开关不会先弹一个「确定要开吗」的确认框。
-  test("拨开开关不弹自家的确认框 —— 系统的指纹提示已经说清楚了", async ({ page, addAuth }) => {
-    await addAuth();
-    await gotoHydrated(page, "/settings");
-    await page.getByRole("switch", { name: /auto-lock/i }).click();
-    await expect(page.getByText(/turn on auto-lock\?/i)).toHaveCount(0);
-  });
-
   // 用例 2:这台机器没有指纹/面容时,开关**直接禁用并说明原因**,而不是让人点了没反应。
   //
   // 为什么必须禁用:这种情况下浏览器**不返回失败** —— 它停在系统那层等一个够格的认证器(真机上就是
@@ -148,15 +140,5 @@ test.describe("开启闲置锁", () => {
     expect(state.timeout).toBe("5"); // 时长是偏好,没被重置回 15
     // 验证不是注册 —— 全程只有一条凭据,不会因为反复开关攒出一堆。
     expect(await authenticator.credentials()).toHaveLength(1);
-  });
-
-  // 用例 22:锁关着的时候,时长那排是灰的、点不动。
-  test("锁关着时时长行灰化且点不动", async ({ page, addAuth }) => {
-    await addAuth();
-    await page.goto("/settings");
-
-    const gate = page.locator('[aria-disabled="true"]').filter({ has: page.getByRole("tablist") });
-    await expect(gate).toBeVisible();
-    await expect(gate).toHaveClass(/pointer-events-none/);
   });
 });

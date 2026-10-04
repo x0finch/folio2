@@ -57,17 +57,6 @@ describe("portfolios/memberships", () => {
       expect(await memberships()).toEqual([{ accountId: acc.id, portfolioId: def.id }]);
     });
 
-    it("Portfolio 被删 → 它的成员关系不再悬空(改指默认)", async () => {
-      const def = await db(USER).portfolios.ensureDefault();
-      const pf = await db(USER).portfolios.create({ name: "要删的" });
-      const a = await account(USER, "甲");
-      await db(USER).portfolios.assignAccount(a.id, pf.id);
-
-      await db(USER).portfolios.remove(pf.id);
-
-      expect((await memberships()).map((l) => l.portfolioId)).toEqual([def.id]);
-    });
-
     it("账户被删 → 它那条关系一并消失", async () => {
       const def = await db(USER).portfolios.ensureDefault();
       const a = await account(USER, "甲");

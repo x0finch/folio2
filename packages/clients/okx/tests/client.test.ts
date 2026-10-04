@@ -17,7 +17,6 @@ import {
 } from "../src/constants";
 import balanceFixture from "./fixtures/balance.json" with { type: "json" };
 import fundingFixture from "./fixtures/funding.json" with { type: "json" };
-import savingsFixture from "./fixtures/savings.json" with { type: "json" };
 import valuationFixture from "./fixtures/valuation.json" with { type: "json" };
 
 const CREDS = { apiKey: "the-key", secret: "the-secret", passphrase: "the-phrase" } as const;
@@ -137,11 +136,6 @@ describe("业务码(HTTP 200 + code)", () => {
   // 与 Bybit 同一个坑,只是 OKX 的 code 是**字符串**。不查它的话,签名错会被当成功、data 为空,
   // 最后表现成「这个账户余额是 0」—— 静默丢数据。
   const withCode = (code: string, msg = "boom") => stub(() => json({ code, msg })).fn;
-
-  it("code '0' 才算成功", async () => {
-    const { fn } = stub(() => json(savingsFixture));
-    await expect(withClient(fn, (c) => c.savingsBalance(CREDS))).resolves.toBeTruthy();
-  });
 
   it("凭据/签名/权限类 code → 凭据问题", async () => {
     // 50100 冻结 / 50102 时间戳过期 / 50105 passphrase 错 / 50111 key 非法 / 50113 签名错

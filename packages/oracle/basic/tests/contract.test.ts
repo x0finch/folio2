@@ -1,17 +1,9 @@
 import { describe, expect, it } from "vitest";
 import * as contract from "../src";
-import {
-  dayBucketOf,
-  INFO_TTL_MS,
-  MS_PER_DAY,
-  normalizeSymbol,
-  PLATFORM_TTL_MS,
-  PRICE_TTL_MS,
-  WARM_TTL_MS,
-} from "../src";
+import { dayBucketOf, MS_PER_DAY, normalizeSymbol } from "../src";
 
-// 契约层只有类型、端口与常量(无逻辑函数)。这里钉的是「常量之间的关系」与
-// 「这一层不许认识任何数据源」—— 后者是 ADR 0023 的立身之本,值得有个守卫。
+// 契约层只有类型、端口与常量(无逻辑函数)。这里钉的是「这一层不许认识任何数据源」——
+// 那是 ADR 0023 的立身之本,值得有个守卫。
 
 describe("这一层不认识任何上游", () => {
   it("导出面里没有数据源的名字", () => {
@@ -24,13 +16,6 @@ describe("这一层不认识任何上游", () => {
     // 若哪天这里冒出一个 `CGK_NAMER` 之类的常量,上面那条会先红;这条钉的是没有默认值可用。
     const values = Object.values(contract).filter((v) => typeof v === "string");
     expect(values.filter((v) => /coingecko|coinmarketcap/i.test(v))).toEqual([]);
-  });
-});
-
-describe("TTL 之间的关系(混一个接口就会在同一个方法里纠缠,故切两个 store)", () => {
-  it("info / 平台名图近静态 → 长;warm / 价要新鲜 → 短", () => {
-    expect(INFO_TTL_MS).toBeGreaterThan(PRICE_TTL_MS);
-    expect(PLATFORM_TTL_MS).toBeGreaterThan(WARM_TTL_MS);
   });
 });
 

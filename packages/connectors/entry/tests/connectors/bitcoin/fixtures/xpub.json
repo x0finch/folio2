@@ -4,31 +4,456 @@
   },
   "response": {
     "address": "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs",
-    "balance": "80000",
+    "balance": "0",
+    "totalReceived": "5631015",
+    "totalSent": "5631015",
     "unconfirmedBalance": "0",
-    "txs": 3,
+    "unconfirmedTxs": 0,
+    "txs": 276,
+    "addrTxCount": 276,
+    "usedTokens": 40,
     "tokens": [
       {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
         "name": "bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu",
         "path": "m/84'/0'/0'/0/0",
-        "transfers": 2,
-        "balance": "50000"
+        "transfers": 176,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "4082661",
+        "totalSent": "4082661"
       },
       {
-        "name": "bc1qchange0",
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qnjg0jd8228aq7egyzacy8cys3knf9xvrerkf9g",
+        "path": "m/84'/0'/0'/0/1",
+        "transfers": 8,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "101720",
+        "totalSent": "101720"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qp59yckz4ae5c4efgw2s5wfyvrz0ala7rgvuz8z",
+        "path": "m/84'/0'/0'/0/2",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "2000",
+        "totalSent": "2000"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qgl5vlg0zdl7yvprgxj9fevsc6q6x5dmcyk3cn3",
+        "path": "m/84'/0'/0'/0/3",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "2000",
+        "totalSent": "2000"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qm97vqzgj934vnaq9s53ynkyf9dgr05rargr04n",
+        "path": "m/84'/0'/0'/0/4",
+        "transfers": 5,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "14292",
+        "totalSent": "14292"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qnpzzqjzet8gd5gl8l6gzhuc4s9xv0djt0rlu7a",
+        "path": "m/84'/0'/0'/0/5",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "2000",
+        "totalSent": "2000"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qtet8q6cd5vqm0zjfcfm8mfsydju0a29ggqrmu9",
+        "path": "m/84'/0'/0'/0/6",
+        "transfers": 6,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "114961",
+        "totalSent": "114961"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qhxgzmkmwvrlwvlfn4qe57lx2qdfg8phycnsarn",
+        "path": "m/84'/0'/0'/0/7",
+        "transfers": 4,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "20000",
+        "totalSent": "20000"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qncdts3qm2guw3hjstun7dd6t3689qg4230jh2n",
+        "path": "m/84'/0'/0'/0/8",
+        "transfers": 5,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "24440",
+        "totalSent": "24440"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qgswpjzsqgrm2qkfkf9kzqpw6642ptrgzapvh9y",
+        "path": "m/84'/0'/0'/0/9",
+        "transfers": 4,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "206170",
+        "totalSent": "206170"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qd30z5a5e50jtgx28rvt64483tq65r9pkj623wh",
+        "path": "m/84'/0'/0'/0/10",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "20000",
+        "totalSent": "20000"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qxr4fjkvnxjqphuyaw5a08za9g6qqh65t8qwgum",
+        "path": "m/84'/0'/0'/0/11",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "157168",
+        "totalSent": "157168"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q8txvqq8kr0nhkatkrmeg7zaj45zpsef2ylc9pq",
+        "path": "m/84'/0'/0'/0/12",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "11630",
+        "totalSent": "11630"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qgr7f3jfuzhpe45h3dnqxxjr3ml0de4ad2w3ysd",
+        "path": "m/84'/0'/0'/0/13",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "45664",
+        "totalSent": "45664"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q4fxs7lhw70m7nn7u6hqsa0glyt045ls5vdl6hs",
+        "path": "m/84'/0'/0'/0/14",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "18738",
+        "totalSent": "18738"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qgtus5u58avcs5ehpqvcllv5f66dneznw3upy2v",
+        "path": "m/84'/0'/0'/0/15",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "1000",
+        "totalSent": "1000"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q7kv2wwzgh2zej88ywrjvnpvmqy2emefc8ar3za",
+        "path": "m/84'/0'/0'/0/16",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "1000",
+        "totalSent": "1000"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qrz46a4gt0sghvvyt4gy5kp2rswmhtufv6sdq9v",
+        "path": "m/84'/0'/0'/0/17",
+        "transfers": 4,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "532417",
+        "totalSent": "532417"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qf60uv69k0prrdxkpmh94u9cwmkpkl0t0r02hgh",
+        "path": "m/84'/0'/0'/0/18",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "23266",
+        "totalSent": "23266"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q27yd7vz8m5kz230wuyncfe3pyazez6ah58yzy0",
+        "path": "m/84'/0'/0'/0/19",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "54202",
+        "totalSent": "54202"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qy62dyq937vfjr5e8tj3ltx7zc6fw958tmvqa5l",
+        "path": "m/84'/0'/0'/0/20",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "30000",
+        "totalSent": "30000"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q7ynxq7vj5uevr243zalsyguttmn636wh7dkml0",
+        "path": "m/84'/0'/0'/0/21",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "1667",
+        "totalSent": "1667"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q22mq4ml9m8y5hptn4qmcj3r9aywgzkspvu0ygc",
+        "path": "m/84'/0'/0'/0/22",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "1666",
+        "totalSent": "1666"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qut5hjrs2l8lxk5rrmt9a0s0z9237h44szk0fyr",
+        "path": "m/84'/0'/0'/0/23",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "35857",
+        "totalSent": "35857"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qrmxgay29sg36z4fjkgzqfjtar0xuztpnkatckh",
+        "path": "m/84'/0'/0'/0/24",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "725",
+        "totalSent": "725"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qerhm9gq6e8gfespketn85mynlp5hzdsuqqal0d",
+        "path": "m/84'/0'/0'/0/25",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "7954",
+        "totalSent": "7954"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qkhslxah97xmmckp2qj3re0z8sry4pagm08s56x",
+        "path": "m/84'/0'/0'/0/26",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "24590",
+        "totalSent": "24590"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q990czzvkezpdypzzdfukw00dlm8rayerq67dd0",
+        "path": "m/84'/0'/0'/0/27",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "9309",
+        "totalSent": "9309"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qa47zdjm62q238yed4q5wugtrxl08xy6h73axwn",
+        "path": "m/84'/0'/0'/0/31",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "8000",
+        "totalSent": "8000"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q2q04566wllnzvl73x2a3dwdk8ga2xukc6ez47h",
+        "path": "m/84'/0'/0'/0/32",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "15379",
+        "totalSent": "15379"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qzsyz2kyt838yc0f8j9j6evrdufu09ze3gjypxk",
+        "path": "m/84'/0'/0'/0/33",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "800",
+        "totalSent": "800"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qzlf4ug5zas4ywhdfy2acjd5fqp98gwy7eupkus",
+        "path": "m/84'/0'/0'/0/34",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "688",
+        "totalSent": "688"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qa7h7t5pls8m5s6jx50kz8ear6qv6vgmekfvqd4",
+        "path": "m/84'/0'/0'/0/35",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "787",
+        "totalSent": "787"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qyz8kumx7yr33tfymev6f0ttgrncvmpxtqgr7z0",
+        "path": "m/84'/0'/0'/0/36",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "14110",
+        "totalSent": "14110"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q5nlgay52lh6segw8cmsxu2x0kgfphf57a00fd9",
+        "path": "m/84'/0'/0'/0/37",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "7770",
+        "totalSent": "7770"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qgpwuwm334d2qlt2rr5nrc0van2lt6ax7h3r3km",
+        "path": "m/84'/0'/0'/0/38",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "6605",
+        "totalSent": "6605"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1qfp32zz2wenptc9nvu7v9qedhf8vdkufljq8qzx",
+        "path": "m/84'/0'/0'/0/39",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "4000",
+        "totalSent": "4000"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q0tdmtp8kf2hk6hfh2xxd2e276tzur85pgps9au",
+        "path": "m/84'/0'/0'/0/40",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "3107",
+        "totalSent": "3107"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q8jkgp7wyyc47h5fj83y3pc5r2n24u6thcdxe04",
+        "path": "m/84'/0'/0'/0/41",
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "2000",
+        "totalSent": "2000"
+      },
+      {
+        "type": "XPUBAddress",
+        "standard": "XPUBAddress",
+        "name": "bc1q8c6fshw2dlwun7ekn9qwf37cu2rn755upcp6el",
         "path": "m/84'/0'/0'/1/0",
-        "transfers": 1,
-        "balance": "30000"
+        "transfers": 2,
+        "decimals": 8,
+        "balance": "0",
+        "totalReceived": "20672",
+        "totalSent": "20672"
       }
     ]
   },
-  "expected": [
-    {
-      "symbol": "BTC",
-      "amount": 0.0008,
-      "value": 0,
-      "kind": "spot",
-      "tokenRef": "bitcoin/native"
-    }
-  ]
+  "expected": []
 }

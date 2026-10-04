@@ -28,20 +28,11 @@ test.describe("锁屏", () => {
     );
   });
 
-  // 用例 9:闲置到时间,持仓被遮住了。
-  test("闲置超时 → 遮罩盖上,持仓看不见了", async ({ page }) => {
-    await page.goto("/");
-    await travelPastIdle(page, 15);
-    // 任何一次活动检查都会触发比对;切个可见性最省事。
-    await page.reload();
-
-    await expect(page.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
-  });
-
-  // 用例 14:刷新页面绕不过锁屏。
+  // 用例 9 + 14:闲置到时间就盖上;刷新页面也绕不过锁屏。
   test("锁着的时候刷新,还是锁着 —— 刷新不是后门", async ({ page }) => {
     await page.goto("/");
     await travelPastIdle(page, 15);
+    // 任何一次活动检查都会触发比对;刷新一下最省事。
     await page.reload();
     await expect(page.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
 

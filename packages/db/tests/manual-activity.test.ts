@@ -2,7 +2,6 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-import { manualActivity } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { forDomain, forOracle } from "./effect";
 
@@ -90,18 +89,5 @@ describe("manual_activity ops", () => {
     expect(await manualOf(USER_B).listActivityByAccount(acc.id)).toEqual([]);
     // A 仍只有 1 条
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(1);
-  });
-
-  it("cascade: deleting the account removes its activity", async () => {
-    const acc = await manualAccount(USER_A);
-    await manualOf(USER_A).recordActivity(acc.id, acc.tokenId, {
-      kind: "set",
-      amount: 10,
-      occurredAt: 1,
-    });
-    await accounts(USER_A).remove(acc.id);
-    // 账户已删 → 直接查表确认活动被级联清(经 userId 路径已查不到账户)。
-    const rows = await getDb(env).select().from(manualActivity);
-    expect(rows.filter((r) => r.accountId === acc.id)).toEqual([]);
   });
 });

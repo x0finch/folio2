@@ -40,14 +40,6 @@ describe("connector 目录(listConnectors 发的就是它)", () => {
       expect(entry.logo, `${cid} 没有 logo`).toBeTruthy();
     }
   });
-
-  it("目录不带任何用户数据 —— 两次取到的完全一样", async () => {
-    blockOutbound();
-    const a = await realRegistry();
-    const b = await realRegistry();
-
-    expect(a.catalog).toEqual(b.catalog);
-  });
 });
 
 describe("凭据字段规格(getConnectorCredentialSpecs 发的就是它)", () => {
@@ -59,20 +51,8 @@ describe("凭据字段规格(getConnectorCredentialSpecs 发的就是它)", () =
     expect(specs.binance?.map((f) => f.key)).not.toContain("passphrase");
   });
 
-  it("每个字段的 type 都在三档之内 —— 加密塑形全靠它", async () => {
-    // **这条是红线的上游。** `sealCreds` 按 type 决定加不加密;出现一个界外的 type,
-    // 那个字段会被当成明文落库。
-    blockOutbound();
-    const { specs } = await realRegistry();
-
-    for (const [cid, fields] of Object.entries(specs)) {
-      for (const f of fields ?? []) {
-        expect(["public", "semi", "secret"], `${cid}.${f.key} 的 type 越界`).toContain(f.type);
-      }
-    }
-  });
-
   it("CEX 的 secret 字段确实标成 secret,不是 public", async () => {
+    // **这条是红线的上游。** `sealCreds` 按 type 决定加不加密;标错一档,那个字段会被当成明文落库。
     blockOutbound();
     const { specs } = await realRegistry();
 

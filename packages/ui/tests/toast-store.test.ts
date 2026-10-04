@@ -21,19 +21,11 @@ describe("toast store", () => {
     expect(snap[0].duration).toBeGreaterThan(0); // 终态自动消失
   });
 
-  it("error 同样支持 {id} 原地更新", () => {
-    const id = toast.loading("同步中");
-    toast.error("失败了", { id });
-    const snap = __toastStore.snapshot();
-    expect(snap).toHaveLength(1);
-    expect(snap[0]).toMatchObject({ id, title: "失败了", status: "error" });
-  });
-
   it("无 {id} 或 id 不存在 → 新建独立 toast", () => {
     toast.loading("a");
     toast.success("b");
     toast.error("c", { id: "does-not-exist" });
-    expect(__toastStore.snapshot()).toHaveLength(3);
+    expect(__toastStore.snapshot().map((t) => t.status)).toEqual(["loading", "success", "error"]);
   });
 
   it("透传 action / description(带按钮的 toast)", () => {

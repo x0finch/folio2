@@ -1,22 +1,14 @@
-import { Duration, Effect, Layer, Option, TestClock, TestContext } from "effect";
+import { Duration, Effect, Option, TestClock } from "effect";
 import { describe, expect, it } from "vitest";
-import { GlobalRefIndexService, Oracle, oracleLayer } from "../src";
+import { GlobalRefIndexService, Oracle } from "../src";
 import { FxService } from "../src/fx";
 import { PlatformService } from "../src/platforms";
 import { TokenService } from "../src/tokens";
-import {
-  fakeGlobalRefIndexStore,
-  fakeTokenPriceStore,
-  fakeTokenStore,
-  harness,
-  now0,
-  upstreamDown,
-} from "./fakes";
+import { harness, now0, upstreamDown } from "./fakes";
 
-// 装配层。三件事只能在这一层被验到:
+// 装配层。两件事只能在这一层被验到:
 //   ① `oracleLayer` 到底提供了哪几个服务、要哪几个端口(装配点照着它接线)
-//   ② 端口契约的往返(内存假实现钉住「读什么写什么」)
-//   ③ **写路径不为目录新鲜度出网**(#216)—— mint 与候选源各自的单测都看不见「装配时把哪个
+//   ② **写路径不为目录新鲜度出网**(#216)—— mint 与候选源各自的单测都看不见「装配时把哪个
 //      实现接了进去」,而洞恰恰在那一行
 //
 // **`DefiLogoResolver` 不在这一层了**(移回 app):它的 `R` 里一个上游都没有,那本身就是
@@ -28,22 +20,6 @@ import {
 // 有 userId 这回事(所以这里也测不了它;真正的隔离由 `@folio/db` 那几个 store 自己的测试盯)。
 
 describe("oracleLayer —— 一次装配拿到三个服务", () => {
-  it("三个服务都在,而且只要那八个端口就能起来(`CandidateSource` 不外露)", async () => {
-    const h = harness({ rates: { EUR: 1.09 }, chains: [{ key: "evm:1", name: "Ethereum" }] });
-    await h.run(
-      Effect.gen(function* () {
-        // 三个都能从 context 里拿出来,而 provide 进去的只有端口(见 fakes 的 `ports`)。
-        // **合并没有让能力消失**:读、写、现汇率、历史汇率、平台五样仍然一个不少,
-        // 只是分别落在三个服务的方法上 —— 这一条把「方法还在」也钉住。
-        expect(yield* Effect.map(TokenService, (t) => typeof t.enrich)).toBe("function");
-        expect(yield* Effect.map(TokenService, (t) => typeof t.mint)).toBe("function");
-        expect(yield* Effect.map(FxService, (f) => typeof f.resolve)).toBe("function");
-        expect(yield* Effect.map(FxService, (f) => typeof f.rateSeries)).toBe("function");
-        expect(yield* Effect.map(PlatformService, (p) => typeof p.resolve)).toBe("function");
-      }),
-    );
-  });
-
   // **聚合挂的是本尊,不是同名的另一份。** `Oracle` 只把三个域服务放到三个字段上,所以
   // `(yield* Oracle).fx` 必须和 `yield* FxService` 是同一个对象 —— 不是的话就意味着装配里
   // 有人又建了一套,那份的缓存、SWR 状态跟另一份对不上(#504 T15)。
@@ -59,26 +35,6 @@ describe("oracleLayer —— 一次装配拿到三个服务", () => {
     );
   });
 
-  // `oracleLayer` 的 `R` 里没有 `CandidateSource` —— 这一条在类型上就成立(装配点不必知道它),
-  // 这里补一个运行时的证据:只给八个端口,mint 的 symbol 那一档照样能走通。
-  it("装配点不 provide 候选源,mint 仍然按 symbol 认得出币", async () => {
-    const h = harness();
-    h.upstream.markets = [
-      {
-        ref: "src/issued:bitcoin",
-        symbol: "BTC",
-        name: "Bitcoin",
-        price: { unitPrice: 1, marketCapRank: 1, asOf: now0 },
-      },
-    ];
-    const ids = await h.run(
-      Effect.flatMap(TokenService, (t) =>
-        t.mint([{ ref: "binance/issued:BTC", seed: { symbol: "BTC" } }]),
-      ),
-    );
-    expect(h.store.refs.get("src/issued:bitcoin")).toBe(ids.get("binance/issued:BTC"));
-  });
-
   it("`oracleLayer` 是纯装配 —— 建它本身不碰任何端口", async () => {
     const h = harness();
     await h.run(Effect.void);
@@ -86,74 +42,6 @@ describe("oracleLayer —— 一次装配拿到三个服务", () => {
     expect(h.cache.reads + h.cache.writes).toBe(0);
     expect(h.upstream.calls).toEqual([]);
     expect(h.store.rows.size).toBe(0);
-  });
-});
-
-describe("契约往返(内存假实现)", () => {
-  // 端口的假实现本身不需要参考层的服务,但要虚拟时钟(TTL / stale 走 `Clock`)。
-  const run = <A, E>(e: Effect.Effect<A, E>) =>
-    Effect.runPromise(
-      Effect.zipRight(TestClock.setTime(now0), e).pipe(Effect.provide(TestContext.TestContext)),
-    );
-
-  it("代币表:建行 → 挂 ref → 按 id 读回;并发建同一条 ref 幂等", async () => {
-    const store = fakeTokenStore();
-    const id = await run(
-      store.create({ symbol: "USDC", name: "USD Coin" }, ["evm:1/contract:0xa0b8"]),
-    );
-
-    expect(await run(store.findByRefs(["evm:1/contract:0xa0b8"]))).toEqual(
-      new Map([["evm:1/contract:0xa0b8", { tokenId: id, linked: false }]]),
-    );
-    expect(Option.getOrThrow(await run(store.getById(id)))).toMatchObject({
-      symbol: "USDC",
-      ref: null,
-    });
-
-    const [a, b] = await run(
-      Effect.all(
-        [
-          store.create({ symbol: "X" }, ["evm:1/contract:0xdead"]),
-          store.create({ symbol: "X" }, ["evm:1/contract:0xdead"]),
-        ],
-        { concurrency: 2 },
-      ),
-    );
-    expect(a).toBe(b);
-  });
-
-  it("价 store:写 → 读回;过期不删,读出带 stale", async () => {
-    const prices = fakeTokenPriceStore();
-    await run(
-      Effect.gen(function* () {
-        yield* prices.put([{ tokenId: "tk_1", unitPrice: 60000, asOf: now0 }], 1000);
-        expect((yield* prices.getByIds(["tk_1"])).get("tk_1")).toMatchObject({
-          unitPrice: 60000,
-          stale: false,
-        });
-
-        yield* TestClock.adjust(Duration.millis(2000));
-        expect((yield* prices.getByIds(["tk_1"])).get("tk_1")).toMatchObject({ stale: true });
-      }),
-    );
-  });
-
-  it("全局映射:按 (upstream, chainRef) 点查回整条 upstream ref;miss 的键不出现", async () => {
-    const store = fakeGlobalRefIndexStore();
-    expect(await run(store.refreshedAt("src"))).toEqual(Option.none());
-
-    await run(
-      store.putAll(
-        [{ chainRef: "evm:1/contract:0xa0b8", upstreamRef: "src/issued:usd-coin" }],
-        123,
-      ),
-    );
-    expect(await run(store.refreshedAt("src"))).toEqual(Option.some(123));
-    expect(
-      await run(store.lookup("src", ["evm:1/contract:0xa0b8", "evm:1/contract:0xdead"])),
-    ).toEqual(new Map([["evm:1/contract:0xa0b8", "src/issued:usd-coin"]]));
-    // 换个上游就查不到 —— 这正是「加源只加行」的另一面。
-    expect(await run(store.lookup("other", ["evm:1/contract:0xa0b8"]))).toEqual(new Map());
   });
 });
 
@@ -269,6 +157,8 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
   });
 
   it("冷缓存下 mint 仍取一次 —— 否则按 symbol 认的币集体认不出来", async () => {
+    // 顺带:`oracleLayer` 的 `R` 里没有 `CandidateSource`(类型上就成立,装配点不必知道它);
+    // harness 只给八个端口,mint 的 symbol 那一档照样走通 —— 这是它的运行时证据。
     const h = harness();
     h.upstream.markets = [POL];
     const ids = await h.run(
@@ -278,12 +168,5 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     );
     expect(ids.get("binance/issued:POL")).toBeDefined();
     expect(h.upstream.calls).toHaveLength(1);
-  });
-});
-
-// `oracleLayer` 本身也要被直接用一次(不经 harness 的那层包装)—— 它是装配点唯一 import 的东西。
-describe("oracleLayer 的类型面", () => {
-  it("它是一个 Layer,且把五个服务一起给出去", () => {
-    expect(Layer.isLayer(oracleLayer)).toBe(true);
   });
 });

@@ -11,11 +11,8 @@ import { AppShellSkeleton } from "@/components/app-shell";
 //
 // (对照:真外壳 `AppShell` 三样都要,所以它没法这么测 —— 那正是两者的分界。)
 describe("<AppShellSkeleton>", () => {
-  it("不套任何 provider 也渲得出来", () => {
-    expect(() => render(<AppShellSkeleton />)).not.toThrow();
-  });
-
-  it("是骨架:灰条占位 + 品牌行,一个数字都没有", () => {
+  it("不套任何 provider 也渲得出来,且是骨架:灰条占位 + 品牌行,一个数字都没有", () => {
+    // 裸 render 本身就是「零 provider」那条断言:壳里多一个 hook,这一行就抛。
     const { container } = render(<AppShellSkeleton />);
     expect(container.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
     // 品牌行两处(桌面侧栏顶 + 移动顶栏),与真外壳同一份 <Brand>。

@@ -171,12 +171,6 @@ describe("账户行的 24h 盈亏(ADR 0040)", () => {
     return acc;
   };
 
-  it("有基准 → 行上带真实盈亏", async () => {
-    await withHistory("Live", "0xa", 100, 110);
-    const { of } = await rowsByLabel();
-    expect(of("Live")?.gain24h?.amount).toBeCloseTo(10, 4);
-  });
-
   it("整条路径不出网", async () => {
     await withHistory("Quiet", "0xd", 100, 110);
     await rowsByLabel();
@@ -251,27 +245,6 @@ describe("manual 账户的抽屉现货行", () => {
     // 这一条就是浏览器里看到的那个矛盾
     expect(row?.balances[0].gain24h).not.toBeNull();
   });
-
-  it("两个 manual 账户持有同一个币(共用 token_id)—— 各自的行互不串", async () => {
-    const mk = async (label: string) => {
-      const a = await dbFor(USER).accounts.create({
-        connectorId: "manual",
-        label,
-        creds: JSON.stringify({ tokens: "[]" }),
-      });
-      await addManualActivities(USER, a.id, [
-        { token: localBtc, kind: "add", amount: 2, occurredAt: Date.now() - 3 * DAY, price: 100 },
-      ]);
-      return a;
-    };
-    await mk("MA");
-    await mk("MB");
-
-    const { of } = await rowsByLabel();
-    for (const label of ["MA", "MB"]) {
-      expect(of(label)?.balances[0]?.gain24h, label).not.toBeNull();
-    }
-  });
 });
 
 describe("复刻真实数据的形状:manual 与同步账户混在一起", () => {
@@ -285,6 +258,7 @@ describe("复刻真实数据的形状:manual 与同步账户混在一起", () =>
   const HOUR = 3600_000;
   const localBtc = { symbol: "BTC", unitPrice: 63921 };
 
+  // 两个 manual 共用同一个 token_id 也在这条里:各自的行互不串,都算得出。
   it("同步账户用窗口内最近的起点(29.9h)算,manual 账户头与其现货行**同时**算得出", async () => {
     const now = Date.now();
     // ① 同步账户:两张快照,29.9h(起点)与 17.5h(当下)

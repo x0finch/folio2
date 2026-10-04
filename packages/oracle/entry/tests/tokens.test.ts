@@ -144,8 +144,11 @@ describe("批量刷 stale 价", () => {
       Effect.gen(function* () {
         const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
-        expect((yield* tokens.refreshStale(["tk_1"])).prices).toBe(0);
-        expect(yield* tokens.refreshStale([])).toEqual({ prices: 0, infos: 0, degraded: false });
+        // info 也已刷过(`info()` 默认 infoStale: false)→ 价与 info 两半都没有目标;
+        // degraded 是 false —— 「没什么要刷」与「上游挂了」分得开。
+        const nothing = { prices: 0, infos: 0, degraded: false };
+        expect(yield* tokens.refreshStale(["tk_1"])).toEqual(nothing);
+        expect(yield* tokens.refreshStale([])).toEqual(nothing);
         expect(h.upstream.calls).toEqual([]);
       }),
     );
@@ -163,23 +166,6 @@ describe("批量刷 stale 价", () => {
       degraded: true,
     });
     expect(h.prices.current.size).toBe(0);
-  });
-
-  it("没什么要刷 → degraded 是 false(与「挂了」分得开)", async () => {
-    const h = setup([info({ id: "tk_1" })]);
-    await h.run(
-      Effect.gen(function* () {
-        const tokens = yield* TokenService;
-        yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
-        // info 也已刷过(`info()` 默认 infoStale: false)→ 两半都没有目标。
-        expect(yield* tokens.refreshStale(["tk_1"])).toEqual({
-          prices: 0,
-          infos: 0,
-          degraded: false,
-        });
-        expect(h.upstream.calls).toEqual([]);
-      }),
-    );
   });
 
   // 同一批 id **只读一次 store**:迁移前是两个方法各读一遍(而且调用点成对并发,连
@@ -309,19 +295,6 @@ describe("批量刷 stale 元信息(覆盖)", () => {
       0,
     );
     expect(h.store.rows.get("tk_1")?.symbol).toBe("OLD");
-  });
-
-  it("没有要刷的 → 零调用", async () => {
-    const h = setup([info({ id: "tk_1" })]);
-    await h.run(
-      Effect.gen(function* () {
-        const tokens = yield* TokenService;
-        expect((yield* tokens.refreshStale(["tk_1"])).infos).toBe(0);
-        expect((yield* tokens.refreshStale([])).infos).toBe(0);
-        // info 那半没有目标 → 一次 `fetchTokens` 都不该发(价那半另有自己的用例)。
-        expect(h.upstream.calls.filter((c) => c.startsWith("fetchTokens"))).toEqual([]);
-      }),
-    );
   });
 });
 

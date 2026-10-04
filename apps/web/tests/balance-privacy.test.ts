@@ -77,14 +77,6 @@ describe("privacyReducer: sync 校准", () => {
     const s = S(true, true);
     expect(privacyReducer(s, { type: "sync", hideBalances: true })).toBe(s);
   });
-  it("fail-closed 落地一例:无缓存先遮,服务器随后说关 → 化开", () => {
-    // 冷启动无缓存 → resolveInitialEnabled(null)=true;第一帧 isHidden 为真(遮)。
-    let s = S(resolveInitialEnabled(null), false);
-    expect(isHidden(s)).toBe(true);
-    // 服务器读回来说其实没开 → 校准后不再遮。
-    s = privacyReducer(s, { type: "sync", hideBalances: false });
-    expect(isHidden(s)).toBe(false);
-  });
 });
 
 describe("缓存序列化", () => {

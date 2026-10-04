@@ -147,6 +147,8 @@ describe("parseProtocols", () => {
   });
 
   it("全是 defi,meta 带 protocol + positionType", () => {
+    // 对账(实测 vitalik 地址):Σ钱包 + Σ协议净值 ≈ 上游 total_usd_value —— cache_token_list 只有钱包
+    // 持仓、complex_protocol_list 只有协议持仓,两个相加不重复计;所以两个解析器都不许产对方的行。
     const rows = parseProtocols(protocols, ids);
     expect(rows.length).toBeGreaterThan(0);
     for (const r of rows) expect(r.kind).toBe("defi");
@@ -209,17 +211,5 @@ describe("parseProtocols", () => {
       },
     ];
     expect(() => parseProtocols(bad, ids)).toThrow();
-  });
-});
-
-describe("对账 —— 上游自己的总值是现成的自检", () => {
-  // 实测(vitalik 地址):Σ钱包 + Σ协议净值 = $897,486 vs 上游 total_usd_value = $897,526,差 -0.0%。
-  // 说明 cache_token_list 只有钱包持仓、complex_protocol_list 只有协议持仓,两个相加不重复计。
-  // 这里用 fixture 做的是**弱版本**断言:两边产出的 tokenRef 允许重合(同一个币可以既在钱包又在协议里),
-  // 但两个解析器都不许把对方的行也产出来。
-  it("钱包解析不产 defi 行,协议解析不产 spot 行", () => {
-    const ids = parseChainIds(chains);
-    expect(parseTokens(tokens, ids).every((r) => r.kind === "spot")).toBe(true);
-    expect(parseProtocols(protocols, ids).every((r) => r.kind === "defi")).toBe(true);
   });
 });

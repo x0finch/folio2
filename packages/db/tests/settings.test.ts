@@ -60,16 +60,12 @@ describe("settings update", () => {
     });
   });
 
-  it("再写一次 → 盖掉旧值", async () => {
-    await settings(USER).update({ hideBalances: true });
-    await settings(USER).update({ hideBalances: false });
+  it("按用户隔离 —— 一个人开隐私、改估值口径,都不影响另一个", async () => {
+    await settings(USER).update({ valuationMode: "source-first", hideBalances: true });
 
-    expect((await settings(USER).get()).hideBalances).toBe(false);
-  });
-
-  it("按用户隔离 —— 一个人开隐私不影响另一个", async () => {
-    await settings(USER).update({ hideBalances: true });
-
-    expect((await settings(OTHER).get()).hideBalances).toBe(false);
+    expect(await settings(OTHER).get()).toEqual({
+      valuationMode: "self-first",
+      hideBalances: false,
+    });
   });
 });

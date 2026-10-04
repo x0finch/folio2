@@ -26,14 +26,6 @@ describe("tags/delete", () => {
   });
 
   describe("deleteTag", () => {
-    it("删一个没人挂着的 → 列表里不再有它", async () => {
-      const { tag } = await seed(USER);
-
-      await call(USER, handleDeleteTag({ tagId: tag.id }));
-
-      expect(await call(USER, handleListTags())).toEqual([]);
-    });
-
     it("删一个正挂在两个账户上的 → tag 没了,两个账户还在,只是不再有这个标", async () => {
       const { pf, tag } = await seed(USER);
       const a = await db(USER).accounts.create({ connectorId: "manual", label: "甲", creds: null });

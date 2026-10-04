@@ -256,6 +256,8 @@ test.describe("面板读轮", () => {
     );
   };
 
+  // 面板各档(整轮没跑起来 / 中断 / 失败逐条)的文案与徽标由 `tests/sync-panel.test.tsx` 钉;
+  // 这里只留一条,验「回包 → 胶囊 → 面板」这条接线在真浏览器里通。
   test("缺凭据的账户算「需要凭据」,不算失败", async ({ page, request }) => {
     await withOneAccount(page, request);
     await page.route("**/api/sync", (route) => route.fulfill(roundView({ needsKeys: 1 })));
@@ -269,44 +271,9 @@ test.describe("面板读轮", () => {
     await expect(page.getByRole("button", { name: /^Synced$/ })).toBeVisible({ timeout: 30_000 });
     await hoverSyncPill(page);
     // 面板文字读的是同一份 round 原料,理应紧随胶囊出现;但 CI 2 核冷编译下偶尔慢过默认 15s
-    // (胶囊那步已给 30s)。对齐到 30s —— 修的是「断言比慢机跑得快」这个 race,不是产品行为。
+    // (胶囊那步已给 30s)。对齐到 30s —— 修的是「断言比慢机跑得快」这个 race,不是产品行为
+    // (这条曾经 flaky 的根)。
     await expect(page.getByText("1 need keys")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Failed this round")).toHaveCount(0);
-  });
-
-  test("整轮没跑起来 → 报错,不谎报成功", async ({ page, request }) => {
-    await withOneAccount(page, request);
-    await page.route("**/api/sync", (route) =>
-      route.fulfill(roundView({ synced: 0, settled: 0, error: "account store exploded" })),
-    );
-
-    await page.reload();
-    await clickSyncPill(page);
-
-    await expect(page.getByRole("button", { name: /^Needs attention$/ })).toBeVisible({
-      timeout: 30_000,
-    });
-    await hoverSyncPill(page);
-    // 30s 对齐胶囊(见「缺凭据」用例注释):CI 慢机下面板文字偶尔慢过默认 15s，是这条曾经 flaky 的根。
-    await expect(page.getByText("Failed this round")).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("account store exploded")).toBeVisible({ timeout: 30_000 });
-  });
-
-  // 中断 = 未收官且心跳断了(worker 死在半路,ADR 0048)。没有它这一档,一轮假同步在面板上
-  // 与「一切正常」长得一模一样,而屏幕上的数其实是旧的。
-  test("中断的一轮 → 说出来,不装作没事", async ({ page, request }) => {
-    await withOneAccount(page, request);
-    await page.route("**/api/sync", (route) =>
-      route.fulfill(roundView({ state: "interrupted", finishedAt: null, settled: 1, synced: 1 })),
-    );
-
-    await page.reload();
-    await clickSyncPill(page);
-
-    await expect(page.getByRole("button", { name: /^Needs attention$/ })).toBeVisible({
-      timeout: 30_000,
-    });
-    await hoverSyncPill(page);
-    await expect(page.getByText("stopped partway")).toBeVisible({ timeout: 30_000 });
   });
 });

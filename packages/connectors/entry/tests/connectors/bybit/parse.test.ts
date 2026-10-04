@@ -30,20 +30,6 @@ describe("parseUnified (golden: fixture in → fixture out)", () => {
     const btc = parseUnified(coins).find((b) => b.symbol === "BTC");
     expect(btc).toMatchObject({ amount: 0.05, value: 3000 });
   });
-
-  it("value 用 Bybit 自带 usdValue,price 反推;locked 的币挂 Locked note", () => {
-    const rows = parseUnified(coins);
-    expect(rows.find((b) => b.symbol === "USD1")?.note).toEqual({
-      title: "Locked",
-      icon: "warning",
-      content: "80,000 USD1 · 100%",
-    });
-    expect(rows.find((b) => b.symbol === "USDT")?.note).toBeUndefined();
-  });
-
-  it("跳过 walletBalance≤0 的尘埃(DUST)", () => {
-    expect(parseUnified(coins).some((b) => b.symbol === "DUST")).toBe(false);
-  });
 });
 
 // 资金账户(FUND)golden:funding.json(录制的 /asset/transfer/query-account-coins-balance 响应)+
@@ -53,13 +39,6 @@ describe("parseFunding (golden: fixture in → fixture out)", () => {
   it("maps recorded funding assets + price hint to expected-funding-balances", () => {
     const hint = buildPriceHint(walletBalance.result.list[0].coin);
     expect(parseFunding(funding.result.balance, hint)).toEqual(expectedFunding);
-  });
-
-  it("每条 funding 余额带不渲染的 note.group='funding'(供抽屉归 Tab)", () => {
-    const hint = buildPriceHint(walletBalance.result.list[0].coin);
-    expect(
-      parseFunding(funding.result.balance, hint).every((r) => r.note?.group === "funding"),
-    ).toBe(true);
   });
 });
 

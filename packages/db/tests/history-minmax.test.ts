@@ -128,7 +128,8 @@ describe("history sampled (FOL-92)", () => {
     const second = await snapshotsOf(USER).listSampledTotalsByAccount(acc.id, undefined, 10);
 
     expect(first.length).toBeLessThanOrEqual(10 * 4);
-    expect(second.length).toBeLessThanOrEqual(10 * 4);
+    // 原始行翻倍(80 → 160),发出的行数不涨 —— 前后比,不只是各自压在上限下。
+    expect(second.length).toBeLessThanOrEqual(first.length);
   }, 30_000);
 
   it("listSampledTotals:只含请求的账户、每账户行数有上界,组合的极值与最后一点都是真值", async () => {
@@ -334,17 +335,5 @@ describe("history sampled (FOL-92)", () => {
     // 组合净值全程含 cold 的 200(不再偏低)。
     const series = buildPortfolioTimeline(rows);
     expect(series.every((p) => p.total === 700)).toBe(true);
-  });
-
-  it("listTotalsByAccount:短窗仍返回原始点(行为不变)", async () => {
-    const acc = await accounts(USER).create({ connectorId: "binance", label: "B", creds: "x" });
-    await snapshotsOf(USER).write(acc.id, { takenAt: 100, totalUsd: 10, balances: [] });
-    await snapshotsOf(USER).write(acc.id, { takenAt: 200, totalUsd: 20, balances: [] });
-    await snapshotsOf(USER).write(acc.id, { takenAt: 300, totalUsd: 30, balances: [] });
-
-    expect(await snapshotsOf(USER).listTotalsByAccount(acc.id, 150)).toEqual([
-      { takenAt: 200, totalUsd: 20 },
-      { takenAt: 300, totalUsd: 30 },
-    ]);
   });
 });

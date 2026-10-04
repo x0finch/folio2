@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { describe, expect, it } from "vitest";
-import { DbClient, provideDbClient } from "../src/client";
+import { provideDbClient } from "../src/client";
 import type { DbEnv } from "../src/connect";
 import { provideCurrentUser } from "../src/current-user";
 import { Database, DatabaseForOracle, GlobalDatabase } from "../src/database";
@@ -55,13 +55,6 @@ describe("一次请求一个 DbClient", () => {
     );
     expect(c.built()).toBe(1);
     await runtime.dispose();
-  });
-
-  it("同一次请求里两处去读,拿到的是同一个句柄", async () => {
-    const [a, b] = await Effect.runPromise(
-      Effect.all([DbClient, DbClient]).pipe(provideDbClient(env)),
-    );
-    expect(a).toBe(b);
   });
 
   // **负对照。** 证明计数器数的真是构造(第一条的 1 不是「计数器没在数」的假象),而且句柄是

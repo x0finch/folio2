@@ -37,24 +37,18 @@ const failing = (
 ): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
 
 describe("工厂:一份适配服务三条链", () => {
-  it("每个 connectionId 产出 id=coinstats 的 provider,声明 COINSTATS_API_KEY + base 覆盖", () => {
-    for (const chain of ["solana", "sui-wallet", "cosmos"]) {
-      const provider = createCoinstatsProvider(chain);
-      expect(provider.id).toBe("coinstats");
-      expect(provider.creds.map((f) => f.key)).toEqual(["COINSTATS_API_KEY", "COINSTATS_API_BASE"]);
-      expect(provider.creds.find((f) => f.key === "COINSTATS_API_BASE")?.type).toBe("public");
-    }
-  });
-
   it("base 覆盖生效,默认 host 一个不留;不设就走官方", async () => {
-    const stub = httpStub(() => json(solana));
+    const overrides = {
+      COINSTATS_API_KEY: KEY,
+      COINSTATS_API_BASE: "http://127.0.0.1:3399/coinstats",
+    };
     const provider = createCoinstatsProvider("solana");
-    await run(
-      stub,
-      provider.fetchBalances(
-        ctx({ COINSTATS_API_KEY: KEY, COINSTATS_API_BASE: "http://127.0.0.1:3399/coinstats" }),
-      ),
-    );
+    // 声明的 key 正是这里注入后真生效的那两个(app 按声明从 env 注入 ctx.creds);base 覆盖是 public。
+    expect(provider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
+    expect(provider.creds.find((f) => f.key === "COINSTATS_API_BASE")?.type).toBe("public");
+
+    const stub = httpStub(() => json(solana));
+    await run(stub, provider.fetchBalances(ctx(overrides)));
     await run(stub, provider.fetchBalances(ctx()));
     const [overridden, plain] = stub.calls.map((c) => c.request.url.href);
     expect(overridden.startsWith("http://127.0.0.1:3399/coinstats/wallet/balance")).toBe(true);

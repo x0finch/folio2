@@ -5,7 +5,6 @@ import { PRICES_IDS_PER_MESSAGE } from "@/lib/server/jobs/constants";
 import { consumeMessage, type JobMessage } from "@/lib/server/jobs/consume";
 import { decodeJob, type Job } from "@/lib/server/jobs/message";
 import { type Enqueued, JobQueue } from "@/lib/server/jobs/queue";
-import { fanOutAllUsers } from "@/lib/server/sync/round";
 import { db } from "../_kit/db";
 import { blockOutbound, json } from "../_kit/outbound";
 import { call } from "../_kit/run";
@@ -102,20 +101,6 @@ describe("jobs/prices", () => {
     blockOutbound();
     await freshUser(USER);
     await db(USER).portfolios.ensureDefault();
-  });
-
-  it("cron 每个用户投一条 `prices`,不延后、不带 id(跑的那一刻才读持仓)", async () => {
-    const sent: Enqueued[] = [];
-    await Effect.runPromise(
-      fanOutAllUsers([USER]).pipe(
-        Effect.provideService(JobQueue, {
-          poke: Effect.void,
-          send: (batch) => Effect.sync(() => void sent.push(...batch)),
-        }),
-      ),
-    );
-    const prices = sent.filter((m) => m.job.kind === "prices");
-    expect(prices).toEqual([{ job: { kind: "prices", userId: USER } }]);
   });
 
   it("250 个持仓币 → 价 3 发(100 个一批),写进价表;不往下投", async () => {

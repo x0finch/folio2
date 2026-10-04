@@ -306,18 +306,9 @@ describe("情景:手动加币,不选、自己敲 USDC", () => {
     const picked = view.holdings.find((h) => h.token.id === pickedId);
     expect(picked?.token.logo).toBe(`/api/logo/token/${pickedId}`);
     expect(picked?.totalValue).toBeCloseTo(MARKET_PRICE, 6);
-    expect(outbound).toEqual([]);
-  });
-
-  it("③ 展示:与选出来的那个真 USDC **不聚合** —— 两行", async () => {
-    await add();
-    await createManualAccount(
-      USER,
-      "Picked",
-      JSON.stringify([{ symbol: "USDC", unitPrice: "1", amount: "1", ticket: ticketOf(USDC_ID) }]),
-    );
-    const view = await overview();
+    // 两个都叫 USDC,但不聚合 —— 屏幕上是两行。
     expect(view.holdings.filter((h) => h.token.symbol === "USDC")).toHaveLength(2);
+    expect(outbound).toEqual([]);
   });
 });
 

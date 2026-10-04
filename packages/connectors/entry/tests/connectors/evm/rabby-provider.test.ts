@@ -92,20 +92,15 @@ describe("fetchBalances", () => {
     expect(paths.some((p) => p.includes("chain/list"))).toBe(false);
   });
 
-  it("不要 provider key —— PC 只有一个 public 的 base 覆盖(这正是它当默认源的理由)", () => {
-    expect(rabbyProvider.id).toBe("rabby");
-    expect(rabbyProvider.creds.map((f) => f.key)).toEqual(["RABBY_API_BASE"]);
-    expect(rabbyProvider.creds.every((f) => f.type === "public")).toBe(true);
-  });
-
   it("base 覆盖生效,默认 host 一个不留", async () => {
+    const overrides = { RABBY_API_BASE: "http://127.0.0.1:3399/rabby" };
+    // 不要 provider key —— PC 只有这一个 public 的 base 覆盖(这正是它当默认源的理由)。
+    // 声明的 key 正是这里注入后真生效的那一个(app 按声明从 env 注入 ctx.creds);全 public(不加密 / 不导出)。
+    expect(rabbyProvider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
+    expect(rabbyProvider.creds.every((f) => f.type === "public")).toBe(true);
+
     const stub = upstream();
-    await run(
-      stub,
-      rabbyProvider.fetchBalances(
-        ctx(`0x${"2".repeat(40)}`, { RABBY_API_BASE: "http://127.0.0.1:3399/rabby" }),
-      ),
-    );
+    await run(stub, rabbyProvider.fetchBalances(ctx(`0x${"2".repeat(40)}`, overrides)));
     const urls = stub.calls.map((c) => c.request.url.href);
     expect(urls.length).toBeGreaterThan(0);
     expect(urls.every((u) => u.startsWith("http://127.0.0.1:3399/rabby/v1/"))).toBe(true);

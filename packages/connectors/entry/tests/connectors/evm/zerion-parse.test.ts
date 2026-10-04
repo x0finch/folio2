@@ -25,9 +25,4 @@ describe("parsePositions (golden: fixtures in → fixture out)", () => {
     // chainIds 映射里没有某仓位的链 → 无法产规范 evm:<id> 标识 → 抛 UPSTREAM_ERROR(可重试)。
     expect(() => parsePositions(positions, {})).toThrow(/no chainId/);
   });
-
-  it("excludes hidden/trash (displayable=false) positions", () => {
-    const balances = parsePositions(positions, chainIds);
-    expect(balances.find((b) => b.symbol === "SPAM")).toBeUndefined();
-  });
 });

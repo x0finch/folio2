@@ -42,6 +42,7 @@ describe("四态", () => {
     expect(note()).toBeNull();
   });
 
+  // 不传 loading / decorate:默认值按抽屉配好,那两处调用只给原料。
   it("点不够 → 摆文案", () => {
     const c = renderPanel({ series: [{ t: T0, total: 110 }] });
     expect(note()).toBeTruthy();
@@ -72,12 +73,5 @@ describe("四态", () => {
     const c = renderPanel({ series: two, decorate: true });
     expect(chartWrapper(c)).toBeTruthy();
     expect(note()).toBeNull();
-  });
-});
-
-describe("默认值按抽屉配好 —— 那两处调用只给原料", () => {
-  it("不传 loading / decorate 时,点不够就是摆文案", () => {
-    renderPanel({ series: [{ t: T0, total: 110 }] });
-    expect(note()).toBeTruthy();
   });
 });
