@@ -31,6 +31,20 @@ export const XpubResponse = Schema.Struct({
 });
 export type XpubResponse = typeof XpubResponse.Type;
 
+// GET /api/v2/xpub/{token}?details=basic —— 只要账户汇总(探活用,不拉各地址明细)。
+//
+// **与上面那份不是同一个形状**:basic 档**不回 `unconfirmedBalance`**(tokens 及以上才有)。以前两档
+// 共用 `XpubResponse`,于是每次 basic 探活都在解析那步失败 —— 添加 xpub 账户一律被拒(录制的
+// 真实响应见 connectors-entry 的 `fixtures/xpub-basic.json`)。所以单独一份,只列 basic 真有的字段。
+export const XpubSummary = Schema.Struct({
+  address: Schema.String,
+  balance: Schema.String,
+  unconfirmedTxs: maybe(Schema.Number),
+  txs: maybe(Schema.Number),
+  usedTokens: maybe(Schema.Number),
+});
+export type XpubSummary = typeof XpubSummary.Type;
+
 // GET /api/v2/address/{addr}
 export const AddressResponse = Schema.Struct({
   address: Schema.String,

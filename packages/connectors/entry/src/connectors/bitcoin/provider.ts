@@ -153,16 +153,16 @@ export const blockbookProvider: BalanceProvider<
   // 轻量探活:地址模式打地址端点;xpub 模式造 token 打 xpub 端点(顺带校验扩展公钥可解析)。
   //
   // 凭据被拒 / xpub 解析不出来 → 成功返回 `false`;够不到上游 → 留在错误通道。
-  // **`details: "basic"`** —— 探活不需要各地址明细,少拉一大坨。
+  // **`xpubSummary`(`details=basic`)** —— 探活不需要各地址明细,少拉一大坨。
   validateAccount: (ctx) => {
     const id = ctx.account.creds.addressOrXpub;
     const client = clientFor(ctx.creds);
     const probe = Effect.suspend(() =>
       isExtendedPubkey(id)
         ? asBitcoin(
-            client.xpub(blockbookXpubParam(id, effectiveScript(id, ctx.account.creds.scriptType)), {
-              details: "basic",
-            }),
+            client.xpubSummary(
+              blockbookXpubParam(id, effectiveScript(id, ctx.account.creds.scriptType)),
+            ),
           )
         : asBitcoin(client.address(id)),
     );

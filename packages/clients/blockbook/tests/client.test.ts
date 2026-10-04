@@ -62,12 +62,33 @@ describe("请求形状", () => {
     expect(calls[0].request.url.searchParams.get("tokens")).toBe("used");
   });
 
+  // basic 档的真实形状(字段照录,见 connectors-entry 的 fixtures/xpub-basic.json):
+  // **没有 `unconfirmedBalance`**。以前它与完整档共用一份 schema,每次探活都解析失败。
+  it("xpubSummary:details=basic,且认得没有 unconfirmedBalance 的真实形状", async () => {
+    const basic = {
+      address: XPUB,
+      balance: "0",
+      totalReceived: "5631015",
+      totalSent: "5631015",
+      unconfirmedTxs: 0,
+      txs: 276,
+      addrTxCount: 276,
+      usedTokens: 40,
+    };
+    const { fn, calls } = stub(() => json(basic));
+    const res = await withClient(fn, (c) => c.xpubSummary(XPUB), { bases: basesOf(1) });
+    expect(res.balance).toBe("0");
+    expect(calls[0].request.url.pathname).toBe(`/api/v2/xpub/${XPUB}`);
+    expect(calls[0].request.url.searchParams.get("details")).toBe("basic");
+    expect(calls[0].request.url.searchParams.get("tokens")).toBeNull();
+  });
+
   it("xpub 的 query 可覆盖", async () => {
     const { fn, calls } = stub(() => json(XPUB_BODY));
-    await withClient(fn, (c) => c.xpub(XPUB, { details: "basic", tokens: "derived" }), {
+    await withClient(fn, (c) => c.xpub(XPUB, { details: "tokens", tokens: "derived" }), {
       bases: basesOf(1),
     });
-    expect(calls[0].request.url.searchParams.get("details")).toBe("basic");
+    expect(calls[0].request.url.searchParams.get("details")).toBe("tokens");
     expect(calls[0].request.url.searchParams.get("tokens")).toBe("derived");
   });
 

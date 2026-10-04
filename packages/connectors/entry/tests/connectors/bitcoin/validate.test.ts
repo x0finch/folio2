@@ -4,6 +4,7 @@ import { type ConnectorError, isRetryable, type ProviderNeeds } from "@folio/con
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { blockbookProvider } from "../../../src/connectors/bitcoin/provider";
+import xpubBasicFixture from "./fixtures/xpub-basic.json";
 
 // 契约(#240):凭据被拒 / xpub 解析不出来 → 成功返回 `false`;够不到上游 → 留在错误通道,
 // 让调用方重试。这几条钉的是**那条分界**。
@@ -41,8 +42,10 @@ describe("validateAccount", () => {
     expect(stub.calls[0].request.url.pathname).toContain("/address/");
   });
 
+  // 回的是**录下来的真实 basic 响应**:它没有 `unconfirmedBalance`(tokens 及以上才有)。
+  // 这里以前手写了一个带它的假响应,于是测试绿着、线上每个 xpub 添加都在解析那步失败。
   it("xpub:打 /xpub/ 且只要 basic(探活不需要各地址明细)", async () => {
-    const stub = httpStub(() => json({ address: ZPUB84, balance: "0", unconfirmedBalance: "0" }));
+    const stub = httpStub(() => json(xpubBasicFixture.response));
     expect(await run(stub, blockbookProvider.validateAccount(ctx({ addressOrXpub: ZPUB84 })))).toBe(
       true,
     );

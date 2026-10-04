@@ -13,4 +13,4 @@ export {
   type XpubQuery,
 } from "./client";
 export { BLOCKBOOK_BASES, USER_AGENT } from "./constants";
-export type { AddressResponse, XpubResponse, XpubToken } from "./types";
+export type { AddressResponse, XpubResponse, XpubSummary, XpubToken } from "./types";

@@ -23,6 +23,8 @@ export const USER_AGENT = "Mozilla/5.0";
 // xpub 端点的默认查询:服务端派生 + 汇总,只要已用地址。
 export const DEFAULT_XPUB_DETAILS = "tokenBalances";
 export const DEFAULT_XPUB_TOKENS = "used";
+// 探活那一档:只要账户汇总(见 `XpubSummary`)。
+export const XPUB_SUMMARY_DETAILS = "basic";
 
 // —— 为什么这里**没有**速率闸 ——
 // 判据是「有没有多个调用挤同一份额度」。这里是**四个公共节点轮流打**,而限流的应对是
