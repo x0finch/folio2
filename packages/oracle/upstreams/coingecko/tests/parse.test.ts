@@ -8,6 +8,7 @@ import {
   parseSimplePrice,
   UPSTREAM_ID,
 } from "../src";
+import simplePrice from "./fixtures/simple-price.json";
 
 // CoinGecko 响应 → 契约形状的纯解析。**只有本包认识这些字段名**(ADR 0023)。
 describe("ref 与 coin id 的双向", () => {
@@ -72,20 +73,24 @@ describe("parseSearch / parseSimplePrice / parsePriceSeries", () => {
     expect(out[1]?.marketCapRank).toBeUndefined();
   });
 
-  it("simple/price:按 ref 索引;缺 usd 的条目跳过;有 last_updated_at 则用它(秒→毫秒)", () => {
-    const out = parseSimplePrice(
-      {
-        bitcoin: { usd: 60000, usd_24h_change: 1.5, usd_last_updated_at: 1_700_000_000 },
-        broken: { eur: 1 },
-      },
-      999,
-    );
+  // 回的是**录下来的真实响应**:时刻字段叫 `last_updated_at`,**不带** `usd_` 前缀(只有 24h 涨跌带)。
+  // 这里以前手写了 `usd_last_updated_at`,解析也读那个名字 —— 两边错得一致,测试绿着,线上每个价的
+  // `asOf` 都落成了兜底的「取数那一刻」,而不是 CoinGecko 自己说的更新时刻。
+  it("simple/price:按 ref 索引,带 24h 涨跌,时刻用上游给的 last_updated_at(秒→毫秒)", () => {
+    const out = parseSimplePrice(simplePrice.response, 999);
+    const btc = simplePrice.response.bitcoin;
     expect(out.get(`${UPSTREAM_ID}/issued:bitcoin`)).toEqual({
-      unitPrice: 60000,
-      change24h: 1.5,
-      asOf: 1_700_000_000_000,
+      unitPrice: btc.usd,
+      change24h: btc.usd_24h_change,
+      asOf: btc.last_updated_at * 1000,
     });
+    expect(out.size).toBe(2);
+  });
+
+  it("simple/price:缺 usd 的条目跳过;没给时刻 → 用兜底", () => {
+    const out = parseSimplePrice({ broken: { eur: 1 }, plain: { usd: 2 } }, 999);
     expect(out.has(`${UPSTREAM_ID}/issued:broken`)).toBe(false);
+    expect(out.get(`${UPSTREAM_ID}/issued:plain`)?.asOf).toBe(999);
   });
 
   it("price series:剔非数、按时间升序", () => {

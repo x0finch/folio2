@@ -4,6 +4,8 @@
 export const UPSTREAM_ID = "coingecko";
 
 export const VS_USD = "usd";
+// `/simple/price?include_last_updated_at=true` 每条回的时刻字段(秒)。**不带币种前缀**,与 `usd_24h_change` 不同。
+export const LAST_UPDATED_AT = "last_updated_at";
 
 // BTC 的 CoinGecko coin id。法币历史汇率从 BTC 反算(ADR 0026),两条腿都是「BTC 在某币种下的价」,
 // base 恒是它。也是 `token_daily_prices` 里 BTC 美元历史腿的键(`coingecko/issued:bitcoin`)。

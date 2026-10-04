@@ -1,7 +1,7 @@
 import type { MarketCoin, SearchResult, SimplePriceMap } from "@folio/coingecko-client";
 import type { TokenPrice, TokenPricePoint, TokenRef, UpstreamToken } from "@folio/oracle-basic";
 import { parseTokenRef, tokenRef } from "@folio/oracle-ref";
-import { SEARCH_LIMIT, UPSTREAM_ID, VS_USD } from "./constants";
+import { LAST_UPDATED_AT, SEARCH_LIMIT, UPSTREAM_ID, VS_USD } from "./constants";
 
 // CoinGecko 响应 → 契约形状的纯解析。零 IO,fixture 可钉死。
 // 产出的 tokenRef 命名者恒为本 adapter 的 id;coin id 规范为小写 kebab,归一在生产者侧做。
@@ -71,7 +71,8 @@ export function parseSimplePrice(
   for (const [coinId, v] of Object.entries(json ?? {})) {
     const unitPrice = v?.[VS_USD];
     if (typeof unitPrice !== "number") continue;
-    const lastUpdated = v[`${VS_USD}_last_updated_at`];
+    // 时刻字段**不带** `usd_` 前缀(`include_last_updated_at` 回的是 `last_updated_at`,与币种无关)。
+    const lastUpdated = v[LAST_UPDATED_AT];
     out.set(cgkRef(coinId), {
       unitPrice,
       change24h: v[`${VS_USD}_24h_change`],
