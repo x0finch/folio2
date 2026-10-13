@@ -256,6 +256,67 @@ describe("toPortfolioCurve", () => {
     expect(toPortfolioCurve(earlier, totals(["a1", 7])).map((p) => p.total)).toEqual([10, 10, 7]);
   });
 
+  // 不变量(固定种子随机原料):末点 = Σ 曲线自己那几个活跃账户的实时净值(总览覆盖不全时 = 冻结值);
+  // 末点时刻 = 最后一行快照的时刻;其余点(不降采样时)与阶梯重建逐点相同;严格升序,没有 NaN。
+  // 原料随机:乱序行、同刻多账户、归档、没有快照的活跃账户、总览多 / 少账户、长窗 sampled。
+  it("随机原料:末点就是实时净值、时刻升序、无 NaN", () => {
+    let seed = 99;
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      return seed / 2 ** 31;
+    };
+    const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1));
+    let replaced = 0;
+    let frozen = 0;
+    for (let n = 0; n < 400; n++) {
+      const ids = Array.from({ length: int(1, 5) }, (_, i) => `a${i}`);
+      const rows = Array.from({ length: int(1, 200) }, () => ({
+        accountId: ids[int(0, ids.length - 1)],
+        takenAt: int(0, 300) * HOUR, // 时刻粗 → 同刻多账户常见
+        totalUsd: int(0, 1_000_000) / 100,
+      }));
+      const archivedAt: [string, number][] = ids
+        .filter(() => rand() < 0.25)
+        .map((id) => [id, int(0, 300) * HOUR]);
+      const archived = new Set(archivedAt.map(([id]) => id));
+      // 活跃账户 = 没归档的那些,外加偶尔一个还没快照的新账户。
+      const liveAccountIds = [
+        ...ids.filter((id) => !archived.has(id)),
+        ...(rand() < 0.2 ? ["fresh"] : []),
+      ];
+      const pool = [...liveAccountIds, ...(rand() < 0.3 ? ["别人的"] : [])];
+      const dropOne = liveAccountIds.length > 0 && rand() < 0.2;
+      const covered = dropOne ? pool.filter((id) => id !== liveAccountIds[0]) : pool;
+      const accountTotals = covered.map((id) => ({
+        account: { id },
+        totalUsd: int(0, 1_000_000) / 100,
+      }));
+      const sampled = rand() < 0.4;
+      const raw = { rows, archivedAt, liveAccountIds, sampled };
+
+      const curve = toPortfolioCurve(raw, { accountTotals });
+      const rebuilt = buildPortfolioHistory(rows, new Map(archivedAt));
+
+      expect(curve.length).toBeGreaterThan(0);
+      for (const p of curve) expect(Number.isFinite(p.total)).toBe(true);
+      for (let i = 1; i < curve.length; i++) expect(curve[i].t).toBeGreaterThan(curve[i - 1].t);
+      expect(curve.at(-1)?.t).toBe(Math.max(...rows.map((r) => r.takenAt)));
+      if (!sampled) expect(curve.slice(0, -1)).toEqual(rebuilt.slice(0, -1));
+      const byId = new Map(accountTotals.map((a) => [a.account.id, a.totalUsd]));
+      if (dropOne) {
+        frozen++;
+        expect(curve.at(-1)?.total).toBe(rebuilt.at(-1)?.total);
+      } else {
+        replaced++;
+        let live = 0;
+        for (const id of liveAccountIds) live += byId.get(id) ?? Number.NaN;
+        expect(curve.at(-1)?.total).toBe(live);
+      }
+    }
+    expect(replaced).toBeGreaterThan(200);
+    expect(frozen).toBeGreaterThan(30);
+  });
+
   it("一个点都没有 → 空曲线,不凭空造一个当下点", () => {
     expect(
       toPortfolioCurve({ rows: [], archivedAt: [], liveAccountIds: ["a1"] }, totals(["a1", 1234])),

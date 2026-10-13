@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import type { TokenInfo } from "@folio/oracle-basic";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { Option } from "effect";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
@@ -270,6 +270,55 @@ describe("合并", () => {
       .from(tokenRefs)
       .where(eq(tokenRefs.tokenId, into));
     expect(refs).toHaveLength(1); // 一个 Token 在 coingecko 下就一条
+  });
+
+  // 防御:merge 的入参是 token id(UUID),调用方本该只递自己的;万一递进来的是**别人的** id,
+  // 这一步也不能改到别人的行 —— 快照余额改指、providerLogo 回填都得按 userId 收住。
+  // 对抗夹具摆在它真会去碰的那一层:B 的 token 行 + 指向它的 B 的历史余额。
+  it("拿别人的 token id 来 merge → 别人的快照余额与代币行一格不动", async () => {
+    const db = getDb(env);
+    const a = storeFor(USER_A);
+    const b = storeFor(USER_B);
+    const fromB = await b.create(seed("USDC", undefined, "b.png"), [USDC_ETH]);
+    const intoB = await b.create(seed("USDC", "USD Coin"), [USDC_UP]);
+    const intoA = await a.create(seed("USDC", "USD Coin"), [USDC_UP]);
+    const fromA = await a.create(seed("USDC", undefined, "a.png"), [USDC_ARB]);
+    await db.insert(accounts).values({
+      id: "acc-b",
+      userId: USER_B,
+      connectorId: "evm" as never,
+      label: "w",
+      createdAt: 1,
+    });
+    await db
+      .insert(snapshots)
+      .values({ id: "snap-b", accountId: "acc-b", takenAt: 1, totalUsd: 1 });
+    await db.insert(snapshotBalances).values({
+      id: "bal-b",
+      snapshotId: "snap-b",
+      amount: 1,
+      usdValue: 1,
+      kind: "spot",
+      tokenId: fromB,
+    });
+    const tokenRowsOf = (ids: string[]) =>
+      db.select().from(tokens).where(inArray(tokens.id, ids)).orderBy(tokens.id);
+    const balB = () =>
+      db
+        .select({ tokenId: snapshotBalances.tokenId })
+        .from(snapshotBalances)
+        .where(eq(snapshotBalances.id, "bal-b"));
+    const before = await tokenRowsOf([fromB, intoB]);
+
+    // ① 两个 id 都是 B 的;② from 是 B 的、into 是 A 自己的;③ from 是 A 的、into 是 B 的。
+    await a.merge(fromB, intoB);
+    await a.merge(fromB, intoA);
+    await a.merge(fromA, intoB);
+
+    expect(await tokenRowsOf([fromB, intoB])).toEqual(before);
+    expect(await balB()).toEqual([{ tokenId: fromB }]);
+    // B 的 provider 图不该被抄进 A 的行。
+    expect((await getInfo(a, intoA))?.providerLogo).toBeUndefined();
   });
 
   // 历史日价按 tokenRef 全局存,与 token_id 无关 → 合并不该让曲线缺一格(#199 定案)。

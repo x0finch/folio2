@@ -70,6 +70,42 @@ describe("minMaxDownsampleHistory", () => {
     expect([...ts].sort((a, b) => a - b)).toEqual(ts);
   });
 
+  // 不变量(固定种子随机序列):全局最高 / 最低、首末点都在;每个输出点都是某个输入点(不造值);
+  // 时间升序;点数 ≤ 每桶两点 + 首末。序列形状随机:平地、尖峰、闪崩、乱序、时刻间隔不均。
+  it("随机序列:极值与首末点保留、不造点、升序、点数有上界", () => {
+    let seed = 7;
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      return seed / 2 ** 31;
+    };
+    for (let n = 0; n < 500; n++) {
+      const len = 2 + Math.floor(rand() * 300);
+      const buckets = 2 + Math.floor(rand() * 60);
+      let t = Math.floor(rand() * 1e12);
+      let v = rand() * 1e5;
+      const pts: { t: number; total: number }[] = [];
+      for (let i = 0; i < len; i++) {
+        t += 1 + Math.floor(rand() * (rand() < 0.1 ? 1e9 : 1e6)); // 时刻唯一、间隔不均
+        const r = rand();
+        // 平地(值不变)/ 单点尖峰或闪崩 / 普通游走。
+        v = r < 0.2 ? v : r < 0.25 ? v * (rand() < 0.5 ? 0.3 : 3) : v + (rand() - 0.5) * 1e3;
+        pts.push({ t, total: Math.round(v * 100) / 100 });
+      }
+      const input = rand() < 0.3 ? [...pts].sort(() => rand() - 0.5) : pts; // 入参不保证有序
+      const out = minMaxDownsampleHistory(input, buckets);
+      const totals = (xs: { total: number }[]) => xs.map((p) => p.total);
+
+      expect(out.length).toBeLessThanOrEqual(2 * buckets + 2);
+      expect(Math.max(...totals(out))).toBe(Math.max(...totals(pts)));
+      expect(Math.min(...totals(out))).toBe(Math.min(...totals(pts)));
+      expect(out[0]).toBe(pts[0]);
+      expect(out.at(-1)).toBe(pts.at(-1));
+      const inputs = new Set(pts);
+      expect(out.every((p) => inputs.has(p))).toBe(true);
+      for (let i = 1; i < out.length; i++) expect(out[i].t).toBeGreaterThan(out[i - 1].t);
+    }
+  });
+
   it("≤ 1 个点 / 全在同一刻 → 原样", () => {
     expect(minMaxDownsampleHistory([])).toEqual([]);
     expect(minMaxDownsampleHistory([{ t: 1, total: 2 }])).toEqual([{ t: 1, total: 2 }]);

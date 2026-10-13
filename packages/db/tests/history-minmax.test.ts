@@ -288,6 +288,66 @@ describe("history sampled (FOL-92)", () => {
     }
   }, 60_000);
 
+  // 不变量(固定种子随机组合,真 D1):上面几条是手挑的形状,这条让账户数、起止、错峰、闪崩、窗口、
+  // 桶数都随机。每轮查:每账户行数 ≤ 3 × 桶数 + 1;重建出的每个点都是真实组合值(不造值);升序;
+  // 窗口内真实组合时间线的首末时刻与全局最低 / 最高值都在。值取整数 —— 两边求和顺序不同,别让
+  // 浮点误差冒充 bug。行数压在每轮几百行以内。
+  it("随机组合:每点皆真值、首末与极值都在、行数有上界", async () => {
+    let seed = 2024;
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      return seed / 2 ** 31;
+    };
+    const int = (lo: number, hi: number) => lo + Math.floor(rand() * (hi - lo + 1));
+    let checked = 0;
+    let windowed = 0;
+    for (let round = 0; round < 10; round++) {
+      await resetUser(USER);
+      const start = int(1, 1000) * DAY;
+      const ids: string[] = [];
+      for (let k = int(1, 3); k > 0; k--) {
+        const acc = await accounts(USER).create({ connectorId: "binance", label: "A", creds: "x" });
+        ids.push(acc.id);
+        let v = int(100, 10_000);
+        const values = Array.from({ length: int(5, 90) }, () => {
+          const r = rand();
+          v = r < 0.3 ? v : Math.max(0, v + int(-500, 500));
+          return r > 0.95 ? int(0, 50) : v; // 偶发单日闪崩
+        });
+        await seedDaily(acc.id, start + int(0, 40) * DAY + int(0, 23) * HOUR, values);
+      }
+      const buckets = int(2, 15);
+      const raw = await snapshotsOf(USER).listTotals();
+      const lastT = Math.max(...raw.map((r) => r.takenAt));
+      const since = rand() < 0.5 ? undefined : start + int(0, 60) * DAY + int(0, 23) * HOUR;
+      if (since != null && since > lastT) continue;
+
+      checked++;
+      if (since != null) windowed++;
+      const rows = await snapshotsOf(USER).listSampledTotals(ids, since, buckets);
+      for (const id of ids) {
+        expect(rows.filter((r) => r.accountId === id).length).toBeLessThanOrEqual(3 * buckets + 1);
+      }
+      const series = buildPortfolioTimeline(rows);
+      // 真实组合时间线(窗口内):窗口内的每个事件时刻,加上窗口起点(有账户在它之前有观测时)。
+      const truth = buildPortfolioTimeline(raw).filter((p) => since == null || p.t >= since);
+      if (since != null && raw.some((r) => r.takenAt < since) && truth[0]?.t !== since) {
+        truth.unshift({ t: since, total: trueValueAt(raw, since) });
+      }
+
+      for (const p of series) expect(p.total).toBe(trueValueAt(raw, p.t));
+      for (let i = 1; i < series.length; i++) expect(series[i].t).toBeGreaterThan(series[i - 1].t);
+      expect(series[0].t).toBe(truth[0].t);
+      expect(series.at(-1)?.t).toBe(truth.at(-1)?.t);
+      const totals = (xs: { total: number }[]) => xs.map((p) => p.total);
+      expect(Math.min(...totals(series))).toBe(Math.min(...totals(truth)));
+      expect(Math.max(...totals(series))).toBe(Math.max(...totals(truth)));
+    }
+    // 别让 `continue` 悄悄把轮次吃光:全窗与裁窗两档都真跑到了。
+    expect(checked).toBeGreaterThanOrEqual(8);
+    expect(windowed).toBeGreaterThanOrEqual(3);
+  }, 60_000);
+
   it("listSampledTotals:只有 extra(纯手记组合)也照样挑候选、发回", async () => {
     const rows = await snapshotsOf(USER).listSampledTotals([], undefined, 5, [
       { accountId: "m1", takenAt: 1_000, totalUsd: 10 },
