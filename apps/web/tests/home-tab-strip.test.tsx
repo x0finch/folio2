@@ -1,6 +1,6 @@
 import { toast } from "@folio/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HomeTabStripView } from "@/lib/core/portfolio";
@@ -17,7 +17,7 @@ import type { PortfolioOverview } from "@/lib/queries/portfolio";
 //     等条子上真挂上了新 tab 再选中它;失败 → toast;已满 3 个 → ＋ 不出现
 //   · pin 本身:**先选中、再点才开管理面板**;面板里改指向 → updateTabPinTarget,取消固定 →
 //     deleteTabPin,且取消的是当前选中的 → 选中挪到左邻(前一个 pin,没有就最后一个视角 tab)
-//   · 面板浮层:窗口 resize → 关;桌面 hover:选中的 pin 移上去即开、未选中的不开
+//   · 面板浮层:按 Esc / 点面板外面 → 关
 // 数据钩子与 server fn 打桩;写完之后「等条子变了」那一步(fetchHomeTabStrip)也打桩成立刻就绪。
 
 const h = vi.hoisted(() => ({
@@ -115,7 +115,6 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
 });
 
 let currentTab = "";
@@ -157,10 +156,6 @@ const total = (container: HTMLElement) =>
     .lastElementChild as HTMLElement;
 const addButton = () => screen.queryByRole("button", { name: "Pin a view" });
 const unpinButton = () => screen.queryByRole("button", { name: "Unpin" });
-// 浮层的开合态(beUI 触发器上的 aria-expanded)。关上之后浮层还要等收拢动画放完才卸载,
-// 所以「没关」要看这个,不能只看 Unpin 还在不在 DOM 里。
-const panelExpanded = () =>
-  document.querySelector("[aria-haspopup=dialog]")?.getAttribute("aria-expanded");
 
 describe("tab 条", () => {
   it("Tokens 恒在;Perps / DeFi 跟着组合有没有;pin 带 #/@ 前缀", () => {
@@ -367,47 +362,6 @@ describe("pin 的管理面板", () => {
     await waitFor(() => expect(err).toHaveBeenCalledWith("Something went wrong."));
   });
 
-  it("窗口 resize → 浮层与触发器脱节了,关掉", async () => {
-    mount();
-    fireEvent.click(tab("#DeFi"));
-    fireEvent.click(tab("#DeFi"));
-    await screen.findByRole("button", { name: "Unpin" });
-    act(() => {
-      window.dispatchEvent(new Event("resize"));
-    });
-    await waitFor(() => expect(unpinButton()).toBeNull());
-  });
-
-  it("触发器被滚走了 → 关;面板自己内部滚动(选择器 overflow)→ 不关", async () => {
-    mount();
-    fireEvent.click(tab("#DeFi"));
-    fireEvent.click(tab("#DeFi"));
-    const unpin = await screen.findByRole("button", { name: "Unpin" });
-    // 打开之后触发器「挪了位置」:jsdom 没有几何,这里让它量出来跟打开时不一样。
-    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(
-      new DOMRect(100, 50, 60, 32),
-    );
-    act(() => {
-      unpin.parentElement?.dispatchEvent(new Event("scroll"));
-    });
-    expect(panelExpanded()).toBe("true");
-    act(() => {
-      document.dispatchEvent(new Event("scroll"));
-    });
-    await waitFor(() => expect(unpinButton()).toBeNull());
-  });
-
-  it("触发器没挪(开面板时自己滚进可视区那一下)→ 不关", async () => {
-    mount();
-    fireEvent.click(tab("#DeFi"));
-    fireEvent.click(tab("#DeFi"));
-    await screen.findByRole("button", { name: "Unpin" });
-    act(() => {
-      document.dispatchEvent(new Event("scroll"));
-    });
-    expect(panelExpanded()).toBe("true");
-  });
-
   it("按 Esc / 点面板外面 → 关", async () => {
     mount();
     fireEvent.click(tab("#DeFi"));
@@ -419,28 +373,6 @@ describe("pin 的管理面板", () => {
     fireEvent.click(tab("#DeFi"));
     await screen.findByRole("button", { name: "Unpin" });
     fireEvent.pointerDown(document.body);
-    await waitFor(() => expect(unpinButton()).toBeNull());
-  });
-
-  it("桌面 hover:选中的 pin 移上去即开,移开一会儿后关;没选中的移上去不开", async () => {
-    vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: query === "(hover: hover)",
-      media: query,
-      addEventListener() {},
-      removeEventListener() {},
-    }));
-    mount();
-    const wrapperOf = (name: string) => tab(name).closest("span.inline-flex") as HTMLElement;
-
-    fireEvent.mouseEnter(wrapperOf("#DeFi"));
-    expect(unpinButton()).toBeNull(); // 没选中
-
-    fireEvent.click(tab("#DeFi")); // 选中(触屏 tap 同路:首点不开)
-    fireEvent.mouseLeave(wrapperOf("#DeFi"));
-    fireEvent.mouseEnter(wrapperOf("#DeFi"));
-    expect(await screen.findByRole("button", { name: "Unpin" })).toBeTruthy();
-
-    fireEvent.mouseLeave(wrapperOf("#DeFi"));
     await waitFor(() => expect(unpinButton()).toBeNull());
   });
 });

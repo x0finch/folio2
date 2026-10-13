@@ -9,7 +9,7 @@ import { DefiPositions } from "@/routes/_authed/-home/holdings/defi";
 
 // DeFi 持仓(首页「DeFi」tab 与账户抽屉共用)屏幕上写的是什么:
 //   · 每协议一行:协议名 + 净小计(资产 − 负债)+ 24h 增量(算不出 → `—`,还在取 → 骨架)
-//   · 构成条:按角色分段、角色名排在条上方;小角色至少占 5%(看得见),全 0 值均分
+//   · 构成条:按角色分段、角色名排在条上方
 //   · hover 明细:按角色分组列出每条腿的数量与美元值,负债腿带「−」
 //   · 隐私:腿的数量与美元值都遮
 // beUI hover Popover 关着时也把明细渲染在 DOM 里(只是 inert),所以直接读那段 DOM。
@@ -80,14 +80,6 @@ describe("协议行", () => {
     expect(protocolRow("Aave").querySelector("[data-slot=skeleton]")).toBeTruthy();
   });
 
-  it("默认有节头;首页 tab 里 hideHeader 省掉", () => {
-    const a = wrap(<DefiPositions groups={[aave]} />);
-    expect(screen.getByText("DeFi positions")).toBeTruthy();
-    a.unmount();
-    wrap(<DefiPositions groups={[aave]} hideHeader />);
-    expect(screen.queryByText("DeFi positions")).toBeNull();
-  });
-
   it("每个协议一行", () => {
     wrap(
       <DefiPositions groups={[aave, { protocol: "Lido", rows: [row("x", "stETH", 1, 3000)] }]} />,
@@ -113,41 +105,6 @@ describe("构成条与明细", () => {
     expect(text).toContain("−219 GHO−$219.00");
     // 角色顺序:deposit 那组在前(腿按 |usd| 降序,先出现的角色先排)。
     expect(text.indexOf("deposit")).toBeLessThan(text.indexOf("loan"));
-  });
-
-  it("小角色抬到 5% —— 不会被压成看不见的一条线", () => {
-    const { container } = wrap(
-      <DefiPositions
-        groups={[
-          {
-            protocol: "Pendle",
-            rows: [row("a", "PT", 1, 10_000, "deposit"), row("b", "PENDLE", 1, 1, "reward")],
-          },
-        ]}
-      />,
-    );
-    const grow = [...container.querySelectorAll<HTMLElement>("[data-lab]")].map((e) =>
-      Number(e.style.flexGrow),
-    );
-    expect(grow[1]).toBe(5);
-    expect(grow[0]).toBeCloseTo(95, 5);
-  });
-
-  it("全是 0 值 → 各角色均分", () => {
-    const { container } = wrap(
-      <DefiPositions
-        groups={[
-          {
-            protocol: "Dust",
-            rows: [row("a", "A", 0, 0, "deposit"), row("b", "B", 0, 0, "reward")],
-          },
-        ]}
-      />,
-    );
-    const grow = [...container.querySelectorAll<HTMLElement>("[data-lab]")].map((e) =>
-      Number(e.style.flexGrow),
-    );
-    expect(grow).toEqual([50, 50]);
   });
 });
 

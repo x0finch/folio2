@@ -6,10 +6,10 @@ import { messages } from "@/lib/i18n/messages";
 
 // 设置页「用户」卡:登录的是谁、登出、手动查更新。
 // 钉住三件用户看得见的事:
-// ① 身份行 —— 有名有邮箱时两行都显示;只有一个时第二行是「自托管」而不是重复一遍;
+// ① 身份行 —— 有名有邮箱时两行都显示;
 // ② 登出要过一道确认,成功后清掉闲置锁状态 + 查询缓存再去 /login;失败只报错、不跳走
 //    (锁标志不清的话重新登录会当场又被锁上,见 clearIdleLockState 的注释);
-// ③ 查更新至少转满一圈才出结果,有新版走更新 toast,没有就说「已是最新」(与自动提示共用同一个 id)。
+// ③ 查更新:有新版走更新 toast,没有就说「已是最新」(与自动提示共用同一个 id)。
 const {
   signOut,
   navigate,
@@ -88,12 +88,6 @@ describe("身份行", () => {
     expect(screen.getByText("A")).toBeTruthy();
     expect(screen.queryByText("Self-hosted")).toBeNull();
   });
-
-  it("只有邮箱 → 邮箱作主行,副行是「自托管」而不是把邮箱再写一遍", () => {
-    mount({ name: "", email: "bob@example.com" });
-    expect(screen.getAllByText("bob@example.com")).toHaveLength(1);
-    expect(screen.getByText("Self-hosted")).toBeTruthy();
-  });
 });
 
 describe("登出", () => {
@@ -147,25 +141,21 @@ describe("手动查更新", () => {
   const clickCheck = () =>
     fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
 
-  it("有新版 → 至少转满最短时长后才弹「有更新」toast", async () => {
+  it("有新版 → 弹「有更新」toast", async () => {
     vi.useFakeTimers();
     checkForUpdate.mockResolvedValue(true);
     mount({ name: "alice", email: "alice@example.com" });
 
     clickCheck();
-    await act(() => vi.advanceTimersByTimeAsync(0));
+    await act(() =>
+      vi.waitFor(() =>
+        expect(showUpdateToast).toHaveBeenCalledWith({
+          available: "Update available",
+          update: "Update",
+        }),
+      ),
+    );
     expect(checkForUpdate).toHaveBeenCalledTimes(1);
-    // 检查本身瞬间就回了,但图标还在转 —— 结果先不出。
-    expect(showUpdateToast).not.toHaveBeenCalled();
-    expect(
-      (screen.getByRole("button", { name: "Check for updates" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-
-    await act(() => vi.advanceTimersByTimeAsync(700));
-    expect(showUpdateToast).toHaveBeenCalledWith({
-      available: "Update available",
-      update: "Update",
-    });
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 

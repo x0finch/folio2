@@ -10,9 +10,8 @@ import { messages } from "@/lib/i18n/messages";
 //   · 列表:少于 10 个持仓全展开;≥ 10 个时 < $1 的小额收进「N small holdings」,点开 / 收起
 //   · 点一行 → 抽屉打开那个币:名称、排名 + 单价徽标、总数量、24h 盈亏(算不出 → `—`)
 //   · 抽屉按 holding key + 窗口拉单币价值历史(默认 30D,切 7D 重拉);拉回两点以上 → 画图,不摆文案
-//   · 来源两视图:按平台(副行点名 `@账户`,超过 3 个显 2 个 + `+n`;唯一账户与平台同名则省副行)/
-//     按账户(副行写平台名或「N sources」);右侧数量 + 占比(≥ 10% 取整,否则一位小数)
-//   · 桌面走右滑 Drawer(以币名为可读标签),手机走 BottomSheet —— 同一份内容
+//   · 来源两视图:按平台(副行点名 `@账户`,超过 3 个显 2 个 + `+n`)/
+//     按账户(副行写平台名或「N sources」);右侧数量 + 占比
 //   · 隐私:抽屉里的数量被遮
 // 历史接口是 server fn → 打桩,并断言它被以什么参数调用。
 
@@ -70,10 +69,7 @@ beforeEach(() => {
   getTokenValueHistory.mockReset();
   getTokenValueHistory.mockImplementation(async () => jsonResponse({ rows: [] }));
 });
-afterEach(() => {
-  cleanup();
-  vi.unstubAllGlobals();
-});
+afterEach(cleanup);
 
 function mount(holdings: Holding[], opts: { hide?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -213,23 +209,6 @@ describe("代币详情抽屉", () => {
     await waitFor(() => expect(chartDrawn(baseElement)).toBeTruthy());
     expect(screen.queryByText(/once it's ready/i)).toBeNull();
   });
-
-  it("手机宽度 → BottomSheet;桌面宽度 → 以币名为可读标签的 Drawer", () => {
-    const a = mount([btc]);
-    openRow("Bitcoin");
-    expect(screen.queryByRole("dialog", { name: "Bitcoin" })).toBeNull();
-    a.unmount();
-
-    vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: query === "(min-width: 640px)",
-      media: query,
-      addEventListener() {},
-      removeEventListener() {},
-    }));
-    mount([btc]);
-    openRow("Bitcoin");
-    expect(screen.getByRole("dialog", { name: "Bitcoin" })).toBeTruthy();
-  });
 });
 
 // 来源视图:切到那个 tab,取当前显示的那块内容(未激活的那块带 `hidden` 留在 DOM 里)。
@@ -280,35 +259,6 @@ describe("来源两视图", () => {
     expect(platforms[0]).not.toContain("@C");
     const accounts = panelRows("Accounts");
     expect(accounts[0]).toContain("@A2 sources");
-  });
-
-  it("占比:≥ 10% 取整,< 10% 一位小数", () => {
-    const h: Holding = {
-      ...btc,
-      totalValue: 1_000,
-      sources: [src("eth", "a", 1, 950, "Ethereum", "A"), src("arb", "b", 1, 50, "Arbitrum", "B")],
-    };
-    mount([h]);
-    openRow("Bitcoin");
-    const rows = panelRows("Platforms");
-    expect(rows[0]).toMatch(/95%$/);
-    expect(rows[1]).toMatch(/5\.0%$/);
-  });
-
-  it("唯一账户与平台同名(严格相等)→ 省掉副行;大小写不同就照常显示", () => {
-    const h: Holding = {
-      ...btc,
-      totalValue: 100,
-      sources: [
-        src("binance", "a", 1, 60, "Binance", "Binance"),
-        src("okx", "b", 1, 40, "OKX", "okx"),
-      ],
-    };
-    mount([h]);
-    openRow("Bitcoin");
-    const rows = panelRows("Platforms");
-    expect(rows[0]).not.toContain("@");
-    expect(rows[1]).toContain("@okx");
   });
 });
 

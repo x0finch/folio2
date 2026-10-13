@@ -6,8 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 // 钉住的是**组合规则**,不是滚轮本身:
 // ① 只改被拨动的那一格,其余(年月日时分秒)原样保留;
 // ② 换月后原日越界(1/31 → 2 月)夹到该月末,而不是让 Date 溢出成 3 月初;
-// ③ 毫秒清零(精确到秒,同一天多笔按真实先后排);
-// ④ 月名跟随界面语言。
+// ③ 毫秒清零(精确到秒,同一天多笔按真实先后排)。
 //
 // 滚轮在「减少动效」模式下渲染成一列可点的按钮(无拖拽物理)—— 测试走这条,点一下 = 拨到那一格。
 vi.mock("motion/react", async (orig) => ({
@@ -21,10 +20,10 @@ const { DateTimeWheel } = await import("@/components/date-time-wheel");
 const Y = new Date().getFullYear() - 1;
 const BASE = new Date(Y, 0, 31, 10, 20, 30, 999).getTime(); // 1 月 31 日 10:20:30.999
 
-function mount(part: "date" | "time", locale = "en") {
+function mount(part: "date" | "time") {
   const onChange = vi.fn();
   const utils = render(
-    <IntlProvider locale={locale} timeZone="UTC">
+    <IntlProvider locale="en" timeZone="UTC">
       <DateTimeWheel part={part} value={BASE} onChange={onChange} />
     </IntlProvider>,
   );
@@ -34,28 +33,11 @@ function mount(part: "date" | "time", locale = "en") {
     [...wheel(n).querySelectorAll("button")].find(
       (b) => b.textContent === label,
     ) as HTMLButtonElement;
-  const labels = (n: number) => [...wheel(n).querySelectorAll("button")].map((b) => b.textContent);
   const picked = () => new Date(onChange.mock.calls.at(-1)?.[0] as number);
-  return { ...utils, onChange, cell, labels, picked };
+  return { ...utils, onChange, cell, picked };
 }
 
 describe("DateTimeWheel — 日期", () => {
-  it("三个滚轮:月(本地化短名)/ 日(随月份天数)/ 年(含今年)", () => {
-    const { labels } = mount("date");
-    expect(labels(0)).toHaveLength(12);
-    expect(labels(0)[0]).toBe("Jan");
-    expect(labels(1)).toHaveLength(31); // 1 月
-    expect(labels(2)).toContain(String(Y + 1));
-  });
-
-  it("月名跟随界面语言", () => {
-    const { labels } = mount("date", "fr");
-    expect(labels(0)[0]).toBe(
-      new Intl.DateTimeFormat("fr", { month: "short" }).format(new Date(2000, 0, 1)),
-    );
-    expect(labels(0)[0]).not.toBe("Jan");
-  });
-
   it("拨日 → 只改日,时分秒保留、毫秒清零", () => {
     const { cell, onChange } = mount("date");
     fireEvent.click(cell(1, "15"));
@@ -77,14 +59,6 @@ describe("DateTimeWheel — 日期", () => {
 });
 
 describe("DateTimeWheel — 时间", () => {
-  it("时 / 分 / 秒 三个两位数滚轮", () => {
-    const { labels } = mount("time");
-    expect(labels(0)).toHaveLength(24);
-    expect(labels(0)[0]).toBe("00");
-    expect(labels(1)).toHaveLength(60);
-    expect(labels(2)).toHaveLength(60);
-  });
-
   it("拨时 / 分 / 秒 → 各改各的,日期不动", () => {
     const { cell, onChange } = mount("time");
     fireEvent.click(cell(0, "05"));

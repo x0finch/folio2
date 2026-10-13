@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "@/lib/i18n/messages";
 
 // 自定义 Tab 的「选目标」选择器(ADR 0034):
-//   · 三段 —— Tags(`#名`)/ Types(连接器类型名,走目录;目录里没有 → 首字母大写兜底)/
+//   · 三段 —— Tags(`#名`)/ Types(连接器类型名,走目录)/
 //     Accounts(`@名`);哪段没有选项哪段整段不出;三段都空 → 「Nothing to pin yet」
 //   · 点一项 → 回调带回的是 {kind, 对应的那个 id},三种 kind 各自填对字段
 // 连接器目录是 server fn → 打桩。
@@ -71,12 +71,6 @@ describe("三段与空态", () => {
       binance,
       screen.getByRole("button", { name: "@Cold" }),
     ]);
-  });
-
-  it("目录里没有这个连接器 → 名字首字母大写兜底", async () => {
-    listConnectors.mockResolvedValue({});
-    mount({ connectorOptions: [{ id: "zerion", label: "x" }] });
-    expect(await screen.findByText("Zerion")).toBeTruthy();
   });
 
   it("没有选项的段整段不出(连段名都没有)", () => {

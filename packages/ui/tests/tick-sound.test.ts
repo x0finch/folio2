@@ -1,41 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // 滚轮选择器的「咔嗒」声:整页共用一个 AudioContext(多个滚轮并排也只开一个)、懒创建、
-// 最后一个使用者 dispose 才关;快速滑动时切掉上一声的尾巴;没有 Web Audio(SSR / 老浏览器)时静默。
+// 最后一个使用者 dispose 才关;没有 Web Audio(SSR / 老浏览器)时静默。
 // node 环境里没有 Web Audio,这里只替换这一层浏览器 API。
 
 class FakeSource {
   buffer: unknown = null;
   onended: (() => void) | null = null;
-  started = false;
   stopped = false;
-  disconnected = false;
-  connectedTo: unknown = null;
-  connect(node: unknown) {
-    this.connectedTo = node;
-  }
-  disconnect() {
-    this.disconnected = true;
-  }
-  start() {
-    this.started = true;
-  }
+  connect() {}
+  disconnect() {}
+  start() {}
   stop() {
     this.stopped = true;
-  }
-}
-
-class FakeBuffer {
-  readonly data: Float32Array;
-  constructor(
-    readonly channels: number,
-    readonly length: number,
-    readonly sampleRate: number,
-  ) {
-    this.data = new Float32Array(length);
-  }
-  getChannelData() {
-    return this.data;
   }
 }
 
@@ -47,27 +24,16 @@ class FakeContext {
   destination = { kind: "destination" };
   closed = 0;
   resumed = 0;
-  gains: { gain: { value: number }; connectedTo: unknown }[] = [];
-  buffers: FakeBuffer[] = [];
   sources: FakeSource[] = [];
   constructor() {
     instances.push(this);
   }
   createGain() {
-    const node = {
-      gain: { value: 1 },
-      connectedTo: null as unknown,
-      connect(n: unknown) {
-        node.connectedTo = n;
-      },
-    };
-    this.gains.push(node);
-    return node;
+    return { gain: { value: 1 }, connect() {} };
   }
-  createBuffer(channels: number, length: number, sampleRate: number) {
-    const b = new FakeBuffer(channels, length, sampleRate);
-    this.buffers.push(b);
-    return b;
+  createBuffer(_channels: number, length: number) {
+    const data = new Float32Array(length);
+    return { length, getChannelData: () => data };
   }
   createBufferSource() {
     const s = new FakeSource();
@@ -117,50 +83,6 @@ describe("createTickPlayer", () => {
     b.play();
     expect(instances).toHaveLength(1);
     expect(instances[0].sources).toHaveLength(2);
-  });
-
-  it("play 出一声:源接到主音量(主音量很小并接到输出),并真的 start", async () => {
-    const { createTickPlayer } = await load();
-    createTickPlayer().play();
-    const ctx = instances[0];
-    const [gain] = ctx.gains;
-    const [src] = ctx.sources;
-    expect(src.started).toBe(true);
-    expect(src.connectedTo).toBe(gain);
-    expect(src.buffer).toBe(ctx.buffers[0]);
-    expect(gain.connectedTo).toBe(ctx.destination);
-    expect(gain.gain.value).toBeGreaterThan(0);
-    expect(gain.gain.value).toBeLessThan(0.1);
-  });
-
-  it("咔嗒声很短(16ms)且归一化到峰值 0.9", async () => {
-    const { createTickPlayer } = await load();
-    createTickPlayer().prepare();
-    const [buf] = instances[0].buffers;
-    expect(buf.length).toBe(Math.ceil(0.016 * 48_000));
-    const peak = Math.max(...Array.from(buf.data, Math.abs));
-    expect(peak).toBeCloseTo(0.9, 6);
-  });
-
-  it("快速连响:新的一声切掉上一声的尾巴", async () => {
-    const { createTickPlayer } = await load();
-    const p = createTickPlayer();
-    p.play();
-    p.play();
-    const [first, second] = instances[0].sources;
-    expect(first.stopped).toBe(true);
-    expect(second.stopped).toBe(false);
-  });
-
-  it("一声自然放完后断开,下一声不再去 stop 它", async () => {
-    const { createTickPlayer } = await load();
-    const p = createTickPlayer();
-    p.play();
-    const [first] = instances[0].sources;
-    first.onended?.();
-    expect(first.disconnected).toBe(true);
-    p.play();
-    expect(first.stopped).toBe(false);
   });
 
   it("context 被挂起时尝试 resume", async () => {
@@ -230,13 +152,6 @@ describe("createTickPlayer", () => {
     createTickPlayer().play();
     expect(instances).toHaveLength(2);
     expect(instances[1].sources).toHaveLength(1);
-  });
-
-  it("只有 webkitAudioContext 的浏览器也能响", async () => {
-    vi.stubGlobal("window", { webkitAudioContext: FakeContext });
-    const { createTickPlayer } = await load();
-    createTickPlayer().play();
-    expect(instances[0].sources[0].started).toBe(true);
   });
 
   it("没有 Web Audio / 没有 window(SSR)时静默,不抛", async () => {

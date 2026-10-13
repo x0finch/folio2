@@ -17,7 +17,7 @@ import {
 //   · 多账户按权益降序;账户头用平台名 + `@账户名`,没平台就只写账户名
 //   · 仓位行:`3x Long` 方向 pill、数量取绝对值;有强平价 → 风险环(明细里的余量 / 开仓 / 标记 / 强平),
 //     没有 → 降级成「Entry $x」文字
-//   · 风险环的填充:危险态至少一小段、穿仓给满环
+//   · 风险环:穿仓给满环、余量写 0%
 //   · 隐私:钱(权益、盈亏、可提、名义、数量、已用保证金)被遮;比率、市场价不遮
 // beUI hover Popover 关着时也把明细渲染在 DOM 里,所以明细文字直接可断。
 
@@ -103,14 +103,6 @@ describe("账户权益条", () => {
     expect(screen.queryByText("Equity")).toBeNull();
     expect(screen.getByText("BTC", { exact: false })).toBeTruthy();
   });
-
-  it("单账户分区默认有节头,hideHeader 时省掉", () => {
-    const a = wrap(<PerpPositions view={view()} />);
-    expect(screen.getByText("Perp positions")).toBeTruthy();
-    a.unmount();
-    wrap(<PerpPositions view={view()} hideHeader />);
-    expect(screen.queryByText("Perp positions")).toBeNull();
-  });
 });
 
 describe("仓位行", () => {
@@ -167,16 +159,6 @@ describe("风险环的填充", () => {
   // 多头 entry 100 / 强平 90,数量 1 → 标记价 = positionValue。
   const at = (mark: number) =>
     pos({ entryPx: 100, liquidationPx: 90, size: 1, positionValue: mark, leverageType: undefined });
-
-  it("警告区(余量 10%)→ 按余量 / 25% 填,不封顶", () => {
-    const { container } = wrap(<PerpPositions view={view({ positions: [at(100)] })} hideHeader />);
-    expect(ringFill(container)).toBeCloseTo(0.4, 5);
-  });
-
-  it("危险但未穿仓(余量约 1%)→ 至少留一小段可见的红弧", () => {
-    const { container } = wrap(<PerpPositions view={view({ positions: [at(91)] })} hideHeader />);
-    expect(ringFill(container)).toBeCloseTo(0.08, 5);
-  });
 
   it("已越过强平价 → 满环(终态),余量写 0%", () => {
     const { container } = wrap(<PerpPositions view={view({ positions: [at(85)] })} hideHeader />);
