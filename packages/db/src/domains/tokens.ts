@@ -8,11 +8,11 @@ import type {
   TokenRefHit,
 } from "@folio/oracle-basic";
 import { formatTokenRef, parseTokenRef } from "@folio/oracle-ref";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, or, sql } from "drizzle-orm";
 import { Clock, Effect, Option } from "effect";
 import { chunk, type DbClient } from "../client";
 import type { Drizzle } from "../connect";
-import { snapshotBalances, tokenRefs, tokens } from "../schema";
+import { accounts, snapshotBalances, snapshots, tokenRefs, tokens } from "../schema";
 
 // 代币的 **info** facet + ref 行(ADR 0021 / 0023,#199)。**每个用户一份** —— userId 由 layer
 // 吃掉,下面所有方法签名里都没有它,拿错用户在编译期就发生不了。
@@ -388,19 +388,36 @@ export const makeUserTokenStore = (namer: string) => (client: DbClient, userId: 
             .update(tokenRefs)
             .set({ tokenId: into })
             .where(and(eq(tokenRefs.userId, userId), eq(tokenRefs.tokenId, from))),
-          // 历史快照改指。snapshot_balances 上没有 user_id 列,但 token_id 是本用户的 UUID,
-          // 只可能出现在本用户的行上 —— 按它直接改指即可。
+          // 历史快照改指。snapshot_balances 上没有 user_id 列 → 经 snapshot → account 收到本用户。
+          // 正常情况下 token_id 是本用户的 UUID、本就只出现在本用户的行上;但万一调用方递进来的是
+          // 别人的 id,这一步也不能改到别人的历史(用例「拿别人的 token id 来 merge」钉着)。
           db
             .update(snapshotBalances)
             .set({ tokenId: into })
-            .where(eq(snapshotBalances.tokenId, from)),
-          // 旧行的 provider 图是展示回退链的一档,别随行一起丢(只填空槽)。
+            .where(
+              and(
+                eq(snapshotBalances.tokenId, from),
+                exists(
+                  db
+                    .select({ one: sql`1` })
+                    .from(snapshots)
+                    .innerJoin(accounts, eq(accounts.id, snapshots.accountId))
+                    .where(
+                      and(
+                        eq(snapshots.id, snapshotBalances.snapshotId),
+                        eq(accounts.userId, userId),
+                      ),
+                    ),
+                ),
+              ),
+            ),
+          // 旧行的 provider 图是展示回退链的一档,别随行一起丢(只填空槽)。读、写两头都按用户收住。
           db
             .update(tokens)
             .set({
-              providerLogo: sql`coalesce(${tokens.providerLogo}, (select provider_logo from ${tokens} where id = ${from}))`,
+              providerLogo: sql`coalesce(${tokens.providerLogo}, (select provider_logo from ${tokens} where id = ${from} and user_id = ${userId}))`,
             })
-            .where(eq(tokens.id, into)),
+            .where(and(eq(tokens.userId, userId), eq(tokens.id, into))),
           db.delete(tokens).where(and(eq(tokens.userId, userId), eq(tokens.id, from))),
           // 两行会合并,正说明至少有一边的名字与上游当前的叫法不一致 —— 赢家留的是自己那份,
           // 可能就是旧的那份。标成该刷,别等 30 天的 TTL。
