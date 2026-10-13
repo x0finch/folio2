@@ -29,17 +29,40 @@ export interface DerivableActivity {
   createdAt: number;
 }
 
+// 浮点容差,**相对**于这一步涉及的数量级(不足 1 按 1 算)。0.1 + 0.2 − 0.3 = 5.55e-17;上亿个的币
+// 累加误差在 1e-8 量级 —— 绝对容差两头顾不上。1e-12 远大于浮点误差,又远小于任何有意义的数量
+// (1 聪 = 1e-8 BTC 照样留得住)。
+const AMOUNT_REL_TOLERANCE = 1e-12;
+const tolerance = (scale: number) => AMOUNT_REL_TOLERANCE * Math.max(1, Math.abs(scale));
+
+/**
+ * 账本折叠的**一步**:这一步之后还剩多少,以及这一步是不是卖超(FOL-109)。
+ *
+ * 读写两条路都走它 —— 折出数量(`deriveAmount`)、写时超卖闸(`runningOk`)、明细里的卖超提示
+ * (`isReduceOversold`)。以前三处各算各的,写路径有容差、读路径没有:卖光留下 5.55e-17 的幽灵持仓,
+ * 写路径刚放行的一笔卖出,明细里又标成卖超。
+ *
+ * 卖出后剩余在容差内(含略负)→ 恰好 0;超出容差的负数 → 卖超,并当步夹 0(不把负债带到后续)。
+ */
+export function foldStep(
+  held: number,
+  activity: Pick<DerivableActivity, "kind" | "amount">,
+): { held: number; oversold: boolean } {
+  if (activity.kind === "set") return { held: activity.amount, oversold: false };
+  if (activity.kind === "add") return { held: held + activity.amount, oversold: false };
+  const tol = tolerance(Math.max(held, activity.amount));
+  const next = held - activity.amount;
+  if (next > tol) return { held: next, oversold: false };
+  return { held: 0, oversold: next < -tol };
+}
+
+/** 按 occurredAt → createdAt 排好序的账本(折叠顺序的单一事实源)。 */
+export const inFoldOrder = <T extends DerivableActivity>(activities: readonly T[]): T[] =>
+  [...activities].sort((a, b) => a.occurredAt - b.occurredAt || a.createdAt - b.createdAt);
+
 export function deriveAmount(activities: DerivableActivity[]): number {
-  const sorted = [...activities].sort(
-    (a, b) => a.occurredAt - b.occurredAt || a.createdAt - b.createdAt,
-  );
   let amount = 0;
-  for (const a of sorted) {
-    if (a.kind === "set") amount = a.amount;
-    else if (a.kind === "add") amount += a.amount;
-    else amount -= a.amount; // reduce
-    if (amount < 0) amount = 0; // 每步夹 0:超卖当步归零,不把负债带到后续活动
-  }
+  for (const a of inFoldOrder(activities)) amount = foldStep(amount, a).held;
   return amount;
 }
 
@@ -197,7 +220,7 @@ export function isReduceOversold(
       a.occurredAt < activity.occurredAt ||
       (a.occurredAt === activity.occurredAt && a.createdAt < activity.createdAt),
   );
-  return deriveAmount(before) < activity.amount;
+  return foldStep(deriveAmount(before), activity).oversold;
 }
 
 // 某 manual 账户的账本 → (takenAt, totalUsd) 序列,在**规则日网格**上采样(ADR 0019):曲线随市价起伏而非

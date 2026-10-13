@@ -1,26 +1,18 @@
 import type { ManualActivityKind } from "@folio/db";
-import type { DerivableActivity } from "@/lib/core/manual";
+import { type DerivableActivity, foldStep, inFoldOrder } from "@/lib/core/manual";
 
 // 服务端**批量写路径**的纯逻辑(无 server-only import → workers-pool 外可单测,与 injector/预热同源那套解耦)。
 // 输入既有 token + 一批草稿,输出「写计划」(要新建的 token + 要插入的活动)或整批拒因(超支的 symbol)。
 // 决策全在此,server fn / db op 只执行(ADR 0017 「决策逻辑下沉纯模块」)。
 
-// 浮点折叠余量容差:runningOk 是写时超卖闸(deriveAmount 会把超卖逐步夹到 0、隐去负值),故校验须独立判负。
-const EPS = 1e-9;
-
-// 运行持有从不为负(reduce 不在任一时点超支)。按 occurredAt→createdAt 折叠;`set` 重置基线、`add` +=、`reduce` -=。
+// 写时超卖闸:没有任何一笔卖出超过当时的持有。与读路径(折出数量、明细的卖超提示)**走同一步折叠**
+// `foldStep`,容差同一个口径 —— 写路径放行的账本,读出来不会被标成卖超(FOL-109)。
 export function runningOk(activities: DerivableActivity[]): boolean {
-  const sorted = [...activities].sort(
-    (a, b) => a.occurredAt - b.occurredAt || a.createdAt - b.createdAt,
-  );
-  let running = 0;
-  for (const a of sorted) {
-    if (a.kind === "set") running = a.amount;
-    else if (a.kind === "add") running += a.amount;
-    else {
-      running -= a.amount;
-      if (running < -EPS) return false;
-    }
+  let held = 0;
+  for (const a of inFoldOrder(activities)) {
+    const step = foldStep(held, a);
+    if (step.oversold) return false;
+    held = step.held;
   }
   return true;
 }
