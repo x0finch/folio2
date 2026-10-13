@@ -80,3 +80,26 @@ describe("attachAccountHoldingGains", () => {
     expect(out!.balances.find((b) => b.id === "spot")?.gain24h).toBeUndefined();
   });
 });
+
+// 一个币现在还有行、但现值是 0(价没了 / 数量归零),24 小时前值 300:按市值占比摊分时分母是 0,
+// 以前直接给每行摊 0 —— −300 从行上消失,行相加对不上账户那一行(FOL-110)。分母为 0 时平摊。
+describe("attachAccountHoldingGains —— 现值归零的币(FOL-110)", () => {
+  it("两行现值都是 0、起点 300 → 每行 −150,两行相加 = 该币的 −300", () => {
+    const [row] = attachAccountHoldingGains(
+      [
+        {
+          account: { id: "a" },
+          archivedAt: null,
+          totalUsd: 0,
+          balances: [
+            { id: "eth-arb", tokenId: "eth", amount: 0, usdValue: 0, kind: "spot" },
+            { id: "eth-op", tokenId: "eth", amount: 0, usdValue: 0, kind: "spot" },
+          ],
+        },
+      ],
+      prevOf("a", [pb({ tokenId: "eth", usdValue: 300 })]),
+    );
+    expect(row?.balances.map((b) => b.gain24h?.amount)).toEqual([-150, -150]);
+    expect(row?.gain24h?.amount).toBe(-300);
+  });
+});

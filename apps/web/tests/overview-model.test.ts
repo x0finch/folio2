@@ -32,7 +32,9 @@ const overviewEffect = (
   Effect.gen(function* () {
     const { tokens, platforms } = yield* Oracle;
     // 与生产总览装配同款:参考层读出的完整行经 `toTokenView` 收窄再喂 buildOverview。
-    const enrichedRecords = yield* tokens.enrich(overviewEnrichIds(accounts, byAccount));
+    const enrichedRecords = yield* tokens.enrich(
+      overviewEnrichIds(accounts, byAccount, deps.prevByAccount),
+    );
     const enriched = new Map([...enrichedRecords].map(([id, r]) => [id, toTokenView(r)] as const));
     const platformMeta = yield* platforms.resolve(
       overviewChainIds(accounts, byAccount, deps.connectorMeta),
@@ -466,6 +468,93 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
     const avg = view.holdings.reduce((s, h) => s + (h.gain24h?.pct ?? 0), 0) / view.holdings.length;
     expect(view.gain24h?.pct).toBeCloseTo(7.5, 4);
     expect(view.gain24h?.pct).not.toBeCloseTo(avg, 2);
+  });
+});
+
+// 「各行相加 = 顶部那个数」(CONTEXT.md 24h 盈亏)。以前**卖光的币**没有行 —— 持仓只收现值 ≠ 0 的币 ——
+// 它的那笔亏损(或赚头)就从行上消失了:24 小时前 1 ETH(3000),现在换成 3000 USDC,顶部是 0,
+// 行上却只剩「USDC +3000」(FOL-110)。卖光的币现在留一行:现值 0,盈亏 = 0 − 24 小时前的值。
+describe("buildOverview —— 卖光的币(FOL-110)", () => {
+  const accounts = [account("a1", "Arb")];
+  const ethThen = bal({ tokenId: "eth", symbol: "ETH", amount: 1, usdValue: 3000 });
+
+  it("ETH 全换成 USDC → ETH 留一行:现值 0、盈亏 −3000;各行相加 = 顶部", async () => {
+    const now = new Map([["a1", snap("a1", 3000, [bal({ amount: 3000, usdValue: 3000 })])]]);
+    const prevMap = new Map([["a1", snap("a1", 0, [ethThen])]]);
+    const view = await runWithOracle(
+      stub,
+      overviewEffect(accounts, now, { prevByAccount: prevMap }),
+    );
+    const eth = view.holdings.find((h) => h.token.id === "eth");
+    expect(eth).toMatchObject({ totalValue: 0, totalAmount: 0, sources: [] });
+    expect(eth?.gain24h).toEqual({ amount: -3000, pct: -100 });
+    const sum = view.holdings.reduce((s, h) => s + (h.gain24h?.amount ?? 0), 0);
+    expect(view.gain24h?.amount).toBeCloseTo(0, 9);
+    expect(sum).toBeCloseTo(view.gain24h?.amount ?? Number.NaN, 9);
+  });
+
+  it("卖光的那行沿用富化出来的名字与图标(不是空白行)", async () => {
+    const now = new Map([["a1", snap("a1", 0, [])]]);
+    const prevMap = new Map([["a1", snap("a1", 0, [ethThen])]]);
+    const view = await runWithOracle(
+      stub,
+      overviewEffect(accounts, now, { prevByAccount: prevMap }),
+    );
+    const eth = view.holdings.find((h) => h.token.id === "eth");
+    expect(eth?.token).toMatchObject({ id: "eth", name: "USD Coin" }); // 桩把每个 id 富化成 USDC 那行
+    expect(eth?.token.logo).toBeDefined();
+  });
+
+  it("24 小时前就是 0 的币不凭空多出一行", async () => {
+    const now = new Map([["a1", snap("a1", 10, [bal({ amount: 10, usdValue: 10 })])]]);
+    const prevMap = new Map([
+      ["a1", snap("a1", 0, [bal({ amount: 10, usdValue: 10 }), { ...ethThen, usdValue: 0 }])],
+    ]);
+    const view = await runWithOracle(
+      stub,
+      overviewEffect(accounts, now, { prevByAccount: prevMap }),
+    );
+    expect(view.holdings.map((h) => h.token.id)).toEqual(["usdc"]);
+  });
+
+  // 不变量,随机组合压一遍(固定种子):只有现货、每行都有 token_id 时,**各行盈亏之和恰好等于顶部**。
+  // 随机生成:几个账户(有的没有 24 小时前基准)、几个币,每个币在起点/现在各自可能有、没有或为 0 ——
+  // 卖光、新买、归零、只在无基准账户里,全都会碰到。
+  it("随机组合:各持仓行的盈亏相加 = 顶部盈亏", async () => {
+    let seed = 7;
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) % 2 ** 31;
+      return seed / 2 ** 31;
+    };
+    const value = () => (rand() < 0.3 ? 0 : Math.round(rand() * 1e6) / 100);
+    const ids = ["t1", "t2", "t3", "t4", "t5"];
+    for (let n = 0; n < 300; n++) {
+      const accs = ["x1", "x2", "x3"]
+        .slice(0, 1 + Math.floor(rand() * 3))
+        .map((id) => account(id, id));
+      const now = new Map<string, SnapshotWithBalances>();
+      const prevMap = new Map<string, SnapshotWithBalances>();
+      for (const a of accs) {
+        const held = (p: number) =>
+          ids
+            .filter(() => rand() < p)
+            .map((tokenId) => bal({ tokenId, symbol: tokenId, amount: 1, usdValue: value() }));
+        const cur = held(0.5);
+        now.set(
+          a.id,
+          snap(
+            a.id,
+            cur.reduce((s, b) => s + b.usdValue, 0),
+            cur,
+          ),
+        );
+        if (rand() < 0.8) prevMap.set(a.id, snap(a.id, 0, held(0.5)));
+      }
+      const view = await runWithOracle(stub, overviewEffect(accs, now, { prevByAccount: prevMap }));
+      if (view.gain24h == null) continue; // 一个有基准的账户都没有 → 顶部 `—`,没有可比的数
+      const sum = view.holdings.reduce((s, h) => s + (h.gain24h?.amount ?? 0), 0);
+      expect(sum).toBeCloseTo(view.gain24h.amount, 6);
+    }
   });
 });
 
