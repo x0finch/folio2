@@ -32,13 +32,16 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
     const amount = Number(d.cashBal ?? 0);
     if (!(amount > 0)) continue;
     const eq = Number(d.eq ?? 0);
-    const price = eq > 0 ? Number(d.eqUsd ?? 0) / eq : 0; // 市价;eq=0 无从折价 → 0(交 oracle 兜底)
+    // 市价 = eqUsd/eq。交易所不报价(eqUsd 0 / 空,或 eq 0)→ **没有价**(undefined),不是价 0:
+    // 估值那步把 0 当成有效自带价就不再回源,这个币会钉死在 $0(FOL-108)。与 Bybit / Binance 同口径。
+    const usd = Number(d.eqUsd ?? 0);
+    const price = eq > 0 && usd > 0 ? usd / eq : undefined;
     const frozen = Number(d.frozenBal ?? 0);
     const row: Spot = {
       symbol: ccy,
       amount,
       price,
-      value: amount * price,
+      value: price != null ? amount * price : 0,
       kind: "spot",
       // 场馆命名:OKX 管这个币叫 `ccy`。symbol 大写归一由本 provider 负责(见 @folio/oracle-ref)。
       tokenRef: tokenRef.issued(PROVIDER_ID, ccy.trim().toUpperCase()),

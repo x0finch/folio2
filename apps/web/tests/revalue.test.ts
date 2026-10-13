@@ -162,6 +162,23 @@ describe("revalue —— 非盯市类型(有权威自带价)", () => {
     expect(asked).toEqual([]); // 与旧行为同开销:CEX 有自带价即不问价
   });
 
+  // 交易所报「价 0」不是一个价,是「我不知道」(FOL-108:OKX 不报价的币就是这样来的)。当成有效自带价的话,
+  // self-first 下永远不回源,这个币就钉死在 $0。所以 0 与「没给价」同等对待:去 oracle 取。
+  it("self-first 但自带价是 0 → 当作没给价,改用源价", async () => {
+    const { tokens, asked } = fakeTokens(PRICES);
+    const out = await runWithOracle(
+      { tokens, fx: NO_FX },
+      revalue(
+        false,
+        [spot({ symbol: "BTC", amount: 2, value: 0, price: 0, tokenRef: "binance/issued:BTC" })],
+        IDS,
+      ),
+    );
+    expect(asked).toEqual(["tk_btc"]);
+    expect(out[0].value).toBe(130000); // 2 × 65000
+    expect(out[0].selfPrice).toBeUndefined();
+  });
+
   it("source-first:改用源价,selfPrice 仍留存(可切回)", async () => {
     const { tokens } = fakeTokens(PRICES);
     const out = await runWithOracle(
