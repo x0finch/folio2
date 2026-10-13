@@ -33,6 +33,19 @@ describe("parseBalances (golden: fixture in → fixture out)", () => {
     const usdt = parseBalances(balance.data[0].details).find((b) => b.symbol === "USDT");
     expect(usdt).toMatchObject({ amount: 1000, price: 1, value: 1000 });
   });
+
+  // OKX 对它不报价的币给 `eqUsd: "0"`(有时连 eq 都是 0)。以前这里折成 **price 0**,而估值那步把 0
+  // 当成有效的自带价、不再去 oracle 取 —— 这个币就永远显示 $0(FOL-108)。没价就是没价:price 省略、
+  // value 记 0,和 Bybit / Binance 同口径,交 oracle 兜底。
+  it.each([
+    ["eqUsd 为 0", { eq: "1000", eqUsd: "0" }],
+    ["eq 为 0", { eq: "0", eqUsd: "0" }],
+    ["eqUsd 为空串", { eq: "1000", eqUsd: "" }],
+  ])("交易所不给价(%s)→ price 省略、value 0,不冒充成一个零价", (_, px) => {
+    const [row] = parseBalances([{ ccy: "XYZ", cashBal: "1000", frozenBal: "0", ...px }]);
+    expect(row).toMatchObject({ symbol: "XYZ", amount: 1000, value: 0 });
+    expect(row?.price).toBeUndefined();
+  });
 });
 
 // 资金账户(funding 桶)golden:funding.json(录制的 /asset/balances 响应)+ 交易账户市价提示表

@@ -45,10 +45,16 @@ export const revalue = (
     const { tokens, fx } = yield* Oracle;
 
     // 盯市类型无权威自带价 → selfPrice = undefined(恒用源价);否则自带单价 = price ?? value/amount。
+    // **价 0 不算价**:持有一个币却报 0,是交易所不知道它的价,不是它真值 0 —— 当成自带价的话 self-first
+    // 下永不回源,这个币钉死在 $0(FOL-108)。
     const selfPriceOf = (b: Balance): number | undefined =>
       markToMarket
         ? undefined
-        : (b.price ?? (b.amount > 0 && b.value > 0 ? b.value / b.amount : undefined));
+        : b.price != null && b.price > 0
+          ? b.price
+          : b.amount > 0 && b.value > 0
+            ? b.value / b.amount
+            : undefined;
     // 这笔要不要源价、要的话是哪个 token_id(认不出来的币 mint 没给 id → 拿不到源价,不猜)。
     const sourceIdOf = (b: Balance): string | undefined => {
       if (b.kind === "perp_position" || b.kind === "perp_equity") return undefined;
