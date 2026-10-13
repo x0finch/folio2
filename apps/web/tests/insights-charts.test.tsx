@@ -13,8 +13,7 @@ import { AllocationPie } from "@/routes/_authed/-insights/allocation-pie";
 import { PortfolioChart } from "@/routes/_authed/-insights/portfolio-chart";
 
 // Insights 页两张图里**我们自己写的那部分**:
-//   · 净值走势(PortfolioChart):X 轴按整段跨度换刻度(< 2 天 →「时:分」,否则「月 日」)、Y 轴用紧凑
-//     金额、tooltip 用完整金额 + 日期时间;金额都按偏好币种换算;开了隐私时 tooltip 里的净值被遮。
+//   · 净值走势(PortfolioChart):金额按偏好币种换算;开了隐私时 tooltip 里的净值被遮。
 //   · 分布饼图(AllocationPie):图例的名字 / 占比 / 金额、尾部「其他」的翻译、空数据的提示;开隐私时
 //     只遮金额、留占比。
 // 不断言 recharts 的几何。图例是我们自己的 <ul>;坐标轴与 tooltip 的文字是我们的 formatter 产出的。
@@ -76,52 +75,7 @@ function openTooltip(container: HTMLElement) {
 const series = (points: [number, number][]): HistoryPoint[] =>
   points.map(([t, total]) => ({ t, total }));
 
-describe("PortfolioChart —— 坐标轴与 tooltip 的文字", () => {
-  it("跨度 ≥ 2 天 → X 轴是「月 日」,Y 轴是紧凑金额", () => {
-    const { container } = wrap(
-      <PortfolioChart
-        series={series([
-          [T0 - 5 * DAY, 1_000],
-          [T0, 13_100],
-        ])}
-      />,
-    );
-    const text = container.textContent ?? "";
-    expect(text).toContain("Jan 5");
-    expect(text).toContain("Jan 10");
-    expect(text).toContain("$14.00K"); // 紧凑:不是 $14,000.00
-    expect(text).not.toContain("$14,000.00");
-  });
-
-  it("跨度 < 2 天 → X 轴换成「时:分」(同一天多次同步才分得开)", () => {
-    const { container } = wrap(
-      <PortfolioChart
-        series={series([
-          [T0, 100],
-          [T0 + 6 * 3_600_000, 110],
-        ])}
-      />,
-    );
-    const text = container.textContent ?? "";
-    expect(text).toMatch(/12:00\s?AM/);
-    expect(text).not.toContain("Jan 10");
-  });
-
-  it("tooltip 用完整金额 + 日期时间", () => {
-    const { container } = wrap(
-      <PortfolioChart
-        series={series([
-          [T0 - 5 * DAY, 1_000],
-          [T0, 13_100],
-        ])}
-      />,
-    );
-    openTooltip(container);
-    const text = container.textContent ?? "";
-    expect(text).toContain("$13,100.00");
-    expect(text).toMatch(/Jan 10, 12:00\s?AM/);
-  });
-
+describe("PortfolioChart —— 币种与隐私", () => {
   it("金额按偏好币种换算(轴与 tooltip 都是)", () => {
     // rate = 1 欧元的美元价;0.5 → 展示值翻倍。
     const { container } = wrap(

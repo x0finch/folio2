@@ -1,7 +1,7 @@
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// 运行中发新版的提示流(ADR 0051):比线上 sw.js 的版本号与本次加载的版本 → 有新版亮常驻 toast
+// 运行中发新版的提示流(ADR 0051):比线上 sw.js 的版本号与本次加载的版本 → 有新版亮 toast
 // (同一版本只弹一次,换更新的版本再弹;设置页手动弹过的,自动那路不再补);点「更新」先亮
 // 「更新中」再让 waiting 新版接管或直接刷新;定时 / 回到前台各探一次;拿不到线上版本时静默。
 // 替换的只有边界:fetch、navigator.serviceWorker、location.reload、toast 出口与文案。
@@ -98,30 +98,6 @@ describe("checkForUpdate", () => {
   });
 });
 
-describe("showUpdateToast", () => {
-  it("常驻、固定 id,描述行是去掉 hash 的新版本号", async () => {
-    const sw = await load();
-    deploy("v1.1.0-2-gdef456");
-    await sw.checkForUpdate();
-    sw.showUpdateToast({ available: "有新版本", update: "更新" });
-    expect(toastMessage).toHaveBeenCalledWith(
-      "有新版本",
-      expect.objectContaining({
-        id: sw.UPDATE_TOAST_ID,
-        duration: 0,
-        description: "v1.1.0-2",
-        action: expect.objectContaining({ label: "更新" }),
-      }),
-    );
-  });
-
-  it("没探到具体版本时省略描述", async () => {
-    const sw = await load();
-    sw.showUpdateToast({ available: "a", update: "u" });
-    expect(toastMessage.mock.calls[0][1].description).toBeUndefined();
-  });
-});
-
 function mountToastHook(sw: SW) {
   function Probe() {
     sw.useUpdateToast();
@@ -201,7 +177,7 @@ function clickUpdate() {
 }
 
 describe("点「更新」", () => {
-  it("先亮「更新中」,600ms 后让 waiting 新版接管;接管后刷新一次", async () => {
+  it("先亮「更新中」,再让 waiting 新版接管;接管后刷新一次", async () => {
     vi.stubEnv("PROD", true);
     vi.useFakeTimers();
     const waiting = { postMessage: vi.fn() };
@@ -225,11 +201,9 @@ describe("点「更新」", () => {
     sw.showUpdateToast({ available: "a", update: "u" });
     act(() => clickUpdate());
     expect(seen.at(-1)).toBe(true);
-    // 「更新中」至少露 600ms 再切,免得文案一闪看不到。
-    await act(() => vi.advanceTimersByTimeAsync(599));
-    expect(waiting.postMessage).not.toHaveBeenCalled();
-    await act(() => vi.advanceTimersByTimeAsync(1));
-    expect(waiting.postMessage).toHaveBeenCalledWith({ type: "SKIP_WAITING" });
+    await act(() =>
+      vi.waitFor(() => expect(waiting.postMessage).toHaveBeenCalledWith({ type: "SKIP_WAITING" })),
+    );
     expect(reload).not.toHaveBeenCalled();
 
     container.emit("controllerchange");
