@@ -131,6 +131,14 @@ describe("列表与小额折叠", () => {
     expect(rowNames()).toHaveLength(8);
   });
 
+  // 卖光的币(FOL-110)现值 0,但这一天它亏了 3000:收进小额折叠就等于把这笔盈亏藏起来了。
+  it("现值 0 但这一天有大额盈亏的行(卖光的币)不收进小额", () => {
+    const soldOut: Holding = { ...coin(9, 0), sources: [], gain24h: { amount: -3000, pct: -100 } };
+    mount([...Array.from({ length: 8 }, (_, i) => coin(i, 100 + i)), coin(8, 0.5), soldOut]);
+    expect(rowNames()).toContain("Token 9");
+    expect(rowNames()).not.toContain("Token 8");
+  });
+
   it("≥ 10 个但没有小额 → 不出折叠入口", () => {
     mount(Array.from({ length: 10 }, (_, i) => coin(i, 100)));
     expect(rowNames()).toHaveLength(10);

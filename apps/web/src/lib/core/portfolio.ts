@@ -541,12 +541,17 @@ export interface OverviewView {
 export function overviewEnrichIds(
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
+  // 24 小时前那组:卖光的币只在那里出现,它那一行(FOL-110)也要名字和图标。
+  prevByAccount?: ReadonlyMap<string, PrevSlice>,
 ): string[] {
   const ids = new Set<string>();
-  for (const account of accounts) {
-    for (const b of balancesOf(byAccount, account.id)) {
-      const vk = viewKind(b);
-      if ((vk === "spot" || vk === "defi") && b.tokenId) ids.add(b.tokenId);
+  for (const group of [byAccount, prevByAccount]) {
+    if (!group) continue;
+    for (const account of accounts) {
+      for (const b of balancesOf(group, account.id)) {
+        const vk = viewKind(b);
+        if ((vk === "spot" || vk === "defi") && b.tokenId) ids.add(b.tokenId);
+      }
     }
   }
   return [...ids];
@@ -668,6 +673,30 @@ export function buildOverview(
         hasBase && id != null
           ? endpointGain(startAgg.token.get(id) ?? 0, curByToken.get(id) ?? 0)
           : null;
+    }
+    // **卖光的币**(FOL-110):24 小时前某个有基准的账户持有过、现在却一行都没有(全卖了 / 现值归零被
+    // 上面的聚合滤掉)。不补这一行,它的那笔盈亏就从行上消失了,「各行相加 = 顶部」对不上 —— ETH 全换成
+    // USDC 那天,顶部 0、行上只剩「USDC +3000」。补一行:现值 0、没有持有来源,盈亏 = 0 − 24 小时前值。
+    const listed = new Set(holdings.map((h) => h.token.id));
+    for (const [id, startValue] of startAgg.token) {
+      if (startValue === 0 || listed.has(id)) continue;
+      const e = enriched.get(id);
+      holdings.push({
+        key: id,
+        token: {
+          id,
+          symbol: e?.symbol ?? "",
+          name: e?.name ?? e?.symbol ?? "",
+          logo: e ? tokenLogoUrl(e) : undefined,
+          unitPrice: e?.price?.unitPrice,
+          marketCapRank: e?.price?.marketCapRank,
+          isFiat: isFiatToken(id),
+        },
+        totalValue: 0,
+        totalAmount: 0,
+        gain24h: endpointGain(startValue, curByToken.get(id) ?? 0),
+        sources: [],
+      });
     }
   }
 
@@ -942,10 +971,12 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
     // 现值:逐 (账户 × 币) 现货合计 —— **与起点侧同口径**(只 isFungible 现货、有 token_id 的行),
     // 一个币散在多条链 = 抽屉里多行,而两端相减是按币一条。
     const curToken = new Map<string, number>();
+    const rowsOfToken = new Map<string, number>();
     for (const b of r.balances) {
       if (!spotOf(b)) continue;
       const id = b.tokenId as string;
       curToken.set(id, (curToken.get(id) ?? 0) + b.usdValue);
+      rowsOfToken.set(id, (rowsOfToken.get(id) ?? 0) + 1);
     }
     return {
       ...r,
@@ -957,8 +988,9 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
         // 起点缺这个币 → 0(今天新买,整份算成今天赚的);两端相减。
         const gain = endpointGain(startToken.get(id) ?? 0, total);
         if (gain == null) return { ...b, gain24h: null };
-        // 按各行市值占比把那一条币的盈亏摊回具体这一行(pct 是币级的,不摊)。
-        const share = total === 0 ? 0 : b.usdValue / total;
+        // 按各行市值占比把那一条币的盈亏摊回具体这一行(pct 是币级的,不摊)。该币现值全是 0(价没了 /
+        // 数量归零)时没有占比可言 → 平摊;摊 0 的话它那笔盈亏就从行上消失了(FOL-110)。
+        const share = total === 0 ? 1 / (rowsOfToken.get(id) ?? 1) : b.usdValue / total;
         return { ...b, gain24h: { amount: gain.amount * share, pct: gain.pct } };
       }),
     };

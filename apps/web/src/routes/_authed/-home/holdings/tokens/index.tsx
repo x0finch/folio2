@@ -68,8 +68,12 @@ export function TokenHoldings({
   const selected = holdings.find((h) => h.key === selectedKey) ?? null;
   // 少于 MIN_FOLD_COUNT 个持仓 → 全展开、不折叠;否则小额行按阈值收进 toggle。
   const canFold = holdings.length >= MIN_FOLD_COUNT;
-  const main = canFold ? holdings.filter((h) => h.totalValue >= DUST_THRESHOLD) : holdings;
-  const dust = canFold ? holdings.filter((h) => h.totalValue < DUST_THRESHOLD) : [];
+  // 小额 = 现值小**而且**这一天没什么盈亏。卖光的币(FOL-110)现值 0,却可能刚亏了 3000 ——
+  // 收进折叠就等于把这笔盈亏藏起来了。
+  const isDust = (h: Holding) =>
+    h.totalValue < DUST_THRESHOLD && Math.abs(h.gain24h?.amount ?? 0) < DUST_THRESHOLD;
+  const main = canFold ? holdings.filter((h) => !isDust(h)) : holdings;
+  const dust = canFold ? holdings.filter(isDust) : [];
   const rows = showDust ? [...main, ...dust] : main;
 
   return (
