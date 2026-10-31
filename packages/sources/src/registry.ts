@@ -1,14 +1,16 @@
 import { binance } from './binance'
 import { bybit } from './bybit'
 import type { Source } from './define'
+import { evm } from './evm'
 import { manual } from './manual'
 import { okx } from './okx'
+import { solana } from './solana'
 
 /**
  * Every source plugin. Adding a source: create `src/<id>/index.ts` with `defineSource()`, add
  * fixture tests next to it, and list it here.
  */
-export const sources: readonly Source[] = [manual, binance, okx, bybit]
+export const sources: readonly Source[] = [manual, evm, solana, binance, okx, bybit]
 
 const byId = new Map(sources.map((source) => [source.id, source]))
 

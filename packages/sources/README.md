@@ -73,3 +73,18 @@ The registry test fails if a source has no `test/<id>.test.ts`.
 
 Exchange tickers become asset ids through one map, `src/tickers.ts`: listed coins get their
 CoinGecko id, anything else is `cex:<TICKER>` with the venue's USDT price as `priceUsd`.
+
+- `evm` — one EVM address on Ethereum, Arbitrum, Base, Optimism, Polygon, BNB Chain, Avalanche,
+  Gnosis, Linea, Scroll and zkSync. No key. Native balances come from each chain's public
+  JSON-RPC (`eth_getBalance` on publicnode.com, mainnet.era.zksync.io); ERC-20 tokens from
+  LI.FI's keyless `GET li.quest/v1/wallets/<address>/balances?extended=true`, which covers all
+  chains in one call and prices each token. Tokens without a LI.FI price or worth under $1 are
+  dropped as spam. LI.FI allows about 10 keyless calls a minute per IP and currently returns no
+  Polygon tokens (Polygon shows POL only). 12 requests.
+- `solana` — one Solana address. No key. SOL via `getBalance` and SPL tokens of the Token and
+  Token-2022 programs via `getTokenAccountsByOwner` (jsonParsed) on the public mainnet RPC;
+  symbol, name, logo and price from Jupiter's keyless `lite-api.jup.ag/tokens/v2/search` (100
+  mints per call, at most 3 calls). Looked-up tokens without a Jupiter price or worth under $1
+  are dropped; NFTs (0 decimals) are skipped; mints past the 300-mint lookup cap are kept with a
+  shortened mint as symbol. Both upstreams throttle bursts (the RPC answers JSON-RPC error 429).
+  Staked SOL is not read. 6 requests.

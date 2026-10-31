@@ -1,0 +1,1890 @@
+{
+  "walletAddress": "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045",
+  "balances": {
+    "1": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
+        "decimals": 18,
+        "amount": "5779567498611001236",
+        "name": "ETH",
+        "chainId": 1,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2244.12",
+        "marketCapUSD": 274195772649,
+        "volumeUSD24H": 68350995.1349268,
+        "fdvUSD": 274195772816,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png"
+      },
+      {
+        "address": "0x01995a697752266d8e748738aaa3f06464b8350b",
+        "symbol": "CANA",
+        "decimals": 18,
+        "amount": "10000000000000000",
+        "name": "CANA Holdings California Carbon Credits",
+        "chainId": 1,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "19.875537137",
+        "marketCapUSD": 612910.242365445,
+        "volumeUSD24H": 37.55687218,
+        "fdvUSD": 612910.242365445
+      },
+      {
+        "address": "0x028171bca77440897b824ca71d1c56cac55b68a3",
+        "symbol": "aDAI",
+        "decimals": 18,
+        "amount": "4487884165715544",
+        "name": "aDAI",
+        "chainId": 1,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9949422219",
+        "marketCapUSD": 113727210.8,
+        "volumeUSD24H": 2.9314479719,
+        "fdvUSD": 8112837.24660848,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x028171bca77440897b824ca71d1c56cac55b68a3/5e56ea1139b85c381144fbb5dd15d06d.png"
+      },
+      {
+        "address": "0x02d3a27ac3f55d5d91fb0f52759842696a864217",
+        "symbol": "IONX",
+        "decimals": 18,
+        "amount": "2875091261154752266060",
+        "name": "Charged Particles",
+        "chainId": 1,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.00009221171544",
+        "marketCapUSD": 9221.1715440318,
+        "volumeUSD24H": 1.0918503369,
+        "fdvUSD": 9183.9527809865,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x02d3a27ac3f55d5d91fb0f52759842696a864217/6dcbc30b7a59980e041b425733eab0c3.png"
+      },
+      {
+        "address": "0x030ba81f1c18d280636f32af80b9aad02cf0854e",
+        "symbol": "aWETH",
+        "decimals": 18,
+        "amount": "51634906121486818",
+        "name": "aWETH",
+        "chainId": 1,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2237.2717026892",
+        "marketCapUSD": 13369573.4482059,
+        "volumeUSD24H": 5.83706742069,
+        "fdvUSD": 13304676.8300669,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x030ba81f1c18d280636f32af80b9aad02cf0854e/b6910e236da889f08602435e79c08f98.png"
+      },
+      {
+        "address": "0x0391d2021f89dc339f60fff84546ea23e337750f",
+        "symbol": "BOND",
+        "decimals": 18,
+        "amount": "1000000000000000000",
+        "name": "BarnBridge",
+        "chainId": 1,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.01597455984",
+        "marketCapUSD": 159745.598449073,
+        "volumeUSD24H": 8371.2411024122,
+        "fdvUSD": 159744.882271453,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x0391d2021f89dc339f60fff84546ea23e337750f/160c85e7f4ed44ee16fd35d53008ea3c.png"
+      },
+      {
+        "address": "0x03ab458634910aad20ef5f1c8ee96f1d6ac54919",
+        "symbol": "RAI",
+        "decimals": 18,
+        "amount": "3366907695158744370",
+        "name": "Rai Reflex Index",
+        "chainId": 1,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "3.0029999564",
+        "marketCapUSD": 1496253.95417947,
+        "volumeUSD24H": 3363.2023420672,
+        "fdvUSD": 1496250.00692001,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x03ab458634910aad20ef5f1c8ee96f1d6ac54919/89f0c429b594592724ea3cbf3d08a8ea.png"
+      },
+      {
+        "address": "0x06450dee7fd2fb8e39061434babcfc05599a6fb8",
+        "symbol": "XEN",
+        "decimals": 18,
+        "amount": "1001337000000000000000000",
+        "name": "XEN Crypto",
+        "chainId": 1,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.000000003883542577",
+        "marketCapUSD": 1807894.31158037,
+        "volumeUSD24H": 14391.330612565,
+        "fdvUSD": 1808202.89624533,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x06450dee7fd2fb8e39061434babcfc05599a6fb8/a728f433a7f518556b1a27102c49a3dd.png"
+      }
+    ],
+    "10": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
+        "decimals": 18,
+        "amount": "181079591875347535",
+        "name": "ETH",
+        "chainId": 10,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2242.81",
+        "marketCapUSD": 299306524383,
+        "volumeUSD24H": 60285.7492504698,
+        "fdvUSD": 299306524383,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png"
+      },
+      {
+        "address": "0x0a7b751fcdbbaa8bb988b9217ad5fb5cfe7bf7a0",
+        "symbol": "ITP",
+        "decimals": 18,
+        "amount": "569001225200813451958",
+        "name": "Infinite Trading Protocol",
+        "chainId": 10,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.004960437394",
+        "marketCapUSD": 24762.1110538583,
+        "volumeUSD24H": 645.93223620402,
+        "fdvUSD": 2775995.04538772,
+        "logoURI": "https://static.debank.com/image/op_token/logo_url/0x0a7b751fcdbbaa8bb988b9217ad5fb5cfe7bf7a0/61248dc61f97c412b4b5ce3ec7b9d5a0.png"
+      },
+      {
+        "address": "0x0b2c639c533813f4aa9d7837caf62653d097ff85",
+        "symbol": "USDC",
+        "decimals": 6,
+        "amount": "24433911",
+        "name": "USD Coin",
+        "chainId": 10,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.0034279234",
+        "marketCapUSD": 72031091262.8733,
+        "volumeUSD24H": 7213511.33823219,
+        "fdvUSD": 144224910.819394,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png"
+      },
+      {
+        "address": "0x17aabf6838a6303fc6e9c5a227dc1eb6d95c829a",
+        "symbol": "TUX",
+        "decimals": 18,
+        "amount": "69000000000000000000",
+        "name": "MagicalTux",
+        "chainId": 10,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.00003593188028",
+        "marketCapUSD": 35931.8802758937,
+        "volumeUSD24H": 0.17664946022,
+        "fdvUSD": 35931.8793038183,
+        "logoURI": "https://static.debank.com/image/op_token/logo_url/0x17aabf6838a6303fc6e9c5a227dc1eb6d95c829a/60c4eed65f7133e4a5135bbcf0d0146d.png"
+      },
+      {
+        "address": "0x4200000000000000000000000000000000000006",
+        "symbol": "WETH",
+        "decimals": 18,
+        "amount": "34930323797124449",
+        "name": "Wrapped ETH",
+        "chainId": 10,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2241.46",
+        "marketCapUSD": 42225710.6793043,
+        "volumeUSD24H": 5494484.14783805,
+        "fdvUSD": 42255823.0686991,
+        "logoURI": "https://static.debank.com/image/op_token/logo_url/0x4200000000000000000000000000000000000006/61844453e63cf81301f845d7864236f6.png"
+      },
+      {
+        "address": "0x4200000000000000000000000000000000000042",
+        "symbol": "OP",
+        "decimals": 18,
+        "amount": "1000000000000000000",
+        "name": "OPTIMISM",
+        "chainId": 10,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.1125989032",
+        "marketCapUSD": 257938312.577786,
+        "volumeUSD24H": 1741734.05289114,
+        "fdvUSD": 483608153.813217,
+        "logoURI": "https://optimistic.etherscan.io/token/images/optimism_32.png"
+      },
+      {
+        "address": "0x4f604735c1cf31399c6e711d5962b2b3e0225ad3",
+        "symbol": "USDGLO",
+        "decimals": 18,
+        "amount": "460000000000000000",
+        "name": "Glo Dollar",
+        "chainId": 10,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9994084849",
+        "marketCapUSD": 1771946.24668528,
+        "volumeUSD24H": 0.003482778012,
+        "fdvUSD": 84940.2001183872,
+        "logoURI": "https://superfluid-finance.github.io/tokenlist/icons/usdglo.png"
+      },
+      {
+        "address": "0x7f5c764cbc14f9669b88837ca1490cca17c31607",
+        "symbol": "USDC",
+        "decimals": 6,
+        "amount": "39186374",
+        "name": "Bridged USD Coin",
+        "chainId": 10,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.0038243408",
+        "marketCapUSD": 18716526.7266774,
+        "volumeUSD24H": 370005.411633165,
+        "fdvUSD": 18716476.8211619,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png"
+      },
+      {
+        "address": "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58",
+        "symbol": "USDT",
+        "decimals": 6,
+        "amount": "43384903",
+        "name": "USDT",
+        "chainId": 10,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9987123779",
+        "marketCapUSD": 150402752.59,
+        "volumeUSD24H": 3681629.01052136,
+        "fdvUSD": 140366834.042555,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png"
+      },
+      {
+        "address": "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1",
+        "symbol": "DAI",
+        "decimals": 18,
+        "amount": "35207010491987843265",
+        "name": "DAI Stablecoin",
+        "chainId": 10,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9975371351",
+        "marketCapUSD": 13421753.0651495,
+        "volumeUSD24H": 62818.2705490555,
+        "fdvUSD": 13421746.4917383,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x6B175474E89094C44Da98b954EedeAC495271d0F/logo.png"
+      },
+      {
+        "address": "0xdc6ff44d5d932cbd77b52e5612ba0529dc6226f1",
+        "symbol": "WLD",
+        "decimals": 18,
+        "amount": "5277375163635194870",
+        "name": "WLD",
+        "chainId": 10,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.4026143816",
+        "marketCapUSD": 1501992746.11786,
+        "volumeUSD24H": 18697.4192124679,
+        "fdvUSD": 184011095.62188,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x163f8c2467924be0ae7b5347228cabf260318753/30ac094d49a4b6e7561810c16ddc8c69.png"
+      }
+    ],
+    "56": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "BNB",
+        "decimals": 18,
+        "amount": "170081301336104040",
+        "name": "BNB",
+        "chainId": 56,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "703.6",
+        "marketCapUSD": 96213566233,
+        "volumeUSD24H": 24291411.9825367,
+        "fdvUSD": 96213566233,
+        "logoURI": "https://assets.coingecko.com/coins/images/825/small/binance-coin-logo.png?1547034615"
+      },
+      {
+        "address": "0x0231f91e02debd20345ae8ab7d71a41f8e140ce7",
+        "symbol": "bwJUP",
+        "decimals": 18,
+        "amount": "700000000000000000000",
+        "name": "Jupiter Project",
+        "chainId": 56,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.000007658061666",
+        "marketCapUSD": 7658.0616657127,
+        "volumeUSD24H": 0.53001457268,
+        "fdvUSD": 5360.6022136316,
+        "logoURI": "https://static.debank.com/image/bsc_token/logo_url/0x0231f91e02debd20345ae8ab7d71a41f8e140ce7/c0fbdc5d05a731e23ba35c2005ce8556.png"
+      },
+      {
+        "address": "0x0465aad9da170798433f4ab7fa7ec8b9b9bf0bb1",
+        "symbol": "mPendle",
+        "decimals": 18,
+        "amount": "29307705040946692",
+        "name": "mPendle",
+        "chainId": 56,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.7691333717",
+        "marketCapUSD": 9896149.79819383,
+        "volumeUSD24H": 0.00597058847,
+        "fdvUSD": 32684.9254290273,
+        "logoURI": "https://static.debank.com/image/arb_token/logo_url/0xb688ba096b7bb75d7841e47163cd12d18b36a5bf/a77c276341191c453fb402456bbbf528.png"
+      },
+      {
+        "address": "0x04756126f044634c9a0f0e985e60c88a51acc206",
+        "symbol": "CSIX",
+        "decimals": 18,
+        "amount": "400000000000000000000",
+        "name": "Carbon Browser",
+        "chainId": 56,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.0001110351241",
+        "marketCapUSD": 100581.156539936,
+        "volumeUSD24H": 2823.8743948665,
+        "fdvUSD": 100445.34202506,
+        "logoURI": "https://static.debank.com/image/bsc_token/logo_url/0x04756126f044634c9a0f0e985e60c88a51acc206/e333a5df61ce1b4c8bcd47ad5864203a.png"
+      },
+      {
+        "address": "0x0782b6d8c4551b9760e74c0545a9bcd90bdc41e5",
+        "symbol": "lisUSD",
+        "decimals": 18,
+        "amount": "2026393375914100",
+        "name": "Lista USD",
+        "chainId": 56,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.0006024445",
+        "marketCapUSD": 75932541.3174178,
+        "volumeUSD24H": 788268.991329116,
+        "fdvUSD": 75932540.5053786,
+        "logoURI": "https://static.debank.com/image/bsc_token/logo_url/0x0782b6d8c4551b9760e74c0545a9bcd90bdc41e5/087e9d8e3984e4800460a1dd0e0e4cf3.png"
+      },
+      {
+        "address": "0x09e889bb4d5b474f561db0491c38702f367a4e4d",
+        "symbol": "CLV",
+        "decimals": 18,
+        "amount": "2374864050000000000",
+        "name": "Clover Finance",
+        "chainId": 56,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.2318686516",
+        "marketCapUSD": 283839906.575601,
+        "volumeUSD24H": 0.0441780332,
+        "fdvUSD": 231868649.590264,
+        "logoURI": "https://static.debank.com/image/bsc_token/logo_url/0x09e889bb4d5b474f561db0491c38702f367a4e4d/123520cb273bf8689b9124f7ae745254.png"
+      },
+      {
+        "address": "0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82",
+        "symbol": "Cake",
+        "decimals": 18,
+        "amount": "585199553472294659",
+        "name": "PancakeSwap",
+        "chainId": 56,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.9469569324",
+        "marketCapUSD": 673770576.776614,
+        "volumeUSD24H": 4431099.32147465,
+        "fdvUSD": 707811691.575396,
+        "logoURI": "https://static.debank.com/image/bsc_token/logo_url/0x0e09fabb73bd3ade0a17ecc321fd13a19e81ce82/9003539eb61139bd494b7412b785d482.png"
+      },
+      {
+        "address": "0x12b4356c65340fb02cdff01293f95febb1512f3b",
+        "symbol": "Broccoli",
+        "decimals": 18,
+        "amount": "500000000000000000000",
+        "name": "Broccoli",
+        "chainId": 56,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.005008445016",
+        "marketCapUSD": 5008445.01589151,
+        "volumeUSD24H": 17941.1034908247,
+        "fdvUSD": 4584690.22423132,
+        "logoURI": "https://static.debank.com/image/bsc_token/logo_url/0x12b4356c65340fb02cdff01293f95febb1512f3b/c9c7d48123cab4062969e294247aeb97.png"
+      }
+    ],
+    "100": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "xDAI",
+        "decimals": 18,
+        "amount": "8709546191240796693",
+        "name": "xDAI Native Token",
+        "chainId": 100,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1",
+        "marketCapUSD": 68770043,
+        "volumeUSD24H": 705837,
+        "fdvUSD": 68770068,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x6B175474E89094C44Da98b954EedeAC495271d0F/logo.png"
+      },
+      {
+        "address": "0x420ca0f9b9b604ce0fd9c18ef134c705e5fa3430",
+        "symbol": "EURe",
+        "decimals": 18,
+        "amount": "656517602283539486",
+        "name": "Monerium EURe",
+        "chainId": 100,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.1121729349",
+        "marketCapUSD": 29069111.6805903,
+        "volumeUSD24H": 530521.969123834,
+        "fdvUSD": 16455365.6479587,
+        "logoURI": "https://docs.monerium.com/img/tokens/eure.svg"
+      },
+      {
+        "address": "0x524b969793a64a602342d89bc2789d43a016b13a",
+        "symbol": "DONUT",
+        "decimals": 18,
+        "amount": "420690000000000000000",
+        "name": "Donut on xDai",
+        "chainId": 100,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.0003365786745",
+        "marketCapUSD": 69568.8469234946,
+        "volumeUSD24H": 10.4022927143162,
+        "fdvUSD": 4380.346140286,
+        "logoURI": "https://static.debank.com/image/xdai_token/logo_url/0x524b969793a64a602342d89bc2789d43a016b13a/89628ac4aaa272e2d3ed7820cb547dc7.png"
+      },
+      {
+        "address": "0x6a023ccd1ff6f2045c3309768ead9e68f978f6e1",
+        "symbol": "WETH",
+        "decimals": 18,
+        "amount": "898621433259",
+        "name": "Wrapped Ether",
+        "chainId": 100,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2240.6707687134",
+        "marketCapUSD": 5414007.09747833,
+        "volumeUSD24H": 50024.5269259766,
+        "fdvUSD": 5423932.87266501,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png"
+      },
+      {
+        "address": "0x9c58bacc331c9aa871afd802db6379a98e80cedb",
+        "symbol": "GNO",
+        "decimals": 18,
+        "amount": "7506282040254150",
+        "name": "Gnosis Token on xDai",
+        "chainId": 100,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "105.1367258002",
+        "marketCapUSD": 277517744.918198,
+        "volumeUSD24H": 87327.8854230249,
+        "fdvUSD": 152024036.773774,
+        "logoURI": "https://static.debank.com/image/xdai_token/logo_url/0x9c58bacc331c9aa871afd802db6379a98e80cedb/69e5fedeca09913fe078a8dca5b7e48c.png"
+      },
+      {
+        "address": "0xddafbb505ad214d7b80b1f830fccc89b60fb7a83",
+        "symbol": "USDC",
+        "decimals": 6,
+        "amount": "1000000",
+        "name": "USD Coin",
+        "chainId": 100,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9972153547",
+        "marketCapUSD": 12569784.4958089,
+        "volumeUSD24H": 182443.984244327,
+        "fdvUSD": 12568955.2334038,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png"
+      },
+      {
+        "address": "0xe91d153e0b41518a2ce8dd3d7944fa863463a97d",
+        "symbol": "WXDAI",
+        "decimals": 18,
+        "amount": "10000000000000000",
+        "name": "WXDAI",
+        "chainId": 100,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9970367409",
+        "marketCapUSD": 41310585.5663887,
+        "volumeUSD24H": 314719.974505498,
+        "fdvUSD": 41310850.4598574,
+        "logoURI": "https://static.debank.com/image/xdai_token/logo_url/0xe91d153e0b41518a2ce8dd3d7944fa863463a97d/3fedab836c5425fc3fc2eb542c34c81a.png"
+      }
+    ],
+    "130": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
+        "decimals": 18,
+        "amount": "344102139825190",
+        "name": "ETH",
+        "chainId": 130,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2243.47",
+        "marketCapUSD": 214890106578,
+        "volumeUSD24H": 1822759.32160302,
+        "fdvUSD": 214890106578,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png"
+      },
+      {
+        "address": "0x03c2868c6d7fd27575426f395ee081498b1120dd",
+        "symbol": "GRG",
+        "decimals": 18,
+        "amount": "20000000000000000",
+        "name": "Rigo Token",
+        "chainId": 130,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.2282826299",
+        "marketCapUSD": 1698609.53778522,
+        "volumeUSD24H": 9.1336614977,
+        "fdvUSD": 37348.8867907249
+      },
+      {
+        "address": "0x588ce4f028d8e7b53b687865d6a67b3a54c75518",
+        "symbol": "USDT",
+        "decimals": 6,
+        "amount": "10001",
+        "name": "Tether USD",
+        "chainId": 130,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.999063393",
+        "marketCapUSD": 68053.4171219288,
+        "volumeUSD24H": 5359.81246049743,
+        "fdvUSD": 68053.4171219288,
+        "logoURI": "https://static.debank.com/image/coin/logo_url/usdt/23af7472292cb41dc39b3f1146ead0fe.png"
+      },
+      {
+        "address": "0x926dc7b96bb2f4a91c2a67e291faf482691a3001",
+        "symbol": "UNICORN",
+        "decimals": 18,
+        "amount": "1000000000000000000000000",
+        "name": "UNICORN",
+        "chainId": 130,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.00005885317706",
+        "marketCapUSD": 58853.1770590989,
+        "volumeUSD24H": 0.29693441751,
+        "fdvUSD": 58853.1770590989,
+        "logoURI": "https://static.debank.com/image/uni_token/logo_url/0x926dc7b96bb2f4a91c2a67e291faf482691a3001/c9a38ddc283bf12e9e1e285d699b7033.png"
+      }
+    ],
+    "324": [
+      {
+        "address": "0x1d17cbcf0d6d143135ae902365d2e5e2a16538d4",
+        "symbol": "USDC",
+        "decimals": 6,
+        "amount": "1000000",
+        "name": "USD Coin",
+        "chainId": 324,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9961494786",
+        "marketCapUSD": 71511521479.0539,
+        "volumeUSD24H": 11337.382639099,
+        "fdvUSD": 10595530.71513,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png"
+      },
+      {
+        "address": "0x3355df6d4c9c3035724fd0e3914de96a5a83aaf4",
+        "symbol": "USDC.e",
+        "decimals": 6,
+        "amount": "6215226",
+        "name": "Bridged USD Coin",
+        "chainId": 324,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9979445319",
+        "marketCapUSD": 21083294.1877944,
+        "volumeUSD24H": 126600.086753372,
+        "fdvUSD": 21083279.0333191,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png"
+      },
+      {
+        "address": "0x493257fd37edb34451f62edf8d2a0c418852ba4c",
+        "symbol": "USDT",
+        "decimals": 6,
+        "amount": "4025420",
+        "name": "USDT",
+        "chainId": 324,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9998100962",
+        "marketCapUSD": 3340986.84,
+        "volumeUSD24H": 10396.7726497804,
+        "fdvUSD": 2207734.65735021,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png"
+      },
+      {
+        "address": "0x5a7d6b2f92c77fad6ccabd7ee0624e64907eaf3e",
+        "symbol": "ZK",
+        "decimals": 18,
+        "amount": "1069520000000000000",
+        "name": "zkSync",
+        "chainId": 324,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.01030526213",
+        "marketCapUSD": 113567628.957172,
+        "volumeUSD24H": 57184.2914473532,
+        "fdvUSD": 159074391.631781,
+        "logoURI": "https://static.debank.com/image/era_token/logo_url/0x5a7d6b2f92c77fad6ccabd7ee0624e64907eaf3e/c9f43a1c9fcec603e6a8a5e92a58a77a.png"
+      },
+      {
+        "address": "0x5aea5775959fbc2557cc8789bc1bf90a239d9a91",
+        "symbol": "WETH",
+        "decimals": 18,
+        "amount": "70773721770203",
+        "name": "Wrapped Ether",
+        "chainId": 324,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2243.25",
+        "marketCapUSD": 30004124.9211759,
+        "volumeUSD24H": 175245.773406292,
+        "fdvUSD": 5666292.49587709,
+        "logoURI": "https://static.debank.com/image/era_token/logo_url/0x5aea5775959fbc2557cc8789bc1bf90a239d9a91/61844453e63cf81301f845d7864236f6.png"
+      },
+      {
+        "address": "0x703b52f2b28febcb60e1372858af5b18849fe867",
+        "symbol": "wstETH",
+        "decimals": 18,
+        "amount": "100000000000000",
+        "name": "txSync Bridged wstETH (zkSync)",
+        "chainId": 324,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2750.1533273244",
+        "marketCapUSD": 398159.066387845,
+        "volumeUSD24H": 149.5014012378,
+        "fdvUSD": 398159.066387845,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x7f39c581f595b53c5cb19bd0b3f8da6c935e2ca0/d0405a0d11669d4e75286d8dd808e19b.png"
+      },
+      {
+        "address": "0x79db8c67d0c33203da4efb58f7d325e1e0d4d692",
+        "symbol": "MEOW",
+        "decimals": 18,
+        "amount": "85729519326644418419643",
+        "name": "Zeek Coin",
+        "chainId": 324,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.0000000312315886",
+        "marketCapUSD": 25163.7777782866,
+        "volumeUSD24H": 1.3048567895,
+        "fdvUSD": 31231.4893422481,
+        "logoURI": "https://static.debank.com/image/era_token/logo_url/0x79db8c67d0c33203da4efb58f7d325e1e0d4d692/e21f7324cd4c95e5cd6c12ace3909f10.png"
+      },
+      {
+        "address": "0xbbeb516fb02a01611cbbe0453fe3c580d7281011",
+        "symbol": "WBTC",
+        "decimals": 8,
+        "amount": "31",
+        "name": "Wrapped BTC",
+        "chainId": 324,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "77386.4729656593",
+        "marketCapUSD": 1350213.42066957,
+        "volumeUSD24H": 3247.7850705774,
+        "fdvUSD": 1350213.37423768,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x2260fac5e5542a773aa44fbcfedf7c193bc2c599/d3c52e7c7449afa8bd4fad1c93f50d93.png"
+      },
+      {
+        "address": "0xbfb4b5616044eded03e5b1ad75141f0d9cb1499b",
+        "symbol": "ZKDOGE",
+        "decimals": 18,
+        "amount": "71243193538221210956400",
+        "name": "zkDoge",
+        "chainId": 324,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.000001799425112",
+        "marketCapUSD": 17994.2511168174,
+        "volumeUSD24H": 3.3078111494,
+        "fdvUSD": 17994.2413670302,
+        "logoURI": "https://static.debank.com/image/era_token/logo_url/0xbfb4b5616044eded03e5b1ad75141f0d9cb1499b/09d12e8848a13bb0d0c53500ad206a9f.png"
+      },
+      {
+        "address": "0xd63ef5e9c628c8a0e8984cdfb7444aee44b09044",
+        "symbol": "GOVI",
+        "decimals": 18,
+        "amount": "4565533273146181251",
+        "name": "GOVI",
+        "chainId": 324,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.001952169898",
+        "marketCapUSD": 62469.4367378538,
+        "volumeUSD24H": 0.001895946072,
+        "fdvUSD": 924.4045381472,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0xeeaa40b28a2d1b0b08f6f97bb1dd4b75316c6107/ed702729f956fb703ef496ab343f2c79.png"
+      },
+      {
+        "address": "0xdd9f72afed3631a6c85b5369d84875e6c42f1827",
+        "symbol": "SIS",
+        "decimals": 18,
+        "amount": "3500000000000000000",
+        "name": "Symbiosis",
+        "chainId": 324,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.01860144133",
+        "marketCapUSD": 1803862.86114961,
+        "volumeUSD24H": 0.3333990551,
+        "fdvUSD": 12732.3521000385,
+        "logoURI": "https://static.debank.com/image/era_token/logo_url/0xdd9f72afed3631a6c85b5369d84875e6c42f1827/f2a59df196e9e3933fd33f76abbfeb19.png"
+      }
+    ],
+    "480": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
+        "decimals": 18,
+        "amount": "605027640638232",
+        "name": "ETH",
+        "chainId": 480,
+        "verificationStatus": "unverified",
+        "verificationStatusBreakdown": [],
+        "priceUSD": "2239.09",
+        "marketCapUSD": 215289844512,
+        "volumeUSD24H": 2906.83435654754,
+        "fdvUSD": 215289844512,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png"
+      },
+      {
+        "address": "0x1c60ba0a0ed1019e8eb035e6daf4155a5ce2380b",
+        "symbol": "EURC",
+        "decimals": 6,
+        "amount": "200000",
+        "name": "EURC",
+        "chainId": 480,
+        "verificationStatus": "unverified",
+        "verificationStatusBreakdown": [],
+        "priceUSD": "1.1043334699",
+        "marketCapUSD": 488898894.822717,
+        "volumeUSD24H": 4542.44290877914,
+        "fdvUSD": 483879.656846508
+      },
+      {
+        "address": "0x2cfc85d8e48f8eab294be644d9e25c3030863003",
+        "symbol": "WLD",
+        "decimals": 18,
+        "amount": "370204807263730282392",
+        "name": "WLD",
+        "chainId": 480,
+        "verificationStatus": "unverified",
+        "verificationStatusBreakdown": [],
+        "priceUSD": "0.3971159361",
+        "marketCapUSD": 1481480588.52402,
+        "volumeUSD24H": 413841.889286172,
+        "fdvUSD": 353019724.897132,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x163f8c2467924be0ae7b5347228cabf260318753/30ac094d49a4b6e7561810c16ddc8c69.png"
+      },
+      {
+        "address": "0x337e7456b420bd3481e7fa61fa9850343d610d34",
+        "symbol": "wMXN",
+        "decimals": 18,
+        "amount": "100000000000000000",
+        "name": "Mexican Peso",
+        "chainId": 480,
+        "verificationStatus": "unverified",
+        "verificationStatusBreakdown": [],
+        "priceUSD": "0.05399307511",
+        "marketCapUSD": 667527.385611845,
+        "volumeUSD24H": 108.51766160257,
+        "fdvUSD": 61564.1786383153,
+        "logoURI": "https://static.debank.com/image/world_token/logo_url/0x337e7456b420bd3481e7fa61fa9850343d610d34/83a56a7a563e507e8c914b2f8e8a6830.png"
+      },
+      {
+        "address": "0x79a02482a880bce3f13e09da970dc34db4cd24d1",
+        "symbol": "USDC.e",
+        "decimals": 6,
+        "amount": "6955265",
+        "name": "USD Coin",
+        "chainId": 480,
+        "verificationStatus": "unverified",
+        "verificationStatusBreakdown": [],
+        "priceUSD": "1.0098217927",
+        "marketCapUSD": 72492289645.2984,
+        "volumeUSD24H": 237459.584902127,
+        "fdvUSD": 15791363.8156205,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png"
+      }
+    ],
+    "1868": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
+        "decimals": 18,
+        "amount": "2131001000000000",
+        "name": "ETH",
+        "chainId": 1868,
+        "verificationStatus": "unverified",
+        "verificationStatusBreakdown": [],
+        "priceUSD": "2244.01",
+        "marketCapUSD": 190191974008.97208,
+        "volumeUSD24H": 5331.74830369302,
+        "fdvUSD": 270219127433.676,
+        "logoURI": "https://img.sonex.so/eth-logo.png"
+      }
+    ],
+    "2741": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
+        "decimals": 18,
+        "amount": "971602587760000",
+        "name": "ETH",
+        "chainId": 2741,
+        "verificationStatus": "unverified",
+        "verificationStatusBreakdown": [],
+        "priceUSD": "2245.75",
+        "marketCapUSD": 232127467633,
+        "volumeUSD24H": 12335711248,
+        "fdvUSD": 232127467633,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png"
+      }
+    ],
+    "8453": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
+        "decimals": 18,
+        "amount": "3128822813472737280",
+        "name": "ETH",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2243.77",
+        "marketCapUSD": 289345069717,
+        "volumeUSD24H": 15107175.5010391,
+        "fdvUSD": 270100837611.22,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png"
+      },
+      {
+        "address": "0x06abb84958029468574b28b6e7792a770ccaa2f6",
+        "symbol": "MONK",
+        "decimals": 18,
+        "amount": "16849000000000000000000",
+        "name": "0xMonk by Virtuals",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.0001581055205",
+        "marketCapUSD": 158105.52051445,
+        "volumeUSD24H": 0.4182333713,
+        "fdvUSD": 158104.611091496,
+        "logoURI": "https://static.debank.com/image/base_token/logo_url/0x06abb84958029468574b28b6e7792a770ccaa2f6/f5b7c32d925f0ea2ca40f60c3caa82cf.png"
+      },
+      {
+        "address": "0x075b25fae35b121b5295b7fa779e73094b2e9153",
+        "symbol": "CLANKTARDIO",
+        "decimals": 18,
+        "amount": "2000000000000000000000000",
+        "name": "CLANKTARDIO",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.0000002966508141",
+        "marketCapUSD": 29665.0814137064,
+        "volumeUSD24H": 0.1834323957,
+        "fdvUSD": 27960.1164549527,
+        "logoURI": "https://static.debank.com/image/base_token/logo_url/0x075b25fae35b121b5295b7fa779e73094b2e9153/dd958bde6ace8f2db8a0505f80066ac9.png"
+      },
+      {
+        "address": "0x077a32fdef94dbb0bdcf917450a9cacf68ed236f",
+        "symbol": "LUMI",
+        "decimals": 18,
+        "amount": "882917546000000000000",
+        "name": "LPC_Ai_Lumi by Virtuals",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.00003169348634",
+        "marketCapUSD": 31693.4863405097,
+        "volumeUSD24H": 0.6927491763,
+        "fdvUSD": 31663.1618878457,
+        "logoURI": "https://static.debank.com/image/base_token/logo_url/0x077a32fdef94dbb0bdcf917450a9cacf68ed236f/4f2077e3973f6a8f351638179aa02f7d.png"
+      },
+      {
+        "address": "0x07d15798a67253d76cea61f0ea6f57aedc59dffb",
+        "symbol": "BASED",
+        "decimals": 18,
+        "amount": "200191000000000003145728",
+        "name": "Based Coin",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.000004911458258",
+        "marketCapUSD": 296202.719141442,
+        "volumeUSD24H": 267.93410538232,
+        "fdvUSD": 306103.127555456,
+        "logoURI": "https://static.debank.com/image/base_token/logo_url/0x07d15798a67253d76cea61f0ea6f57aedc59dffb/892d5d2a0dafb79d97e451760536f528.png"
+      },
+      {
+        "address": "0x09188484e1ab980daef53a9755241d759c5b7d60",
+        "symbol": "GRG",
+        "decimals": 18,
+        "amount": "50000000000000000",
+        "name": "RigoBlock",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.2160362026",
+        "marketCapUSD": 1607486.099208,
+        "volumeUSD24H": 17.5415143569,
+        "fdvUSD": 75188.2795983214,
+        "logoURI": "https://static.debank.com/image/base_token/logo_url/0x09188484e1ab980daef53a9755241d759c5b7d60/0fbf2e6f706029bde207be5e10dc6040.png"
+      },
+      {
+        "address": "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b",
+        "symbol": "VIRTUAL",
+        "decimals": 18,
+        "amount": "719654397150311512",
+        "name": "Virtuals Protocol",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.5777384354",
+        "marketCapUSD": 380374806.124815,
+        "volumeUSD24H": 16411379.8774984,
+        "fdvUSD": 287546915.199676,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x44ff8620b8ca30902395a7bd3f2407e1a091bf73/cbb70834d9442214c846833e47648255.png"
+      },
+      {
+        "address": "0x0bbbead62f7647ae8323d2cb243a0db74b7c2b80",
+        "symbol": "WALLET",
+        "decimals": 18,
+        "amount": "66000000000000000000",
+        "name": "Ambire Wallet",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.01781629422",
+        "marketCapUSD": 12922263.0112852,
+        "volumeUSD24H": 150.4589897717,
+        "fdvUSD": 127934.101233582,
+        "logoURI": "https://static.debank.com/image/base_token/logo_url/0x0bbbead62f7647ae8323d2cb243a0db74b7c2b80/6d920bb617173a2c6d5e4d8d91febeeb.png"
+      },
+      {
+        "address": "0x0c41f1fc9022feb69af6dc666abfe73c9ffda7ce",
+        "symbol": "BTCB",
+        "decimals": 18,
+        "amount": "28307870257979229",
+        "name": "Bitcoin on Base",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.05149226006",
+        "marketCapUSD": 804352.42698941,
+        "volumeUSD24H": 281.808558516017,
+        "fdvUSD": 804352.426989409,
+        "logoURI": "https://static.debank.com/image/base_token/logo_url/0x0c41f1fc9022feb69af6dc666abfe73c9ffda7ce/2ed7dcc0e4138c77eb9f0a102877e6a8.png"
+      },
+      {
+        "address": "0x0c5142bc58f9a61ab8c3d2085dd2f4e550c5ce0b",
+        "symbol": "RUSSELL",
+        "decimals": 18,
+        "amount": "42069000000000000000000",
+        "name": "RUSSELL",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.001198413622",
+        "marketCapUSD": 1163639.80069128,
+        "volumeUSD24H": 10663.9601089461,
+        "fdvUSD": 1163639.80069128,
+        "logoURI": "https://static.debank.com/image/base_token/logo_url/0x0c5142bc58f9a61ab8c3d2085dd2f4e550c5ce0b/d164beddc5f2ea72556d1c1b95d28c0a.png"
+      },
+      {
+        "address": "0x1111111111166b7fe7bd91427724b487980afc69",
+        "symbol": "ZORA",
+        "decimals": 18,
+        "amount": "416913514268726249",
+        "name": "Zora",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.006042464123",
+        "marketCapUSD": 27009814.6177341,
+        "volumeUSD24H": 272716.014016293,
+        "fdvUSD": 60424634.6017167,
+        "logoURI": "https://static.debank.com/image/base_token/logo_url/0x1111111111166b7fe7bd91427724b487980afc69/5cfbf8c19d9328428ea7be742e5a630d.png"
+      },
+      {
+        "address": "0x1196c6704789620514fd25632abe15f69a50bc4f",
+        "symbol": "PEPEC",
+        "decimals": 18,
+        "amount": "58072671042875330661",
+        "name": "Pepe Clanker",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.0172362942",
+        "marketCapUSD": 17236.2942026076,
+        "volumeUSD24H": 253.233613795,
+        "fdvUSD": 16606.1410005881,
+        "logoURI": "https://static.debank.com/image/base_token/logo_url/0x1196c6704789620514fd25632abe15f69a50bc4f/44f4f5f2a47964f1a13045c1264e8346.png"
+      },
+      {
+        "address": "0x11d41056ff636107dd710ec4ea772490a710cdb7",
+        "symbol": "SPECU",
+        "decimals": 18,
+        "amount": "2000000000000000000",
+        "name": "Speculation",
+        "chainId": 8453,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.005732462623",
+        "marketCapUSD": 5732.4626226786,
+        "volumeUSD24H": 0.5171098586,
+        "fdvUSD": 5569.0690266442,
+        "logoURI": "https://static.debank.com/image/base_token/logo_url/0x11d41056ff636107dd710ec4ea772490a710cdb7/500e5f42466db1e5e21f9c13035f2076.png"
+      }
+    ],
+    "42161": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
+        "decimals": 18,
+        "amount": "159411760907900921",
+        "name": "ETH",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2244.09",
+        "marketCapUSD": 271721659905,
+        "volumeUSD24H": 7317710.41181927,
+        "fdvUSD": 271721659905,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png"
+      },
+      {
+        "address": "0x080f6aed32fc474dd5717105dba5ea57268f46eb",
+        "symbol": "SYN",
+        "decimals": 18,
+        "amount": "32574107982996112",
+        "name": "Synapse",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.1547274166",
+        "marketCapUSD": 33895598.0993758,
+        "volumeUSD24H": 20.91428550924,
+        "fdvUSD": 267997.242192701,
+        "logoURI": "https://static.debank.com/image/arb_token/logo_url/0x080f6aed32fc474dd5717105dba5ea57268f46eb/4497316d0335d94bcec6c0c397238971.png"
+      },
+      {
+        "address": "0x13ad51ed4f1b7e9dc168d8a00cb3f4ddd85efa60",
+        "symbol": "LDO",
+        "decimals": 18,
+        "amount": "1000000000000000000",
+        "name": "Lido DAO Token",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.331830255",
+        "marketCapUSD": 275275682.75992,
+        "volumeUSD24H": 25038.6143619929,
+        "fdvUSD": 562466.90815063,
+        "logoURI": "https://static.debank.com/image/arb_token/logo_url/0x13ad51ed4f1b7e9dc168d8a00cb3f4ddd85efa60/3a1a90da5ccd4849de3e83755f1fd8b5.png"
+      },
+      {
+        "address": "0x25118290e6a5f4139381d072181157035864099d",
+        "symbol": "RAIN",
+        "decimals": 18,
+        "amount": "1000000000000000000",
+        "name": "Rain",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.006134173877",
+        "marketCapUSD": 4360347680.90769,
+        "volumeUSD24H": 1013379.3459765,
+        "fdvUSD": 7007708833.05989,
+        "logoURI": "https://static.debank.com/image/arb_token/logo_url/0x25118290e6a5f4139381d072181157035864099d/86cb22cba540c11e8d7980141c09bb48.png"
+      },
+      {
+        "address": "0x25d887ce7a35172c62febfd67a1856f20faebb00",
+        "symbol": "PEPE",
+        "decimals": 18,
+        "amount": "568013300780982071882412",
+        "name": "Pepe",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.000004986106609",
+        "marketCapUSD": 2097605189.2402,
+        "volumeUSD24H": 8597.9688668616,
+        "fdvUSD": 649703.572011775,
+        "logoURI": "https://static.debank.com/image/arb_token/logo_url/0x25d887ce7a35172c62febfd67a1856f20faebb00/53d2c227a5766580ec1cb595c7bcfd3a.png"
+      },
+      {
+        "address": "0x289ba1701c2f088cf0faf8b3705246331cb8a839",
+        "symbol": "LPT",
+        "decimals": 18,
+        "amount": "3062182425005485",
+        "name": "Livepeer Token",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.4273018426",
+        "marketCapUSD": 70921136.3850789,
+        "volumeUSD24H": 36845.1116331012,
+        "fdvUSD": 54867776.4475258,
+        "logoURI": "https://static.debank.com/image/arb_token/logo_url/0x289ba1701c2f088cf0faf8b3705246331cb8a839/2b0e16c3295259f03cb6a737f373608d.png"
+      },
+      {
+        "address": "0x2c852d3334188be136bfc540ef2bb8c37b590bad",
+        "symbol": "MAGIC",
+        "decimals": 18,
+        "amount": "1000000000000000000",
+        "name": "MAGICToken",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.001515567356",
+        "marketCapUSD": 8139.23,
+        "volumeUSD24H": 0.7834682476,
+        "fdvUSD": 6233.5760274424,
+        "logoURI": "https://static.debank.com/image/arb_token/logo_url/0x2c852d3334188be136bfc540ef2bb8c37b590bad/6cbbbc73bc79dfb1105250a2e2e7bf67.png"
+      },
+      {
+        "address": "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f",
+        "symbol": "WBTC",
+        "decimals": 8,
+        "amount": "109695",
+        "name": "WBTC",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "77223.4517573845",
+        "marketCapUSD": 567622134.7869279,
+        "volumeUSD24H": 41662576.4447243,
+        "fdvUSD": 567622020.118597,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599/logo.png"
+      },
+      {
+        "address": "0x3e6648c5a70a150a88bce65f4ad4d506fe15d2af",
+        "symbol": "SPELL",
+        "decimals": 18,
+        "amount": "19654553140418437121",
+        "name": "Spell Token",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.00007770491879",
+        "marketCapUSD": 13327212.6635517,
+        "volumeUSD24H": 4341.282416281,
+        "fdvUSD": 88436.2272372502,
+        "logoURI": "https://static.debank.com/image/arb_token/logo_url/0x3e6648c5a70a150a88bce65f4ad4d506fe15d2af/a1b1003790d9ee1463cacba03eecc1a6.png"
+      },
+      {
+        "address": "0x46850ad61c2b7d64d08c9c754f45254596696984",
+        "symbol": "FLX",
+        "decimals": 6,
+        "amount": "1843193",
+        "name": "PayPal USD",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9996462445",
+        "marketCapUSD": 2839209978.62304,
+        "volumeUSD24H": 5049.67374672067,
+        "fdvUSD": 311450569.983219,
+        "logoURI": "https://static.debank.com/image/arb_token/logo_url/0x46850ad61c2b7d64d08c9c754f45254596696984/4f85a1a76650fb9478b6778cd624b453.png"
+      },
+      {
+        "address": "0x5575552988a3a80504bbaeb1311674fcfd40ad4b",
+        "symbol": "SPA",
+        "decimals": 18,
+        "amount": "2037495095234019305",
+        "name": "Sperax",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.00243801651",
+        "marketCapUSD": 4663314.05349692,
+        "volumeUSD24H": 6335.807086355,
+        "fdvUSD": 9850375.98268522,
+        "logoURI": "https://arbiscan.io/token/images/speraxtoken_32.png"
+      },
+      {
+        "address": "0x5d3a1ff2b6bab83b63cd9ad0787074081a52ef34",
+        "symbol": "USDe",
+        "decimals": 18,
+        "amount": "100000000000000000",
+        "name": "USDe",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9991560975",
+        "marketCapUSD": 4511219238.17811,
+        "volumeUSD24H": 63547.8505559233,
+        "fdvUSD": 1887982.62118965,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x4c9edd5852cd905f086c759e8383e09bff1e68b3/734064e545eabfc501b9d0e752644b7d.png"
+      },
+      {
+        "address": "0x82af49447d8a07e3bd95bd0d56f35241523fbab1",
+        "symbol": "WETH",
+        "decimals": 18,
+        "amount": "16330169236089097",
+        "name": "WETH",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2244.09",
+        "marketCapUSD": 261852360.2663032,
+        "volumeUSD24H": 94736317.1534788,
+        "fdvUSD": 261602725.143425,
+        "logoURI": "https://static.debank.com/image/era_token/logo_url/0x5aea5775959fbc2557cc8789bc1bf90a239d9a91/61844453e63cf81301f845d7864236f6.png"
+      },
+      {
+        "address": "0x912ce59144191c1204e64559fe8253a0e49e6548",
+        "symbol": "ARB",
+        "decimals": 18,
+        "amount": "23671066717268252605",
+        "name": "Arbitrum",
+        "chainId": 42161,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.160846608536958",
+        "marketCapUSD": 1108573328.3829412,
+        "volumeUSD24H": 6956239.92119192,
+        "fdvUSD": 1608632904.94448,
+        "logoURI": "https://static.debank.com/image/coin/logo_url/arbitrum/854f629937ce94bebeb2cd38fb336de7.png"
+      }
+    ],
+    "42220": [
+      {
+        "address": "0x471ece3750da237f93b8e339c536989b8978a438",
+        "symbol": "CELO",
+        "decimals": 18,
+        "amount": "1843432181162125495",
+        "name": "Celo native asset",
+        "chainId": 42220,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.073262",
+        "marketCapUSD": 44574248.46238,
+        "volumeUSD24H": 396029.776730516,
+        "fdvUSD": 73244288.4470252,
+        "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5567.png"
+      },
+      {
+        "address": "0x2def4285787d58a2f811af24755a8150622f4361",
+        "symbol": "cETH",
+        "decimals": 18,
+        "amount": "693862404866",
+        "name": "Wrapped Ethereum",
+        "chainId": 42220,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1517.8902905046",
+        "marketCapUSD": 99700.7427510143,
+        "volumeUSD24H": 61.3975006561669,
+        "fdvUSD": 99700.7427510144,
+        "logoURI": "https://static.debank.com/image/celo_token/logo_url/0x2def4285787d58a2f811af24755a8150622f4361/1e59620be2b4f3fc249fdc840c447b62.png"
+      },
+      {
+        "address": "0x471ece3750da237f93b8e339c536989b8978a438",
+        "symbol": "CELO",
+        "decimals": 18,
+        "amount": "1843432181162125495",
+        "name": "Celo native asset",
+        "chainId": 42220,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.073262",
+        "marketCapUSD": 44574248.46238,
+        "volumeUSD24H": 396029.776730516,
+        "fdvUSD": 73244288.4470252,
+        "logoURI": "https://s2.coinmarketcap.com/static/img/coins/64x64/5567.png"
+      },
+      {
+        "address": "0x62b8b11039fcfe5ab0c56e502b1c372a3d2a9c7a",
+        "symbol": "G$",
+        "decimals": 18,
+        "amount": "446479159056312471423",
+        "name": "GoodDollar",
+        "chainId": 42220,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.0001120157394",
+        "marketCapUSD": 327304.5,
+        "volumeUSD24H": 858.882268371238,
+        "fdvUSD": 441211.34430803,
+        "logoURI": "https://static.debank.com/image/celo_token/logo_url/0x62b8b11039fcfe5ab0c56e502b1c372a3d2a9c7a/7db0aed77313b82cf929faf48b78aa59.png"
+      },
+      {
+        "address": "0x765de816845861e75a25fca122bb6898b8b1282a",
+        "symbol": "cUSD",
+        "decimals": 18,
+        "amount": "10000000000000000",
+        "name": "Mento Dollar",
+        "chainId": 42220,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.0037176977",
+        "marketCapUSD": 13496844.6910037,
+        "volumeUSD24H": 37891.6802024441,
+        "fdvUSD": 13496844.098823,
+        "logoURI": "https://reserve.mento.org/tokens/USDm.svg"
+      }
+    ],
+    "43114": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "AVAX",
+        "decimals": 18,
+        "amount": "324952024142594956",
+        "name": "AVAX",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "8.43",
+        "marketCapUSD": 2863319343,
+        "volumeUSD24H": 2743705.23657841,
+        "fdvUSD": 3744129659.31972,
+        "logoURI": "https://static.debank.com/image/avax_token/logo_url/avax/0b9c84359c84d6bdd5bfda9c2d4c4a82.png"
+      },
+      {
+        "address": "0x08c4b51e6ca9eb89c255f0a5ab8afd721420e447",
+        "symbol": "PEARL",
+        "decimals": 18,
+        "amount": "10000000000000000000",
+        "name": "Stargate Bridged Pearl (Avalanche)",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.003709360016",
+        "marketCapUSD": 163628.91,
+        "volumeUSD24H": 974.505797822,
+        "fdvUSD": 276700.66466388,
+        "logoURI": "https://static.debank.com/image/avax_token/logo_url/0x08c4b51e6ca9eb89c255f0a5ab8afd721420e447/b98eaba115a5fd779a16cf629b2babb6.png"
+      },
+      {
+        "address": "0x184ff13b3ebcb25be44e860163a5d8391dd568c1",
+        "symbol": "KIMBO",
+        "decimals": 18,
+        "amount": "10000000000000000000000",
+        "name": "Kimbo",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.00000261582819",
+        "marketCapUSD": 181590.792956105,
+        "volumeUSD24H": 175.8509464866,
+        "fdvUSD": 181585.6632998,
+        "logoURI": "https://static.debank.com/image/avax_token/logo_url/0x184ff13b3ebcb25be44e860163a5d8391dd568c1/3af21d48be38b253950dd841a1e0b1c4.png"
+      },
+      {
+        "address": "0x2f6f07cdcf3588944bf4c42ac74ff24bf56e7590",
+        "symbol": "STG",
+        "decimals": 18,
+        "amount": "115783962443658082",
+        "name": "StargateToken",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.1460270699",
+        "marketCapUSD": 13528957.2894464,
+        "volumeUSD24H": 96.8289047116,
+        "fdvUSD": 206721.463927997,
+        "logoURI": "https://static.debank.com/image/avax_token/logo_url/0x2f6f07cdcf3588944bf4c42ac74ff24bf56e7590/55886c6280173254776780fd8340cca7.png"
+      },
+      {
+        "address": "0x37b608519f91f70f2eeb0e5ed9af4061722e4f76",
+        "symbol": "SUSHI.e",
+        "decimals": 18,
+        "amount": "105335267213421351",
+        "name": "SUSHI",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.2175504621",
+        "marketCapUSD": 62382697.0460842,
+        "volumeUSD24H": 0.9723685665,
+        "fdvUSD": 6520.5026313383,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x6B3595068778DD592e39A122f4f5a5cF09C90fE2/logo.png"
+      },
+      {
+        "address": "0x48f88a3fe843ccb0b5003e70b4192c1d7448bef0",
+        "symbol": "CAI",
+        "decimals": 18,
+        "amount": "1870403793375037",
+        "name": "Colony Avalanche Index",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "76.5367942511",
+        "marketCapUSD": 108076.291037679,
+        "volumeUSD24H": 5.4656292744,
+        "fdvUSD": 108086.786027776,
+        "logoURI": "https://static.debank.com/image/avax_token/logo_url/0x48f88a3fe843ccb0b5003e70b4192c1d7448bef0/b062f5b5c88dce84c56658cc09669877.png"
+      },
+      {
+        "address": "0x49d5c2bdffac6ce2bfdb6640f4f80f226bc10bab",
+        "symbol": "WETH.e",
+        "decimals": 18,
+        "amount": "100000000000000",
+        "name": "Wrapped Ether",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2243.8067066485",
+        "marketCapUSD": 42444875.5413247,
+        "volumeUSD24H": 9812857.1582628,
+        "fdvUSD": 42444870.1301966,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png"
+      },
+      {
+        "address": "0x9209e7ebd056d72c5996220e99df6049253debcf",
+        "symbol": "MEOW",
+        "decimals": 18,
+        "amount": "155554000000000000000",
+        "name": "MEOW",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.00001017813716",
+        "marketCapUSD": 101781.371615023,
+        "volumeUSD24H": 0.83242385601,
+        "fdvUSD": 101781.332427619
+      },
+      {
+        "address": "0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7",
+        "symbol": "USDt",
+        "decimals": 6,
+        "amount": "2002129",
+        "name": "TetherToken",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.0020968941",
+        "marketCapUSD": 180501138552.627,
+        "volumeUSD24H": 13061280.8053352,
+        "fdvUSD": 1851078749.49172,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0xdac17f958d2ee523a2206206994597c13d831ec7/464c0de678334b8fe87327e527bc476d.png"
+      },
+      {
+        "address": "0xab592d197acc575d16c3346f4eb70c703f308d1e",
+        "symbol": "FEED",
+        "decimals": 18,
+        "amount": "232000000000000000000",
+        "name": "chikn feed",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.00002140752933",
+        "marketCapUSD": 40103.97,
+        "volumeUSD24H": 21.8707954739,
+        "fdvUSD": 38697.5063775973,
+        "logoURI": "https://static.debank.com/image/avax_token/logo_url/0xab592d197acc575d16c3346f4eb70c703f308d1e/be895776520269d6a05759ce469b77f5.png"
+      },
+      {
+        "address": "0xafe3d2a31231230875dee1fa1eef14a412443d22",
+        "symbol": "DFIAT",
+        "decimals": 18,
+        "amount": "113749886249999985590",
+        "name": "DeFiato",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.0005790328643",
+        "marketCapUSD": 86396.8665844936,
+        "volumeUSD24H": 1.2845374337,
+        "fdvUSD": 9621.5104424842,
+        "logoURI": "https://static.debank.com/image/avax_token/logo_url/0xafe3d2a31231230875dee1fa1eef14a412443d22/ff42362256dadbcebc9ad9efcd94618d.png"
+      },
+      {
+        "address": "0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
+        "symbol": "USDC",
+        "decimals": 6,
+        "amount": "1043756",
+        "name": "USD Coin",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.0004291725",
+        "marketCapUSD": 71818751896.4953,
+        "volumeUSD24H": 65993376.0663038,
+        "fdvUSD": 347929931.223651,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png"
+      },
+      {
+        "address": "0xd586e7f844cea2f87f50152665bcbc2c279d8d70",
+        "symbol": "DAI.e",
+        "decimals": 18,
+        "amount": "18061547931542985",
+        "name": "DAI Stablecoin",
+        "chainId": 43114,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.0014487145",
+        "marketCapUSD": 8687459.17067692,
+        "volumeUSD24H": 44141.9367981325,
+        "fdvUSD": 8687458.97855739,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x6B175474E89094C44Da98b954EedeAC495271d0F/logo.png"
+      }
+    ],
+    "59144": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "ETH",
+        "decimals": 18,
+        "amount": "6803680919043338",
+        "name": "ETH",
+        "chainId": 59144,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2241.49",
+        "marketCapUSD": 190496154186.61142,
+        "volumeUSD24H": 425.1699705502,
+        "fdvUSD": 270513807538.834,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png"
+      },
+      {
+        "address": "0x176211869ca2b568f2a7d4ee941e073a821ee1ff",
+        "symbol": "USDC",
+        "decimals": 6,
+        "amount": "2490524",
+        "name": "USDC",
+        "chainId": 59144,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.0005258101",
+        "marketCapUSD": 22363582.3617411,
+        "volumeUSD24H": 178396.632218143,
+        "fdvUSD": 22363571.1000487,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png"
+      },
+      {
+        "address": "0x4af15ec2a0bd43db75dd04e62faa3b8ef36b00d5",
+        "symbol": "DAI",
+        "decimals": 18,
+        "amount": "100600000000000000",
+        "name": "Dai Stablecoin",
+        "chainId": 59144,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.0018191559",
+        "marketCapUSD": 111949.984122202,
+        "volumeUSD24H": 1267.44732722812,
+        "fdvUSD": 111949.976291548,
+        "logoURI": "https://static.debank.com/image/eth_token/logo_url/0x6b175474e89094c44da98b954eedeac495271d0f/549c4205dbb199f1b8b03af783f35e71.png"
+      },
+      {
+        "address": "0xa219439258ca9da29e9cc4ce5596924745e12b93",
+        "symbol": "USDT",
+        "decimals": 6,
+        "amount": "2639548",
+        "name": "USDT",
+        "chainId": 59144,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.9994457868",
+        "marketCapUSD": 7812469.67732858,
+        "volumeUSD24H": 35651.3464465232,
+        "fdvUSD": 7812437.92586842,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png"
+      },
+      {
+        "address": "0xe5d7c2a44ffddf6b295a15c148167daaaf5cf34f",
+        "symbol": "WETH",
+        "decimals": 18,
+        "amount": "2737000000000",
+        "name": "Wrapped Ether",
+        "chainId": 59144,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "2242.99",
+        "marketCapUSD": 13518481.3980284,
+        "volumeUSD24H": 176002.374581627,
+        "fdvUSD": 13518475.9823148,
+        "logoURI": "https://static.debank.com/image/mtr_token/logo_url/0x79a61d3a28f8c8537a3df63092927cfa1150fb3c/61844453e63cf81301f845d7864236f6.png"
+      },
+      {
+        "address": "0xeb1fd1dbb8adda4fa2b5a5c4bce34f6f20d125d2",
+        "symbol": "DTC",
+        "decimals": 18,
+        "amount": "666000000000000000000",
+        "name": "Donald Toad Coin",
+        "chainId": 59144,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.2359409831",
+        "marketCapUSD": 16279852.7596082,
+        "volumeUSD24H": 1.5463161203,
+        "fdvUSD": 16279852.7596082,
+        "logoURI": "https://static.debank.com/image/linea_token/logo_url/0xeb1fd1dbb8adda4fa2b5a5c4bce34f6f20d125d2/957c90a6afc5541737b3c4c3d3ac3838.png"
+      }
+    ],
+    "80094": [
+      {
+        "address": "0x0000000000000000000000000000000000000000",
+        "symbol": "BERA",
+        "decimals": 18,
+        "amount": "2225233189587047551",
+        "name": "BERA",
+        "chainId": 80094,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.139",
+        "marketCapUSD": 55969022,
+        "volumeUSD24H": 10573953,
+        "fdvUSD": 103135511,
+        "logoURI": "https://raw.githubusercontent.com/lifinance/types/main/src/assets/icons/tokens/bera.svg"
+      }
+    ],
+    "534352": [
+      {
+        "address": "0x06efdbff2a14a7c8e15944d1f4a48f9f95f663a4",
+        "symbol": "USDC",
+        "decimals": 6,
+        "amount": "190030",
+        "name": "USD Coin",
+        "chainId": 534352,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "1.0014469319",
+        "marketCapUSD": 3998792.66964105,
+        "volumeUSD24H": 305813.498154372,
+        "fdvUSD": 3998785.99205801,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png"
+      },
+      {
+        "address": "0xd29687c813d741e2f938f4ac377128810e217b1b",
+        "symbol": "SCR",
+        "decimals": 18,
+        "amount": "1200000000000000000",
+        "name": "Scroll",
+        "chainId": 534352,
+        "verificationStatus": "verified",
+        "verificationStatusBreakdown": [
+          { "provider": "hypernative", "result": "verified", "providerResult": "accept" }
+        ],
+        "priceUSD": "0.01918440124",
+        "marketCapUSD": 3645036.23551133,
+        "volumeUSD24H": 102.63609199315,
+        "fdvUSD": 19184401.2080025,
+        "logoURI": "https://static.debank.com/image/scrl_token/logo_url/0xd29687c813d741e2f938f4ac377128810e217b1b/0eabb4976c99ba1e66fdb9b3e5139dcf.png"
+      }
+    ]
+  },
+  "limit": 1000
+}
