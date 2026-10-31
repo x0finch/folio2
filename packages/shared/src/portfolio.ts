@@ -82,3 +82,12 @@ export interface Portfolio {
   /** Newest position update across connections. */
   updatedAt: number | null
 }
+
+/** `GET /api/assets/search?q=`: coins to pick for a manual holding. */
+export interface AssetSearchResult {
+  assetId: string
+  symbol: string
+  name: string
+  logo: string | null
+  rank: number | null
+}

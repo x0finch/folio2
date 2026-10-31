@@ -24,6 +24,8 @@ export function budgetedFetch(inner: FetchLike, limit: number): BudgetedFetch {
   return Object.assign(fetch, { budget })
 }
 
+const USER_AGENT = 'Folio/1.0 (self-hosted portfolio tracker)'
+
 /**
  * Fetches JSON and checks it against `schema`. Maps HTTP failures to source error codes so
  * plugins don't have to.
@@ -36,6 +38,8 @@ export async function fetchJson<T extends z.ZodType>(
 ): Promise<z.output<T>> {
   const headers = new Headers(init?.headers)
   if (!headers.has('accept')) headers.set('accept', 'application/json')
+  // Workers send no User-Agent by default, and some APIs (CoinGecko) refuse requests without one.
+  if (!headers.has('user-agent')) headers.set('user-agent', USER_AGENT)
   let res: Response
   try {
     res = await fetch(url, { ...init, headers })

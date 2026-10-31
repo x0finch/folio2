@@ -100,3 +100,16 @@ test('display currency is saved per user', async () => {
   const bad = await t.send('PUT', '/api/settings', alice.headers, { currency: 'DOGE', dustUsd: 1 })
   expect(bad.status).toBe(400)
 })
+
+test('the portfolio values synced positions with stored prices', async () => {
+  const { headers } = await syncManual()
+  const portfolio = (await (await t.send('GET', '/api/portfolio', headers)).json()) as {
+    totalUsd: number
+    holdings: { assetId: string; amount: string; valueUsd: number }[]
+  }
+  expect(portfolio.holdings.map((h) => [h.assetId, h.amount])).toEqual([
+    ['coingecko:bitcoin', '0.5'],
+    ['coingecko:usd-coin', '10'],
+  ])
+  expect(portfolio.totalUsd).toBeCloseTo(77395.2478594337 / 2 + 10, 0)
+})

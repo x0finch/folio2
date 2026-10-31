@@ -49,6 +49,8 @@ export interface Source<Schema extends z.ZodObject = z.ZodObject> {
   label: string
   /** One line under the label in the picker. */
   description: string
+  /** Logo URL (square), shown in the picker and on connections. */
+  icon?: string
   config: Schema
   /** The most subrequests one fetch may need; the sync engine defers it when less is left. */
   maxRequests: (config: z.output<Schema>) => number
@@ -82,6 +84,7 @@ export function describeSource(source: Source): SourceInfo {
     kind: source.kind,
     label: source.label,
     description: source.description,
+    icon: source.icon ?? null,
     configSchema: z.toJSONSchema(source.config, { io: 'input' }),
   }
 }

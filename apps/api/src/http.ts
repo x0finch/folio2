@@ -8,6 +8,7 @@ const STATUS = {
   forbidden: 403,
   not_found: 404,
   too_large: 413,
+  upstream: 502,
   not_configured: 503,
 } as const
 

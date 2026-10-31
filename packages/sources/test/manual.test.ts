@@ -17,13 +17,13 @@ test('turns holdings into spot positions without any request', async () => {
   )
   expect(await manual.fetchPositions(ctx)).toEqual([
     {
-      asset: { id: 'coingecko:bitcoin', symbol: 'BTC', name: undefined },
+      asset: { id: 'coingecko:bitcoin', symbol: 'BTC', name: undefined, logo: undefined },
       amount: '0.5',
       kind: 'spot',
       location: 'Ledger',
     },
     {
-      asset: { id: 'ethereum:0xa0b8', symbol: 'USDC', name: undefined },
+      asset: { id: 'ethereum:0xa0b8', symbol: 'USDC', name: undefined, logo: undefined },
       amount: '1200',
       kind: 'spot',
       location: undefined,

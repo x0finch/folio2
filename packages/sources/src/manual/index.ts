@@ -8,6 +8,7 @@ const holding = z.object({
   assetId: z.string().regex(/^[a-z0-9-]+:.+$/, 'Pick an asset'),
   symbol: z.string().trim().min(1).max(20),
   name: z.string().trim().max(80).optional(),
+  logo: z.url().max(500).optional(),
   amount: z.string().trim().refine(isDecimal, 'Enter a number like 1.25'),
   /** Where it is kept, e.g. "Ledger" or "Bank". */
   note: z.string().trim().max(80).optional(),
@@ -28,7 +29,7 @@ export const manual = defineSource({
   defaultLabel: () => 'Manual',
   fetchPositions: async ({ config }) =>
     config.holdings.map((entry) => ({
-      asset: { id: entry.assetId, symbol: entry.symbol, name: entry.name },
+      asset: { id: entry.assetId, symbol: entry.symbol, name: entry.name, logo: entry.logo },
       amount: entry.amount,
       kind: 'spot' as const,
       location: entry.note,

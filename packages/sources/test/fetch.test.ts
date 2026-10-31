@@ -36,6 +36,13 @@ describe('fetchJson', () => {
     expect(error).toMatchObject({ code })
   })
 
+  test('sends a User-Agent and asks for JSON', async () => {
+    const { fetch, requests } = fixtureFetch([{ url: 'example.com', json: { ok: true } }])
+    await fetchJson(fetch, 'https://example.com', schema)
+    expect(requests[0]?.headers.get('user-agent')).toMatch(/^Folio\//)
+    expect(requests[0]?.headers.get('accept')).toBe('application/json')
+  })
+
   test('rejects an unexpected shape as an upstream error', async () => {
     const { fetch } = fixtureFetch([{ url: 'example.com', json: { ok: 'yes' } }])
     await expect(fetchJson(fetch, 'https://example.com', schema)).rejects.toMatchObject({

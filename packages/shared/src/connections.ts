@@ -8,6 +8,7 @@ export interface SourceInfo {
   kind: SourceKind
   label: string
   description: string
+  icon: string | null
   /** JSON Schema of the config; each property may carry `title`, `description`,
    * `placeholder` and `secret`. */
   configSchema: Record<string, unknown>
@@ -39,3 +40,13 @@ export const updateConnectionBody = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
 })
 export type UpdateConnectionBody = z.input<typeof updateConnectionBody>
+
+/** A row of the manual source's config (mirrors its zod schema in @folio/sources). */
+export interface ManualHoldingInput {
+  assetId: string
+  symbol: string
+  name?: string
+  logo?: string
+  amount: string
+  note?: string
+}

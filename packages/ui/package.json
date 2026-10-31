@@ -9,6 +9,7 @@
   "exports": {
     "./globals.css": "./src/styles/globals.css",
     "./components/*": "./src/components/*.tsx",
+    "./lib/presence-gate": "./src/lib/presence-gate.tsx",
     "./lib/*": "./src/lib/*.ts"
   },
   "scripts": {
