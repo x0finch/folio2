@@ -36,5 +36,7 @@ export function useMoney() {
     (valueUsd: number, options?: MoneyOptions) => formatMoney(valueUsd * factor, currency, options),
     [factor, currency],
   )
-  return { format, currency, settings }
+  /** A USD value in the display currency, as a number (for animated figures). */
+  const convert = useCallback((valueUsd: number) => valueUsd * factor, [factor])
+  return { format, convert, currency, settings }
 }

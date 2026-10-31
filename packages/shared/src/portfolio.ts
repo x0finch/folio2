@@ -91,3 +91,21 @@ export interface AssetSearchResult {
   logo: string | null
   rank: number | null
 }
+
+/** USD stablecoins by canonical id, for the stablecoin share. */
+export const STABLECOIN_IDS: ReadonlySet<string> = new Set(
+  [
+    'usd-coin',
+    'tether',
+    'dai',
+    'usds',
+    'ethena-usde',
+    'first-digital-usd',
+    'paypal-usd',
+    'frax',
+    'true-usd',
+    'binance-usd',
+    'gho',
+    'crvusd',
+  ].map((id) => `coingecko:${id}`),
+)

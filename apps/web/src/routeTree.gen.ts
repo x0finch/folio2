@@ -15,6 +15,7 @@ import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppAccountsRouteImport } from './routes/_app/accounts'
 import { Route as AppInsightsRouteImport } from './routes/_app/insights'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppAssetsAssetIdRouteImport } from './routes/_app/assets.$assetId'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -45,6 +46,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAssetsAssetIdRoute = AppAssetsAssetIdRouteImport.update({
+  id: '/assets/$assetId',
+  path: '/assets/$assetId',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -52,6 +58,7 @@ export interface FileRoutesByFullPath {
   '/accounts': typeof AppAccountsRoute
   '/insights': typeof AppInsightsRoute
   '/settings': typeof AppSettingsRoute
+  '/assets/$assetId': typeof AppAssetsAssetIdRoute
 }
 export interface FileRoutesByTo {
   '/sign-in': typeof SignInRoute
@@ -59,6 +66,7 @@ export interface FileRoutesByTo {
   '/insights': typeof AppInsightsRoute
   '/settings': typeof AppSettingsRoute
   '/': typeof AppIndexRoute
+  '/assets/$assetId': typeof AppAssetsAssetIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -68,12 +76,25 @@ export interface FileRoutesById {
   '/_app/insights': typeof AppInsightsRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/assets/$assetId': typeof AppAssetsAssetIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/sign-in' | '/accounts' | '/insights' | '/settings'
+  fullPaths:
+    | '/'
+    | '/sign-in'
+    | '/accounts'
+    | '/insights'
+    | '/settings'
+    | '/assets/$assetId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/sign-in' | '/accounts' | '/insights' | '/settings' | '/'
+  to:
+    | '/sign-in'
+    | '/accounts'
+    | '/insights'
+    | '/settings'
+    | '/'
+    | '/assets/$assetId'
   id:
     | '__root__'
     | '/_app'
@@ -82,6 +103,7 @@ export interface FileRouteTypes {
     | '/_app/insights'
     | '/_app/settings'
     | '/_app/'
+    | '/_app/assets/$assetId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -133,6 +155,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/assets/$assetId': {
+      id: '/_app/assets/$assetId'
+      path: '/assets/$assetId'
+      fullPath: '/assets/$assetId'
+      preLoaderRoute: typeof AppAssetsAssetIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -141,6 +170,7 @@ interface AppRouteChildren {
   AppInsightsRoute: typeof AppInsightsRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppAssetsAssetIdRoute: typeof AppAssetsAssetIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -148,6 +178,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppInsightsRoute: AppInsightsRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppIndexRoute: AppIndexRoute,
+  AppAssetsAssetIdRoute: AppAssetsAssetIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
