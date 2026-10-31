@@ -37,6 +37,7 @@ See README.md for the stack, commands and architecture. Conventions the code doe
 
 ## UI
 
-- beUI components are added with `pnpm dlx shadcn add @beui/<name>` into `packages/ui`;
+- beUI components are added with `pnpm --filter @folio/ui add-beui <name>` (see
+  `packages/ui/VENDORED.md`);
   token-only local primitives where beUI has none. No Radix.
 - Colours come from tokens only (`packages/ui/src/styles`), charts from `--chart-*`.

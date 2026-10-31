@@ -109,3 +109,11 @@ export const STABLECOIN_IDS: ReadonlySet<string> = new Set(
     'crvusd',
   ].map((id) => `coingecko:${id}`),
 )
+
+export const HISTORY_RANGES = ['7d', '30d', '90d', '1y', 'all'] as const
+export type HistoryRange = (typeof HISTORY_RANGES)[number]
+
+/** `GET /api/history`: value over time, oldest first, at most ~120 points. */
+export interface HistoryResponse {
+  points: { t: number; v: number }[]
+}

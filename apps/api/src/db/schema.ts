@@ -1,6 +1,6 @@
 // The app's tables. drizzle-kit generates migrations from this file.
 import type { PerpDetails } from '@folio/sources'
-import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 import { user } from './auth-schema'
 
@@ -99,3 +99,33 @@ export const userSettings = sqliteTable('user_settings', {
   dustUsd: real('dust_usd').notNull(),
   updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
 })
+
+/** Net worth over time: one row per user per hour, overwritten by later syncs in that hour. */
+export const portfolioSnapshots = sqliteTable(
+  'portfolio_snapshots',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** Start of the hour, epoch ms. */
+    hour: integer('hour').notNull(),
+    totalUsd: real('total_usd').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.hour] })],
+)
+
+/** Each asset's amount and value per user per day (UTC), overwritten by later syncs that day. */
+export const assetSnapshots = sqliteTable(
+  'asset_snapshots',
+  {
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** Start of the UTC day, epoch ms. */
+    day: integer('day').notNull(),
+    assetId: text('asset_id').notNull(),
+    amount: text('amount').notNull(),
+    valueUsd: real('value_usd'),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.assetId, table.day] })],
+)

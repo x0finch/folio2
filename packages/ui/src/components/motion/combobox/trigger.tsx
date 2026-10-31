@@ -1,3 +1,4 @@
+// @ts-nocheck -- vendored from beUI, see packages/ui/VENDORED.md
 "use client";
 
 import { ChevronsUpDown, Search } from "lucide-react";

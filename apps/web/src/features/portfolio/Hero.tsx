@@ -15,7 +15,7 @@ export function Hero({ portfolio, chart }: { portfolio: Portfolio; chart?: React
   const { top, worst, stableShare } = dayHighlights(portfolio)
 
   return (
-    <section className="grid gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] md:items-end">
+    <section className="grid gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] md:items-center">
       <div>
         <p className="text-xs text-muted-foreground">Total net worth</p>
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">

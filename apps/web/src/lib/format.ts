@@ -43,6 +43,7 @@ export function formatMoney(value: number, currency: string, options: MoneyOptio
     style: 'currency',
     currency,
     notation: compact && abs >= 10_000 ? 'compact' : 'standard',
+    maximumSignificantDigits: compact && abs >= 10_000 ? 3 : undefined,
     // Sub-cent prices need more digits; everything else reads as money.
     maximumFractionDigits: abs > 0 && abs < 1 && !compact ? significantDigits(abs) : 2,
     minimumFractionDigits: compact && abs >= 10_000 ? 0 : 2,

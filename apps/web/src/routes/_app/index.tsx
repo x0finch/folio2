@@ -6,6 +6,8 @@ import { useState } from 'react'
 
 import { PageHeader } from '../../components/PageHeader'
 import { connectionsQuery, portfolioQuery } from '../../features/connections/queries'
+import { historyQuery } from '../../features/history/queries'
+import { TrendChart } from '../../features/history/TrendChart'
 import { useMoney } from '../../features/money/queries'
 import { Hero } from '../../features/portfolio/Hero'
 import { HoldingRow } from '../../features/portfolio/HoldingRow'
@@ -84,7 +86,7 @@ function OverviewPage() {
   return (
     <>
       {header}
-      <Hero portfolio={portfolio} />
+      <Hero portfolio={portfolio} chart={<OverviewTrend />} />
       <div className="mt-10 flex items-center justify-between gap-3">
         <Tabs value={tab} onValueChange={(value) => setTab(value === 'perps' ? 'perps' : 'tokens')}>
           <TabsList>
@@ -153,4 +155,11 @@ function OverviewPage() {
       </div>
     </>
   )
+}
+
+/** The last 30 days next to the number; Insights has the other ranges. */
+function OverviewTrend() {
+  const { data } = useQuery(historyQuery('30d'))
+  if (!data) return <div className="h-40 animate-pulse rounded-2xl bg-card" />
+  return <TrendChart points={data.points} range="30d" label="Net worth, last 30 days" />
 }

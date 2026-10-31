@@ -1,9 +1,14 @@
+import type { HistoryRange } from '@folio/shared'
 import { useQuery } from '@tanstack/react-query'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { ArrowLeft } from 'lucide-react'
+import { useState } from 'react'
 
 import { Avatar } from '../../components/Avatar'
 import { portfolioQuery } from '../../features/connections/queries'
+import { assetHistoryQuery } from '../../features/history/queries'
+import { RangeTabs } from '../../features/history/RangeTabs'
+import { TrendChart } from '../../features/history/TrendChart'
 import { useMoney } from '../../features/money/queries'
 import { ChangePill } from '../../features/portfolio/ChangePill'
 import { useAccountIcons } from '../../features/portfolio/use-accounts'
@@ -71,6 +76,7 @@ function AssetPage() {
               {holding.share !== null && ` · ${formatPercent(holding.share)} of portfolio`}
             </p>
           </section>
+          <AssetTrend assetId={assetId} />
           <section className="mt-10">
             <h2 className="mb-2 text-sm font-medium">Where you hold it</h2>
             <ul>
@@ -106,5 +112,23 @@ function AssetPage() {
         </>
       )}
     </>
+  )
+}
+
+function AssetTrend({ assetId }: { assetId: string }) {
+  const [range, setRange] = useState<HistoryRange>('30d')
+  const { data } = useQuery(assetHistoryQuery(assetId, range))
+  return (
+    <section className="mt-10">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-medium">Value over time</h2>
+        <RangeTabs value={range} onChange={setRange} />
+      </div>
+      {data ? (
+        <TrendChart points={data.points} range={range} label="Value of this asset over time" />
+      ) : (
+        <div className="h-48 animate-pulse rounded-2xl bg-card" />
+      )}
+    </section>
   )
 }

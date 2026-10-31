@@ -6,6 +6,7 @@ import { type AppOptions, createApp } from '../src/app'
 import { createAuthOptions } from '../src/auth'
 import { getDb } from '../src/db'
 import type { Env } from '../src/env'
+import { writeSnapshot } from '../src/history/snapshots'
 import { priceUser } from '../src/pricing/store'
 import { createTestDb } from './d1'
 import { fakeRunners } from './runners'
@@ -41,7 +42,10 @@ export async function createTestApp(
     fetch: testFetch,
     clock,
     onFinished: appOptions.pricing
-      ? (userId) => priceUser(getDb(db), testFetch, userId, clock.now)
+      ? async (userId) => {
+          await priceUser(getDb(db), testFetch, userId, clock.now)
+          await writeSnapshot(getDb(db), userId, clock.now)
+        }
       : undefined,
   })
   const env: Env = {

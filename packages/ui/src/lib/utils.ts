@@ -1,3 +1,4 @@
+// @ts-nocheck -- vendored from beUI, see packages/ui/VENDORED.md
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 

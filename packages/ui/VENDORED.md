@@ -1,17 +1,16 @@
 # Vendored beUI components
 
-`src/components/motion/`, `src/components/charts/` and most of `src/lib/` come from the beUI
-registry (`pnpm dlx shadcn@latest add @beui/<name>` run in this folder). They are excluded from
-oxlint/oxfmt and are not edited, except for the patches below, which only make them compile
-under this repository's stricter TypeScript (`noUncheckedIndexedAccess`). Re-apply them after
-updating a component from the registry.
+`src/components/motion/`, `src/components/charts/` and `src/lib/` come from the beUI registry.
+Add or update components with:
 
-| File                                              | Patch                                                              |
-| ------------------------------------------------- | ------------------------------------------------------------------ |
-| `components/motion/loader.tsx`                    | `MORPH_PATHS[0]!` in `MORPH_SEQ`                                   |
-| `components/motion/tabs.tsx`                      | `as const` on the `saved` tuples, `saved[index]!`, `clips[index]!` |
-| `components/motion/bottom-sheet.tsx`              | `smaller[smaller.length - 1]!`, `snapPoints[snap]!`                |
-| `components/motion/combobox/use-active-option.ts` | `rows[index]!`                                                     |
-| `components/motion/select.tsx`                    | defaults `[p = 0, near = 0]` in the clip-path transform            |
-| `lib/hooks/use-listbox.ts`                        | `enabled[(from + step) % enabled.length]!`                         |
-| `lib/hooks/use-row-cursor.ts`                     | `live[next]!`                                                      |
+```sh
+pnpm --filter @folio/ui add-beui <name> [<name>...]
+```
+
+It runs `shadcn add @beui/<name>` and marks every vendored file `// @ts-nocheck`. beUI is
+written for a looser TypeScript than this repository's (`noUncheckedIndexedAccess`), and the
+files are not ours to edit; the marker keeps them out of type errors while the app code that
+uses them is still checked against their exported types. The folders are also excluded from
+oxlint and oxfmt.
+
+Don't edit these files. Wrap a component in `apps/web/src/components` instead.

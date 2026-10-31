@@ -1,3 +1,4 @@
+// @ts-nocheck -- vendored from beUI, see packages/ui/VENDORED.md
 export const TOUCH_GESTURE_CLASS = "select-none [-webkit-touch-callout:none]";
 
 /**
