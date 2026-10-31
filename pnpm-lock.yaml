@@ -164,6 +164,9 @@ settings:
 
 catalogs:
   default:
+    '@types/big.js':
+      specifier: ^7.0.0
+      version: 7.0.0
     '@types/node':
       specifier: ^22.20.5
       version: 22.20.5
@@ -176,6 +179,9 @@ catalogs:
     better-auth:
       specifier: 1.7.7
       version: 1.7.7
+    big.js:
+      specifier: ^7.0.1
+      version: 7.0.1
     lucide-react:
       specifier: ^1.65.0
       version: 1.65.0
@@ -227,7 +233,7 @@ importers:
         specifier: 'catalog:'
         version: 1.7.7(@tanstack/react-start@1.169.4(esbuild@0.28.2)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(rolldown@1.2.16)(supports-color@10.2.2)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)))(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(kysely@0.29.7))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(vitest@5.0.5(@types/node@22.20.5)(vite@8.3.5(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)))
       big.js:
-        specifier: ^7.0.1
+        specifier: 'catalog:'
         version: 7.0.1
       drizzle-orm:
         specifier: ^0.45.4
@@ -243,7 +249,7 @@ importers:
         version: 4.6.7
     devDependencies:
       '@types/big.js':
-        specifier: ^7.0.0
+        specifier: 'catalog:'
         version: 7.0.0
       '@types/node':
         specifier: 'catalog:'
@@ -339,10 +345,16 @@ importers:
       '@folio/shared':
         specifier: workspace:*
         version: link:../shared
+      big.js:
+        specifier: 'catalog:'
+        version: 7.0.1
       zod:
         specifier: 'catalog:'
         version: 4.6.7
     devDependencies:
+      '@types/big.js':
+        specifier: 'catalog:'
+        version: 7.0.0
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.5

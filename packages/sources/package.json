@@ -13,9 +13,11 @@
   },
   "dependencies": {
     "@folio/shared": "workspace:*",
+    "big.js": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@types/big.js": "catalog:",
     "@types/node": "catalog:"
   }
 }

@@ -17,3 +17,5 @@ catalog:
   motion: ^14.2.0
   lucide-react: ^1.65.0
   '@types/node': ^22.20.5
+  big.js: ^7.0.1
+  '@types/big.js': ^7.0.0
