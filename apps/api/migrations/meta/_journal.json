@@ -22,6 +22,13 @@
       "when": 1793443126389,
       "tag": "0002_powerful_captain_cross",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793443306441,
+      "tag": "0003_small_gamma_corps",
+      "breakpoints": true
     }
   ]
 }

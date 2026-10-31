@@ -1,5 +1,5 @@
 import type { HealthResponse, MeResponse } from '@folio/shared'
-import { type Source, sources } from '@folio/sources'
+import type { Source } from '@folio/sources'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 
@@ -8,7 +8,9 @@ import { errorResponse, fail } from './http'
 import { requireUser } from './middleware'
 import { authRateLimit } from './rate-limit'
 import { connectionRoutes, sourceRoutes } from './routes/connections'
-import type { AppEnv, AuthFor, SourceRegistry } from './types'
+import { syncRoutes } from './routes/sync'
+import { createRegistry, defaultRegistry } from './sources'
+import type { AppEnv, AuthFor } from './types'
 
 /** Request bodies above this are refused before they are read in full. */
 const MAX_BODY_BYTES = 256 * 1024
@@ -19,14 +21,9 @@ export interface AppOptions {
   sources?: readonly Source[]
 }
 
-function registry(list: readonly Source[]): SourceRegistry {
-  const byId = new Map(list.map((source) => [source.id, source]))
-  return { all: list, get: (id) => byId.get(id) }
-}
-
 export function createApp(options: AppOptions = {}) {
   const authFor = options.auth ?? getAuth
-  const sourceRegistry = registry(options.sources ?? sources)
+  const sourceRegistry = options.sources ? createRegistry(options.sources) : defaultRegistry
   const app = new Hono<AppEnv>().basePath('/api')
 
   app.use('*', async (c, next) => {
@@ -55,6 +52,7 @@ export function createApp(options: AppOptions = {}) {
 
   app.route('/sources', sourceRoutes)
   app.route('/connections', connectionRoutes)
+  app.route('/sync', syncRoutes)
 
   app.onError(errorResponse)
   return app

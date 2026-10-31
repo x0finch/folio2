@@ -1,5 +1,6 @@
 // The app's tables. drizzle-kit generates migrations from this file.
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import type { PerpDetails } from '@folio/sources'
+import { index, integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 import { user } from './auth-schema'
 
@@ -36,4 +37,40 @@ export const connections = sqliteTable(
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
   },
   (table) => [index('connections_user_idx').on(table.userId)],
+)
+
+/**
+ * The latest positions of each connection, replaced as a whole by every successful sync of
+ * that connection. Prices and values are what the source reported (if anything); pricing adds
+ * the rest when the portfolio is read.
+ */
+export const positions = sqliteTable(
+  'positions',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    connectionId: text('connection_id')
+      .notNull()
+      .references(() => connections.id, { onDelete: 'cascade' }),
+    assetId: text('asset_id').notNull(),
+    symbol: text('symbol').notNull(),
+    name: text('name'),
+    logo: text('logo'),
+    /** Decimal string. */
+    amount: text('amount').notNull(),
+    kind: text('kind', {
+      enum: ['spot', 'staked', 'lending', 'borrowed', 'reward', 'perp'],
+    }).notNull(),
+    location: text('location'),
+    priceUsd: real('price_usd'),
+    valueUsd: real('value_usd'),
+    perp: text('perp', { mode: 'json' }).$type<PerpDetails>(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => [
+    index('positions_user_idx').on(table.userId),
+    index('positions_connection_idx').on(table.connectionId),
+  ],
 )

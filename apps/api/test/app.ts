@@ -1,3 +1,4 @@
+import { sources } from '@folio/sources'
 import { betterAuth } from 'better-auth/minimal'
 import { testUtils } from 'better-auth/plugins'
 
@@ -5,13 +6,14 @@ import { type AppOptions, createApp } from '../src/app'
 import { createAuthOptions } from '../src/auth'
 import type { Env } from '../src/env'
 import { createTestDb } from './d1'
+import { fakeRunners } from './runners'
 
 export const TEST_ORIGIN = 'http://localhost:8787'
 
 /** App wired to a fresh D1 and a Better Auth instance with test helpers. */
 export async function createTestApp(
   overrides: Partial<Env> = {},
-  appOptions: Omit<AppOptions, 'auth'> = {},
+  appOptions: Omit<AppOptions, 'auth'> & { fetch?: typeof fetch } = {},
 ) {
   const { db: base, dispose } = await createTestDb()
   // Counts D1 statements so tests can assert which requests touch the database.
@@ -23,8 +25,18 @@ export async function createTestApp(
       return typeof value === 'function' ? value.bind(target) : value
     },
   })
+  const clock = { now: Date.parse('2026-10-01T00:00:00Z') }
+  const runners = fakeRunners({
+    db: () => db,
+    sources: appOptions.sources ?? sources,
+    encryptionSecret: 'test-encryption-secret-test-encryption',
+    fetch: appOptions.fetch ?? (() => Promise.reject(new Error('No network in tests'))),
+    clock,
+  })
   const env: Env = {
     DB: db,
+    SYNC_RUNNER: runners.namespace,
+    SCHEDULER: {} as Env['SCHEDULER'],
     BETTER_AUTH_URL: TEST_ORIGIN,
     BETTER_AUTH_SECRET: 'test-secret-test-secret-test-secret-123',
     ENCRYPTION_SECRET: 'test-encryption-secret-test-encryption',
@@ -32,7 +44,7 @@ export async function createTestApp(
   }
   const options = createAuthOptions(env)
   const auth = betterAuth({ ...options, plugins: [...options.plugins, testUtils()] })
-  const app = createApp({ ...appOptions, auth: () => auth })
+  const app = createApp({ sources: appOptions.sources, auth: () => auth })
   const helpers = (await auth.$context).test
 
   /** Creates a user and returns request headers carrying their session cookie. */
@@ -66,5 +78,5 @@ export async function createTestApp(
       body: body === undefined ? undefined : JSON.stringify(body),
     })
 
-  return { app, env, auth, request, send, signIn, queries, dispose }
+  return { app, env, auth, request, send, signIn, queries, dispose, clock, runners }
 }

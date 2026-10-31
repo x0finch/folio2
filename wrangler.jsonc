@@ -21,6 +21,17 @@
       "migrations_dir": "apps/api/migrations",
     },
   ],
+  // Background sync (apps/api/src/sync/durable.ts): one runner per user, one scheduler. The
+  // free plan only offers SQLite-backed Durable Objects, hence new_sqlite_classes.
+  "durable_objects": {
+    "bindings": [
+      { "name": "SYNC_RUNNER", "class_name": "SyncRunner" },
+      { "name": "SCHEDULER", "class_name": "Scheduler" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SyncRunner", "Scheduler"] }],
+  // Hourly sweep: wakes the Scheduler, which enqueues every user's connections.
+  "triggers": { "crons": ["17 * * * *"] },
   // Auth endpoint limits (apps/api/src/rate-limit.ts). namespace_id must be unique in the account.
   "ratelimits": [
     {
