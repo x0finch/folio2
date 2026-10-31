@@ -1,1 +1,11 @@
-@import 'tailwindcss';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+@import '@fontsource-variable/newsreader';
+@import '@folio/ui/globals.css';
+
+/* Tailwind v4 skips node_modules: scan the app's sources. */
+@source '../**/*.{ts,tsx}';
+
+@theme {
+  --font-serif: 'Newsreader Variable', Georgia, 'Times New Roman', serif;
+}

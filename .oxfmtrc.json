@@ -6,5 +6,12 @@
   "trailingComma": "all",
   "sortImports": {},
   "sortPackageJson": true,
-  "ignorePatterns": ["pnpm-lock.yaml", "**/*.gen.ts", "**/worker-configuration.d.ts"]
+  "ignorePatterns": [
+    "pnpm-lock.yaml",
+    "**/*.gen.ts",
+    "packages/ui/src/components/motion/**",
+    "packages/ui/src/components/charts/**",
+    "packages/ui/src/lib/**",
+    "**/worker-configuration.d.ts"
+  ]
 }

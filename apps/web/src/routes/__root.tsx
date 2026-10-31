@@ -9,6 +9,8 @@ import {
 } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 
+import { themeInitScript } from '../lib/theme'
+
 import appCss from '../styles/app.css?url'
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -26,8 +28,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <HeadContent />
       </head>
       <body>
@@ -42,5 +45,5 @@ function RootLayout() {
   // The prerendered shell holds no page content; pages render after hydration so the first
   // client render matches it.
   const hydrated = useHydrated()
-  return <main className="min-h-dvh">{hydrated && <Outlet />}</main>
+  return hydrated ? <Outlet /> : null
 }

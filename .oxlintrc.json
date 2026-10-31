@@ -32,6 +32,9 @@
     "**/.output/**",
     "**/.wrangler/**",
     "**/*.gen.ts",
+    "packages/ui/src/components/motion/**",
+    "packages/ui/src/components/charts/**",
+    "packages/ui/src/lib/**",
     "**/worker-configuration.d.ts"
   ],
   "overrides": [

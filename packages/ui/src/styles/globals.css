@@ -1,0 +1,151 @@
+@import 'tailwindcss';
+
+/*
+ * Folio's theme. Colours are named by role (shadcn conventions, which beUI components use);
+ * components never use raw colours. Light values follow beui.dev, with these adjustments for
+ * how Folio uses them:
+ * - muted/accent sit one step below card, so hover surfaces show on cards;
+ * - border/input at 10% so dividers and field outlines show on popovers;
+ * - ring has 3:1 contrast, as the only focus indicator.
+ */
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/* Tailwind v4 skips node_modules: scan this package's sources explicitly. */
+@source '../**/*.{ts,tsx}';
+
+@theme inline {
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-shimmer: var(--shimmer);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
+  --color-gain: var(--gain);
+  --color-gain-surface: var(--gain-surface);
+  --color-loss: var(--loss);
+  --color-loss-surface: var(--loss-surface);
+  --color-warn: var(--warn);
+  --color-warn-surface: var(--warn-surface);
+  --color-logo: var(--logo);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+:root {
+  color-scheme: light;
+  --radius: 0.75rem;
+  --background: lab(98.84% 0 0);
+  --foreground: lab(3.05% 0 0);
+  --card: lab(96.52% 0 0);
+  --card-foreground: lab(3.05% 0 0);
+  --popover: lab(96.52% 0 0);
+  --popover-foreground: lab(3.05% 0 0);
+  --primary: lab(3.05% 0 0);
+  --primary-foreground: lab(98.84% 0 0);
+  --secondary: lab(96.52% 0 0);
+  --secondary-foreground: lab(3.05% 0 0);
+  --muted: lab(93% 0 0);
+  --muted-foreground: lab(42% 0 0);
+  --accent: lab(93% 0 0);
+  --accent-foreground: lab(3.05% 0 0);
+  --destructive: lab(53.69% 69.68 43.77);
+  --border: lab(3.05% 0 0 / 0.1);
+  --border-strong: lab(3.05% 0 0 / 0.18);
+  --input: lab(3.05% 0 0 / 0.1);
+  --ring: oklch(0.708 0 0);
+  --shimmer: lab(70% 0 0);
+  --chart-1: oklch(0.62 0.19 259);
+  --chart-2: oklch(0.7 0.15 162);
+  --chart-3: oklch(0.75 0.16 70);
+  --chart-4: oklch(0.6 0.22 304);
+  --chart-5: oklch(0.65 0.21 17);
+  --chart-6: oklch(0.7 0.12 215);
+  --gain: oklch(0.55 0.13 152);
+  --gain-surface: oklch(0.95 0.03 152);
+  --loss: oklch(0.577 0.245 27.3);
+  --loss-surface: oklch(0.95 0.03 27);
+  --warn: oklch(0.62 0.13 70);
+  --warn-surface: oklch(0.96 0.04 80);
+  /* Coin logos are drawn for light backgrounds: keep a light plate in both themes. */
+  --logo: oklch(1 0 0);
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --background: #151515;
+  --foreground: lab(95.36% 0 0);
+  --card: #1c1c1c;
+  --card-foreground: lab(95.36% 0 0);
+  --popover: #1f1f1f;
+  --popover-foreground: lab(95.36% 0 0);
+  --primary: lab(95.36% 0 0);
+  --primary-foreground: #151515;
+  --secondary: #1c1c1c;
+  --secondary-foreground: lab(95.36% 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.2);
+  --border: #ffffff1a;
+  --border-strong: #ffffff2e;
+  --input: #ffffff1a;
+  --ring: oklch(0.556 0 0);
+  --shimmer: lab(50% 0 0);
+  --chart-1: oklch(0.65 0.2 259);
+  --chart-2: oklch(0.72 0.15 162);
+  --chart-3: oklch(0.79 0.16 75);
+  --chart-4: oklch(0.66 0.22 304);
+  --chart-5: oklch(0.68 0.2 17);
+  --chart-6: oklch(0.74 0.12 215);
+  --gain: oklch(0.72 0.15 158);
+  --gain-surface: oklch(0.29 0.06 158);
+  --loss: oklch(0.704 0.191 22.2);
+  --loss-surface: oklch(0.29 0.07 25);
+  --warn: oklch(0.79 0.13 78);
+  --warn-surface: oklch(0.3 0.05 78);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply bg-background;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: 'tnum' 0;
+  }
+}
+
+/* Figures that line up in columns. */
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
