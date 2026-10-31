@@ -16,3 +16,4 @@ catalog:
   tailwindcss: ^4.3.3
   motion: ^14.2.0
   lucide-react: ^1.65.0
+  '@types/node': ^22.20.5

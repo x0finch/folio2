@@ -21,7 +21,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/node": "^22.20.5",
+    "@types/node": "catalog:",
     "drizzle-kit": "^0.31.11",
     "miniflare": "^4.20260730.0",
     "wrangler": "^4.149.0"
