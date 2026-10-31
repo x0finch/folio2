@@ -108,8 +108,8 @@ describe('binance', () => {
       expect(url.searchParams.get('signature')).toBe(await signBinance(unsigned!, config.apiSecret))
     }
     // The calls run in parallel, so find the account call rather than assume its position.
-    const account = requests.find((request) => request.url.includes('/api/v3/account'))
-    expect(account?.url).toContain('omitZeroBalances=true')
+    const accountCall = requests.find((request) => request.url.includes('/api/v3/account'))
+    expect(accountCall?.url).toContain('omitZeroBalances=true')
   })
 
   test('skips the price request when every ticker maps to CoinGecko', async () => {
