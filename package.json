@@ -14,7 +14,8 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
     "codegen": "pnpm -r --if-present codegen",
     "postinstall": "pnpm codegen",
-    "deploy": "pnpm --filter @folio/api deploy"
+    "deploy": "pnpm --filter @folio/api run deploy",
+    "test:e2e": "pnpm --filter @folio/web build && pnpm --filter @folio/e2e test:e2e"
   },
   "devDependencies": {
     "oxfmt": "^0.72.0",
@@ -26,5 +27,21 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "pnpm@12.11.2"
+  "packageManager": "pnpm@12.11.2",
+  "cloudflare": {
+    "bindings": {
+      "DB": {
+        "description": "The app's D1 database. Migrations run on every deploy."
+      },
+      "BETTER_AUTH_URL": {
+        "description": "The app's address, e.g. `https://folio.<your-subdomain>.workers.dev` (the subdomain is under **Workers & Pages** in the dashboard), or your own domain. Sign-in only works from this address."
+      },
+      "BETTER_AUTH_SECRET": {
+        "description": "32+ random characters, e.g. from `openssl rand -hex 32`. Signs sessions; changing it signs everyone out."
+      },
+      "ENCRYPTION_SECRET": {
+        "description": "32+ random characters. Encrypts the API secrets of your exchange connections; changing it makes saved secrets unreadable."
+      }
+    }
+  }
 }

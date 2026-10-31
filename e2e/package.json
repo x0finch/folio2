@@ -1,0 +1,15 @@
+{
+  "name": "@folio/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:e2e": "playwright test --project=journey",
+    "screenshots": "playwright test --project=screenshots",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "catalog:"
+  }
+}

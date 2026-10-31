@@ -4,6 +4,7 @@ import { eq, inArray, sql } from 'drizzle-orm'
 
 import type { Db } from '../db'
 import { fxRates, positions, prices } from '../db/schema'
+import { DEFAULT_UPSTREAMS, type Upstreams } from '../upstreams'
 import { type Quote, fetchQuotes } from './defillama'
 import { fetchFiatRates } from './frankfurter'
 
@@ -55,6 +56,7 @@ export async function refreshPrices(
   fetch: typeof globalThis.fetch,
   assetIds: string[],
   now: number,
+  urls: Upstreams = DEFAULT_UPSTREAMS,
 ): Promise<number> {
   const known = new Map<string, number>()
   for (const ids of chunk(assetIds, IN_CHUNK)) {
@@ -67,7 +69,7 @@ export async function refreshPrices(
   }
   const stale = assetIds.filter((id) => now - (known.get(id) ?? 0) >= PRICE_TTL_MS)
   if (!stale.length) return 0
-  const quotes = await fetchQuotes(fetch, stale)
+  const quotes = await fetchQuotes(fetch, stale, urls.defillama)
   const rows = [...quotes].map(([assetId, quote]) => ({
     assetId,
     priceUsd: quote.priceUsd,
@@ -94,13 +96,18 @@ export async function refreshPrices(
 }
 
 /** Refreshes fiat rates when they are older than a day's half. */
-export async function refreshFx(db: Db, fetch: typeof globalThis.fetch, now: number) {
+export async function refreshFx(
+  db: Db,
+  fetch: typeof globalThis.fetch,
+  now: number,
+  urls: Upstreams = DEFAULT_UPSTREAMS,
+) {
   const [newest] = await db
     .select({ updatedAt: fxRates.updatedAt })
     .from(fxRates)
     .where(eq(fxRates.currency, 'EUR'))
   if (newest && now - newest.updatedAt.getTime() < FX_TTL_MS) return false
-  const rates = await fetchFiatRates(fetch)
+  const rates = await fetchFiatRates(fetch, urls.frankfurter)
   const wanted = new Set<string>(DISPLAY_CURRENCIES)
   const rows = [...rates]
     .filter(([currency]) => wanted.has(currency))
@@ -139,7 +146,8 @@ export async function priceUser(
   fetch: typeof globalThis.fetch,
   userId: string,
   now: number,
+  urls: Upstreams = DEFAULT_UPSTREAMS,
 ) {
-  await refreshPrices(db, fetch, await assetIdsOf(db, userId), now)
-  await refreshFx(db, fetch, now)
+  await refreshPrices(db, fetch, await assetIdsOf(db, userId), now, urls)
+  await refreshFx(db, fetch, now, urls)
 }

@@ -1,7 +1,8 @@
 import { fetchJson } from '@folio/sources'
 import { z } from 'zod'
 
-const BASE = 'https://coins.llama.fi'
+import { DEFAULT_UPSTREAMS } from '../upstreams'
+
 /** Ids per request: keeps URLs well under common length limits. */
 export const DEFILLAMA_BATCH = 80
 /** Prices DefiLlama is less sure about than this are ignored. */
@@ -34,6 +35,7 @@ export interface Quote {
 export async function fetchQuotes(
   fetch: typeof globalThis.fetch,
   assetIds: string[],
+  base = DEFAULT_UPSTREAMS.defillama,
 ): Promise<Map<string, Quote>> {
   const quotes = new Map<string, Quote>()
   for (let i = 0; i < assetIds.length; i += DEFILLAMA_BATCH) {
@@ -43,8 +45,8 @@ export async function fetchQuotes(
       .join(',')
     // oxlint-disable-next-line no-await-in-loop -- batches share one subrequest budget
     const [prices, changes] = await Promise.all([
-      fetchJson(fetch, `${BASE}/prices/current/${ids}?searchWidth=4h`, pricesSchema),
-      fetchJson(fetch, `${BASE}/percentage/${ids}?period=24h`, percentageSchema),
+      fetchJson(fetch, `${base}/prices/current/${ids}?searchWidth=4h`, pricesSchema),
+      fetchJson(fetch, `${base}/percentage/${ids}?period=24h`, percentageSchema),
     ])
     for (const [id, coin] of Object.entries(prices.coins)) {
       if ((coin.confidence ?? 1) < MIN_CONFIDENCE) continue

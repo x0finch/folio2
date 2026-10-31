@@ -5,6 +5,7 @@ import { z } from 'zod'
 
 import { fail, query } from '../http'
 import type { AppEnv } from '../types'
+import { DEFAULT_UPSTREAMS, upstreams } from '../upstreams'
 
 const searchSchema = z.object({
   coins: z.array(
@@ -25,8 +26,9 @@ const CACHE_SECONDS = 60 * 60
 export async function searchAssets(
   fetch: typeof globalThis.fetch,
   q: string,
+  base = DEFAULT_UPSTREAMS.coingecko,
 ): Promise<AssetSearchResult[]> {
-  const url = `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(q)}`
+  const url = `${base}/api/v3/search?query=${encodeURIComponent(q)}`
   const body = await fetchJson(fetch, url, searchSchema)
   return body.coins.slice(0, MAX_RESULTS).map((coin) => ({
     assetId: `coingecko:${coin.id}`,
@@ -47,10 +49,12 @@ export const assetRoutes = new Hono<AppEnv>().get(
     const key = new Request(`https://folio.cache/assets/search?q=${encodeURIComponent(q)}`)
     const hit = await cache?.match(key)
     if (hit) return c.json<AssetSearchResult[]>(await hit.json())
-    const results = await searchAssets(fetch, q).catch((error: unknown) => {
-      console.warn(JSON.stringify({ message: 'asset search failed', error: String(error) }))
-      return fail('upstream')
-    })
+    const results = await searchAssets(fetch, q, upstreams(c.env).coingecko).catch(
+      (error: unknown) => {
+        console.warn(JSON.stringify({ message: 'asset search failed', error: String(error) }))
+        return fail('upstream')
+      },
+    )
     const response = Response.json(results, {
       headers: { 'Cache-Control': `public, max-age=${CACHE_SECONDS}` },
     })

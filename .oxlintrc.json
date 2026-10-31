@@ -40,7 +40,7 @@
   ],
   "overrides": [
     {
-      "files": ["**/*.test.ts", "**/test/**/*.ts"],
+      "files": ["**/*.test.ts", "**/test/**/*.ts", "e2e/**"],
       "rules": {
         "typescript/no-unsafe-type-assertion": "off",
         "no-await-in-loop": "off"

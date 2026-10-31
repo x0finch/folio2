@@ -5,6 +5,7 @@ import type { Env } from '../env'
 import { writeSnapshot } from '../history/snapshots'
 import { priceUser } from '../pricing/store'
 import { defaultRegistry } from '../sources'
+import { upstreams } from '../upstreams'
 import { SyncEngine } from './engine'
 import { schedulePage } from './schedule'
 
@@ -23,7 +24,13 @@ export class SyncRunner extends DurableObject<Env> {
       fetch: (input, init) => fetch(input, init),
       onFinished: async (userId) => {
         const db = getDb(this.env.DB)
-        await priceUser(db, (input, init) => fetch(input, init), userId, Date.now())
+        await priceUser(
+          db,
+          (input, init) => fetch(input, init),
+          userId,
+          Date.now(),
+          upstreams(this.env),
+        )
         await writeSnapshot(db, userId, Date.now())
       },
     })

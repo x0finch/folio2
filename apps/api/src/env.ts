@@ -7,4 +7,8 @@ export interface Env extends Omit<Bindings, 'AUTH_RATE_LIMIT'> {
   TRUSTED_ORIGINS?: string
   /** Optional: absent in tests and local dev. */
   AUTH_RATE_LIMIT?: RateLimit
+  /** Market-data base URLs; only the end-to-end tests set these (upstreams.ts). */
+  DEFILLAMA_URL?: string
+  FRANKFURTER_URL?: string
+  COINGECKO_URL?: string
 }

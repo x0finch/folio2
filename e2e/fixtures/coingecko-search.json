@@ -1,0 +1,94 @@
+{
+  "coins": [
+    {
+      "id": "bitcoin",
+      "name": "Bitcoin",
+      "symbol": "BTC",
+      "market_cap_rank": 1
+    },
+    {
+      "id": "bitcoin-cash",
+      "name": "Bitcoin Cash",
+      "symbol": "BCH",
+      "market_cap_rank": 20
+    },
+    {
+      "id": "bitcoin-cash-sv",
+      "name": "Bitcoin SV",
+      "symbol": "BSV",
+      "market_cap_rank": 126
+    },
+    {
+      "id": "dog-go-to-the-moon-rune",
+      "name": "Dog (Bitcoin)",
+      "symbol": "DOG",
+      "market_cap_rank": 306
+    },
+    {
+      "id": "fractal-bitcoin",
+      "name": "Fractal Bitcoin",
+      "symbol": "FB",
+      "market_cap_rank": 550
+    },
+    {
+      "id": "ethereum",
+      "name": "Ethereum",
+      "symbol": "ETH",
+      "market_cap_rank": 2
+    },
+    {
+      "id": "ethereum-classic",
+      "name": "Ethereum Classic",
+      "symbol": "ETC",
+      "market_cap_rank": 69
+    },
+    {
+      "id": "ethereum-name-service",
+      "name": "Ethereum Name Service",
+      "symbol": "ENS",
+      "market_cap_rank": 165
+    },
+    {
+      "id": "ethereum-pow-iou",
+      "name": "EthereumPoW",
+      "symbol": "ETHW",
+      "market_cap_rank": 751
+    },
+    {
+      "id": "midas-re7-ethereum",
+      "name": "Midas Re7 Ethereum",
+      "symbol": "MRE7ETH",
+      "market_cap_rank": 1199
+    },
+    {
+      "id": "solana",
+      "name": "Solana",
+      "symbol": "SOL",
+      "market_cap_rank": 7
+    },
+    {
+      "id": "solana-name-service",
+      "name": "Solana Name Service",
+      "symbol": "SNS",
+      "market_cap_rank": 2213
+    },
+    {
+      "id": "play-solana-token",
+      "name": "Play Solana Token",
+      "symbol": "PLAY",
+      "market_cap_rank": 3251
+    },
+    {
+      "id": "green-satoshi-token",
+      "name": "STEPN Green Satoshi Token on Solana",
+      "symbol": "GST-SOL",
+      "market_cap_rank": 3531
+    },
+    {
+      "id": "pepecoin-on-solana",
+      "name": "PepeCoin on Solana",
+      "symbol": "PEPE",
+      "market_cap_rank": 3595
+    }
+  ]
+}
