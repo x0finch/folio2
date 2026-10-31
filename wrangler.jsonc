@@ -1,0 +1,25 @@
+{
+  "$schema": "apps/api/node_modules/wrangler/config-schema.json",
+  "name": "folio",
+  "main": "apps/api/src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // The SPA and the API share one origin: static assets are served without invoking the
+  // Worker (free and fast); only /api/* runs Worker code.
+  "assets": {
+    "directory": "apps/web/dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "folio-db",
+      // Placeholder: the deploy workflow (or the Deploy to Cloudflare button) creates the
+      // database if needed and fills in its id.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "apps/api/migrations",
+    },
+  ],
+  "observability": { "enabled": true },
+}

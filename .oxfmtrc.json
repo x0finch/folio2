@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": false,
+  "singleQuote": true,
+  "printWidth": 100,
+  "trailingComma": "all",
+  "sortImports": {},
+  "sortPackageJson": true,
+  "ignorePatterns": ["pnpm-lock.yaml", "**/*.gen.ts", "**/worker-configuration.d.ts"]
+}

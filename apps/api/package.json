@@ -1,0 +1,27 @@
+{
+  "name": "@folio/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local --config ../../wrangler.jsonc",
+    "deploy": "pnpm --filter @folio/web build && wrangler d1 migrations apply DB --remote --config ../../wrangler.jsonc && wrangler deploy --config ../../wrangler.jsonc",
+    "build": "wrangler deploy --dry-run --outdir dist --config ../../wrangler.jsonc",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local --config ../../wrangler.jsonc",
+    "codegen": "wrangler types --env-interface Bindings --config ../../wrangler.jsonc worker-configuration.d.ts",
+    "typecheck": "tsc && tsc -p test"
+  },
+  "dependencies": {
+    "@folio/shared": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.13",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "drizzle-kit": "^0.31.11",
+    "miniflare": "^4.20260730.0",
+    "wrangler": "^4.149.0"
+  }
+}

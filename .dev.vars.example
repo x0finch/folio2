@@ -1,0 +1,11 @@
+# Secrets for the Worker. Locally, copy this file to .dev.vars (next to wrangler.jsonc) and fill
+# it in. The Deploy to Cloudflare button asks for the same values.
+
+# The app's address: http://localhost:3000 locally; once deployed,
+# https://folio.<your-subdomain>.workers.dev or your own domain.
+BETTER_AUTH_URL=
+# 32+ random characters, e.g. from `openssl rand -hex 32`. Changing it signs everyone out.
+BETTER_AUTH_SECRET=
+# 32+ random characters, e.g. from `openssl rand -hex 32`. Encrypts the API secrets of your
+# exchange connections. Changing it makes saved secrets unreadable.
+ENCRYPTION_SECRET=
