@@ -17,3 +17,6 @@ apps/api/worker-configuration.d.ts
 e2e/.wrangler-state/
 e2e/test-results/
 e2e/playwright-report/
+
+# Agent worktrees
+.claude/worktrees/

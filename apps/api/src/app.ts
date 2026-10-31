@@ -49,6 +49,17 @@ export function createApp(options: AppOptions = {}) {
   // Everything below needs a signed-in user.
   app.use('*', requireUser(authFor))
 
+  // Deletes the user; every user-owned row goes with it (foreign keys cascade).
+  app.delete('/me', async (c) => {
+    await c.env.DB.prepare('delete from user where id = ?').bind(c.get('user').id).run()
+    const res = c.body(null, 204)
+    // Drop the session cookies; the session rows are already gone.
+    for (const name of ['better-auth.session_token', 'better-auth.session_data']) {
+      res.headers.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`)
+    }
+    return res
+  })
+
   app.get('/me', (c) => {
     const user = c.get('user')
     return c.json<MeResponse>({ id: user.id, email: user.email, name: user.name })
