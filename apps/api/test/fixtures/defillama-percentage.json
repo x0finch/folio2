@@ -1,0 +1,9 @@
+{
+  "coins": {
+    "coingecko:bitcoin": -0.22355877779315544,
+    "coingecko:ethereum": 0.1236561584791519,
+    "coingecko:usd-coin": 0.019945811022446334,
+    "ethereum:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": 0.019945811022446334,
+    "solana:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": 0.019945811022446334
+  }
+}

@@ -74,3 +74,28 @@ export const positions = sqliteTable(
     index('positions_connection_idx').on(table.connectionId),
   ],
 )
+
+/** Latest USD price per asset id. Public market data, shared by every user. */
+export const prices = sqliteTable('prices', {
+  assetId: text('asset_id').primaryKey(),
+  priceUsd: real('price_usd').notNull(),
+  /** 24h change as a ratio, when the feed has one. */
+  change24h: real('change_24h'),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
+/** Units of a fiat currency per 1 USD (ECB rates). Public, shared by every user. */
+export const fxRates = sqliteTable('fx_rates', {
+  currency: text('currency').primaryKey(),
+  perUsd: real('per_usd').notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+})
+
+export const userSettings = sqliteTable('user_settings', {
+  userId: text('user_id')
+    .primaryKey()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  currency: text('currency').notNull(),
+  dustUsd: real('dust_usd').notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+})

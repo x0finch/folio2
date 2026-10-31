@@ -4,7 +4,9 @@ import { testUtils } from 'better-auth/plugins'
 
 import { type AppOptions, createApp } from '../src/app'
 import { createAuthOptions } from '../src/auth'
+import { getDb } from '../src/db'
 import type { Env } from '../src/env'
+import { priceUser } from '../src/pricing/store'
 import { createTestDb } from './d1'
 import { fakeRunners } from './runners'
 
@@ -13,7 +15,11 @@ export const TEST_ORIGIN = 'http://localhost:8787'
 /** App wired to a fresh D1 and a Better Auth instance with test helpers. */
 export async function createTestApp(
   overrides: Partial<Env> = {},
-  appOptions: Omit<AppOptions, 'auth'> & { fetch?: typeof fetch } = {},
+  appOptions: Omit<AppOptions, 'auth'> & {
+    fetch?: typeof fetch
+    /** Price positions when a sync finishes, with `fetch`. */
+    pricing?: boolean
+  } = {},
 ) {
   const { db: base, dispose } = await createTestDb()
   // Counts D1 statements so tests can assert which requests touch the database.
@@ -26,12 +32,17 @@ export async function createTestApp(
     },
   })
   const clock = { now: Date.parse('2026-10-01T00:00:00Z') }
+  const testFetch: typeof fetch =
+    appOptions.fetch ?? (() => Promise.reject(new Error('No network in tests')))
   const runners = fakeRunners({
     db: () => db,
     sources: appOptions.sources ?? sources,
     encryptionSecret: 'test-encryption-secret-test-encryption',
-    fetch: appOptions.fetch ?? (() => Promise.reject(new Error('No network in tests'))),
+    fetch: testFetch,
     clock,
+    onFinished: appOptions.pricing
+      ? (userId) => priceUser(getDb(db), testFetch, userId, clock.now)
+      : undefined,
   })
   const env: Env = {
     DB: db,

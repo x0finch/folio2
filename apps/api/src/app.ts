@@ -8,6 +8,7 @@ import { errorResponse, fail } from './http'
 import { requireUser } from './middleware'
 import { authRateLimit } from './rate-limit'
 import { connectionRoutes, sourceRoutes } from './routes/connections'
+import { rateRoutes, settingsRoutes } from './routes/settings'
 import { syncRoutes } from './routes/sync'
 import { createRegistry, defaultRegistry } from './sources'
 import type { AppEnv, AuthFor } from './types'
@@ -53,6 +54,8 @@ export function createApp(options: AppOptions = {}) {
   app.route('/sources', sourceRoutes)
   app.route('/connections', connectionRoutes)
   app.route('/sync', syncRoutes)
+  app.route('/settings', settingsRoutes)
+  app.route('/rates', rateRoutes)
 
   app.onError(errorResponse)
   return app

@@ -14,3 +14,4 @@ export interface MeResponse {
 
 export * from './connections'
 export * from './sync'
+export * from './portfolio'

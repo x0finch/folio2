@@ -16,3 +16,4 @@ export { budgetedFetch, fetchJson, type BudgetedFetch, type FetchLike } from './
 export { manual, type ManualHolding } from './manual'
 export { isDecimal, nonZero, type PerpDetails, type Position, type PositionKind } from './position'
 export { getSource, sources } from './registry'
+export { canonicalAssetId } from './canonical'

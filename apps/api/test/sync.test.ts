@@ -164,7 +164,8 @@ describe('sync engine', () => {
       await engine.alarm()
       perAlarm.push(fetched.length - before)
     }
-    expect(perAlarm).toEqual([big, big, big])
+    // Three source alarms, then the finishing alarm.
+    expect(perAlarm).toEqual([big, big, big, 0])
     for (const count of perAlarm) expect(count).toBeLessThanOrEqual(FETCH_BUDGET_PER_ALARM)
   })
 

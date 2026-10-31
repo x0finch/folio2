@@ -20,11 +20,19 @@ interface QueueEntry {
 interface State {
   userId: string | null
   queue: QueueEntry[]
+  /** The queue emptied; the finishing step (pricing, snapshot) runs in the next alarm. */
+  finishing: boolean
   startedAt: number | null
   finishedAt: number | null
 }
 
-const EMPTY: State = { userId: null, queue: [], startedAt: null, finishedAt: null }
+const EMPTY: State = {
+  userId: null,
+  queue: [],
+  finishing: false,
+  startedAt: null,
+  finishedAt: null,
+}
 
 /** The parts of Durable Object storage the engine uses; tests pass an in-memory one. */
 export interface EngineStorage {
@@ -41,7 +49,10 @@ export interface EngineDeps {
   encryptionSecret: string
   fetch: typeof fetch
   now?: () => number
-  /** Runs once the queue is empty: pricing and the snapshot (later slices). */
+  /**
+   * Runs once the queue is empty, in an alarm of its own so it has a full subrequest budget:
+   * pricing, then the snapshot.
+   */
   onFinished?: (userId: string) => Promise<void>
 }
 
@@ -104,7 +115,7 @@ export class SyncEngine {
   private toStatus(state: State): SyncStatus {
     return {
       queued: state.queue.map((entry) => entry.connectionId),
-      running: state.queue.length > 0,
+      running: state.queue.length > 0 || state.finishing,
       startedAt: state.startedAt,
       finishedAt: state.finishedAt,
     }
@@ -115,6 +126,17 @@ export class SyncEngine {
     const state = await this.state()
     const userId = state.userId
     if (!userId) return
+    if (!state.queue.length) {
+      if (!state.finishing) return
+      try {
+        await this.deps.onFinished?.(userId)
+      } catch (error) {
+        // Positions are saved; prices catch up on the next sync.
+        consoleLog({ userId }).warn('finishing failed', { error: String(error) })
+      }
+      await this.save({ ...state, finishing: false, finishedAt: this.now() })
+      return
+    }
     const started = this.now()
     let fetchesLeft = FETCH_BUDGET_PER_ALARM
     const remaining: QueueEntry[] = []
@@ -137,13 +159,9 @@ export class SyncEngine {
     }
 
     const finished = remaining.length === 0
-    await this.save({
-      ...state,
-      queue: remaining,
-      finishedAt: finished ? this.now() : state.finishedAt,
-    })
+    await this.save({ ...state, queue: remaining, finishing: finished })
     if (finished) {
-      await this.deps.onFinished?.(userId)
+      await this.deps.storage.setAlarm(this.now())
       return
     }
     // Continue right away if something is due, else when the earliest retry is.

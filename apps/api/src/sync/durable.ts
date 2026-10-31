@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 
 import { getDb } from '../db'
 import type { Env } from '../env'
+import { priceUser } from '../pricing/store'
 import { defaultRegistry } from '../sources'
 import { SyncEngine } from './engine'
 import { schedulePage } from './schedule'
@@ -19,6 +20,8 @@ export class SyncRunner extends DurableObject<Env> {
       sources: defaultRegistry,
       encryptionSecret: this.env.ENCRYPTION_SECRET,
       fetch: (input, init) => fetch(input, init),
+      onFinished: (userId) =>
+        priceUser(getDb(this.env.DB), (input, init) => fetch(input, init), userId, Date.now()),
     })
   }
 

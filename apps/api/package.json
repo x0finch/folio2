@@ -16,12 +16,14 @@
     "@folio/shared": "workspace:*",
     "@folio/sources": "workspace:*",
     "better-auth": "catalog:",
+    "big.js": "^7.0.1",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.13",
     "ulid": "^3.0.2",
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@types/big.js": "^7.0.0",
     "@types/node": "catalog:",
     "drizzle-kit": "^0.31.11",
     "miniflare": "^4.20260730.0",

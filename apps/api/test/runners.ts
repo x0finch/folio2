@@ -34,6 +34,7 @@ export function fakeRunners(options: {
   encryptionSecret: string
   fetch: typeof fetch
   clock: { now: number }
+  onFinished?: (userId: string) => Promise<void>
 }) {
   const engines = new Map<string, { engine: SyncEngine; storage: MemoryStorage }>()
   const registry = createRegistry(options.sources)
@@ -49,6 +50,7 @@ export function fakeRunners(options: {
         encryptionSecret: options.encryptionSecret,
         fetch: options.fetch,
         now: () => options.clock.now,
+        onFinished: options.onFinished,
       })
       entry = { engine, storage }
       engines.set(name, entry)
