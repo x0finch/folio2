@@ -15,6 +15,13 @@
       "when": 1793442465118,
       "tag": "0001_fast_miss_america",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793443126389,
+      "tag": "0002_powerful_captain_cross",
+      "breakpoints": true
     }
   ]
 }

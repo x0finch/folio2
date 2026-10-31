@@ -1,7 +1,7 @@
 import { betterAuth } from 'better-auth/minimal'
 import { testUtils } from 'better-auth/plugins'
 
-import { createApp } from '../src/app'
+import { type AppOptions, createApp } from '../src/app'
 import { createAuthOptions } from '../src/auth'
 import type { Env } from '../src/env'
 import { createTestDb } from './d1'
@@ -9,7 +9,10 @@ import { createTestDb } from './d1'
 export const TEST_ORIGIN = 'http://localhost:8787'
 
 /** App wired to a fresh D1 and a Better Auth instance with test helpers. */
-export async function createTestApp(overrides: Partial<Env> = {}) {
+export async function createTestApp(
+  overrides: Partial<Env> = {},
+  appOptions: Omit<AppOptions, 'auth'> = {},
+) {
   const { db: base, dispose } = await createTestDb()
   // Counts D1 statements so tests can assert which requests touch the database.
   const queries = { count: 0 }
@@ -29,7 +32,7 @@ export async function createTestApp(overrides: Partial<Env> = {}) {
   }
   const options = createAuthOptions(env)
   const auth = betterAuth({ ...options, plugins: [...options.plugins, testUtils()] })
-  const app = createApp({ auth: () => auth })
+  const app = createApp({ ...appOptions, auth: () => auth })
   const helpers = (await auth.$context).test
 
   /** Creates a user and returns request headers carrying their session cookie. */

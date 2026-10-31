@@ -1,3 +1,5 @@
+import type { Source } from '@folio/sources'
+
 import type { Auth } from './auth'
 import type { Env } from './env'
 
@@ -9,6 +11,8 @@ export type AppEnv = {
   Bindings: Env
   Variables: {
     user: User
+    /** The source plugins this app serves (the registry; tests add fakes). */
+    sources: SourceRegistry
   }
 }
 
@@ -19,3 +23,8 @@ export interface AuthLike {
 }
 
 export type AuthFor = (env: Env) => AuthLike
+
+export interface SourceRegistry {
+  all: readonly Source[]
+  get: (id: string) => Source | undefined
+}

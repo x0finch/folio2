@@ -1,9 +1,8 @@
+import type { SourceInfo, SourceKind } from '@folio/shared'
 import { z } from 'zod'
 
 import type { BudgetedFetch } from './fetch'
 import type { Position } from './position'
-
-export type SourceKind = 'wallet' | 'exchange' | 'perp' | 'manual'
 
 /**
  * Metadata on a config field, attached with zod's `.meta()`. The web app builds the form from
@@ -77,15 +76,6 @@ export function secretFields(source: Source): string[] {
 }
 
 /** The public description of a source, for the picker and the generated form. */
-export interface SourceInfo {
-  id: string
-  kind: SourceKind
-  label: string
-  description: string
-  /** JSON Schema of the config, with `title`/`description`/`placeholder`/`secret` per field. */
-  configSchema: Record<string, unknown>
-}
-
 export function describeSource(source: Source): SourceInfo {
   return {
     id: source.id,

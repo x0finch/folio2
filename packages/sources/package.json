@@ -12,6 +12,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@folio/shared": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

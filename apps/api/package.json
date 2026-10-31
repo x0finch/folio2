@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@folio/shared": "workspace:*",
+    "@folio/sources": "workspace:*",
     "better-auth": "catalog:",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.13",
