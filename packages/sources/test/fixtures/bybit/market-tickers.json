@@ -1,0 +1,56 @@
+{
+  "retCode": 0,
+  "retMsg": "OK",
+  "result": {
+    "category": "spot",
+    "list": [
+      {
+        "symbol": "BTCUSDT",
+        "bid1Price": "20517.96",
+        "bid1Size": "2",
+        "ask1Price": "20527.77",
+        "ask1Size": "1.862172",
+        "lastPrice": "20533.13",
+        "prevPrice24h": "20393.48",
+        "price24hPcnt": "0.0068",
+        "highPrice24h": "21128.12",
+        "lowPrice24h": "20318.89",
+        "turnover24h": "243765620.65899866",
+        "volume24h": "11801.27771",
+        "usdIndexPrice": "20784.12009279"
+      },
+      {
+        "symbol": "ORDIUSDT",
+        "bid1Price": "31.1",
+        "bid1Size": "10",
+        "ask1Price": "31.3",
+        "ask1Size": "12",
+        "lastPrice": "31.2",
+        "prevPrice24h": "30.9",
+        "price24hPcnt": "0.0097",
+        "highPrice24h": "32",
+        "lowPrice24h": "30.5",
+        "turnover24h": "1250000",
+        "volume24h": "40000",
+        "usdIndexPrice": ""
+      },
+      {
+        "symbol": "PEOPLEUSDT",
+        "bid1Price": "0.0062",
+        "bid1Size": "1000",
+        "ask1Price": "0.0063",
+        "ask1Size": "1000",
+        "lastPrice": "0.00623",
+        "prevPrice24h": "0.0062",
+        "price24hPcnt": "0.005",
+        "highPrice24h": "0.0064",
+        "lowPrice24h": "0.0061",
+        "turnover24h": "500000",
+        "volume24h": "80000000",
+        "usdIndexPrice": ""
+      }
+    ]
+  },
+  "retExtInfo": {},
+  "time": 1673859087947
+}

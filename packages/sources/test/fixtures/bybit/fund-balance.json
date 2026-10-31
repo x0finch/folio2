@@ -1,0 +1,30 @@
+{
+  "retCode": 0,
+  "retMsg": "success",
+  "result": {
+    "memberId": "XXXX",
+    "accountType": "FUND",
+    "balance": [
+      {
+        "coin": "USDC",
+        "transferBalance": "0",
+        "walletBalance": "0",
+        "bonus": ""
+      },
+      {
+        "coin": "USDT",
+        "transferBalance": "100",
+        "walletBalance": "100",
+        "bonus": ""
+      },
+      {
+        "coin": "ORDI",
+        "transferBalance": "5",
+        "walletBalance": "5",
+        "bonus": ""
+      }
+    ]
+  },
+  "retExtInfo": {},
+  "time": 1675866354913
+}

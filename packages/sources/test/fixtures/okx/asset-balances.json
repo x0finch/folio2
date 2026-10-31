@@ -1,0 +1,18 @@
+{
+  "code": "0",
+  "msg": "",
+  "data": [
+    {
+      "availBal": "37.11827078",
+      "bal": "37.11827078",
+      "ccy": "ETH",
+      "frozenBal": "0"
+    },
+    {
+      "availBal": "40",
+      "bal": "50",
+      "ccy": "ORDI",
+      "frozenBal": "10"
+    }
+  ]
+}

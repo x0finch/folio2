@@ -53,3 +53,23 @@ The registry test fails if a source has no `test/<id>.test.ts`.
 ## Sources
 
 - `manual` — holdings entered by hand; no requests.
+- `binance` — Binance REST (`api.binance.com`) with a read-only API key + secret (HMAC-SHA256,
+  hex). Spot (`/api/v3/account`), funding (`/sapi/v1/asset/get-funding-asset`) and Simple Earn
+  flexible (`lending`) and locked (`staked`) positions, first page of 100 each; `LD*` earn
+  receipts map to their coin. Unknown tickers are priced from `/api/v3/ticker/price` (USDT
+  pairs). At most 5 requests, about 50 of the 6,000 request weight per minute. Binance answers
+  451 to some regions (US among them). Futures and margin are not read yet.
+- `okx` — OKX v5 (`www.okx.com`) with a read-only API key, secret and passphrase (HMAC-SHA256,
+  base64). Trading account (`/api/v5/account/balance`, coin equity with USD values) and funding
+  (`/api/v5/asset/balances`); unknown currencies priced from `/api/v5/market/tickers` (public).
+  At most 3 requests. Keys from regional sites (EEA, US) or demo trading are rejected. Derivative
+  positions are not listed yet (their unrealized PnL is in the coin equity).
+- `bybit` — Bybit v5 (`api.bybit.com`) with a read-only API key + secret (HMAC-SHA256, hex).
+  Unified Trading Account (`/v5/account/wallet-balance`, coin equity with USD values) and
+  Funding (`/v5/asset/transfer/query-account-coins-balance`); unknown coins priced from
+  `/v5/market/tickers` (public). At most 3 requests. Classic (non-unified) accounts and keys
+  from regional sites are not supported; Bybit's CDN answers 403 to blocked regions. Derivative
+  positions are not listed yet (their unrealized PnL is in the coin equity).
+
+Exchange tickers become asset ids through one map, `src/tickers.ts`: listed coins get their
+CoinGecko id, anything else is `cex:<TICKER>` with the venue's USDT price as `priceUsd`.
