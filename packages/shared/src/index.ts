@@ -4,3 +4,10 @@ export const APP_NAME = 'Folio'
 export interface HealthResponse {
   ok: true
 }
+
+/** Shape of `GET /api/me`. */
+export interface MeResponse {
+  id: string
+  email: string
+  name: string
+}

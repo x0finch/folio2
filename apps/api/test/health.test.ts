@@ -1,19 +1,15 @@
-import { afterAll, beforeAll, expect, test } from 'vitest'
+import { afterEach, beforeEach, expect, test } from 'vitest'
 
-import { createApp } from '../src/app'
-import type { Env } from '../src/env'
-import { createTestDb } from './d1'
+import { createTestApp } from './app'
 
-let db: Awaited<ReturnType<typeof createTestDb>>
-
-beforeAll(async () => {
-  db = await createTestDb()
+let t: Awaited<ReturnType<typeof createTestApp>>
+beforeEach(async () => {
+  t = await createTestApp()
 })
-afterAll(() => db.dispose())
+afterEach(() => t.dispose())
 
-test('health touches D1 and reports ok', async () => {
-  const env: Env = { DB: db.db }
-  const res = await createApp().request('/api/health', {}, env)
+test('health touches D1 and needs no session', async () => {
+  const res = await t.request('/api/health')
   expect(res.status).toBe(200)
   expect(await res.json()).toEqual({ ok: true })
 })
