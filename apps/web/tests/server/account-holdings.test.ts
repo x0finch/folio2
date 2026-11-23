@@ -62,7 +62,7 @@ describe("per-account breakdown and archiving", () => {
 });
 
 describe("live repricing: account page and home use the same basis", () => {
-  // Account page (list + drawer) used to take the snapshot-frozen totalUsd / usdValue, showing stale prices and a flat $0 24h change.
+  // Account page (list + drawer) must not take the snapshot-frozen totalUsd / usdValue, which show stale prices and a flat $0 24h change.
   // Active accounts now go row by row through `liveValue` (same basis as home's `deriveLiveAccountTotals`); marked-to-market rows use the reference layer's live price.
   const seedPrice = (tokenId: string, unitPrice: number) =>
     env.DB.prepare("UPDATE tokens SET unit_price = ?, price_as_of = ? WHERE id = ?")
