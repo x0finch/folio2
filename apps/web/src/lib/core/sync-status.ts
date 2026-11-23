@@ -2,59 +2,44 @@ import type { ConnectorId } from "@folio/connectors";
 import type { AccountSafe } from "@folio/db";
 import { isManual } from "@/lib/core/manual";
 
-// 可同步账户判别:活跃(未归档)且**不是 manual** —— manual 不是同步源:当下值实时由 creds.tokens
-// 现造、不写快照(ADR 0018)。住这儿(而不是单开一个文件):这个模块就是「谁算同步过 / 谁可同步」
-// 的派生层,`summarizeSync` 里那条 `!isManual` 的分道与它是同一个概念的两面。
+// Manual accounts are not a sync source: their value is computed on read and never snapshotted.
 export function isSyncableAccount(a: Pick<AccountSafe, "archivedAt" | "connectorId">): boolean {
   return a.archivedAt == null && !isManual(a.connectorId);
 }
 
-// 「一个账户的同步状态」—— 账户列表那一行(`-accounts/index.tsx`)和页头那块同步面板**共用这一份**。
-//
-// 住在这儿而不是 `lib/server/*`:这个概念属于同步状态派生层,本来就是纯的(无 cloudflare env)、
-// 客户端与服务端共用。`lib/server/sync/status.ts` 只保留轮次视图等 server 侧组装。
+// Per-account staleness, shared by the accounts list row and the header sync panel.
 export const STALE_SYNC_MS = 3 * 24 * 60 * 60 * 1000;
 
-// 组合级的数据新鲜度阈值(FOL-18)。两档各管各的、故意分开:
-//   · SYNC_DUE_MS(1 小时)—— 进首页超过这个就自动补一轮同步(子票 2)。同步贵(交易所配额、
-//     快照存储),这个阈值要稀。
-//   · SYNC_WARN_MS(26 小时)—— 超过这个同步药丸转黄(子票 1)。24 小时是 24h 盈亏的基准窗口,
-//     +2 小时容差:正好是「盈亏失去精确基准」那个点。绑这个而不是绑同步周期,是因为绑周期会让
-//     任何一个交易所抽风都染黄药丸,狼来了几次就没人看它了。
-// 单账户的 STALE_SYNC_MS(3 天)是另一回事:它管「某一行数旧了」进 attention 清单,不是组合整体。
+// SYNC_DUE_MS: entering the home page past this triggers a sync; sparse because syncs are costly.
+// SYNC_WARN_MS: the pill turns yellow past this. 24h is the 24h-gain baseline plus 2h slack; tying
+// it to the sync period instead would turn the pill yellow on any flaky exchange.
 export const SYNC_DUE_MS = 60 * 60 * 1000;
 export const SYNC_WARN_MS = 26 * 60 * 60 * 1000;
 
-// 组合最新一次快照相对当下的新鲜度。判据只看**最新那次**(`summarizeSync` 的 lastSyncedAt),
-// 因为「功能有没有退化」看的是整体最新数据的年龄,不是最旧那个账户。
-//   · never   —— 从没同步过(交给 attention 的 never-synced 那条管,药丸不因它单独转黄)
-//   · stale   —— 超过 26 小时(药丸转黄)
-//   · syncDue —— 超过 1 小时但没到 26(该自动补,但还没到撒谎的程度)
-//   · fresh   —— 1 小时内,或时钟偏移导致的未来时间戳(不能把未来当成过期)
+// Judged on the newest snapshot only: the question is whether the portfolio's data as a whole has
+// aged. A future timestamp (clock skew) counts as fresh.
 export type DataFreshness = "never" | "stale" | "syncDue" | "fresh";
 
 export function dataFreshness(lastSyncedAt: number | null, now: number): DataFreshness {
   if (lastSyncedAt == null) return "never";
   const age = now - lastSyncedAt;
-  if (age < 0) return "fresh"; // 时钟偏移:未来的时间戳不算过期(否则一次校时把好数据判死)
+  if (age < 0) return "fresh"; // clock skew must not mark good data as expired
   if (age > SYNC_WARN_MS) return "stale";
   if (age > SYNC_DUE_MS) return "syncDue";
   return "fresh";
 }
 
-// 药丸该不该因「数据太旧」转黄(子票 1):同步过、但最新快照超过 26 小时。「从未同步」不走这条
-// —— 那由 attention 的 never-synced 管,两条并存时药丸本来就是黄的。
+// "never" is excluded: the never-synced attention item already turns the pill yellow.
 export const isDataStale = (lastSyncedAt: number | null, now: number): boolean =>
   dataFreshness(lastSyncedAt, now) === "stale";
 
-// 进首页该不该自动补一轮(子票 2):从没同步过、或最新快照超过 1 小时。新用户接完账户回首页
-// (lastSyncedAt = null)也要补第一轮,所以 "never" 也算 due。
+// "never" counts as due, so a new user's first sync runs on arrival.
 export const isSyncDue = (lastSyncedAt: number | null, now: number): boolean =>
   dataFreshness(lastSyncedAt, now) !== "fresh";
 
 export type AccountSyncStatus = "needsCreds" | "never" | "stale" | "fresh";
 
-// 顺序即优先级:凭据没配齐是根因,「从未同步」是它的后果,分两句说会让人以为有两件事要修。
+// Order is priority: missing creds is the root cause of "never synced", so report only that.
 export function accountSyncStatus(
   account: { needsCredentials: boolean; takenAt: number | null },
   nowMs: number,
@@ -68,24 +53,14 @@ export interface SyncAccountInput {
   id: string;
   label: string;
   connectorId: ConnectorId;
-  /** 归档时间戳(null = 活跃);归档账户不参与同步、不计入摘要。 */
   archivedAt: number | null;
-  /** 凭据是否齐全(与设计的 status==='missing' 对应)。 */
   complete: boolean;
-  /** 该账户最新快照时间(null = 从未同步)。 */
+  /** null = never synced. */
   takenAt: number | null;
 }
 
-/**
- * 一个来源为什么需要注意。
- *
- * **这一份清单同时装「没有数」和「数旧了」**(#527 裁定 8):以前只有前者,于是一个一周没同步的
- * 账户在摘要里一切正常,首页那个总资产是旧数而屏幕上没有任何迹象。两者的下一步动作不同
- * (一个去补配置、一个点一下同步),但「有件事要看一眼」是同一件事,所以是一份清单、不是两段。
- *
- * 措辞与账户列表那一行逐字相同(`缺少凭据` / `从未同步` / `同步于 X 前`)—— 那套说法本来就在,
- * 面板不必另造一套。
- */
+// One list holds both "no data" and "stale data": without the latter, an account unsynced for a
+// week looked fine while the home total was old.
 type SyncAttentionKind = "missing-credentials" | "never-synced" | "stale";
 
 export interface SyncAttentionSource {
@@ -93,39 +68,30 @@ export interface SyncAttentionSource {
   label: string;
   connectorId: ConnectorId;
   kind: SyncAttentionKind;
-  /** 最近一次快照时刻;只有 `stale` 用得上(要渲染「同步于 X 前」)。 */
+  /** Only used by `stale` (renders "synced X ago"). */
   takenAt: number | null;
 }
 
 export interface SyncStatusSummary {
-  /**
-   * **可同步的**活跃账户(id + label)——「立即同步」按这一集并发同步。
-   *
-   * 手记账户不在里面:它没有上游可问(ADR 0018 —— 当下值读的时候现算,从不写快照)。
-   */
+  /** Syncable active accounts; manual accounts have no upstream to ask. */
   accounts: { id: string; label: string }[];
   /**
-   * 这个视图里的活跃账户数,**含手记账户** —— 与页头那句「across N sources」逐字同一个数。
-   *
-   * 面板拿它减掉可同步的那些,得出「不参与同步的来源」有几个 —— 那几个的值是读的时候现算的,
-   * 永远是当下,所以三段式里的 synced 要把它们加上(ADR 0048 裁定 7)。
+   * Active accounts including manual ones (matches "across N sources"). Manual accounts are always
+   * current, so the panel counts them as synced.
    */
   total: number;
-  /** 需要看一眼的来源,按严重程度排(缺凭据 → 从未同步 → 数旧了,同档内旧的在前)。 */
+  /** By severity, then oldest first. */
   attention: SyncAttentionSource[];
-  /** 全部活跃账户里最新的一次快照时间(null = 全部从未同步)。 */
+  /** null = none ever synced. */
   lastSyncedAt: number | null;
   /**
-   * 组合整体数据是否旧到该转黄(FOL-18 子票 1):最新快照超过 26 小时。
-   *
-   * 与 `attention` 分开:attention 是逐账户的问题清单,`dataStale` 是「整体最新数据的年龄」这一个
-   * 组合级判据。42 小时没同步但每个账户都 < 3 天时,attention 是空的、药丸却该黄 —— 这个字段补的
-   * 就是那个洞。
+   * Portfolio-level: the newest snapshot is older than 26h. Separate from `attention`, which is
+   * per account: 42h without sync but every account < 3 days leaves attention empty.
    */
   dataStale: boolean;
 }
 
-// 严重程度序。同档内按 takenAt 升序(越旧越前),没有 takenAt 的算最旧。
+// Within a level, oldest takenAt first; a missing takenAt counts as oldest.
 const SEVERITY: Record<SyncAttentionKind, number> = {
   "missing-credentials": 0,
   "never-synced": 1,
@@ -139,16 +105,13 @@ const KIND_OF: Record<AccountSyncStatus, SyncAttentionKind | null> = {
   fresh: null,
 };
 
-// `now` 是显式参数,不在函数里读时钟:这一层要断言「恰好卡在阈值上」这种精确边界,
-// 而读墙钟的测试是 flaky 的(CODING.md「别断言墙上时钟」)。handler 从 Effect 的 Clock 取。
+// `now` is a parameter so tests can hit exact thresholds without the wall clock.
 export function summarizeSync(accounts: SyncAccountInput[], now: number): SyncStatusSummary {
   const active = accounts.filter((a) => a.archivedAt == null);
-  // 手记账户在这里分道:它算一个「来源」(进分母、也进分子),但不是一个可同步的东西 ——
-  // 「立即同步」不该去问它,清单里也不该出现它。
+  // Manual accounts count as sources but are never synced or listed for attention.
   const syncable = active.filter((a) => !isManual(a.connectorId));
   const attention = syncable
     .flatMap((a) => {
-      // 判据与账户列表那一行同一个函数,不是同形的第二份。
       const kind =
         KIND_OF[accountSyncStatus({ needsCredentials: !a.complete, takenAt: a.takenAt }, now)];
       return kind

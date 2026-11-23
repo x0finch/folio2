@@ -34,15 +34,11 @@ import {
 } from "@/lib/core/logo";
 import { displayTokenId, type TokenEnrichment } from "@/lib/core/token-model";
 
-// 首页 / 组合的**纯计算层**(FOL-45)。跟 `history.ts` 同目录、同风格:无 Effect、无 Oracle、
-// 无 cloudflare env —— 喂原料(账户 / 快照 / 富化字典 / 价格字典 / 平台元数据字典)→ 出视图形状。
-// 口径只在这一处定义,读接口、同步收官、后台补算都调这里。
-//
-// 调用点侧的薄适配层(FOL-45):在 Effect 里备好字典,再把纯函数当普通函数调。
+// Pure computation for the home/portfolio views (no Effect, Oracle or env): every read path,
+// sync finish and backfill calls this, so the math is defined once.
 
-// `buildOverview` 真正要的最小快照切片:`takenAt`(账户 totalUsd 那一刻)+ 余额行。快照原料下发
-// 浏览器时只发这些(见 `SnapshotView` / `BalanceView`),整包因此瘦一大截。服务端的完整
-// `SnapshotWithBalances` 结构上也满足它(`ReadonlyMap` 对值协变),两条路照旧共用同一批算术。
+// Minimal slice the browser receives; the server's full `SnapshotWithBalances` also satisfies it,
+// so both paths share the same arithmetic.
 export interface SnapshotSlice {
   snapshot: { takenAt: number };
   balances: OverviewBalance[];
@@ -51,10 +47,8 @@ export interface SnapshotSlice {
 const balancesOf = (byAccount: ReadonlyMap<string, SnapshotSlice>, id: string): OverviewBalance[] =>
   byAccount.get(id)?.balances ?? [];
 
-// 富化字典喂 `buildOverview` / 下发到浏览器的**瘦身形状**(FOL-48 优化):只留 buildOverview 真正
-// 用到的字段。**logo 上游 URL 不进来** —— 只带「有没有图」的布尔;`tokenLogoUrl` 由 token id 拼
-// `/api/logo/token/{id}`,http 与 data: 内嵌图都经代理端点返回(见 `logos/serve.ts`),payload 不带
-// 任何 URL。实测把富化字典 raw 砍掉约四分之一。
+// Slim enrichment shape: no upstream logo URL, only whether one exists; the proxy URL is derived
+// from the token id.
 export interface TokenView {
   id: string;
   symbol: string;
@@ -63,14 +57,13 @@ export interface TokenView {
   hasLogo: boolean;
 }
 
-// 完整 `TokenRecord`(参考层读出、带上游 URL)→ 瘦身 `TokenView`。服务端现算路径与下发浏览器的
-// 原料都在装配点经此收窄,于是「浏览器算」与「服务端算」喂进 buildOverview 的是逐值相同的原料。
+// Both server-side and browser computation narrow through here, so they get identical inputs.
 export function toTokenView(r: TokenRecord): TokenView {
   const { hasLogo } = toLogoSource(r);
   return { id: r.id, symbol: r.symbol, name: r.name, price: r.price, hasLogo };
 }
 
-// `tokenEnrichment` 原子资源的瘦身形状:在 `TokenView` 上多带 `hasRef`(刷价门与 enrich 同源)。
+// `hasRef` keeps the price-refresh gate aligned with enrichment.
 export type TokenEnrichmentView = TokenView & { hasRef: boolean };
 
 export function toTokenEnrichmentView(r: TokenRecord): TokenEnrichmentView {
@@ -85,12 +78,9 @@ const enrichmentFromView = (tv: TokenEnrichmentView): TokenEnrichment => ({
   marketCapRank: tv.price?.marketCapRank,
 });
 
-//  —— 现价(读时现推)
-
-// 读时现推(Phase 3,#81):不落库,按当前 mode + 实时源价重算 value。
-// 关键:存储的 `selfPrice` 已编码盯市决策 —— null = 盯市类型(manual/bitcoin,无权威自带价,恒用源);
-// 数值 = enrich-not-reprice(CEX/链上/perp,自带价 = 同步时 value/amount)。故读时无需 connectorId,
-// 纯 valuate(amount, selfPrice, 源价, mode)。源价缺(未解析/未预热)或都无 → 兜底冻结 usdValue。
+// Repriced on read, never stored. A null `selfPrice` means mark-to-market (manual/bitcoin);
+// a number means enrich-not-reprice (selfPrice = value/amount at sync). Falls back to the frozen
+// usdValue when no source price is available.
 export interface RevaluableBalance {
   amount: number;
   usdValue: number;
@@ -106,18 +96,15 @@ export function liveValue(
   return v?.value ?? b.usdValue;
 }
 
-// 只对同质持仓取价:现货 + UTXO(BTC);defi/perp 不取(价值/展示走 typed meta)。
-// (与 `tokens/model.ts` 的 `fungibleTokenId` 同口径 —— 这里内联,免得纯核心反过来依赖 server 层。)
+// Inlined copy of `fungibleTokenId`'s rule so this pure core doesn't depend on the server layer.
 const fungibleId = (b: OverviewBalance): string | null =>
   isFungible(viewKind(b)) ? (b.tokenId ?? null) : null;
 
-// 按账户现推净值:对每账户最新快照的**全部**余额取 cache-only 源价(富化字典按 token_id 查),liveValue 求和。
-// self-first(默认)下 enrich-not-reprice 行 value≡冻结、盯市行取实时源价 → 与主页总价同源同算。
-// 主页(buildOverview)与资产曲线当下点(history)共用本函数,保证「主页总价 ≡ 曲线当下点」。
+// Shared by the home total and the chart's live point so they always match.
 export const deriveLiveAccountTotals = (
   accounts: AccountSafe[],
   byAccount: ReadonlyMap<string, SnapshotSlice>,
-  // 只读现价 —— 结构型入参,`TokenView` 与完整 `TokenRecord` 都喂得进(免得调用点被迫先收窄)。
+  // Structural so both `TokenView` and a full `TokenRecord` fit.
   enriched: ReadonlyMap<string, { price?: TokenRecordPrice }>,
   mode: ValuationMode,
 ): Map<string, number> => {
@@ -134,18 +121,13 @@ export const deriveLiveAccountTotals = (
   return totals;
 };
 
-//  —— 24h 盈亏(ADR 0050,两端相减)——
+// 24h gain = value now − value 24h ago (pct base: the start value). Deposits and withdrawals show up
+// in the day's gain by design, so it agrees with the net-worth curve. No start snapshot in
+// [now-7d, now-24h] → no baseline.
 
-// 24h 盈亏(ADR 0050,取代 ADR 0040)——「**现在的值 − 24 小时前的值**」,全站一个口径
-//(百分比基数 = 24 小时前的值)。分段 TWR 弃用(太复杂、解释成本高过它剔掉的那点误差):
-// **明确接受充值 / 提现体现在当天盈亏里,这是设计,不是 bug** —— 你充进 10 万,今天就 +10 万,
-// 数字与脚下那条净值曲线从此对得上。起点取法见 `snapshots.asOf`:每账户 [now-7d, now-24h] 窗口内
-// 最近一张;窗口内无快照 → 起点空(账户不满 24 小时 / 断线超 7 天)。
-
-// 窗口:滚动 24 小时,不是自然日(沿用 ADR 0040 的权衡 —— 币市不休市、零点在哪个时区说不清)。
+// Rolling 24h, not a calendar day: crypto never closes and "midnight" has no time zone.
 export const GAIN_WINDOW_MS = 24 * 60 * 60 * 1000;
-// 起点回看下界:24 小时前那一刻往前最多再找 7 天(`snapshots.asOf` 的 floor)。断线超 7 天 →
-// 窗口内无起点 → 该账户涨跌当 0,不拿极旧的值虚增(ADR 0050 / FOL-43)。
+// Disconnected over 7 days → no baseline (rather than inflating with a very old value).
 export const GAIN_START_FLOOR_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface Gain {
@@ -154,9 +136,8 @@ export interface Gain {
 }
 
 /**
- * 两端相减。`start == null` = 没有 24 小时前的观测 → `null`,界面渲染 `—`;与 `{ amount: 0 }`
- * (算得出、确实没涨没跌)必须分得开。分母 ≤ 0(空仓起步 / DeFi 净负债)→ 百分比无从谈起,
- * `pct` 给 `null`,金额照给。
+ * `null` (no observation 24h ago, rendered `—`) must stay distinct from `{ amount: 0 }`. A start
+ * ≤ 0 (empty start, net DeFi debt) gives `pct: null` but still an amount.
  */
 export function endpointGain(start: number | null | undefined, current: number): Gain | null {
   if (start == null) return null;
@@ -164,11 +145,8 @@ export function endpointGain(start: number | null | undefined, current: number):
   return { amount, pct: start > 0 ? (amount / start) * 100 : null };
 }
 
-// 「24 小时前」那一组快照原料复用当前组同一个瘦身形状(`snapshots.asOf` 的一张,或 manual 由账本
-// 折算)—— 浏览器一次重建两组(当前 + 24 小时前),两端相减就是盈亏。
 export type PrevSlice = SnapshotSlice;
 
-// 起点账户的几张汇总表:每账户总额 / 每现货代币(跨账户与逐账户)/ 每 DeFi 协议净值。
 interface StartAggregates {
   accountTotal: Map<string, number>;
   token: Map<string, number>;
@@ -192,7 +170,7 @@ const startAggregates = (prevByAccount: ReadonlyMap<string, PrevSlice>): StartAg
         defi.set(key, (defi.get(key) ?? 0) + b.usdValue);
         continue;
       }
-      // 现货合计与总览聚合同一个口径(`isFungible`):perp 权益不进代币行,两端才对得上。
+      // Same rule as the overview aggregate (`isFungible`), so both endpoints compare like with like.
       if (b.tokenId == null || !isFungible(vk)) continue;
       token.set(b.tokenId, (token.get(b.tokenId) ?? 0) + b.usdValue);
       const line = `${accountId} ${b.tokenId}`;
@@ -203,35 +181,27 @@ const startAggregates = (prevByAccount: ReadonlyMap<string, PrevSlice>): StartAg
   return { accountTotal, token, tokenByAccount, defi };
 };
 
-// 24h 盈亏是**最简两档**(ADR 0050 / FOL-51 最终口径,取代 FOL-43 那套 new/stale 分档):
-//   · **有 24 小时前基准**(`prev`:窗口内有起点快照 / manual 由账本折算得出)→ **两端相减**
-//     (差值含这天充/提的值,与净值曲线一致)。
-//   · **没有基准**(起点空 —— 新账户 / 新建 manual 不满 24 小时,**或**断线超 7 天)→ **一律 `—`**,不硬算。
-// 判据就是一个 `hasPrev`(账户在不在起点组里),账户级 / 组合级 / 持仓级 / DeFi 级**全部**用它,
-// 零特例、零组合专属闸。所以不再有 `classifyGain`/new/stale —— 一个 `prevByAccount.has(id)` 就够。
+// Two cases only, at every level (account, portfolio, holding, DeFi): with a baseline, subtract
+// endpoints; without one (new account, or disconnected > 7 days), `—`.
 
-//  —— 跨账户聚合(按 canonical 代币成 Holding 树)
-
-// symbol 归一(与 tokens 层同口径:trim + 大写)—— 只用在还没有 token_id 的行上(见 groupKey)。
+// Only for rows without a token_id.
 const norm = (s: string): string => s.trim().toUpperCase();
 
-// 聚合输入:一笔持仓 + 其解析结果(ref/展示,由 server 富化)。
 export interface AggInput {
-  id?: string; // 余额行 id;仅用作没有 token_id 的行的稳定分组键(见 groupKey)
+  id?: string; // balance row id; group key only for rows without token_id
   symbol: string;
   amount: number;
-  value: number; // USD(provider 权威;聚合按它求和)
-  kind: string; // 归一后的 viewKind:spot | defi | perp_equity | perp_position | utxo
+  value: number; // USD, provider-authoritative; aggregation sums this
+  kind: string;
   platform?: string | null;
   account: { id: string; label: string; connectorId: string; platform?: string | null };
-  // **归并身份**:写快照时 mint 定死的代币行 id(ADR 0021)。
+  // Token row id fixed at snapshot write time.
   tokenId?: string | null;
   name?: string;
-  logo?: string; // 已按回退链取好(CGK→provider)
-  // 法币身份(ADR 0025 / #271):由该 token 在 fiat 命名者下的 ref 经 fiatCodeOf 推出。
+  logo?: string; // already resolved through the fallback chain
   isFiat?: boolean;
-  unitPrice?: number; // 单价(USD;展示用,详情头部)
-  marketCapRank?: number; // 市值排名(展示用,详情头部)
+  unitPrice?: number;
+  marketCapRank?: number;
 }
 
 export interface HoldingSource {
@@ -242,7 +212,7 @@ export interface HoldingSource {
   kind: string;
 }
 export interface Holding {
-  key: string; // 分组键(去重/稳定用)
+  key: string;
   token: {
     id?: string;
     symbol: string;
@@ -250,22 +220,21 @@ export interface Holding {
     logo?: string;
     unitPrice?: number;
     marketCapRank?: number;
-    isFiat?: boolean; // 法币身份(ADR 0025);组 = 一个 token → 取组内代表值。
+    isFiat?: boolean;
   };
   totalValue: number;
-  totalAmount?: number; // 各 source 数量之和(组统一单位,跨链/多源亦可汇总)
-  // 24h 盈亏(ADR 0040):由 server 读路径按快照历史分段算好后附上,**不在这里算**。
+  totalAmount?: number; // sum across sources; only set when the group is a single token
+  // Computed by the read path, not here.
   gain24h?: Gain | null;
   sources: HoldingSource[];
 }
 
-// 分组键 = `token_id`。没有 token_id 的行**各自成行**,键 = `账户 + 余额行 id`。
-// (只在本模块内用 —— buildCanonicalHoldings;不再对外导出,#201 后无外部消费者。)
+// Rows without a token_id each form their own group.
 function groupKey(row: AggInput): string {
   return row.tokenId ?? `no-token:${row.account.id}:${row.id ?? norm(row.symbol)}`;
 }
 
-// 进聚合的同质口径:只认现货(含并回的 BTC)。perp 权益不并入(#129)。kind 已由 overview 用 viewKind 归一。
+// Perp equity is never aggregated as a holding.
 function isEligible(row: AggInput): boolean {
   return row.kind === "spot";
 }
@@ -281,7 +250,7 @@ interface Acc {
   sources: Map<string, HoldingSource>;
 }
 
-// 聚合器:eligible 行 → 按代币的 Holding[]。value 降序;组内单一 Token 才给 totalAmount。
+// Sorted by value desc.
 export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
   const acc = new Map<string, Acc>();
   for (const row of rows) {
@@ -304,7 +273,7 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
     if (a.unitPriceHint == null && row.unitPrice != null) a.unitPriceHint = row.unitPrice;
     if (a.marketCapRankHint == null && row.marketCapRank != null)
       a.marketCapRankHint = row.marketCapRank;
-    // 持有点的平台单元:链上按链拆(同账户多链 → 多 source),场馆/manual 即连接器本身。
+    // On-chain splits by chain; venues and manual are the connector itself.
     const platformId = row.platform ?? row.account.connectorId;
     const sk = `${row.account.id}|${platformId}`;
     const existing = a.sources.get(sk);
@@ -324,8 +293,7 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
 
   const holdings: Holding[] = [];
   for (const a of acc.values()) {
-    // 无美元价值(未定价/垃圾空投)→ 不进组合持仓。**判据是「等于 0」,不是「≤ 0」**(#527 发现 2):
-    // 负合计的行**要留**(perp 亏穿那笔是真实持仓,`totalUsd` 从来都算着它)。
+    // `=== 0`, not `<= 0`: a negative total (perp blown through) is a real holding.
     if (a.totalValue === 0) continue;
     const sources = [...a.sources.values()].sort((x, y) => y.value - x.value);
     const token = {
@@ -353,29 +321,19 @@ export function buildCanonicalHoldings(rows: readonly AggInput[]): Holding[] {
   return holdings.sort((x, y) => y.totalValue - x.totalValue);
 }
 
-//  —— 单币价值历史
-
-// 单币价值历史接口下发的原料(FOL-50 + FOL-46 + FOL-92):每账户、每桶一行的**现货价值合计**
-// (`SnapshotTotalRow` 形状,与组合曲线同一种)。归属(token_id)与入选口径(只数现货,
-// `viewKind === "spot"`)在 SQL 里判,合计也在那儿算 —— 浏览器拿到的已经是「某账户某时刻这个币值多少」。
-//   · 短窗(≤ 7 天每张快照一行 / 30 天每天一行):阶梯重建 + 自适应降采样。
-//   · 长窗(1y/all,`sampled`):SQL 按桶挑出的最低 / 最高 / 最后时刻,每账户 ≤ 199 行(review #2),
-//     阶梯重建 + min-max 降采样。
+// Per account per bucket spot value for one token; attribution and the spot-only filter run in SQL.
+// Long windows (`sampled`) carry bucket min/max/last points and get min-max downsampled.
 export interface TokenValueHistoryRaw {
   rows: SnapshotTotalRow[];
   sampled?: boolean;
 }
 
-// 原料 → 单币价值曲线:跨账户阶梯重建(与主页 hero 同语义),再按窗口降采样
-// (与 buildAccountValueHistory 的 `sampled ? minMax : downsampleSeries` 同一口径)。
 export function tokenValueHistoryFromRaw(raw: TokenValueHistoryRaw): HistoryPoint[] {
   const series = buildPortfolioHistory(raw.rows);
   return raw.sampled ? minMaxDownsampleHistory(series) : downsampleSeries(series);
 }
 
-//  —— 首页 tab 条(纯推导)
-
-// 有没有永续 / DeFi:入参就是 `toAccountSections` 的出口,轻请求和列表共用。
+// Input is `toAccountSections` output.
 type KindSection = {
   perp: { positions: readonly unknown[]; equity: unknown } | null;
   defi: DefiGroup[];
@@ -393,7 +351,7 @@ export function kindPresence(sections: KindSection[]): {
   };
 }
 
-// 自定义 Tab 的显示名(+ connector 的图):服务端解析好再下发。`#` / `@` 不进这里 —— 渲染时按 kind 加。
+// Resolved server-side. `#` / `@` prefixes are added at render time by kind.
 export function resolvePinLabel(
   pin: {
     kind: "connector" | "tag" | "account";
@@ -413,13 +371,12 @@ export function resolvePinLabel(
   return c.logo ? { name: c.name, logo: c.logo } : { name: c.name };
 }
 
-// 首页 tab 条 pin 原料 —— 只含 pin 行 + connector 展示元数据;账户/快照走 overview 缓存,标签走 tagListQuery。
+// Accounts and snapshots come from the overview cache, tags from tagListQuery.
 export interface PortfolioTabPinsData {
   pins: TabPin[];
   connectorMeta: [string, { name: string; logo?: string }][];
 }
 
-// 首页 tab 条视图 —— `computeHomeTabStrip` 的出参。
 export interface HomeTabStripView {
   hasAccounts: boolean;
   hasPerps: boolean;
@@ -435,7 +392,6 @@ export interface HomeTabStripView {
   }[];
 }
 
-/** 从快照原料 + pin 原料 + 标签列表算出首页 tab 条。 */
 export function computeHomeTabStrip(
   snapshot: PortfolioSnapshotData,
   tabPins: PortfolioTabPinsData,
@@ -485,29 +441,22 @@ export function computeHomeTabStrip(
   };
 }
 
-//  —— 组合总览
-
-// 总览读模型(纯 —— 依赖注入,无 Effect、无 Oracle,可脱离 server fn 单测)。
-// 持仓区 = 跨账户按 canonical 代币聚合(**只认现货** spot/manual/CEX);DeFi 仓位、perp 权益 + 敞口
-// 走每账户次级分区(不进聚合)。总额 = 各账户最新快照 totalUsd 之和。
+// Holdings aggregate spot only, across accounts by token; DeFi and perp stay per-account sections.
+// Total = Σ each account's live total.
 
 export interface OverviewInput {
-  // 代币富化(按 token_id 查表取回瘦身行)。**由调用方那一次装配供上**(`tokens.enrich(...)` 经
-  // `toTokenView` 收窄)—— 服务端现算与浏览器算喂的是同一批 `TokenView`。
+  // Supplied by the caller's single assembly, so server and browser feed identical `TokenView`s.
   enriched: ReadonlyMap<string, TokenView>;
-  // 每账户现推净值(`deriveLiveAccountTotals`)—— 与主页总价、曲线当下点同源。
+  // Same source as the home total and the chart's live point.
   liveTotals: ReadonlyMap<string, number>;
-  // 平台(链 ∪ 场馆)展示元数据(`platforms.resolve(overviewChainIds(...))`)。
   platformMeta: ReadonlyMap<string, PlatformMeta>;
-  // 场馆键(manual/exchange:/perp:)→ 连接器自带 name+logo,不查 CoinGecko(#52);链键返回 null → 走 platformMeta。
+  // Venue keys use the connector's own name/logo; chain keys return null and use platformMeta.
   connectorMeta?: (key: string) => { name: string; logo?: string } | null;
-  // 估值模式(Phase 3,#81)。缺省 self-first(= 旧行为)。
+  // Defaults to self-first.
   mode?: ValuationMode;
-  // tokenId → 该 token 在 fiat 命名者下的 ref(`fiat/issued:<CODE>`);缺省空 → 无法币。
+  // tokenId → ref under the fiat namer (`fiat/issued:<CODE>`).
   fiatRefs?: ReadonlyMap<string, string>;
-  // 24h 盈亏的原料(ADR 0050):「24 小时前」那一组快照(`snapshots.asOf` + manual 折算)。
-  // 缺省 → 不算盈亏(字段缺席)。当前组是 `byAccount`,两组相减就是盈亏。判据只是「账户在不在这组里」
-  // (有基准两端相减 / 无基准 `—`),**不看当下时刻**,所以这一层不再需要 `now`。
+  // The "24h ago" snapshot set; omitted → no gain fields. Only membership matters, not `now`.
   prevByAccount?: ReadonlyMap<string, PrevSlice>;
 }
 
@@ -529,19 +478,17 @@ export interface OverviewView {
     takenAt: number | null;
   }[];
   totalUsd: number;
-  // 组合层 24h 盈亏(ADR 0050,两端相减)。**可选**:传了 `prevByAccount` 才算,字段才出现。
+  // Present only when `prevByAccount` was given.
   gain24h?: Gain | null;
   holdingsSubtotal: number;
   defiSubtotal: number;
 }
 
-// —— 调用点备料用的三个纯 id 收集器(与 buildOverview 内部口径一致,单处定义免得走散)——
-
-// 富化字典该覆盖哪些 token_id:eligible(现货)∪ defi 行。**不含 perp**(perp 富化会改 decorate 的 symbol)。
+// Excludes perp: enriching perp rows would change decorate's symbol.
 export function overviewEnrichIds(
   accounts: AccountSafe[],
   byAccount: Map<string, SnapshotWithBalances>,
-  // 24 小时前那组:卖光的币只在那里出现,它那一行(FOL-110)也要名字和图标。
+  // Tokens sold out since 24h ago only appear in the prev set but still need a name and icon.
   prevByAccount?: ReadonlyMap<string, PrevSlice>,
 ): string[] {
   const ids = new Set<string>();
@@ -557,7 +504,7 @@ export function overviewEnrichIds(
   return [...ids];
 }
 
-// 该送去 platforms.resolve 的链键:eligible 行的平台键去重,减去连接器自带展示的场馆键(#52)。
+// Venue keys are excluded: connectors supply their own display.
 export function overviewChainIds(
   accounts: AccountSafe[],
   byAccount: ReadonlyMap<string, SnapshotSlice>,
@@ -585,13 +532,12 @@ export function buildOverview(
     prevByAccount,
   }: OverviewInput,
 ): OverviewView {
-  // 法币身份:该 token 有 fiat 命名者的 ref、且经 fiatCodeOf 落在白名单内 → 是法币(身份驱动,不看 symbol)。
+  // Identity-driven (ref under the fiat namer), not symbol-driven.
   const isFiatToken = (tokenId?: string | null): boolean => {
     const ref = tokenId ? fiatRefs?.get(tokenId) : undefined;
     return ref ? fiatCodeOf(ref) != null : false;
   };
 
-  // 1) 摊平所有(账户 × 持仓),挑出进聚合的 eligible —— **只认现货**(spot/manual/CEX/UTXO)。
   const eligible: Elig[] = [];
   for (const account of accounts) {
     for (const b of balancesOf(byAccount, account.id)) {
@@ -599,7 +545,6 @@ export function buildOverview(
     }
   }
 
-  // 2) 富化(附回)→ 组装 AggInput → 聚合。
   const recordOf = (b: { tokenId?: string | null }): TokenView | undefined =>
     b.tokenId ? enriched.get(b.tokenId) : undefined;
   const rows = eligible.map((x) => ({ ...x, e: recordOf(x.b) }));
@@ -607,7 +552,6 @@ export function buildOverview(
     id: b.id,
     symbol: e?.symbol ?? "",
     amount: b.amount,
-    // 读时现推:按 mode + 实时源价(cache-only)重算 —— self-first 下 enrich-not-reprice 行 ≡ 冻结值。
     value: liveValue(b, e?.price?.unitPrice, mode),
     kind: viewKind(b),
     platform: b.platform,
@@ -620,7 +564,7 @@ export function buildOverview(
     tokenId: b.tokenId,
     isFiat: isFiatToken(b.tokenId),
     name: e?.name,
-    logo: e ? tokenLogoUrl(e) : undefined, // 有图→拼自家代理 /api/logo/token/{id}(FOL-48 起不再发上游 URL),无图→undefined 显首字母;隐私 ADR 0008
+    logo: e ? tokenLogoUrl(e) : undefined, // proxied; never an upstream URL
     unitPrice: e?.price?.unitPrice,
     marketCapRank: e?.price?.marketCapRank,
   }));
@@ -628,23 +572,19 @@ export function buildOverview(
 
   const withGain = prevByAccount != null;
   let portfolioGain: Gain | null | undefined;
-  // 起点各表 + 有基准的账户集,组合 / 持仓 / DeFi 三块共用(DeFi 那块在 sections 建好之后)。
   let start: StartAggregates | undefined;
-  // **有 24h 前基准的账户集**(= 起点组里的账户)。没有基准的账户(新建 / 断线)两端都不计 → `—`。
+  // Accounts without a baseline (new / disconnected) count on neither side → `—`.
   let prevAccounts: Set<string> | undefined;
   let hasPrevAny = false;
   if (withGain && prevByAccount) {
     const startAgg = startAggregates(prevByAccount);
     start = startAgg;
-    // 最简两档:账户在不在起点组里(`start.accountTotal` 的键就是有基准的账户)。
     const prevAccountIds = new Set(
       accounts.filter((a) => startAgg.accountTotal.has(a.id)).map((a) => a.id),
     );
     prevAccounts = prevAccountIds;
     hasPrevAny = prevAccountIds.size > 0;
-    // 组合层(ADR 0050 最终口径):只数**有基准**的账户,两端相减 —— 起点 = 各基准总额之和,现值 =
-    // 同一批账户的现推净值之和。没有基准的账户(新建 / 断线)整个不计(它的市值仍在 totalUsd 里,
-    // 但不进涨跌)。一个有基准的账户都没有 → null(界面 `—`)。
+    // Only accounts with a baseline count; others stay in totalUsd but not in the gain. None → null.
     let startSum = 0;
     let curSum = 0;
     for (const account of accounts) {
@@ -653,10 +593,8 @@ export function buildOverview(
       curSum += liveTotals.get(account.id) ?? 0;
     }
     portfolioGain = hasPrevAny ? endpointGain(startSum, curSum) : null;
-    // 持仓层:按 token_id 两端相减。**现值侧与起点侧同口径**(`startAggregates.token` 只收 isFungible
-    // 现货、且有 token_id 的行;DeFi 走各自那套)—— 少了这个过滤,同一 token_id 又有现货又有 DeFi/
-    // 非同质行时现值会多算、盈亏虚高。现值只数**有基准**账户的行(与组合同口径),起点缺这个币 → 0
-    // (基准账户 24h 前没这个币 / 今天在基准账户里新买的那一份)。
+    // Current side uses the same filter as the start side (fungible spot with token_id); otherwise
+    // a token also held as DeFi would inflate the gain.
     const curByToken = new Map<string, number>();
     for (const r of aggInputs) {
       if (!prevAccountIds.has(r.account.id)) continue;
@@ -665,18 +603,14 @@ export function buildOverview(
     }
     for (const h of holdings) {
       const id = h.token.id;
-      // 这个币**有没有基准**:被某个有基准的账户现在持有(`curByToken`)或 24 小时前持有过
-      // (`start.token`)。都没有(比如它只存在于一个今天新建 / 断线的账户里)→ 没有可比的起点 → `—`,
-      // 与账户级「无基准 → `—`」一致,不拿 `endpointGain(0,0)` 冒充「$0」。无 token_id 的持仓同理算不出。
+      // A token held only by baseline-less accounts has no comparable start → `—`, not $0.
       const hasBase = id != null && (curByToken.has(id) || startAgg.token.has(id));
       h.gain24h =
         hasBase && id != null
           ? endpointGain(startAgg.token.get(id) ?? 0, curByToken.get(id) ?? 0)
           : null;
     }
-    // **卖光的币**(FOL-110):24 小时前某个有基准的账户持有过、现在却一行都没有(全卖了 / 现值归零被
-    // 上面的聚合滤掉)。不补这一行,它的那笔盈亏就从行上消失了,「各行相加 = 顶部」对不上 —— ETH 全换成
-    // USDC 那天,顶部 0、行上只剩「USDC +3000」。补一行:现值 0、没有持有来源,盈亏 = 0 − 24 小时前值。
+    // Tokens sold out since 24h ago: add a zero-value row so row gains still sum to the total.
     const listed = new Set(holdings.map((h) => h.token.id));
     for (const [id, startValue] of startAgg.token) {
       if (startValue === 0 || listed.has(id)) continue;
@@ -700,26 +634,25 @@ export function buildOverview(
     }
   }
 
-  // 读路径装饰:每个 platform key 都给一份展示(命中真名+logo,否则兜底名),cache-only 零网络。
   for (const h of holdings) {
     for (const s of h.sources) {
       const cm = connectorMeta?.(s.platform.id);
       if (cm) {
         s.platform.name = cm.name;
-        s.platform.logo = platformLogoUrl(s.platform.id, cm.logo); // 上游 URL → folio 代理(隐私;ADR 0008)
+        s.platform.logo = platformLogoUrl(s.platform.id, cm.logo);
         continue;
       }
       const m = platformMeta.get(s.platform.id);
       if (m) {
         s.platform.name = m.name;
-        s.platform.logo = platformLogoUrl(m.key, m.logo); // 上游 URL → folio 代理(隐私;见 ADR 0008 / #20)
+        s.platform.logo = platformLogoUrl(m.key, m.logo);
       }
     }
   }
 
   const holdingsSubtotal = holdings.reduce((sum, h) => sum + h.totalValue, 0);
 
-  // 3) 次级分区(每账户 defi 分组 + perp 权益/敞口)。perp 权益不进 Holdings(#129)。
+  // Perp equity never enters holdings.
   const decorate = (bs: OverviewBalance[]): OverviewBalance[] =>
     bs.map((b) => ({
       ...b,
@@ -747,7 +680,7 @@ export function buildOverview(
         perp: secs.perp,
       };
     })
-    // 仅权益、无持仓的 perp 账户也保留(code review #7)。
+    // Equity-only perp accounts are kept.
     .filter(
       (s) =>
         s.defi.length > 0 ||
@@ -755,9 +688,7 @@ export function buildOverview(
     );
 
   if (withGain && start) {
-    // —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相减)—— 该协议现在的净值 − 24 小时前的净值,
-    // 与全站同一口径(旧的「按总敞口分母」废止)。`start`(24 小时前那张的协议净值)一路带着,
-    // 好让 `mergeDefiGroups` 跨账户合并时按「合并后的收益 ÷ 合并后的起点」重算百分比。
+    // `start` is carried so `mergeDefiGroups` can recompute pct across accounts.
     for (const s of sections) {
       const hasPrevAcc = prevAccounts?.has(s.account.id) ?? false;
       for (const g of s.defi) {
@@ -766,7 +697,6 @@ export function buildOverview(
           continue;
         }
         const key = defiGainKey(s.account.id, g.protocol);
-        // 无基准账户(新建 / 断线超 7 天)两端都不计 → 涨跌当 0。
         const startVal = hasPrevAcc ? (start.defi.get(key) ?? 0) : 0;
         const current = hasPrevAcc ? g.rows.reduce((sum, r) => sum + r.usdValue, 0) : 0;
         const eg = endpointGain(startVal, current);
@@ -775,7 +705,7 @@ export function buildOverview(
     }
   }
 
-  // 4) 每账户净值 + 组合总额(按账户去重)。现推(不落库,liveTotals 已在装配点求得)。
+  // Live totals were computed at the assembly point.
   const accountTotals = accounts.map((account) => ({
     account: { id: account.id, label: account.label },
     totalUsd: liveTotals.get(account.id) ?? 0,
@@ -794,70 +724,45 @@ export function buildOverview(
   };
 }
 
-//  —— 快照原料 → 总览(浏览器里算,FOL-48)——
-
-// 余额行下发到浏览器的**瘦身形状**(FOL-48 优化):只留 `buildOverview` / `deriveLiveAccountTotals`
-// 真正读到的列。**砍掉两列**:`snapshotId`(payload 已按 account 分组,前端不做关联)与 `note`
-// (balance 级展示 note 只在账户抽屉那条路渲染,首页总览不显 —— 见 `toAccountSections` 的 spot 分区被
-// buildOverview 丢弃)。`metaJson` 留着:defi/perp 的 `parseDefiMeta` / `PerpEquityMeta` / `viewKind`
-// 全靠它。实测把快照那一段 raw 砍掉约一半。
+// Only the columns the browser computation reads; `snapshotId` and `note` are dropped (the home
+// overview never shows balance notes). `metaJson` stays: defi/perp parsing needs it.
 export interface BalanceView {
-  id: string; // 无 token_id 的行的分组键;DefiRow.id —— 必须留
+  id: string; // also DefiRow.id; required
   amount: number;
   usdValue: number;
   kind: string;
-  selfPrice?: number | null; // 读时现推的原料(liveValue)
-  platform?: string | null; // 聚合来源单元
-  tokenId?: string | null; // 富化查表 / 聚合身份 / 法币身份
-  metaJson: string | null; // defi/perp meta 解析
+  selfPrice?: number | null;
+  platform?: string | null;
+  tokenId?: string | null;
+  metaJson: string | null;
 }
 
-// 快照下发的**瘦身包裹**:只发 `takenAt`(账户 totalUsd 那一刻;`accountTotals` 用)+ 余额行。
-// 完整包裹里的 snapshot id/accountId/totalUsd/note/noteHash + 账户级 note[] 前端一概不读。
 interface SnapshotView {
   takenAt: number;
   balances: BalanceView[];
 }
 
-// 服务端发的一份「当前快照原料」(方案 C:名字 / 库里当前价内联发下来;logo 只发「有没有图」布尔,
-// URL 由 token id 在浏览器里拼,见 `TokenView`)。Map 走 entries
-// 过线,客户端在 `select` 里重建 Map 再调 `buildOverview` —— 首页总额 / 持仓 / 各小计
-// 全部在浏览器里算,读接口只取行 + 备料,不做聚合。
+// Maps travel as entries over the wire; the client rebuilds them and computes the overview.
 export interface PortfolioSnapshotData {
   accounts: AccountSafe[];
-  // byAccount 的 entries(accountId → 瘦身快照:takenAt + 瘦身余额行,含 manual 注入)。见 `SnapshotView`。
   snapshots: [string, SnapshotView][];
-  // 「24 小时前」那一组(`snapshots.asOf` + manual 折算),与当前组并列发下来 —— 浏览器一次
-  // 重建两组、两端相减算 24h 盈亏(ADR 0050)。窗口内没起点快照的账户不在内(涨跌当 0 / `—`)。
   prevSnapshots: [string, SnapshotView][];
-  // 富化字典 entries(token_id → 瘦身行:名字 / 价格 / 有没有图)。**不含上游 logo URL**
-  // (FOL-48:有 id 就能拼 `/api/logo/token/{id}`)。
   enriched: [string, TokenView][];
-  // 平台(链)展示元数据 entries(场馆键不在内 —— 那些走 connectorMeta)。
   platformMeta: [string, PlatformMeta][];
-  // 场馆键(connectorId)→ 连接器自带 name + logo 的 entries(链键不在内 → 走 platformMeta)。
   connectorMeta: [string, { name: string; logo?: string }][];
-  // 法币身份 ref 的 entries(token_id → `fiat/issued:<CODE>`)。
   fiatRefs: [string, string][];
-  // 估值口径(self-first / source-first)。
   mode: ValuationMode;
-  // 装配这份原料的时刻。**只当 `isFirstSyncPending` 的兜底时钟用**(总额 / 持仓 / 24h 盈亏都两端
-  // 相减,不看当下时刻,所以 `overviewFromSnapshotData` 根本不读它)。首页那条路会给
-  // `isFirstSyncPending` 显式传真 `Date.now()`,不走这个字段 —— 因为快照 key 的锚点是 hour-floor 的
-  // (SSR / 补水同刻度),把那个 floored 值当「已过多久」的基准会低估最多 ~1 小时。
+  // Only the fallback clock for `isFirstSyncPending`. The home page passes the real `Date.now()`:
+  // this value is the hour-floored snapshot key anchor and would understate elapsed time by ~1h.
   now: number;
 }
 
-// 瘦身快照包裹 entries → buildOverview 要的最小切片(takenAt 挪回 `snapshot.takenAt` 的位置)。
 const sliceMap = (entries: [string, SnapshotView][]): Map<string, SnapshotSlice> =>
   new Map(
     entries.map(([id, s]) => [id, { snapshot: { takenAt: s.takenAt }, balances: s.balances }]),
   );
 
-// 客户端把原料算成总览:重建两组快照(当前 + 24 小时前)→ 纯算 liveTotals →
-// 浏览器把快照原料算成总览视图(FOL-48 / FOL-54)。原料由原子读在客户端 `assemblePortfolioSnapshotData`
-// 拼好;总额 / 持仓 / 各小计与 `buildOverview` 逐值一致。
-// (共用同一个 `buildOverview`);24h 盈亏(ADR 0050)由两组快照两端相减,浏览器里算。
+// Gains come from subtracting the two snapshot sets; matches `buildOverview` value for value.
 export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewView {
   const byAccount = sliceMap(raw.snapshots);
   const prevByAccount = sliceMap(raw.prevSnapshots);
@@ -877,24 +782,14 @@ export function overviewFromSnapshotData(raw: PortfolioSnapshotData): OverviewVi
   });
 }
 
-// 「刚加账户、首次同步还没落地」的时间窗。**这个窗是为了把「短暂的首次同步中」与「从没同步成功」
-// 分开**(见 `isFirstSyncPending`):同步轮几秒到一分钟内就会写下第一张快照,给足 10 分钟余量。
+// First syncs land within seconds to a minute; 10 minutes is ample margin.
 export const FIRST_SYNC_WINDOW_MS = 10 * 60 * 1000;
 
-// **首次同步中**:组合里有**刚建的**账户,但一张快照都还没有(没有任何账户同步落地 —— 含手记注入
-// 的合成快照也算)。这一刻 `overviewFromSnapshotData` 会算出总额 0 / 空持仓,与「真的空组合(零账户)」
-// 在屏幕上一模一样 —— 首页据此显加载态而不是把「还不知道」画成 $0。
-//
-// **「刚建的」这一档是必须的,不是优化**(FOL-51 code-review 修的回归):光判「有账户 + 无快照」对
-// 「从没同步成功过」的账户(坏凭据 / 从没同步成)**永真** → hero 永久卡加载骨架,轮询用尽也不解除。
-// 加账户几秒内同步就会落第一张快照;超过 `FIRST_SYNC_WINDOW_MS` 还没有,那不是「还在同步」,是
-// 「同步不成」—— 该显 $0 / 空态(账户在,值是 0),让用户去查凭据,而不是盯着一片加载。
-// 判据全从快照原料读:`accounts` 里有一个 `createdAt` 落在窗口内、且 `snapshots` 全空。
-//
-// **`now` 必须是真墙钟,不能是快照 key 那个 hour-floor 锚点**:整点向下取整会把「账户建了多久」
-// 低估最多 ~1 小时,让坏凭据、始终落不下快照的账户 hero 卡加载骨架最长约 57 分钟(而不是过了
-// 10 分钟窗就转 $0 / 空态)—— 正是当初加这个窗口要避免的「永久骨架」回归。默认回落到 `raw.now`
-// 只为让不传时钟的调用点(测试)有个确定值;首页那条路显式传 `Date.now()`。
+// A freshly created account with no snapshot at all would render $0, identical to an empty
+// portfolio, so the home page shows a loading state instead. "Freshly created" is required: an
+// account whose sync always fails (bad creds) would otherwise keep the skeleton forever.
+// `now` must be the real wall clock, not the hour-floored key anchor (that would stretch the window
+// by up to ~1h).
 export function isFirstSyncPending(
   raw: PortfolioSnapshotData | undefined,
   now: number = raw?.now ?? Date.now(),
@@ -903,18 +798,12 @@ export function isFirstSyncPending(
   return raw.accounts.some((a) => now - a.createdAt < FIRST_SYNC_WINDOW_MS);
 }
 
-//  —— 账户明细的 24h 盈亏(两端相减,纯计算部分)
-
-// `loadAccountHoldings` 的纯计算部分(ADR 0050 / ADR 0039)。取数(账户 / 当下快照 / 富化 /
-// 「24 小时前」那一组)是调用点的 Effect 适配层;这里只做「有了富化行 + 起点组 → 每账户 /
-// 每现货行的 24h 盈亏」,两端相减(现值 − 24 小时前值)。
 export interface AccountGainRow {
   account: { id: string };
   archivedAt: number | null;
-  // 该账户当下净值(冻结口径:最新快照 totalUsd)—— 账户级两端相减的「现值」那一端。
+  // Frozen latest snapshot total.
   totalUsd: number;
-  // `kind`/`metaJson` 是逐币盈亏两端同口径要用的:现值侧只聚合 isFungible 现货行(与起点侧一致),
-  // 否则同一 token_id 又有现货又有 DeFi/perp 行时现值会多算、盈亏虚高。
+  // Needed so the current side aggregates only fungible spot rows, matching the start side.
   balances: readonly {
     id: string;
     tokenId?: string | null;
@@ -930,17 +819,13 @@ export type WithAccountHoldingGain<R extends AccountGainRow> = Omit<R, "balances
   balances: Array<R["balances"][number] & { gain24h?: Gain | null }>;
 };
 
-// `prevByAccount` = 「24 小时前」那一组(`snapshots.asOf` + manual 折算)。**最简两档**(与组合级同一套):
-//   · 有基准(`prev != null`)→ 两端相减(账户级 + 逐现货行按市值占比摊分)。
-//   · 无基准(新账户 / 新建 manual 不满 24h,或断线超 7 天)→ 一律 `null`(`—`),不硬算。
-// 归档账户两级都 `undefined`(ADR 0039:界面据此整行省略)。非同质行(defi/perp)逐行盈亏也 `undefined`
-//(各自分区给)。
+// Same two cases as the portfolio level. Archived accounts get `undefined` at both levels (the UI
+// omits the row); non-fungible rows get `undefined` (their sections carry the gain).
 export function attachAccountHoldingGains<R extends AccountGainRow>(
   rows: readonly R[],
   prevByAccount: ReadonlyMap<string, PrevSlice>,
 ): WithAccountHoldingGain<R>[] {
   return rows.map((r): WithAccountHoldingGain<R> => {
-    // 逐行盈亏只对 isFungible 现货行有意义(DeFi/perp 行的盈亏由各自的分区给);非同质行 → undefined。
     const spotOf = (b: R["balances"][number]): boolean =>
       b.tokenId != null && isFungible(viewKind(b));
     if (r.archivedAt != null) {
@@ -951,7 +836,7 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
       };
     }
     const prev = prevByAccount.get(r.account.id);
-    // 无基准 → 一律 `—`:账户级 null,现货行 null,非现货行 undefined。
+    // No baseline: account null, spot rows null, other rows undefined.
     if (prev == null) {
       return {
         ...r,
@@ -959,7 +844,6 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
         balances: r.balances.map((b) => ({ ...b, gain24h: spotOf(b) ? null : undefined })),
       };
     }
-    // 有基准:起点各表(账户总额 + 逐现货代币值)从那张起点快照汇。
     let startTotal = 0;
     const startToken = new Map<string, number>();
     for (const b of prev.balances) {
@@ -968,8 +852,7 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
         startToken.set(b.tokenId, (startToken.get(b.tokenId) ?? 0) + b.usdValue);
       }
     }
-    // 现值:逐 (账户 × 币) 现货合计 —— **与起点侧同口径**(只 isFungible 现货、有 token_id 的行),
-    // 一个币散在多条链 = 抽屉里多行,而两端相减是按币一条。
+    // One token on several chains is several drawer rows but one gain.
     const curToken = new Map<string, number>();
     const rowsOfToken = new Map<string, number>();
     for (const b of r.balances) {
@@ -985,11 +868,11 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
         if (!spotOf(b)) return { ...b, gain24h: undefined };
         const id = b.tokenId as string;
         const total = curToken.get(id) ?? 0;
-        // 起点缺这个币 → 0(今天新买,整份算成今天赚的);两端相减。
+        // Missing at start → 0 (bought today).
         const gain = endpointGain(startToken.get(id) ?? 0, total);
         if (gain == null) return { ...b, gain24h: null };
-        // 按各行市值占比把那一条币的盈亏摊回具体这一行(pct 是币级的,不摊)。该币现值全是 0(价没了 /
-        // 数量归零)时没有占比可言 → 平摊;摊 0 的话它那笔盈亏就从行上消失了(FOL-110)。
+        // Split the token's gain across its rows by value share; if all are 0, split evenly so the
+        // gain doesn't vanish.
         const share = total === 0 ? 1 / (rowsOfToken.get(id) ?? 1) : b.usdValue / total;
         return { ...b, gain24h: { amount: gain.amount * share, pct: gain.pct } };
       }),
@@ -997,14 +880,12 @@ export function attachAccountHoldingGains<R extends AccountGainRow>(
   });
 }
 
-// 客户端 hour-floor 锚点(FOL-54):快照 / 盈亏窗口 key 用同一刻度,避免 SSR 与补水各算各的 now。
+// Snapshot and gain-window keys share this anchor so SSR and hydration agree on `now`.
 export const floorToHour = (ms: number) => Math.floor(ms / 3_600_000) * 3_600_000;
-
-//  —— 原子资源 → 快照原料(浏览器合并,FOL-54 / FOL-56)——
 
 type ConnectorCatalogEntry = { label: string; logo?: string };
 
-/** 总览 connector 展示元数据:场馆键走目录,链键落空 → `platformMeta`。 */
+/** Venue keys come from the catalog; chain keys fall through to `platformMeta`. */
 export const connectorMetaForOverview = (
   accounts: readonly { id: string; connectorId: string }[],
   snapshotsNow: readonly { accountId: string; balances: BalanceView[] }[],
@@ -1027,11 +908,8 @@ export const connectorMetaForOverview = (
 };
 
 /**
- * 三处组装(首页总览 `usePortfolioOverview`、tab 条原料 `usePortfolioSnapshotAtoms`、SSR 预取
- * `fetchPortfolioSnapshotAtoms`)的公共前半段:accounts + 当下快照 + 连接器目录 → connectorMeta
- * (entries)+ 该拉 `platforms.resolve` 的 chainIds。抽成一处,免得改一处漏两处 —— 尤其 SSR
- * 预取那条最容易和两个 hook 悄悄分叉。`platformMeta` 的实际拉取仍留各调用点:它是一条 query,
- * hook(`useSuspenseQuery`)与非 hook(`fetchQuery`)取法不同。
+ * Shared front half of the three assembly sites (home overview, tab strip, SSR prefetch), so the
+ * SSR path can't silently diverge. Fetching `platformMeta` stays per call site (hook vs fetchQuery).
  */
 export function overviewConnectorInputs(
   accounts: readonly AccountSafe[],
@@ -1053,7 +931,6 @@ export function overviewConnectorInputs(
   return { connectorMeta, chainIds };
 }
 
-/** 原子资源在浏览器合并 → `PortfolioSnapshotData` → `overviewFromSnapshotData`。 */
 export function assemblePortfolioSnapshotData(args: {
   accounts: readonly AccountSafe[];
   snapshotsNow: readonly { accountId: string; takenAt: number; balances: BalanceView[] }[];
@@ -1089,10 +966,8 @@ export function assemblePortfolioSnapshotData(args: {
 }
 
 /**
- * 纯函数:原子原料 → 总览(与首页 `usePortfolioOverview` 的 `select` 同口径)。
- *
- * `now` 是 `isFirstSyncPending` 的判定时钟,**必须是真墙钟**,与 `args.now`(快照 key 的 hour-floor
- * 锚点)分开传 —— 用锚点会把首次同步窗撑大最多 ~1 小时。默认 `Date.now()` 给不关心 pending 的调用点。
+ * `now` is the `isFirstSyncPending` clock and must be the real wall clock, separate from
+ * `args.now` (the hour-floored key anchor).
  */
 export function portfolioOverviewFromAtoms(
   args: Parameters<typeof assemblePortfolioSnapshotData>[0],
@@ -1101,8 +976,6 @@ export function portfolioOverviewFromAtoms(
   const raw = assemblePortfolioSnapshotData(args);
   return { ...overviewFromSnapshotData(raw), pending: isFirstSyncPending(raw, now) };
 }
-
-//  —— 账户明细:发原料 + 浏览器算(与首页 `overviewFromSnapshotData` 同路,FOL-44 收尾)
 
 export interface AccountSnapshotEntry {
   accountId: string;
@@ -1122,7 +995,6 @@ const enrichBalanceRows = (
     return tv ? { ...b, ...enrichmentFromView(tv) } : b;
   });
 
-// 账户页原子资源在浏览器合并 → `AccountHoldingsData` → `accountRowsFromRaw`(FOL-54 / FOL-55)。
 export function assembleAccountHoldingsData(args: {
   accounts: readonly { id: string; label: string; archivedAt: number | null }[];
   snapshotsNow: readonly AccountSnapshotEntry[];
@@ -1154,37 +1026,29 @@ export function assembleAccountHoldingsData(args: {
   };
 }
 
-// 账户明细「一行」的原料:冻结快照值 + 富化(含 `unitPrice`)。**活跃行的现价重算 + 24h 盈亏
-// 不在这里做,在浏览器 `accountRowsFromRaw` 里做** —— 服务端只发料,和首页那条读接口一个方向。
+// Frozen snapshot values; live repricing and gains happen in the browser.
 interface AccountHoldingRow {
   account: { id: string; label: string };
   archivedAt: number | null;
-  // 冻结快照总额:归档行原样用(封存,ADR 0039);活跃行浏览器按 `liveValue` 重算后覆盖。
+  // Archived rows use it as-is; active rows are repriced in the browser.
   totalUsd: number;
   takenAt: number | null;
   note?: Note[];
   balances: OverviewBalance[];
 }
 
-// 账户明细读接口的原料(`getAccountHoldings` 的出参)。**只发料,不聚合、不重算、不算盈亏** ——
-// 那三步全在浏览器 `accountRowsFromRaw` 里(与首页 `getPortfolioSnapshotData` 同一个方向)。
 export interface AccountHoldingsData {
   rows: AccountHoldingRow[];
-  // 「24 小时前」那一组(`snapshots.asOf` + manual 折算),浏览器与当前组两端相减算 24h 盈亏。
   prevSnapshots: [string, SnapshotView][];
-  // 估值口径(self-first / source-first)—— 现价重算用它,与首页同一个 mode。
   mode: ValuationMode;
 }
 
-// 账户明细在浏览器算完的视图:每账户带现价重算的总额/持仓 + 两端相减的 24h 盈亏。
 export interface AccountHoldingsView {
   rows: WithAccountHoldingGain<AccountHoldingRow>[];
 }
 
-// 浏览器把账户明细原料算成行:活跃账户逐行 `liveValue` 现价重算(与首页 `deriveLiveAccountTotals`
-// 同口径:盯市行取实时源价、CEX 自带价行 self-first 下≡冻结、非同质/无价回退冻结),账户总额 =
-// 重算后各行之和;归档账户不现推(封存值取自快照,ADR 0039)。随后两端相减贴上 24h 盈亏
-// (`attachAccountHoldingGains`:当前端 = 重算后的现值,起点端 = 24 小时前那张冻结快照)。
+// Active accounts are repriced row by row (same rule as `deriveLiveAccountTotals`); archived
+// accounts keep their frozen snapshot values.
 export function accountRowsFromRaw(raw: AccountHoldingsData): AccountHoldingsView {
   const prevByAccount = sliceMap(raw.prevSnapshots);
   const priced = raw.rows.map((r): AccountHoldingRow => {
