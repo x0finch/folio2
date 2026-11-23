@@ -7,11 +7,7 @@ import { call, readOverview, readSnapshotData } from "../_kit/run";
 import { seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 portfolio/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
-//
-// **FOL-48 / FOL-54:总览改成「原子读 + 浏览器算」。** `readOverview` 走原子原料 +
-// `overviewFromSnapshotData`(= 前端 `select` 那一行),不复刻业务逻辑。
+// `readOverview` = atomic reads + `overviewFromSnapshotData` (the frontend `select`), no duplicated logic.
 describe("portfolio/overview", () => {
   const USER = "h-pf-overview";
   const BTC = "token-btc";
@@ -30,8 +26,8 @@ describe("portfolio/overview", () => {
     vi.useRealTimers();
   });
 
-  describe("总览(快照原料 + 客户端算)", () => {
-    it("三个账户各有仓 → 同一个币合并成一行,金额是各账户之和", async () => {
+  describe("overview (snapshot data + client compute)", () => {
+    it("three accounts holding one token → one row, value summed", async () => {
       for (const [label, value] of [
         ["甲", 100],
         ["乙", 200],
@@ -48,7 +44,7 @@ describe("portfolio/overview", () => {
       expect(view.totalUsd).toBe(600);
     });
 
-    it("两个不同的币 → 两行,各自独立", async () => {
+    it("two tokens → two independent rows", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, NOW, [
         { tokenId: BTC, amount: 1, usdValue: 100 },
@@ -61,9 +57,9 @@ describe("portfolio/overview", () => {
       expect(view.totalUsd).toBe(150);
     });
 
-    it("手记账户与链上账户持有同一个币 → 合并成一行,来源两条", async () => {
-      // **合并的键是 tokenId,不是 symbol。** 所以这个场景必须让两边指向同一行代币 ——
-      // 先建手记账户(它经 mint 建出真代币行),读出那个 id,再拿它去种链上那张快照。
+    it("manual and on-chain account hold one token → one row, two sources", async () => {
+      // Merging is by tokenId, not symbol: create the manual account first (mints the token row),
+      // then seed the on-chain snapshot with that id.
       const manual = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
         unitPrice: 50,
@@ -82,7 +78,7 @@ describe("portfolio/overview", () => {
       expect(btcRow?.sources.length).toBeGreaterThanOrEqual(2);
     });
 
-    it("perp 亏穿、净值为负 → 总额如实为负,不被夹成 0", async () => {
+    it("perp underwater → total is negative, not clamped to 0", async () => {
       const acc = await seedAccount(USER, "永续", "hyperliquid");
       await seedSnapshot(USER, acc.id, NOW, [
         { tokenId: "token-perp", amount: 1, usdValue: -500, kind: "perp_equity" },
@@ -93,7 +89,7 @@ describe("portfolio/overview", () => {
       expect(view.totalUsd).toBe(-500);
     });
 
-    it("portfolioId 传别人的 → 静默退回默认视图,一条别人的数据都不出现", async () => {
+    it("someone else's portfolioId → silently default view, none of their data", async () => {
       const theirPf = await db(otherUser(USER)).portfolios.ensureDefault();
       const theirAcc = await seedAccount(otherUser(USER), "他们的", "bitcoin");
       await seedSnapshot(otherUser(USER), theirAcc.id, NOW, [
@@ -107,7 +103,7 @@ describe("portfolio/overview", () => {
       expect(view.totalUsd).toBe(100);
     });
 
-    it("全新用户 → 空但结构完整的视图,不是报错", async () => {
+    it("new user → empty but well-formed view, not an error", async () => {
       const view = await readOverview(USER, {});
 
       expect(view.holdings).toEqual([]);
@@ -116,7 +112,7 @@ describe("portfolio/overview", () => {
       expect(view.accountTotals).toEqual([]);
     });
 
-    it("从没同步过的账户 → 出现在 accountTotals 里,takenAt 是空", async () => {
+    it("never-synced account → in accountTotals with null takenAt", async () => {
       await seedAccount(USER, "没同步过", "bitcoin");
 
       const view = await readOverview(USER, {});
@@ -126,21 +122,20 @@ describe("portfolio/overview", () => {
     });
   });
 
-  describe("快照原料(原子装配)", () => {
-    it("只发原料:取行 + 备料,不聚合", async () => {
+  describe("snapshot data (atomic assembly)", () => {
+    it("raw data only: rows plus lookups, no aggregation", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
       const raw = await readSnapshotData(USER, {});
 
-      // 账户 + 原始快照「行」都在,而不是合计。
       expect(raw.accounts.map((a) => a.label)).toEqual(["甲"]);
       expect(raw.snapshots).toHaveLength(1);
       const [[accId, snap]] = raw.snapshots;
       expect(accId).toBe(acc.id);
       expect(snap.balances.map((b) => b.tokenId)).toEqual([BTC]);
       expect(snap.balances[0].usdValue).toBe(100);
-      // 备的是字典 + 口径,没有任何聚合字段(总额 / 持仓 / 小计 都不在原料里)。
+      // Lookups and settings only; no aggregate fields (total / holdings / subtotals).
       expect(raw.mode).toBe("self-first");
       expect(raw).not.toHaveProperty("totalUsd");
       expect(raw).not.toHaveProperty("holdings");
@@ -148,7 +143,7 @@ describe("portfolio/overview", () => {
       expect(raw).not.toHaveProperty("pricesStale");
     });
 
-    it("按 scope 在原料里就筛好:pin 只发那个上游的账户", async () => {
+    it("scope filters the raw data: a connector pin sends only that connector's accounts", async () => {
       const btcAcc = await seedAccount(USER, "链上", "bitcoin");
       await seedSnapshot(USER, btcAcc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       const cexAcc = await seedAccount(USER, "交易所", "binance");
@@ -159,17 +154,16 @@ describe("portfolio/overview", () => {
 
       expect(raw.accounts.map((a) => a.label)).toEqual(["链上"]);
       expect(raw.snapshots.map(([id]) => id)).toEqual([btcAcc.id]);
-      // 浏览器算出来的总额也只含那个上游。
       expect((await readOverview(USER, scope)).totalUsd).toBe(100);
     });
   });
 
-  describe("入参 schema", () => {
-    it("入参缺省 → schema 给出默认值,loader 不带参也能调", () => {
+  describe("input schema", () => {
+    it("missing input → schema defaults, loader can call without args", () => {
       expect(PortfolioScopeInput.parse(undefined)).toEqual({});
     });
 
-    it("pin 的 kind 不在枚举里 → schema 拒", () => {
+    it("unknown pin kind → schema rejects", () => {
       expect(PortfolioScopeInput.safeParse({ pin: { kind: "portfolio" } }).success).toBe(false);
     });
   });

@@ -9,17 +9,13 @@ import { call, callWithRegistry, readAccountHoldingsView } from "../_kit/run";
 import { seedAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
-// ADR 0047:**作用域在服务端定**。账户域这五个读取口都按当前组合收口 —— 以前它们整份下发,
-// 账户页自己筛,于是别的组合的账户名、余额、盈亏、标签都在响应里。
-//
-// 为什么值得有一条横跨五个口的用例(而不是各自那份用例里各加一条):这五个口是**同一条规则的五个
-// 落点**,而漏掉任何一个都不报错 —— 画面照旧对(客户端那时还在筛),只是数据仍然发出去了。
-// 一次装场景、一次断言五处,新加第六个口时这里会立刻显出「它没在名单上」。
+// Scoping happens server-side: these account-domain reads must all narrow to the current portfolio.
+// One cross-cutting case because a missed endpoint renders fine while still leaking data.
 describe("portfolio/scope", () => {
   const USER = "h-pf-scope";
 
-  // 默认组合 vs 另一个组合,各一个账户。默认那个再挂一个标签 —— 标签是 Portfolio 内概念(ADR 0034),
-  // 所以它也该跟着收口。
+  // Default vs another portfolio, one account each; the default one also has a tag, since tags are
+  // portfolio-scoped too.
   let DEFAULT_ID = "";
   let WATCH_ID = "";
   let MINE = "";
@@ -52,30 +48,29 @@ describe("portfolio/scope", () => {
     await db(USER).tags.create({ portfolioId: WATCH_ID, name: "观察中" });
   });
 
-  describe("账户域按当前组合收口", () => {
-    it("账户列表只回这个组合的账户,并带上它的归属", async () => {
+  describe("account domain is scoped to the current portfolio", () => {
+    it("account list returns only this portfolio's accounts, with membership", async () => {
       expect((await listed(WATCH_ID)).map((a) => a.label)).toEqual(["只看看"]);
       expect((await listed(WATCH_ID))[0].portfolioId).toBe(WATCH_ID);
       expect((await listed(DEFAULT_ID)).map((a) => a.label)).toEqual(["自己的"]);
     });
 
-    it("不带组合参数 = 默认组合", async () => {
+    it("no portfolio param = default portfolio", async () => {
       expect((await listed()).map((a) => a.label)).toEqual(["自己的"]);
     });
 
-    it("按账户的持仓(含 24h 盈亏)只回这个组合的", async () => {
-      // 盈亏 FOL-51 起随持仓一行行回(两端相减),同一份响应里 —— 收窄由服务端在算的时候完成,
-      // 所以「响应里只有这个组合的账户」这一条同时盖住了持仓与盈亏。
+    it("per-account holdings (with 24h P&L) only for this portfolio", async () => {
+      // P&L ships in the same per-account rows, so this covers both holdings and P&L.
       const holdings = await readAccountHoldingsView(USER, { portfolioId: WATCH_ID });
       expect(holdings.rows.map((r) => r.account.label)).toEqual(["只看看"]);
       expect(holdings.rows.map((r) => r.account.id)).toEqual([WATCHED]);
     });
 
-    it("标签定义与账户→标签关联也跟着收口", async () => {
+    it("tag definitions and account→tag links are scoped too", async () => {
       expect(
         (await call(USER, handleListTags({ portfolioId: WATCH_ID }))).map((t) => t.name),
       ).toEqual(["观察中"]);
-      // 唯一那条关联挂在默认组合的账户上 → 看 Watch 时一条都不该回。
+      // The only link is on a default-portfolio account → none for Watch.
       expect(await call(USER, handleListAccountTags({ portfolioId: WATCH_ID }))).toEqual([]);
       expect(
         (await call(USER, handleListAccountTags({ portfolioId: DEFAULT_ID }))).map(
@@ -84,7 +79,7 @@ describe("portfolio/scope", () => {
       ).toEqual([MINE]);
     });
 
-    it("**归档账户仍在里面** —— 账户页有归档区,收口用的是「归档无关」那个口径", async () => {
+    it("archived accounts are still included (the accounts page has an archive section)", async () => {
       await db(USER).accounts.setArchived(WATCHED, true);
 
       expect((await listed(WATCH_ID)).map((a) => a.label)).toEqual(["只看看"]);
@@ -92,7 +87,7 @@ describe("portfolio/scope", () => {
       expect(holdings.rows.map((r) => r.account.label)).toEqual(["只看看"]);
     });
 
-    it("认不出的组合 id(别人的 / 已删的)→ 静默落回默认,不是空视图", async () => {
+    it("unknown portfolio id (someone else's / deleted) → silently default, not empty", async () => {
       const theirs = await db(otherUser(USER)).portfolios.ensureDefault();
 
       expect((await listed(theirs.id)).map((a) => a.label)).toEqual(["自己的"]);

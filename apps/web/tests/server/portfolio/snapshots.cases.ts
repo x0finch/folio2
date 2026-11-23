@@ -23,7 +23,7 @@ describe("portfolio/snapshots", () => {
   });
 
   describe("getSnapshots", () => {
-    it("历史读(带 after)at 上界:只取 takenAt ≤ at 的最近一张", async () => {
+    it("historical read (with after): latest snapshot with takenAt ≤ at", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, ago(2 * DAY), [{ tokenId: BTC, amount: 1, usdValue: 50 }]);
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
@@ -36,9 +36,9 @@ describe("portfolio/snapshots", () => {
       expect(rows[0]?.totalUsd).toBe(50);
     });
 
-    it("当下读(无 after)= 真最新:takenAt 略晚于 at 也回 —— 同步刚写不被截掉", async () => {
-      // 回归:同步刚落库的快照 takenAt(服务端时钟)可能略超读取方传入的 at(墙钟)。
-      // 当下读若按 at 截,会把刚同步的账户显示成「从未同步」(e2e sync-round)。
+    it("current read (no after) = true latest, even if takenAt is slightly after at", async () => {
+      // A just-synced snapshot's takenAt (server clock) can exceed the caller's `at` (wall clock);
+      // cutting at `at` would show the account as never synced.
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, NOW + HOUR, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
@@ -48,7 +48,7 @@ describe("portfolio/snapshots", () => {
       expect(rows[0]?.totalUsd).toBe(100);
     });
 
-    it("after 下界:窗口内无快照 → 不回", async () => {
+    it("after lower bound: no snapshot in window → none returned", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, ago(8 * DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
@@ -58,7 +58,7 @@ describe("portfolio/snapshots", () => {
       expect(rows).toEqual([]);
     });
 
-    it("manual 账户在 at 合成持仓", async () => {
+    it("manual account holdings synthesized at `at`", async () => {
       const acc = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
         unitPrice: 100,
@@ -71,7 +71,7 @@ describe("portfolio/snapshots", () => {
       expect(row?.balances[0]?.amount).toBe(2);
     });
 
-    it("按组合收口:别的组合账户的快照不回", async () => {
+    it("portfolio-scoped: other portfolios' snapshots not returned", async () => {
       const def = await db(USER).portfolios.ensureDefault();
       const watch = await db(USER).portfolios.create({ name: "Watch" });
       const mine = await seedAccount(USER, "自己的", "bitcoin");
@@ -98,7 +98,7 @@ describe("tokens/enrichment", () => {
   });
 
   describe("getTokenEnrichment", () => {
-    it("回用户全部已知代币,与当前快照无关", async () => {
+    it("returns all of the user's known tokens regardless of current snapshots", async () => {
       await seedManualAccount(USER, "手记", { symbol: "BTC", unitPrice: 100, amount: 1 });
       const first = await call(USER, handleGetTokenEnrichment());
       expect(first.enriched.length).toBeGreaterThan(0);

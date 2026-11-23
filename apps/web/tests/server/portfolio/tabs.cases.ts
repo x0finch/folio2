@@ -7,10 +7,7 @@ import { call, readTabStrip } from "../_kit/run";
 import { seedAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 portfolio/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("portfolio/tabs", () => {
-  // FOL-49 · getPortfolioTabPins + overview + computeHomeTabStrip
   const USER = "h-pf-tabs";
 
   let NOW = 0;
@@ -27,7 +24,7 @@ describe("portfolio/tabs", () => {
   });
 
   describe("home tab strip", () => {
-    it("两个 pin → tab 条里出现这两个,标签是解析好的人话", async () => {
+    it("two pins → both in the strip with resolved names", async () => {
       const pf = await db(USER).portfolios.ensureDefault();
       const acc = await seedAccount(USER, "我的钱包", "bitcoin");
       await db(USER).portfolios.assignAccount(acc.id, pf.id);
@@ -40,7 +37,7 @@ describe("portfolio/tabs", () => {
       expect(strip.pins.map((p) => p.name).sort()).toEqual(["我的钱包", "长期"]);
     });
 
-    it("别的组合的 pin 不摆在这个组合的 tab 条里(三类各一个)", async () => {
+    it("other portfolios' pins are excluded (one of each kind)", async () => {
       const def = await db(USER).portfolios.ensureDefault();
       const watch = await db(USER).portfolios.create({ name: "Watch" });
       const mine = await seedAccount(USER, "自己的", "bitcoin");
@@ -58,7 +55,7 @@ describe("portfolio/tabs", () => {
       expect((await readTabStrip(USER, { portfolioId: watch.id })).pins).toEqual([]);
     });
 
-    it("connector pin 在**有这个 connector 的每个组合**里都摆(它是个镜头,不归属组合)", async () => {
+    it("connector pin shows in every portfolio that has that connector", async () => {
       const def = await db(USER).portfolios.ensureDefault();
       const watch = await db(USER).portfolios.create({ name: "Watch" });
       const a = await seedAccount(USER, "甲", "binance");
@@ -72,7 +69,7 @@ describe("portfolio/tabs", () => {
       }
     });
 
-    it("有 perp 仓 → hasPerps 为真;有 DeFi 仓 → hasDefi 为真", async () => {
+    it("perp position → hasPerps; DeFi position → hasDefi", async () => {
       const acc = await seedAccount(USER, "永续", "hyperliquid");
       await seedSnapshot(USER, acc.id, NOW, [
         {
@@ -97,7 +94,7 @@ describe("portfolio/tabs", () => {
       expect(strip.hasDefi).toBe(true);
     });
 
-    it("全新用户(零账户零 pin)→ hasAccounts 为假,不报错", async () => {
+    it("new user (no accounts, no pins) → hasAccounts false, no error", async () => {
       const strip = await readTabStrip(USER, {});
 
       expect(strip.hasAccounts).toBe(false);
@@ -106,7 +103,7 @@ describe("portfolio/tabs", () => {
       expect(strip.pins).toEqual([]);
     });
 
-    it("切到别的 Portfolio → 不把上一个的持仓带过来", async () => {
+    it("switching portfolio → previous portfolio's holdings don't carry over", async () => {
       const def = await db(USER).portfolios.ensureDefault();
       const other = await db(USER).portfolios.create({ name: "另一个" });
       const acc = await seedAccount(USER, "甲", "hyperliquid");
@@ -127,13 +124,13 @@ describe("portfolio/tabs", () => {
       expect(strip.hasPerps).toBe(false);
     });
 
-    it("别人的 pin 不出现在我的 tab 条里", async () => {
+    it("other users' pins aren't in my strip", async () => {
       await db(otherUser(USER)).tabPins.create({ kind: "connector", connectorId: "bitcoin" });
 
       expect((await readTabStrip(USER, {})).pins).toEqual([]);
     });
 
-    it("有账户有永续有 pin → 条子与夹具对得上", async () => {
+    it("accounts, perps and pins → strip matches the fixture", async () => {
       const pf = await db(USER).portfolios.ensureDefault();
       const acc = await seedAccount(USER, "我的钱包", "hyperliquid");
       await db(USER).portfolios.assignAccount(acc.id, pf.id);
@@ -159,7 +156,7 @@ describe("portfolio/tabs", () => {
       expect(served.pins[0].name).toBe("长期");
     });
 
-    it("标签改名 → 条上换成新名字", async () => {
+    it("tag renamed → strip shows the new name", async () => {
       const pf = await db(USER).portfolios.ensureDefault();
       const acc = await seedAccount(USER, "甲", "bitcoin");
       const tag = await db(USER).tags.create({ portfolioId: pf.id, name: "旧名字" });
@@ -172,7 +169,7 @@ describe("portfolio/tabs", () => {
       expect((await readTabStrip(USER, {})).pins[0].name).toBe("新名字");
     });
 
-    it("钉一个 Tab → 条上多一格", async () => {
+    it("pinning a tab → one more entry in the strip", async () => {
       const pf = await db(USER).portfolios.ensureDefault();
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await db(USER).portfolios.assignAccount(acc.id, pf.id);
