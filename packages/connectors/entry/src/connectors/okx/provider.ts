@@ -29,23 +29,21 @@ import {
   perpNote,
 } from "./parse";
 
-// —— 账户级 creds(AC):apiKey(semi)/ secret(secret)/ passphrase(secret)——
-// apiKey = 标识符(明文走 header,非认证秘密)→ semi;secret / passphrase 都是签名秘密 → secret。
+// apiKey is an identifier sent in plain headers (semi); secret and passphrase sign requests.
 export const okxAccountCreds = [
   { key: "apiKey", type: "semi", label: "API Key", validator: z.string().trim().min(1) },
   { key: "secret", type: "secret", label: "API Secret", validator: z.string().trim().min(1) },
   { key: "passphrase", type: "secret", label: "Passphrase", validator: z.string().trim().min(1) },
 ] as const satisfies readonly CredField[];
 
-// —— base URL 覆盖(#264)—— 归适配层,client 只吃不透明的 `{ apiBase }`(ADR 0036 边界决定 2)。
+// Optional proxy base, injected from env like the other CEX overrides.
 const OKX_BASE_KEY = "OKX_API_BASE";
 const baseFrom = (creds: Record<string, unknown>): string => {
   const v = creds[OKX_BASE_KEY];
   return typeof v === "string" && v.trim() ? v.trim() : OKX_API_BASE;
 };
 
-// 统一账户的四个**余额桶**(ADR 0031)。名字进失败 Note,所以和取数绑在一起 ——
-// 用 `Effect.partition` 的话成败两个数组不带来源,名字就得靠下标猜(binance 那片踩过)。
+// Names go into the failure note, so they live with the fetch.
 interface Bucket {
   readonly name: string;
   readonly rows: (
@@ -68,8 +66,7 @@ const STAKING: Bucket = {
   rows: (c, creds) => asConnector(c.stakingOrders(creds)),
 };
 
-// 四个**余额源**桶。对账锚(asset-valuation)与合约探测(positions)不在此列 ——
-// 它们不产余额,失败只是本轮少两条 Note,不参与「全军覆没」的判定。
+// Valuation and positions aren't balance sources, so they don't count toward "all failed".
 const BUCKETS: readonly Bucket[] = [TRADING, FUNDING, SAVINGS, STAKING];
 
 const withClient = <A, E>(
@@ -80,8 +77,7 @@ const withClient = <A, E>(
 export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
   id: PROVIDER_ID,
   label: "OKX",
-  // 无全局 provider key —— 账户自己那三样即凭据。PC 仅作 env 注入声明(base 覆盖),
-  // 不进 UI 表单、不加密、不导出;值可能含代理密钥 → 不可 echo/log。
+  // Not real credentials: an env-injected base override. May embed a proxy key: never log it.
   creds: [
     {
       key: OKX_BASE_KEY,
@@ -96,9 +92,7 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
       Effect.gen(function* () {
         const creds = ctx.account.creds;
 
-        // 六个端点**同一把 key 并发**拉。业务码(HTTP 200 + code≠"0")已经由 client 判成失败,
-        // 所以这里只需要 `Effect.either` —— 老那版要自己写一个 `readBucket` 把 rejected 和
-        // 「200 但码不对」两种失败揉成一种,那段随 client 接手业务码一起没了。
+        // Business errors (HTTP 200 + code ≠ "0") are already failures from the client.
         const [buckets, valuation, positions] = yield* Effect.all(
           [
             Effect.all(
@@ -109,15 +103,13 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
               ),
               { concurrency: "unbounded" },
             ),
-            // 软信号:失败只是本轮没这两条 Note。
+            // Soft signals: failure just drops their notes this round.
             Effect.either(asConnector(client.assetValuation(creds))),
             Effect.either(asConnector(client.positions(creds))),
           ],
           { concurrency: "unbounded" },
         );
 
-        // 成败裁定三家 CEX 同一把尺子(瞬时错升级 / 全军覆没),住 ../../upstream。
-        // 对账锚与合约探测不在此列 —— 它们不产余额,失败只是本轮少两条 Note。
         const failed = yield* bestEffortVerdict(buckets);
 
         const bodyOf = <T>(bucket: Bucket): T | undefined => {
@@ -127,8 +119,7 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
 
         const details: OkxDetail[] =
           bodyOf<{ data?: { details?: OkxDetail[] }[] }>(TRADING)?.data?.[0]?.details ?? [];
-        // 交易账户的市价表复用给资金 / 赚币估值(零额外请求)。trading 失败 → 空表,
-        // 那些币交给 oracle 兜底(value 0)。
+        // Trading prices value funding/earn rows; if trading failed those wait for the oracle.
         const hint = buildPriceHint(details);
 
         const earnItems = [
@@ -154,9 +145,7 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
         }
 
         if (valuation._tag === "Right") {
-          // earn 未细分(结构化 / 定期)→ 合成聚合行**计进净值**(金额已知)。
-          // `earnComplete`:两个 earn 桶都拉到,残差才可信 —— 某个失败的话残差是「没拉到」
-          // 而不是「未细分」,不能计入。
+          // The residual is only meaningful if both earn buckets were fetched.
           const earnComplete = !failed.some((f) => f.bucket === SAVINGS || f.bucket === STAKING);
           if (earnComplete) {
             const earnBucketUsd = Number(valuation.right.data?.[0]?.details?.earn ?? 0);
@@ -165,12 +154,10 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
               if (row) balances.push(row);
             }
           }
-          // classic 整桶漏拉 → 账户级 Note(不像 earn 有可直接计入的残差,先只提示)。
           const cn = classicNote(valuation.right);
           if (cn) notes.push(cn);
         }
 
-        // 合约持仓非空 → 兜底 Note(本轮不解析 perp,见 ADR 0031)。
         if (positions._tag === "Right") {
           const pn = perpNote(positions.right);
           if (pn) notes.push(pn);
@@ -180,8 +167,7 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
       }),
     ),
 
-  // 校验:打一次交易账户余额。凭据被拒 → 成功返回 `false`;够不到上游 → 留在错误通道。
-  // OKX 的凭据错通常是 **HTTP 200 + code 50xxx**,client 已经把那些码判成「凭据问题」。
+  // OKX signals bad credentials as HTTP 200 + code 50xxx; the client maps those to auth.
   validateAccount: (ctx) =>
     withClient(ctx.creds, (client) =>
       asConnector(client.balance(ctx.account.creds)).pipe(
