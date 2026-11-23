@@ -24,7 +24,7 @@ describe("accounts/rename", () => {
   });
 
   describe("renameAccount", () => {
-    it("改名 → 列表里是新名字", async () => {
+    it("rename → list shows the new name", async () => {
       const acc = await seedAccount(USER, "旧名", "bitcoin");
 
       await call(USER, handleRenameAccount({ accountId: acc.id, label: "新名" }));
@@ -32,7 +32,7 @@ describe("accounts/rename", () => {
       expect(await labels()).toEqual(["新名"]);
     });
 
-    it("改别人的账户 → 对方那个名字没变", async () => {
+    it("renaming someone else's account → their name unchanged", async () => {
       const theirs = await seedAccount(otherUser(USER), "他们的", "bitcoin");
 
       await callExit(USER, handleRenameAccount({ accountId: theirs.id, label: "被我改了" }));
@@ -40,7 +40,7 @@ describe("accounts/rename", () => {
       expect((await db(otherUser(USER)).accounts.getById(theirs.id))?.label).toBe("他们的");
     });
 
-    it("名字改成空串 / 纯空格 → schema 拒", () => {
+    it("empty / whitespace name → schema rejects", () => {
       expect(RenameAccountInput.safeParse({ accountId: "a", label: "" }).success).toBe(false);
       expect(RenameAccountInput.safeParse({ accountId: "a", label: "  " }).success).toBe(false);
     });

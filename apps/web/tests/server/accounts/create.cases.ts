@@ -10,17 +10,12 @@ import { blockOutbound } from "../_kit/outbound";
 import { callWithRegistry, callWithRegistryExit, failureOf } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 accounts/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("accounts/create", () => {
-  // #527 · createAccount
-  //
-  // **这是全仓唯一同时碰加密和出网的写路径**,也是清单里对抗条最厚的一个。
-  // 探活走替身(`fakeRegistry` 只换 `validate`,规格用真的)—— 规格决定哪个字段加密,
-  // 用假的等于把最该测的那半架空。
+  // The only write path that touches both encryption and the network. Only `validate` is faked;
+  // field specs stay real since they decide what gets encrypted.
   const USER = "h-acc-create";
 
-  /** 库里那份原始 creds(密文),用来断言「secret 真的加密了」。 */
+  /** Raw stored creds (ciphertext), to assert secrets really are encrypted. */
   const rawCredsOf = async (userId: string, accountId: string) =>
     (await db(userId).accounts.getRawCreds(accountId)) ?? "";
 
@@ -31,7 +26,7 @@ describe("accounts/create", () => {
   });
 
   describe("createAccount", () => {
-    it("建链上地址账户 → 出现在列表里、凭据齐,返回里没有任何 secret 原文", async () => {
+    it("on-chain address account → listed, creds complete, no secret plaintext returned", async () => {
       const { registry } = await fakeRegistry();
 
       const account = await callWithRegistry(
@@ -48,12 +43,11 @@ describe("accounts/create", () => {
       const listed = await callWithRegistry(USER, registry, handleListAccounts());
       expect(listed).toHaveLength(1);
       expect(listed[0].needsCredentials).toBe(false);
-      expect(JSON.stringify(listed[0].credsSafe)).toContain("bc1"); // public 字段照旧看得见
+      expect(JSON.stringify(listed[0].credsSafe)).toContain("bc1"); // public fields stay visible
     });
 
-    it("建 CEX 账户 → 落库那份里 secret 是加密的,public / semi 是明文", async () => {
-      // **这条是原则 #5 的可执行形式。** 断言的不是「有没有报错」,而是库里那一行长什么样:
-      // apiKey(semi)照旧看得见,secret 字段在密文里找不到原文,而解密回来又等于原值。
+    it("CEX account → secret encrypted at rest, public/semi plaintext", async () => {
+      // Asserts the stored row: semi apiKey readable, secret absent as plaintext yet decrypts back.
       const { registry } = await fakeRegistry();
       const values = { apiKey: "key-明文可见", secret: "secret-绝不可见" };
 
@@ -72,7 +66,7 @@ describe("accounts/create", () => {
       expect(opened.secret).toBe("secret-绝不可见");
     });
 
-    it("建手记账户 → 同时落了 token 声明与开仓活动", async () => {
+    it("manual account → token declaration and opening activity are both written", async () => {
       const { registry } = await fakeRegistry();
 
       const account = await callWithRegistry(
@@ -86,8 +80,7 @@ describe("accounts/create", () => {
       );
 
       expect(account.connectorId).toBe("manual");
-      // `manual_activity` 没有 user_id 列(归属经 accountId,ADR 0022 的形状),所以数行数要
-      // 走明细而不是那张表 —— 撞过一次 `no such column: user_id`。
+      // `manual_activity` has no user_id column (owned via accountId), so count via the details.
       const detail = await callWithRegistry(
         USER,
         registry,
@@ -97,7 +90,7 @@ describe("accounts/create", () => {
       expect(detail.activities).toHaveLength(1);
     });
 
-    it("带 portfolioId 建 → 归在那个 Portfolio 下,不是默认那个", async () => {
+    it("with portfolioId → filed under that portfolio, not the default", async () => {
       const { registry } = await fakeRegistry();
       const def = await db(USER).portfolios.ensureDefault();
       const target = await db(USER).portfolios.create({ name: "目标" });
@@ -119,7 +112,7 @@ describe("accounts/create", () => {
       expect(where).not.toBe(def.id);
     });
 
-    it("地址写错 / key 是假的 → 探活失败,一行都不许落库,错误原文能传到前端", async () => {
+    it("bad address / fake key → probe fails, nothing written, message reaches the frontend", async () => {
       const { registry } = await fakeRegistry({ validate: validateFails("这个地址不对") });
 
       const exit = await callWithRegistryExit(
@@ -133,15 +126,14 @@ describe("accounts/create", () => {
       );
 
       expect(exit._tag).toBe("Failure");
-      // 类型化失败,不是 defect:前端拿到的是这句原文,而不是一坨 FiberFailure。
+      // Typed failure, not a defect: the frontend gets this message, not a FiberFailure.
       expect((failureOf(exit) as Error | undefined)?.message).toContain("这个地址不对");
       expect(await countRows("accounts", USER)).toBe(0);
       expect(await callWithRegistry(USER, registry, handleListAccounts())).toEqual([]);
     });
 
-    it("可选字段留空串 → 当作没填,不会被加密进去", async () => {
-      // 空串一旦落库,`isComplete` 会认为「填了」,于是「凭据不齐」的提示消失、同步却拿着空 key
-      // 去打上游。这条钉的是过滤那一步。
+    it("empty optional field → treated as unset, not sealed", async () => {
+      // A stored empty string would count as "filled" in `isComplete` and sync would use an empty key.
       const { registry, validated } = await fakeRegistry();
 
       await callWithRegistry(
@@ -157,9 +149,8 @@ describe("accounts/create", () => {
       expect(validated[0]).not.toHaveProperty("passphrase");
     });
 
-    it("同一个地址建两次 → 两条各自独立,不是一条盖掉另一条", async () => {
-      // 钉现状:没有唯一约束。两条独立在这里是说得通的(同一个地址可以分两个用途记),
-      // 但界面上会出现两行同名同址 —— 要不要挡是你的决定(#527 待定项)。
+    it("same address twice → two independent accounts, no overwrite", async () => {
+      // Pins current behaviour: no uniqueness constraint.
       const { registry } = await fakeRegistry();
       const body = {
         connectorId: "bitcoin" as const,
@@ -174,7 +165,7 @@ describe("accounts/create", () => {
       expect(await countRows("accounts", USER)).toBe(2);
     });
 
-    it("portfolioId 是别人的 → 账户不许落到别人名下", async () => {
+    it("someone else's portfolioId → account not filed under it", async () => {
       const { registry } = await fakeRegistry();
       const theirPf = await db(otherUser(USER)).portfolios.ensureDefault();
 
@@ -193,7 +184,7 @@ describe("accounts/create", () => {
       expect(await db(otherUser(USER)).portfolios.listMemberships()).toEqual([]);
     });
 
-    it("label 空串 / 纯空格、connectorId 空串 → schema 拒", () => {
+    it("empty / whitespace label or empty connectorId → schema rejects", () => {
       expect(
         CreateAccountInput.safeParse({ connectorId: "bitcoin", label: "", values: {} }).success,
       ).toBe(false);
@@ -205,7 +196,7 @@ describe("accounts/create", () => {
       ).toBe(false);
     });
 
-    it("label 两头带空格 → schema trim 之后才落库", () => {
+    it("label with surrounding spaces → trimmed by schema before write", () => {
       expect(
         CreateAccountInput.parse({ connectorId: "bitcoin", label: "  冷钱包 ", values: {} }).label,
       ).toBe("冷钱包");
