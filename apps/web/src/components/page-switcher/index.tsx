@@ -1,36 +1,24 @@
 import { Activity, type ComponentType, type ReactNode, Suspense, useEffect, useState } from "react";
 import { RevealContext } from "./stagger-reveal";
 
-// 可复用的 page 切换器(FOL-79)。跟路由无关:吃一份"页注册表" + 外部传入的当前 key。
-//
-// - **保活**:每个去过的页裹在 React 原生 `<Activity>` 里,当前页 `visible`、其余 `hidden`。隐藏 = 留状态 + 留 DOM
-//   (滚动、表单都在)、但清掉 effect(后台不空转);切回来即时、原样。
-// - **首次加载 = lazy**:没进过的页**根本不进树** → 它的 `React.lazy` chunk 永不请求。第一次切过去才挂载(import
-//   触发),这一刻 `Suspense` 用该页自己的 `Skeleton` 顶着;chunk + 数据到了原地换成真页。
-// - **进场**:某页成为当前页时,它主体那几段内容依次淡入 + 轻抬。动效本身住 `StaggerReveal`(各页自己裹),
-//   这里只发「该播了」的信号 —— 面板这一层**不做整页淡入**:它裹着页头那个 absolute 的 `<HeaderSync/>`,
-//   而且与逐段进场叠起来是双重淡入。
-//
-// key 的类型由调用方的注册表决定(泛型 `K`):传进来的 `activeKey` 只能是注册表里有的那几个值,
-// 「切到一个没注册的页」在编译期就发生不了。
+// Route-agnostic page switcher: takes a page registry and the current key. Visited pages are kept
+// alive in React `<Activity>` (hidden = state and DOM kept, effects cleared); unvisited pages stay
+// out of the tree so their lazy chunk is never requested. The entrance animation lives in
+// `StaggerReveal`; this layer only signals "replay" and does no whole-page fade (it wraps the
+// absolute `<HeaderSync/>`, and it would double-fade).
 
 export interface SwitcherPage<K extends string> {
   key: K;
-  /** 通常是 `React.lazy(() => import(...))`;首次挂载时由 `Skeleton` 顶着。 */
+  /** Usually `React.lazy(() => import(...))`. */
   Component: ComponentType;
-  /** 该页首次加载(chunk 还在下载)时的骨架 —— 每页自己的形状,不共用一张。 */
+  /** Skeleton shown while the page's chunk first loads. */
   Skeleton: ComponentType;
 }
 
-// 一个保活面板:`<Activity>` 管可见性,这里只负责「进场该重播了」的信号 —— 一个每次本页成为当前页
-// 就 +1 的计数,页面内的 `StaggerReveal` 读它重播。
-//
-// 为什么是「keyed on active 的 effect」:`<Activity mode="hidden">` 会**清掉**子树的 effect,揭开时
-// 再重新跑一遍 —— 所以「转为隐藏」那一支根本不会执行(别指望它归位),而「揭开」这件事必然伴随
-// effect 重跑,拿它当重播的扳机是稳的。计数只增不减,状态与 DOM 一概不动:重播靠重新起播,
-// **不靠换 key 重挂载**。
-//
-// `data-page` 是给测试量的:哪几页在树上(严格 lazy)、当前可见的是哪页,都从它读,不猜 DOM 形状。
+// A keep-alive panel: `<Activity>` handles visibility; this bumps a counter each time the page
+// becomes current so `StaggerReveal` replays. Keyed on an active effect because hidden Activities
+// clear effects and rerun them on reveal; the counter only grows and no remount happens.
+// `data-page` lets tests read which pages are in the tree and which is visible.
 function Panel({
   pageKey,
   active,
@@ -61,10 +49,9 @@ export function PageSwitcher<K extends string>({
   pages: readonly SwitcherPage<K>[];
   activeKey: K;
 }) {
-  // 去过的页(含当前):只增不减。没进过的不进树,保证 lazy —— chunk 只在第一次切过去时才请求。
+  // Visited pages only grow, keeping unvisited ones (and their chunks) out.
   const [visited, setVisited] = useState<Set<K>>(() => new Set([activeKey]));
-  // 首次切到某页时在**渲染期**就并入 visited(React 认可的「渲染中调整 state」:立刻重渲染、不提交中间态)。
-  // 这样新页在同一次提交里挂载 —— 不留 useEffect 那种「旧页已隐藏、新页还没挂」的空白帧。guard 保证不死循环。
+  // Added during render (React's "adjust state while rendering") so the new page mounts in the same commit with no blank frame.
   if (!visited.has(activeKey)) {
     setVisited((prev) => new Set(prev).add(activeKey));
   }
@@ -75,7 +62,7 @@ export function PageSwitcher<K extends string>({
         .filter((p) => visited.has(p.key))
         .map((p) => (
           <Panel key={p.key} pageKey={p.key} active={p.key === activeKey}>
-            {/* 骨架也标上页名:测试凭它断「首访显示的是**这一页**的骨架、回访一次都不出现」。 */}
+            {/* Tests assert on the skeleton's page name. */}
             <Suspense
               fallback={
                 <div data-page-skeleton={p.key}>

@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 
-// folio 品牌标记(自 folio-old app/icon0.svg 迁移)。折角「folio」字形,单色走 currentColor 以适配明暗。
+// Single-color via currentColor to suit light and dark.
 export function Logo(props: SVGProps<SVGSVGElement>) {
   return (
     <svg
