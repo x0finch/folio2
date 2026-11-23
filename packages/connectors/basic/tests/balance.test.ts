@@ -2,8 +2,8 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import { Balance, type BalanceKind, Defi, type PerpPosition, Spot } from "../src/balance";
 
-describe("Balance 4-kind 判别联合 —— runtime parse", () => {
-  it("spot:普通代币行(零 typed meta)", () => {
+describe("Balance discriminated union: runtime parse", () => {
+  it("spot: a plain token row with no typed meta", () => {
     const b = Balance.parse({
       kind: "spot",
       symbol: "BTC",
@@ -14,7 +14,7 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
     expect(b).toMatchObject({ kind: "spot", symbol: "BTC", value: 100 });
   });
 
-  it("defi:带 protocol/positionType meta", () => {
+  it("defi: carries protocol/positionType meta", () => {
     const b = Balance.parse({
       kind: "defi",
       symbol: "aUSDC",
@@ -24,10 +24,10 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
       meta: { protocol: "aave", positionType: "deposit" },
     });
     expect(b.kind).toBe("defi");
-    if (b.kind === "defi") expect(b.meta.protocol).toBe("aave"); // kind 窄化后 meta 精确
+    if (b.kind === "defi") expect(b.meta.protocol).toBe("aave");
   });
 
-  it("perp_equity / perp_position:各自 meta", () => {
+  it("perp_equity / perp_position: each with its own meta", () => {
     const eq = Balance.parse({
       kind: "perp_equity",
       symbol: "ACCT",
@@ -42,7 +42,7 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
       symbol: "BTC-PERP",
       tokenRef: "hyperliquid/issued:X",
       amount: 1,
-      value: 0, // 仓位行不承载净值
+      value: 0, // position rows carry no net worth
       meta: {
         coin: "BTC",
         side: "long",
@@ -56,26 +56,25 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
     expect(pos.kind).toBe("perp_position");
   });
 
-  it("未知 kind 被拒(含并回 spot 的旧 utxo)", () => {
+  it("rejects unknown kinds, including the retired utxo", () => {
     expect(() =>
       Balance.parse({ kind: "manual", symbol: "X", tokenRef: "x/y", amount: 1, value: 1 }),
     ).toThrow();
     expect(() =>
       Balance.parse({ kind: "perp", symbol: "X", tokenRef: "x/y", amount: 1, value: 1 }),
     ).toThrow();
-    // utxo 已并回 spot(ADR 0010)→ 不再是合法 kind;旧快照行由读端 viewKind 老化归 spot。
     expect(() =>
       Balance.parse({ kind: "utxo", symbol: "BTC", tokenRef: "x/y", amount: 0.5, value: 30000 }),
     ).toThrow();
   });
 
-  it("defi 缺 meta 被拒(meta 随 kind 必填)", () => {
+  it("rejects defi without meta", () => {
     expect(() =>
       Balance.parse({ kind: "defi", symbol: "X", tokenRef: "x/y", amount: 1, value: 1 }),
     ).toThrow();
   });
 
-  it("perp_position 缺必填 meta 字段被拒", () => {
+  it("rejects perp_position missing required meta fields", () => {
     expect(() =>
       Balance.parse({
         kind: "perp_position",
@@ -89,19 +88,19 @@ describe("Balance 4-kind 判别联合 —— runtime parse", () => {
   });
 });
 
-describe("Balance —— 类型完备", () => {
-  it("BalanceKind 恰为 4 个 kind", () => {
+describe("Balance types", () => {
+  it("BalanceKind is exactly the four kinds", () => {
     expectTypeOf<BalanceKind>().toEqualTypeOf<"spot" | "defi" | "perp_equity" | "perp_position">();
   });
 
-  it("子集 schema 的 z.infer 精确到该子集(defineConnector 推断基础)", () => {
+  it("z.infer of a subset schema is exactly that subset", () => {
     const spotDefi = z.discriminatedUnion("kind", [Spot, Defi]);
     expectTypeOf<z.infer<typeof spotDefi>>().toEqualTypeOf<
       z.infer<typeof Spot> | z.infer<typeof Defi>
     >();
   });
 
-  it("kind 窄化后 meta 自动精确(消灭 as cast)", () => {
+  it("narrowing on kind makes meta precise without casts", () => {
     const b = Balance.parse({
       kind: "perp_position",
       symbol: "X",

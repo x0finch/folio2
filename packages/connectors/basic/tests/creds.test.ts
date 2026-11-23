@@ -18,16 +18,16 @@ const okxCreds = [
 ] as const satisfies readonly CredField[];
 
 describe("validateCredentials", () => {
-  it("全过 → 返回已校验值(含 coerce)", async () => {
+  it("returns validated values (with coercion) when all pass", async () => {
     const manual = [
       { key: "symbol", type: "public", validator: z.string(), label: "Symbol" },
       { key: "amount", type: "public", validator: z.coerce.number(), label: "Amount" },
     ] as const satisfies readonly CredField[];
     const out = await validateCredentials(manual, { symbol: "BTC", amount: "1.5" });
-    expect(out).toEqual({ symbol: "BTC", amount: 1.5 }); // string "1.5" coerce 成 number
+    expect(out).toEqual({ symbol: "BTC", amount: 1.5 });
   });
 
-  it("任一不过 → 抛 CredentialValidationError,消息带字段名", async () => {
+  it("throws CredentialValidationError naming the field when any fails", async () => {
     await expect(
       validateCredentials(okxCreds, { apiKey: "", secret: "s", passphrase: "p" }),
     ).rejects.toBeInstanceOf(CredentialValidationError);
@@ -37,22 +37,22 @@ describe("validateCredentials", () => {
   });
 });
 
-describe("暴露级别分类 + 打码", () => {
-  it("secret/semi/public keys 各归其类", () => {
+describe("exposure classification + masking", () => {
+  it("sorts keys into secret / semi / public", () => {
     expect(secretKeys(okxCreds)).toEqual(["secret", "passphrase"]);
     expect(semiKeys(okxCreds)).toEqual(["apiKey"]);
     expect(publicKeys(okxCreds)).toEqual([]);
   });
 
-  it("maskCredential 首尾留、中间省;过短全省", () => {
+  it("maskCredential keeps the ends and hides the middle; short values are fully hidden", () => {
     expect(maskCredential("abcdefghijkl")).toBe("abcd…ijkl");
-    expect(maskCredential("abc123")).toBe("…"); // ≤6 不露
+    expect(maskCredential("abc123")).toBe("…");
     expect(maskCredential("")).toBe("");
   });
 });
 
-describe("CredsOf 类型推断", () => {
-  it("从 const 字面量推出精确 creds 形状(异构)", () => {
+describe("CredsOf inference", () => {
+  it("infers the exact heterogeneous creds shape from a const literal", () => {
     type C = CredsOf<typeof okxCreds>;
     expectTypeOf<C>().toEqualTypeOf<{
       readonly apiKey: string;

@@ -26,7 +26,7 @@ describe("crypto AES-GCM", () => {
 
   it("detects tampering (GCM auth)", async () => {
     const ct = await encrypt("secret", KEY);
-    // 改动载荷首字符(IV 区)→ 认证失败
+    // Flip the first char (IV region) → authentication fails.
     const tampered = (ct[0] === "A" ? "B" : "A") + ct.slice(1);
     await expect(decrypt(tampered, KEY)).rejects.toBeInstanceOf(CryptoError);
   });
@@ -38,7 +38,7 @@ describe("crypto AES-GCM", () => {
   });
 });
 
-// Golden: 与参考实现 openssl dgst -sha256 -hmac 逐位一致(hex 与 base64 两种编码)。
+// Golden values from `openssl dgst -sha256 -hmac`.
 const SECRET = "test-secret-key";
 const MSG = "okx-prehash";
 
