@@ -5,8 +5,7 @@ import { getDb } from "../src/connect";
 import { user } from "../src/schema/auth";
 import { forDomain } from "./effect";
 
-// per-user 设置(#82 估值口径 + FOL-75 隐私开关)。测的是「读带缺省 / upsert 只覆盖给定字段 / 按用户隔离」——
-// 落库对不对,跟时序无关,故保持 Promise 形状(见 effect.ts 的判据)。
+// Reads have defaults, upsert overwrites only the given fields, and users are isolated; persistence only, so Promise-shaped.
 
 const settings = forDomain((db) => db.settings);
 
@@ -31,8 +30,8 @@ beforeEach(async () => {
   await resetUser(OTHER);
 });
 
-describe("settings get 缺省", () => {
-  it("没有行的用户 → self-first + 不隐藏", async () => {
+describe("settings get defaults", () => {
+  it("a user with no row gets self-first and not hidden", async () => {
     expect(await settings(USER).get()).toEqual({
       valuationMode: "self-first",
       hideBalances: false,
@@ -41,7 +40,7 @@ describe("settings get 缺省", () => {
 });
 
 describe("settings update", () => {
-  it("开隐私开关 → 读回 true,估值口径保持缺省", async () => {
+  it("turning privacy on reads back true; the valuation mode keeps its default", async () => {
     await settings(USER).update({ hideBalances: true });
 
     expect(await settings(USER).get()).toEqual({
@@ -50,7 +49,7 @@ describe("settings update", () => {
     });
   });
 
-  it("只覆盖给定字段:先设估值,再单独关隐私,不动估值", async () => {
+  it("overwrites only the given fields: set valuation, then turn privacy off, valuation untouched", async () => {
     await settings(USER).update({ valuationMode: "source-first", hideBalances: true });
     await settings(USER).update({ hideBalances: false });
 
@@ -60,7 +59,7 @@ describe("settings update", () => {
     });
   });
 
-  it("按用户隔离 —— 一个人开隐私、改估值口径,都不影响另一个", async () => {
+  it("isolated per user: one user's privacy or valuation change doesn't affect another", async () => {
     await settings(USER).update({ valuationMode: "source-first", hideBalances: true });
 
     expect(await settings(OTHER).get()).toEqual({

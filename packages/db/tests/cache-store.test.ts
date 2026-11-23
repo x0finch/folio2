@@ -5,12 +5,7 @@ import { getDb } from "../src/connect";
 import { user } from "../src/schema/auth";
 import { forDomain } from "./effect";
 
-// per-user KV 缓存。**这一条测的不是「能不能写进去」,是「大值会不会把一整批写掉在地上」**。
-//
-// 预计算(ADR 0049)搬进这张表之后,一个键装的是一整份总览 JSON,而一个组合一次要写十来个键
-// —— 这是这张表上唯一一处「一批可能有几 MB」的写。批量超限的下场不是报错然后重试:上层
-// (`precomputePortfolio`)把失败咽下去回 `false`,于是那个组合的键永远填不上、页面永远读不到数。
-// 所以 `putMany` 按累计字节切批,而这条用例钉的就是「切了之后每个键都真的在」。
+// Large values must not drop a whole batch: after precompute moved into this table, one key holds a whole overview JSON and a portfolio writes ~10 keys at once. A failed batch is swallowed upstream (returns false), so keys would never fill. `putMany` splits batches by cumulative bytes, and this pins that every key survives.
 
 const cache = forDomain((db) => db.cache);
 
@@ -35,14 +30,14 @@ beforeEach(async () => {
   await resetUser(OTHER);
 });
 
-/** 一份「像总览那样大」的值。`kb` 是大致的 KB 数。 */
+/** A value "as large as an overview"; `kb` is roughly the KB count. */
 const blob = (kb: number) => ({
   rows: Array.from({ length: kb * 8 }, (_, i) => ({ i, s: "0123456789abcdef" })),
 });
 
 describe("cache putMany", () => {
-  it("十个大值一次写下去 → 一个都不少", async () => {
-    // 十个 200KB ≈ 2MB,远超一批的字节预算 → 内部切成好几批。
+  it("ten large values written at once: none are lost", async () => {
+    // Ten 200KB values ~2MB, far above one batch's byte budget, so they split into several batches.
     const writes = Array.from({ length: 10 }, (_, i) => ({
       key: `big:${i}`,
       value: blob(200),
@@ -53,13 +48,13 @@ describe("cache putMany", () => {
 
     const got = await cache(USER).getMany(writes.map((w) => w.key));
     expect(got.size).toBe(10);
-    // 抽两个真读一下内容 —— 只数条数的话,写进去半截也数得对。
+    // Spot-check two contents: counting rows alone would miss a half-written value.
     for (const k of ["big:0", "big:9"]) {
       expect((got.get(k)?.value as ReturnType<typeof blob>).rows).toHaveLength(200 * 8);
     }
   });
 
-  it("按用户隔离 —— 另一个人写的同名键读不到", async () => {
+  it("isolated per user: another user's same-named key isn't readable", async () => {
     await cache(OTHER).putMany([{ key: "mine", value: "theirs", ttlMs: 60_000 }]);
 
     expect((await cache(USER).getMany(["mine"])).size).toBe(0);

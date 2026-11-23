@@ -31,7 +31,7 @@ beforeEach(async () => {
   await resetUser(USER_B);
 });
 
-// 活动挂 (账户, token)。#203 起 token 就是 `tokens` 里的一行(生产路径是 mint;这里直接用 store)。
+// Activity hangs off (account, token); the token is a row in `tokens` (production mints it; here the store is used directly).
 async function manualAccount(userId: string) {
   const acc = await accounts(userId).create({ connectorId: "manual", label: "M", creds: "{}" });
   const tokenId = await tokensOf(userId, "coingecko").create({ symbol: "BTC" }, []);
@@ -77,7 +77,7 @@ describe("manual_activity ops", () => {
       amount: 10,
       occurredAt: 1,
     });
-    // B 记录到 A 的 token → 抛(assertTokenOwned:不属本人)
+    // B recording against A's token throws (assertTokenOwned: not theirs)
     await expect(
       manualOf(USER_B).recordActivity(acc.id, acc.tokenId, {
         kind: "add",
@@ -85,9 +85,9 @@ describe("manual_activity ops", () => {
         occurredAt: 2,
       }),
     ).rejects.toThrow();
-    // B 列 A 的账户 → 空(join 限 userId)
+    // B listing A's account is empty (join limited by userId)
     expect(await manualOf(USER_B).listActivityByAccount(acc.id)).toEqual([]);
-    // A 仍只有 1 条
+    // A still has only 1
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(1);
   });
 });

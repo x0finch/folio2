@@ -9,10 +9,7 @@ import { Database, type DbRequest } from "../src/database";
 import { user } from "../src/schema/auth";
 import { forDomain } from "./effect";
 
-// 日汇总(FOL-91):写侧跟着快照同一个 batch 维护、迁移回填、长窗读它而不扫快照。
-//
-// **为什么非真 D1 不可**:维护语句靠的是「batch 按序执行、后一条读得到前一条写的行」+ SQLite
-// upsert 的 `excluded` 语义,回填靠窗口函数 —— 这些只有真库答得了。
+// Daily rollup: maintained in the same batch as snapshots, backfilled by the migration, and read by long windows instead of scanning snapshots. Needs real D1: batch ordering (later statements see earlier writes), SQLite upsert `excluded`, and window-function backfill.
 
 const snapshotsOf = forDomain((db) => db.snapshots);
 const accountsOf = forDomain((db) => db.accounts);
@@ -20,7 +17,7 @@ const accountsOf = forDomain((db) => db.accounts);
 const USER = "user-daily-totals";
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
-// 某个 UTC 零点(取 1_800_000_000_000 所在那天的起点)。
+// A UTC midnight (the start of the day containing 1_800_000_000_000).
 const D0 = Math.floor(1_800_000_000_000 / DAY) * DAY;
 
 interface DailyRow {
@@ -69,7 +66,7 @@ const write = (accountId: string, takenAt: number, totalUsd: number, collapse = 
     { collapseSameHour: collapse },
   );
 
-/** 本用户的全部日汇总行,按 (account, day) 排好。 */
+/** All of this user's rollup rows, sorted by (account, day). */
 async function dailyRows(): Promise<DailyRow[]> {
   const { results } = await env.DB.prepare(
     `SELECT d.* FROM account_daily_totals d JOIN accounts a ON a.id = d.account_id
@@ -80,7 +77,7 @@ async function dailyRows(): Promise<DailyRow[]> {
   return results;
 }
 
-/** 参照系:直接从快照按定义现算(与写侧 / 回填各自独立的第三份实现)。 */
+/** Reference: computed directly from snapshots by definition (a third implementation, independent of the write side and the backfill). */
 async function expectedFromSnapshots(): Promise<DailyRow[]> {
   const { results } = await env.DB.prepare(
     `SELECT s.account_id, s.taken_at, s.total_usd, s.rowid AS rid FROM snapshots s
@@ -121,15 +118,15 @@ async function expectedFromSnapshots(): Promise<DailyRow[]> {
   return out.sort((a, b) => a.account_id.localeCompare(b.account_id) || a.day - b.day);
 }
 
-describe("写快照时维护日汇总", () => {
-  it("追加写(乱序到达)→ open/min/max/close 各就各位", async () => {
+describe("maintained on snapshot write", () => {
+  it("appends arriving out of order: open/min/max/close land in place", async () => {
     const acc = await account("a");
     await write(acc, D0 + 10 * HOUR, 150);
-    await write(acc, D0 + 2 * HOUR, 120); // 更早 → 成为 open
-    await write(acc, D0 + 20 * HOUR, 130); // 最晚 → close
-    await write(acc, D0 + 5 * HOUR, 90); // 最低
-    await write(acc, D0 + 15 * HOUR, 200); // 最高
-    await write(acc, D0 + DAY + HOUR, 1); // 第二天,自成一行
+    await write(acc, D0 + 2 * HOUR, 120); // earlier: becomes open
+    await write(acc, D0 + 20 * HOUR, 130); // latest: close
+    await write(acc, D0 + 5 * HOUR, 90); // lowest
+    await write(acc, D0 + 15 * HOUR, 200); // highest
+    await write(acc, D0 + DAY + HOUR, 1); // next day, its own row
 
     expect(await dailyRows()).toEqual([
       {
@@ -159,12 +156,12 @@ describe("写快照时维护日汇总", () => {
     ]);
   });
 
-  it("collapseSameHour 换掉的正是当天最高点 → 整日重算,旧极值退出", async () => {
+  it("when collapseSameHour replaces that day's high, the whole day is recomputed and the old extreme leaves", async () => {
     const acc = await account("collapse");
     await write(acc, D0 + 3 * HOUR, 100, true);
-    await write(acc, D0 + 9 * HOUR + 60_000, 500, true); // 当天最高
+    await write(acc, D0 + 9 * HOUR + 60_000, 500, true); // the day's high
     await write(acc, D0 + 12 * HOUR, 110, true);
-    // 同一钟点再同步一次:500 那张被删,换成 105。增量比较会让 500 留在 max 上 —— 必须重算。
+    // Syncing the same hour again: the 500 row is deleted and replaced by 105. An incremental compare would leave 500 as max, so recompute.
     await write(acc, D0 + 9 * HOUR + 30 * 60_000, 105, true);
 
     const [row] = await dailyRows();
@@ -175,7 +172,7 @@ describe("写快照时维护日汇总", () => {
     expect(await dailyRows()).toEqual(await expectedFromSnapshots());
   });
 
-  it("collapseSameHour 换掉的是当天唯一 / 最后那张 → close 跟着换", async () => {
+  it("when collapseSameHour replaces the day's only / last snapshot, close follows", async () => {
     const acc = await account("only");
     await write(acc, D0 + 23 * HOUR + 1000, 300, true);
     await write(acc, D0 + 23 * HOUR + 2000, 250, true);
@@ -196,7 +193,7 @@ describe("写快照时维护日汇总", () => {
     ]);
   });
 
-  it("删账户 → 它的日汇总一起走(外键级联)", async () => {
+  it("deleting an account removes its rollup too (FK cascade)", async () => {
     const acc = await account("gone");
     await write(acc, D0 + HOUR, 10);
     expect(await dailyRows()).toHaveLength(1);
@@ -205,24 +202,24 @@ describe("写快照时维护日汇总", () => {
   });
 });
 
-describe("迁移回填", () => {
-  it("回填语句从快照重算出的行,与写侧一路维护出来的逐字相同", async () => {
+describe("migration backfill", () => {
+  it("rows recomputed by the backfill statement match the write side's maintained rows verbatim", async () => {
     const a = await account("a");
     const b = await account("b");
-    // 混着来:追加 + 折叠、乱序、同值并列、跨天、同刻并列。
+    // A mix: append + collapse, out of order, equal-value ties, across days, same-instant ties.
     for (let h = 0; h < 50; h++) {
       await write(a, D0 + h * HOUR + 60_000, 100 + ((h * 37) % 23), h % 2 === 0);
     }
-    await write(a, D0 + 4 * HOUR + 60_000, 100 + ((4 * 37) % 23), true); // 同钟点再写同值
+    await write(a, D0 + 4 * HOUR + 60_000, 100 + ((4 * 37) % 23), true); // same value again in the same hour
     await write(b, D0 + 30 * HOUR, 50);
-    await write(b, D0 + 30 * HOUR, 60); // 同刻并列:后写的是 close
-    await write(b, D0 + 26 * HOUR, 60); // 与最高同值、更早 → max_at 取它
+    await write(b, D0 + 30 * HOUR, 60); // same-instant tie: the later write is close
+    await write(b, D0 + 26 * HOUR, 60); // same as the highest, earlier: max_at takes it
     await write(b, D0 + 2 * HOUR, 70);
 
     const maintained = await dailyRows();
     expect(maintained).toEqual(await expectedFromSnapshots());
 
-    // 取迁移文件里真的那条回填语句(不另抄一份 —— 抄的那份会和迁移慢慢走样)。
+    // Takes the real backfill statement from the migration file (not a copy, which would drift).
     const migration = env.TEST_MIGRATIONS.find((m) => m.name.includes("account_daily_totals"));
     const backfill = migration?.queries.find((q) => q.includes("INSERT OR REPLACE"));
     expect(backfill).toBeDefined();
@@ -239,14 +236,12 @@ describe("迁移回填", () => {
   }, 30_000);
 });
 
-// —— 读侧 ——
-
 interface Recorded {
   sql: string;
   params: unknown[];
 }
 
-// 透传的 D1 绑定,记下每条语句(同 snapshot-latest-rows-read.test.ts)。
+// Pass-through D1 binding recording each statement (as in snapshot-latest-rows-read.test.ts).
 function recordingD1(db: D1Database, log: Recorded[]): D1Database {
   const passthrough = <T extends object>(target: T, key: string | symbol): unknown => {
     const v = Reflect.get(target, key);
@@ -310,7 +305,7 @@ async function plan(stmts: Recorded[]): Promise<string[]> {
   return out;
 }
 
-// 逐小时快照直接灌 SQL(几千行,走 write 太慢),再用回填语句把日汇总补上 —— 与生产迁移同一条路。
+// Hourly snapshots seeded via SQL (thousands of rows; `write` is too slow), then the backfill fills the rollup, like the production migration.
 async function seedHourly(accountIds: string[], fromHour: number, toHour: number): Promise<void> {
   for (const id of accountIds) {
     await env.DB.prepare(
@@ -326,11 +321,11 @@ async function seedHourly(accountIds: string[], fromHour: number, toHour: number
   await env.DB.prepare(backfill as string).run();
 }
 
-describe("长窗读日汇总,不扫快照", () => {
+describe("long windows read the rollup, not snapshots", () => {
   const ACCOUNTS = 3;
   const WINDOW_DAYS = 30;
 
-  it("30 天窗口:历史 60 天 → 400 天,读的行数不变;语句里没有整表扫快照", async () => {
+  it("30-day window: history 60 to 400 days, rows read unchanged; no full snapshot scan in the statements", async () => {
     const ids: string[] = [];
     for (let i = 0; i < ACCOUNTS; i++) ids.push(await account(`A${i}`));
 
@@ -342,7 +337,7 @@ describe("长窗读日汇总,不扫快照", () => {
       const single = await recorded((s) => s.listDailyTotalsByAccount(ids[0], since));
       const singleSampled = await recorded((s) => s.listSampledTotalsByAccount(ids[0], since));
       const all = { portfolio, sampled, single, singleSampled };
-      // 读数当场量:窗口只有下界,种了更多历史之后再量「小」那组就不是同一个窗口了。
+      // Measure reads here: the window has only a lower bound, so after seeding more history the "small" set wouldn't be the same window.
       const reads = {} as Record<keyof typeof all, number>;
       for (const k of Object.keys(all) as (keyof typeof all)[]) {
         reads[k] = await rowsRead(all[k].statements);
@@ -358,21 +353,19 @@ describe("长窗读日汇总,不扫快照", () => {
     for (const k of ["portfolio", "sampled", "single", "singleSampled"] as const) {
       expect(large.reads[k]).toBe(small.reads[k]);
       const details = await plan(large[k].statements);
-      // 快照表只许被按 (account_id, taken_at) 索引点查(carry-in),不许 SCAN。
+      // The snapshot table may only be point-looked-up by (account_id, taken_at) index (carry-in), never SCANned.
       expect(details.some((d) => /^SCAN (snapshots|s)\b/.test(d))).toBe(false);
     }
-    // 组合日线:每账户每天 ≤ 1 行 + carry-in 一行。
+    // Portfolio daily line: at most 1 row per account per day plus one carry-in row.
     expect(large.portfolio.result.length).toBeLessThanOrEqual(ACCOUNTS * (WINDOW_DAYS + 2));
-    // 单账户日线:每天 ≤ 4 点。
+    // Single-account daily line: at most 4 points per day.
     expect(large.single.result.length).toBeLessThanOrEqual(4 * (WINDOW_DAYS + 1));
-    // 读 400 天历史的 30 天窗口,读数远小于窗口内的逐小时快照数。
+    // For a 30-day window over 400 days of history, reads are far below the hourly snapshot count.
     expect(large.reads.portfolio).toBeLessThan(ACCOUNTS * WINDOW_DAYS * 24);
   }, 120_000);
 });
 
-// —— 对拍:日汇总画出来的图,与逐小时快照画出来的在「日」这一粒度上一个点都不差 ——
-
-/** 组合阶梯重建(与 apps/web buildPortfolioHistory 同语义)。 */
+/** Portfolio step reconstruction (same semantics as apps/web buildPortfolioHistory). */
 function timeline(rows: readonly { accountId: string; takenAt: number; totalUsd: number }[]) {
   const sorted = [...rows].sort((a, b) => a.takenAt - b.takenAt);
   const latest = new Map<string, number>();
@@ -387,19 +380,19 @@ function timeline(rows: readonly { accountId: string; takenAt: number; totalUsd:
   return out;
 }
 
-/** 每个 UTC 日留最后一个点(与 apps/web `toDailySeries` 在 30 天跨度上的行为相同)。 */
+/** Keeps each UTC day's last point (matches apps/web `toDailySeries` over a 30-day span). */
 const lastPerDay = (points: readonly { t: number; total: number }[]) => {
   const m = new Map<number, { t: number; total: number }>();
   for (const p of points) m.set(Math.floor(p.t / DAY), p);
   return [...m.values()];
 };
 
-describe("对拍(golden):日汇总 vs 逐小时快照", () => {
-  it("组合 30 天:每日收盘点与逐小时重建逐点相同;单账户 1 年:极值与端点相同", async () => {
+describe("golden: daily rollup vs hourly snapshots", () => {
+  it("portfolio 30 days: each day's close matches the hourly rebuild point by point; single account 1 year: extremes and endpoints match", async () => {
     const a = await account("a");
     const b = await account("b");
     const cold = await account("cold");
-    // a / b 逐小时 40 天,值各自起伏;cold 只在窗口前有一张(carry-in 那条路)。b 晚 3 天入场。
+    // a / b hourly for 40 days with varying values; cold has one snapshot before the window (the carry-in path). b joins 3 days later.
     for (let h = 0; h < 40 * 24; h += 1) {
       await write(a, D0 + h * HOUR + 60_000, 1000 + Math.round(Math.sin(h / 7) * 300), true);
       if (h >= 72) {
@@ -409,27 +402,27 @@ describe("对拍(golden):日汇总 vs 逐小时快照", () => {
     await write(cold, D0 - 5 * DAY, 777, true);
 
     const now = D0 + 40 * DAY;
-    const since = now - 30 * DAY + 5 * HOUR; // 窗口起点落在某天中间
+    const since = now - 30 * DAY + 5 * HOUR; // window start falls mid-day
     const ids = [a, b, cold];
 
-    const hourly = await snapshotsOf(USER).listTotals(since); // 旧那条路的原料
+    const hourly = await snapshotsOf(USER).listTotals(since); // input of the old path
     const daily = await snapshotsOf(USER).listDailyTotals(ids, since);
 
     expect(daily.length).toBeLessThanOrEqual(ids.length * 32);
     expect(hourly.length).toBeGreaterThan(daily.length * 10);
     expect(lastPerDay(timeline(daily))).toEqual(lastPerDay(timeline(hourly)));
 
-    // 单账户:30 天的日点在「每天最后一个点」上与原始点相同(浏览器 downsampleSeries 取的就是它)。
+    // Single account: over 30 days the daily points equal the raw points on each day's last point (what the browser's downsampleSeries takes).
     const rawA = await snapshotsOf(USER).listTotalsByAccount(a, since);
     const dailyA = await snapshotsOf(USER).listDailyTotalsByAccount(a, since);
     const asPoints = (rows: { takenAt: number; totalUsd: number }[]) =>
       rows.map((r) => ({ t: r.takenAt, total: r.totalUsd }));
     expect(lastPerDay(asPoints(dailyA))).toEqual(lastPerDay(asPoints(rawA)));
-    // 日点都是真实观测(每个都能在原始点里找到)。
+    // Daily points are all real observations (each found among the raw points).
     const rawSet = new Set(rawA.map((r) => `${r.takenAt}:${r.totalUsd}`));
     expect(dailyA.every((r) => rawSet.has(`${r.takenAt}:${r.totalUsd}`))).toBe(true);
 
-    // 单账户长窗(SQL 按桶封顶,FOL-92):全局最高 / 最低与原始点相同,首末点相同。
+    // Single-account long window (SQL caps per bucket): global max / min and first/last points match the raw ones.
     const sampledA = await snapshotsOf(USER).listSampledTotalsByAccount(a);
     const allA = await snapshotsOf(USER).listTotalsByAccount(a);
     const vals = (rows: { totalUsd: number }[]) => rows.map((r) => r.totalUsd);

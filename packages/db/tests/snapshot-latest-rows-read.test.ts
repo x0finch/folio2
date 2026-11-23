@@ -9,17 +9,9 @@ import { Database } from "../src/database";
 import { user } from "../src/schema/auth";
 import { forDomain } from "./effect";
 
-// `latest()` / `asOf()` 的 D1 计费回归(`rows_read`)。
+// D1 billing regression (`rows_read`) for `latest()` / `asOf()`. D1 bills by rows_read and these reads run on every page load and cron round; the old GROUP BY + max() read ~2x total snapshots. The property is that rows read depend on account count, not snapshot count, so the assertion compares two scales rather than an absolute value.
 //
-// **为什么要钉这个数**:D1 按 `rows_read` 计费(免费档每天 500 万行,超了直接报错),而这两个读
-// 每次页面加载 + 每轮 cron 两趟都要跑。旧写法是 `GROUP BY account_id` + `max(taken_at)`,SQLite
-// 得把每个账户的索引项全走一遍 → `rows_read ≈ 2 × 快照总数`,随历史线性长。要的性质是
-// **读多少行只跟账户数有关,跟攒了多少快照无关** —— 所以断言的是「两个规模下读数相同」,
-// 不是某个绝对值。
-//
-// **怎么拿到 `rows_read`**:drizzle 的 D1 驱动把 `meta` 丢了。这里不另写一份「等价 SQL」来量
-// (那份会和生产那条慢慢走样),而是给 `DbClient` 喂一个**记录型** D1 绑定:它原样转发,顺手记下
-// 每条语句的 SQL + 参数;再把记下的那条原样经裸绑定 `.all()` 重跑一遍读 `meta`。量的就是生产那条。
+// drizzle's D1 driver drops `meta`, so a recording D1 binding forwards calls, records each statement's SQL + params, and the recorded statement is re-run through the raw binding to read `meta`: it measures the production statement, not an equivalent copy.
 
 const USER = "user-rows-read";
 const ACCOUNTS = 10;
@@ -32,8 +24,7 @@ interface Recorded {
   params: unknown[];
 }
 
-// 透传的 D1 绑定:`prepare(sql)` 记 SQL,`bind(...)` 记参数,其余一律转给真绑定。
-// 方法 `.bind(target)` 回原对象 —— workerd 的绑定是原生对象,`this` 换成 Proxy 会炸。
+// Pass-through D1 binding: `prepare` records SQL, `bind` records params, the rest forwards. `.bind(target)` returns the original object because workerd bindings are native and a Proxy `this` breaks.
 function recordingD1(db: D1Database, log: Recorded[]): D1Database {
   const passthrough = <T extends object>(target: T, key: string | symbol): unknown => {
     const v = Reflect.get(target, key);
@@ -60,7 +51,7 @@ function recordingD1(db: D1Database, log: Recorded[]): D1Database {
   });
 }
 
-// 以 USER 跑一次 `pick(snapshots)`,返回它发出的**第一条**语句(快照那条;第二条是按 id 取余额)。
+// Runs `pick(snapshots)` once as USER and returns the first statement it emits (the snapshot one; the second fetches balances by id).
 async function firstStatementOf(
   pick: (s: Database["snapshots"]) => ReturnType<Database["snapshots"]["latest"]>,
 ): Promise<Recorded> {
@@ -91,8 +82,7 @@ async function queryPlan(stmt: Recorded): Promise<string[]> {
   return results.map((r) => r.detail);
 }
 
-// 每账户补到 `perAccount` 张逐小时快照(`[from, perAccount)` 这一段)。一条 INSERT … SELECT,
-// 递归 CTE 出序号 × 本用户账户 —— 6000 行一趟往返,不必在 JS 里拼几百条语句。
+// Tops each account up to `perAccount` hourly snapshots ([from, perAccount)) with one INSERT ... SELECT over a recursive CTE, so 6000 rows take one round trip.
 async function seedHourly(from: number, perAccount: number): Promise<void> {
   await env.DB.prepare(
     `INSERT INTO snapshots (id, account_id, taken_at, total_usd)
@@ -114,7 +104,7 @@ async function snapshotCount(): Promise<number> {
 
 beforeEach(async () => {
   const db = getDb(env);
-  await db.delete(user).where(eq(user.id, USER)); // 级联清掉账户 / 快照
+  await db.delete(user).where(eq(user.id, USER)); // cascades accounts / snapshots
   await db.insert(user).values({
     id: USER,
     name: USER,
@@ -128,12 +118,11 @@ beforeEach(async () => {
   }
 });
 
-describe("snapshots rows_read 不随快照总数增长", () => {
-  // 每账户一次点查 ≈ 账户行 + 索引探一下 + 取快照行 = 3 行(实测正好 `账户数 × 3`),上界留一点
-  // 常数余量。旧写法实测:latest() 2000 张读 4038、6000 张读 12038;asOf() 生产窗口读 3420。
+describe("snapshots rows_read does not grow with total snapshots", () => {
+  // One point lookup per account is ~3 rows (account row + index probe + snapshot row), measured exactly accounts x 3; the bound leaves a constant margin. Old code: latest() read 4038 at 2000 snapshots and 12038 at 6000.
   const CEILING = ACCOUNTS * 3 + 5;
 
-  it("latest():2000 与 6000 张快照读的行数相同,且 ≤ 账户数 × 3 + 常数", async () => {
+  it("latest(): 2000 and 6000 snapshots read the same row count, <= accounts x 3 + constant", async () => {
     await seedHourly(0, 200);
     expect(await snapshotCount()).toBe(2000);
     const small = await firstStatementOf((s) => s.latest());
@@ -147,12 +136,12 @@ describe("snapshots rows_read 不随快照总数增长", () => {
     expect(largeRead).toBe(smallRead);
     expect(largeRead).toBeLessThanOrEqual(CEILING);
 
-    // 计划:快照那侧是按 (account_id, taken_at) 索引的 SEARCH,不是整表 SCAN。
+    // Plan: the snapshot side is an index SEARCH on (account_id, taken_at), not a full SCAN.
     const plan = await queryPlan(large);
     expect(plan.some((d) => /SEARCH .*snapshots_account_id_taken_at_idx/.test(d))).toBe(true);
     expect(plan.some((d) => /^SCAN (snapshots|x)\b/.test(d))).toBe(false);
 
-    // 行为没变:每账户一张,且是最新那张(序号 599)。
+    // Behaviour unchanged: one per account, the latest one (index 599).
     const rows = await Effect.runPromise(
       Effect.flatMap(Database, (db) => db.snapshots.latest()).pipe(
         Effect.provide(Database.Default),
@@ -164,9 +153,8 @@ describe("snapshots rows_read 不随快照总数增长", () => {
     expect(rows.every((r) => r.snapshot.takenAt === 599 * HOUR_MS)).toBe(true);
   });
 
-  // 生产那条的形状(ADR 0050):t = 最新 −24h,floor = t −7d。旧写法的读数跟窗口里有多少张走
-  // (窗口塞满逐小时快照时实测 3420 行),新写法每账户一次点查。
-  it("asOf():生产形状的 [t−7d, t] 窗口,读数与总数无关且 ≤ 账户数 × 3 + 常数", async () => {
+  // Production shape: t = latest - 24h, floor = t - 7d. The old code's reads grew with snapshots in the window (3420 rows when full); now it's one point lookup per account.
+  it("asOf(): production-shaped [t-7d, t] window, reads independent of total and <= accounts x 3 + constant", async () => {
     const measureAt = async (top: number) => {
       const t = (top - 24) * HOUR_MS;
       const stmt = await firstStatementOf((s) => s.asOf(t, t - 7 * 24 * HOUR_MS));

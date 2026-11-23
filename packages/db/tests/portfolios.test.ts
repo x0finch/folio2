@@ -10,8 +10,7 @@ const transferOf = forDomain((db) => db.transfer);
 const accounts = forDomain((db) => db.accounts);
 const portfolios = forDomain((db) => db.portfolios);
 
-// Portfolio 地基(ADR 0033)对着真 D1 跑:唯一约束 / 部分索引 / cascade / batch 都真生效。
-// 不隔离每测存储 → beforeEach 重置用户(级联清 portfolios/portfolio_accounts)。
+// Runs on real D1: unique constraints, partial indexes, cascades and batches all take effect. Storage isn't isolated per test, so beforeEach resets users (cascade clears portfolios/portfolio_accounts).
 
 const USER_A = "user-a";
 const USER_B = "user-b";
@@ -35,7 +34,7 @@ beforeEach(async () => {
 });
 
 describe("ensureDefaultPortfolio", () => {
-  it("find-or-create:同用户反复调 → 同一行(幂等)", async () => {
+  it("find-or-create: repeated calls for one user return the same row (idempotent)", async () => {
     const p1 = await portfolios(USER_A).ensureDefault();
     const p2 = await portfolios(USER_A).ensureDefault();
     expect(p2.id).toBe(p1.id);
@@ -43,21 +42,21 @@ describe("ensureDefaultPortfolio", () => {
     expect(await portfolios(USER_A).list()).toHaveLength(1);
   });
 
-  it("名字 = `<用户名>'s`", async () => {
+  it("name = `<username>'s`", async () => {
     await resetUser(USER_A, "Alice");
     const p = await portfolios(USER_A).ensureDefault();
     expect(p.name).toBe("Alice's");
   });
 
-  it("用户名为空 → 兜底 `My Portfolio`", async () => {
+  it("an empty username falls back to `My Portfolio`", async () => {
     await resetUser(USER_A, "");
     const p = await portfolios(USER_A).ensureDefault();
     expect(p.name).toBe("My Portfolio");
   });
 
-  it("部分唯一索引:一个用户只能有一个默认 Portfolio", async () => {
+  it("partial unique index: one user can have only one default Portfolio", async () => {
     const p = await portfolios(USER_A).ensureDefault();
-    // 手动插第二个默认 → 撞 portfolios_user_default_uidx。
+    // Manually inserting a second default hits portfolios_user_default_uidx.
     await expect(
       env.DB.prepare(
         "INSERT INTO portfolios (id, user_id, name, is_default, sort_order, created_at) VALUES (?, ?, ?, 1, 0, 0)",
@@ -69,8 +68,8 @@ describe("ensureDefaultPortfolio", () => {
   });
 });
 
-describe("account ↔ portfolio 归属(每账户恰一行)", () => {
-  it("createAccount 把新账户落进默认 Portfolio", async () => {
+describe("account to portfolio membership (exactly one row per account)", () => {
+  it("createAccount puts the new account in the default Portfolio", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
@@ -81,7 +80,7 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
     expect(memberships).toEqual([{ accountId: acc.id, portfolioId: pf.id }]);
   });
 
-  it("accounts.listWithPortfolio:一条查询给出账户 + 归属(无归属行 → null,只含本人)", async () => {
+  it("accounts.listWithPortfolio: one query gives account + membership (no membership row gives null, own accounts only)", async () => {
     const acc = await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
     const loose = await accounts(USER_A).create({ connectorId: "manual", label: "L", creds: "x" });
     await accounts(USER_B).create({ connectorId: "manual", label: "B", creds: "x" });
@@ -97,11 +96,11 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
         [loose.id, null],
       ].sort(),
     );
-    // 安全列:不带 creds。
+    // Safe columns: no creds.
     expect(rows.every((r) => !("creds" in r))).toBe(true);
   });
 
-  it("importAccount(新建分支)也归属默认 Portfolio", async () => {
+  it("importAccount (new branch) also joins the default Portfolio", async () => {
     const { id, created } = await transferOf(USER_A).importAccount({
       connectorId: "manual",
       label: "Imported",
@@ -114,7 +113,7 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
     ]);
   });
 
-  it("importAccount(命中既有)不重复插归属", async () => {
+  it("importAccount (existing match) doesn't insert membership again", async () => {
     const first = await transferOf(USER_A).importAccount({
       connectorId: "manual",
       label: "Dup",
@@ -129,7 +128,7 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
     expect(await portfolios(USER_A).listMemberships()).toHaveLength(1);
   });
 
-  it("删账户 → 归属行经 cascade 清", async () => {
+  it("deleting an account clears its membership row via cascade", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
@@ -141,13 +140,13 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
     expect(await accounts(USER_A).list()).toHaveLength(0);
   });
 
-  it("一对一锁:一个账户不能归属两个 Portfolio", async () => {
+  it("one-to-one lock: an account can't belong to two Portfolios", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
       creds: "x",
     });
-    // 手动再插一行归属(不同 portfolio_id)→ 撞 portfolio_accounts_account_uidx。
+    // Manually inserting another membership (different portfolio_id) hits portfolio_accounts_account_uidx.
     await expect(
       env.DB.prepare("INSERT INTO portfolio_accounts (portfolio_id, account_id) VALUES (?, ?)")
         .bind("other-pf", acc.id)
@@ -157,17 +156,17 @@ describe("account ↔ portfolio 归属(每账户恰一行)", () => {
 });
 
 describe("createPortfolio / assignAccountToPortfolio", () => {
-  it("createPortfolio 建的是命名非默认 Portfolio;列表按创建序(不置顶默认)", async () => {
-    const def = await portfolios(USER_A).ensureDefault(); // 先建默认
+  it("createPortfolio makes a named non-default Portfolio; the list is in creation order (default not pinned first)", async () => {
+    const def = await portfolios(USER_A).ensureDefault(); // create the default first
     const watch = await portfolios(USER_A).create({ name: "Watch" });
     expect(watch.isDefault).toBe(false);
     const all = await portfolios(USER_A).list();
     expect(all).toHaveLength(2);
-    expect(all.map((p) => p.id)).toEqual([def.id, watch.id]); // 创建序:默认先建 → 在前(非因它是默认)
-    expect(all.filter((p) => p.isDefault)).toHaveLength(1); // 仍只一个默认
+    expect(all.map((p) => p.id)).toEqual([def.id, watch.id]); // creation order: default was created first, so it's first (not because it's default)
+    expect(all.filter((p) => p.isDefault)).toHaveLength(1); // still exactly one default
   });
 
-  it("assignAccountToPortfolio 一对一改归属(旧行替换,不叠加)", async () => {
+  it("assignAccountToPortfolio changes membership one-to-one (replaces the old row, doesn't stack)", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
@@ -176,32 +175,32 @@ describe("createPortfolio / assignAccountToPortfolio", () => {
     const watch = await portfolios(USER_A).create({ name: "Watch" });
     await portfolios(USER_A).assignAccount(acc.id, watch.id);
     const memberships = await portfolios(USER_A).listMemberships();
-    expect(memberships).toEqual([{ accountId: acc.id, portfolioId: watch.id }]); // 仍恰一行,指向 Watch
+    expect(memberships).toEqual([{ accountId: acc.id, portfolioId: watch.id }]); // still exactly one row, pointing at Watch
   });
 
-  it("assignAccountToPortfolio 拒绝越权(他人账户 / 他人 Portfolio)", async () => {
+  it("assignAccountToPortfolio rejects foreign ownership (another user's account / Portfolio)", async () => {
     const accA = await accounts(USER_A).create({
       connectorId: "manual",
       label: "A",
       creds: "x",
     });
     const pfB = await portfolios(USER_B).create({ name: "B's" });
-    // A 的账户移到 B 的 Portfolio → 拒。
+    // Moving A's account into B's Portfolio is rejected.
     await expect(portfolios(USER_A).assignAccount(accA.id, pfB.id)).rejects.toThrow();
-    // B 动 A 的账户 → 拒(账户 owner 断言)。
+    // B moving A's account is rejected (account owner assertion).
     await expect(portfolios(USER_B).assignAccount(accA.id, pfB.id)).rejects.toThrow();
   });
 });
 
-describe("管理:rename / setDefault / delete", () => {
-  it("renamePortfolio 改名(含默认)", async () => {
+describe("management: rename / setDefault / delete", () => {
+  it("renamePortfolio renames (including the default)", async () => {
     const def = await portfolios(USER_A).ensureDefault();
     await portfolios(USER_A).rename(def.id, "Renamed");
     const all = await portfolios(USER_A).list();
     expect(all[0]!.name).toBe("Renamed");
   });
 
-  it("setDefaultPortfolio 换默认:恰一个默认,旧默认降级", async () => {
+  it("setDefaultPortfolio switches the default: exactly one default, the old one demoted", async () => {
     const old = await portfolios(USER_A).ensureDefault();
     const watch = await portfolios(USER_A).create({ name: "Watch" });
     await portfolios(USER_A).setDefault(watch.id);
@@ -211,15 +210,15 @@ describe("管理:rename / setDefault / delete", () => {
     expect(all.find((p) => p.id === old.id)!.isDefault).toBe(false);
   });
 
-  it("deletePortfolio 拒删默认", async () => {
+  it("deletePortfolio refuses to delete the default", async () => {
     const def = await portfolios(USER_A).ensureDefault();
-    // 类型化失败,不是 defect(#527 裁定 4):陈旧页面发得出这个请求。
+    // A typed failure, not a defect: a stale page can send this request.
     await expect(portfolios(USER_A).remove(def.id)).rejects.toThrow(
       /default portfolio cannot be deleted/,
     );
   });
 
-  it("deletePortfolio 命名组:成员退回默认后删该行(账户不动)", async () => {
+  it("deletePortfolio on a named group: members return to the default, then the row is deleted (accounts untouched)", async () => {
     const def = await portfolios(USER_A).ensureDefault();
     const acc = await accounts(USER_A).create({
       connectorId: "manual",
@@ -231,7 +230,7 @@ describe("管理:rename / setDefault / delete", () => {
 
     await portfolios(USER_A).remove(watch.id);
 
-    // 组没了、账户还在、归属退回默认。
+    // The group is gone, the account remains, membership returns to the default.
     expect(await portfolios(USER_A).list()).toHaveLength(1);
     expect(await accounts(USER_A).list()).toHaveLength(1);
     expect(await portfolios(USER_A).listMemberships()).toEqual([
@@ -239,7 +238,7 @@ describe("管理:rename / setDefault / delete", () => {
     ]);
   });
 
-  it("空的命名组也能删(空组持久、只显式删)", async () => {
+  it("an empty named group can also be deleted (empty groups persist and are only deleted explicitly)", async () => {
     await portfolios(USER_A).ensureDefault();
     const empty = await portfolios(USER_A).create({ name: "Empty" });
     await portfolios(USER_A).remove(empty.id);
@@ -247,8 +246,8 @@ describe("管理:rename / setDefault / delete", () => {
   });
 });
 
-describe("listPortfolios / memberships 跨用户隔离", () => {
-  it("listPortfoliosByUser 只返回本人的", async () => {
+describe("listPortfolios / memberships isolated across users", () => {
+  it("listPortfoliosByUser returns only the caller's", async () => {
     await portfolios(USER_A).ensureDefault();
     await portfolios(USER_B).ensureDefault();
     const a = await portfolios(USER_A).list();
@@ -257,7 +256,7 @@ describe("listPortfolios / memberships 跨用户隔离", () => {
     expect(await portfolios(USER_B).list()).toHaveLength(1);
   });
 
-  it("memberships 不泄露他人账户归属", async () => {
+  it("memberships don't leak other users' account membership", async () => {
     await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
     await accounts(USER_B).create({ connectorId: "manual", label: "B", creds: "x" });
     expect(await portfolios(USER_A).listMemberships()).toHaveLength(1);
@@ -269,39 +268,41 @@ describe("listPortfolios / memberships 跨用户隔离", () => {
   });
 });
 
-// 名字唯一(#527 裁定 5)—— 与 tag 同一道题。索引本身兜并发,domain 先给出一句人话。
-describe("每用户内名字唯一", () => {
-  it("重名 → 拒;只有大小写/空格不同也算重名", async () => {
+// Names are unique (same as tags): the index guards concurrency, the domain gives a readable message first.
+describe("names unique per user", () => {
+  it("a duplicate name is rejected; differing only in case/spaces counts as a duplicate", async () => {
     await portfolios(USER_A).ensureDefault();
-    await portfolios(USER_A).create({ name: "长线仓" });
-    await expect(portfolios(USER_A).create({ name: "长线仓" })).rejects.toThrow(
+    await portfolios(USER_A).create({ name: "Long-term" });
+    await expect(portfolios(USER_A).create({ name: "Long-term" })).rejects.toThrow(
       /name already used/,
     );
-    // 两头空格也算同一个名字 —— 不然「长线仓」和「长线仓 」在屏幕上一模一样却是两行。
-    await expect(portfolios(USER_A).create({ name: "长线仓 " })).rejects.toThrow(
+    // Edge spaces count as the same name, otherwise "Long-term" and "Long-term " look identical on screen yet are two rows.
+    await expect(portfolios(USER_A).create({ name: "Long-term " })).rejects.toThrow(
       /name already used/,
     );
     await expect(portfolios(USER_A).create({ name: "Defi" })).resolves.toBeTruthy();
     await expect(portfolios(USER_A).create({ name: "DEFI" })).rejects.toThrow(/name already used/);
   });
 
-  it("唯一性是每用户的 —— 别人叫这个名字不挡我", async () => {
-    await portfolios(USER_A).create({ name: "长线仓" });
-    await expect(portfolios(USER_B).create({ name: "长线仓" })).resolves.toBeTruthy();
+  it("uniqueness is per user: another user's same name doesn't block me", async () => {
+    await portfolios(USER_A).create({ name: "Long-term" });
+    await expect(portfolios(USER_B).create({ name: "Long-term" })).resolves.toBeTruthy();
   });
 
-  it("改名撞上已有的 → 拒;改成自己现在这个名字(只动空格)→ 允许,落库时 trim", async () => {
+  it("a rename that collides is rejected; renaming to one's own current name (spaces only) is allowed, trimmed on save", async () => {
     await portfolios(USER_A).ensureDefault();
-    const a = await portfolios(USER_A).create({ name: "长线仓" });
-    await portfolios(USER_A).create({ name: "短线仓" });
-    await expect(portfolios(USER_A).rename(a.id, "短线仓")).rejects.toThrow(/name already used/);
-    await portfolios(USER_A).rename(a.id, " 长线仓 ");
-    expect((await portfolios(USER_A).list()).map((p) => p.name)).toContain("长线仓");
+    const a = await portfolios(USER_A).create({ name: "Long-term" });
+    await portfolios(USER_A).create({ name: "Short-term" });
+    await expect(portfolios(USER_A).rename(a.id, "Short-term")).rejects.toThrow(
+      /name already used/,
+    );
+    await portfolios(USER_A).rename(a.id, " Long-term ");
+    expect((await portfolios(USER_A).list()).map((p) => p.name)).toContain("Long-term");
   });
 
-  it("默认那个的名字被占了也照样建得出来 —— 首次打开应用不该 die", async () => {
-    // 罕见但够得着:一个命名 Portfolio 恰好叫 `<用户名>'s`,而这个用户还没有默认那行。
-    // 默认名不是用户当场输入的,没有「换一个」可走,所以它自己找一个空闲名。
+  it("the default's name being taken still creates it: first app open must not die", async () => {
+    // Rare but reachable: a named Portfolio is literally called `<username>'s`, and this user has no default row yet.
+    // The default name isn't typed by the user, so there's no "pick another"; it finds a free name itself.
     await portfolios(USER_A).create({ name: `${USER_A}'s` });
     const def = await portfolios(USER_A).ensureDefault();
     expect(def.isDefault).toBe(true);

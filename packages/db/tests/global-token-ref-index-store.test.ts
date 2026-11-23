@@ -7,19 +7,16 @@ import { diffRefIndexPage, type RefIndexRow, refKey } from "../src/domains/globa
 import { globalTokenRefIndex } from "../src/schema";
 import { forGlobal } from "./effect";
 
-// `global_token_ref_index` 的真 D1 测试(ADR 0022,#199 / #228 / #FOL-68)。
-// 这张表**没有 userId** —— 里面一条用户数据都没有,全是上游的公开知识(原则 #6 的受控例外)。
-// 表里两条 ref:chain_ref(链上寻址)+ upstream ref(上游命名,拆成 upstream/upstream_local_name 两列)。
+// Real-D1 tests for `global_token_ref_index`. No userId: no user data, only public upstream knowledge (a controlled exception to user scoping). Two refs per row: chain_ref and the upstream ref (split into upstream / upstream_local_name).
 //
-// #FOL-68 起 `putAll` 是**差量写**:与上游全集比对,只落真变了的行(改名/新增/下架),稳态写入 ≈ 0。
-// 下面「差量写」一节钉住这个行为,其余仍验读路径(lookup / 归一)不受影响。
+// `putAll` writes diffs: compared with the upstream full set, only really changed rows (rename / add / delist) are written, so steady state is ~0 writes. The "diff write" section pins this; the rest verify the read path.
 
 const CGK = "coingecko";
 const CMC = "coinmarketcap";
 const USDC_ETH = "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48";
 const USDC_SOL = "solana/contract:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
-// 上游整条 ref(#228:表存 / lookup 返回的都是整条,不是裸 id)。
+// The whole upstream ref (the table stores and lookup returns the whole ref, not a bare id).
 const cgk = (id: string) => tokenRef.issued(CGK, id);
 const cmc = (id: string) => tokenRef.issued(CMC, id);
 
@@ -27,14 +24,13 @@ beforeEach(async () => {
   await getDb(env).delete(globalTokenRefIndex);
 });
 
-// 生产那条路(`GlobalDatabase` → 这个字段);把手只是让用例照旧 `await s.xxx(…)`。
-// 全局表不按用户隔离(ADR 0022),所以这条路上**根本没有** `CurrentUser` 可给。
+// The production path (`GlobalDatabase`); the handle just lets cases `await s.xxx(...)`. The global table isn't user-scoped, so there is no `CurrentUser` to give.
 const store = forGlobal((db) => db.refIndex);
 
 const rowCount = async () => (await getDb(env).select().from(globalTokenRefIndex)).length;
 
-describe("整份灌 + 正查", () => {
-  it("灌进去,按 (upstream, chainRef) 点查得回**整条** upstream ref;miss 的键不出现", async () => {
+describe("full load + forward lookup", () => {
+  it("after loading, a lookup by (upstream, chainRef) returns the whole upstream ref; missed keys don't appear", async () => {
     const s = store();
     await s.putAll(
       [
@@ -50,33 +46,33 @@ describe("整份灌 + 正查", () => {
     expect(got.size).toBe(2);
   });
 
-  // 验收(#228):upstream_local_name 存的是 tokenRef 的 localName **规范形**(issued:usd-coin),不是裸 id。
-  it("落表:拆成 (upstream, upstream_local_name),后者是规范形不是裸 id", async () => {
+  // upstream_local_name stores the canonical form of the tokenRef's localName (issued:usd-coin), not a bare id.
+  it("stored as (upstream, upstream_local_name), the latter canonical not a bare id", async () => {
     const s = store();
     await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cgk("usd-coin") }], 1000);
     const [row] = await getDb(env).select().from(globalTokenRefIndex);
     expect(row.chainRef).toBe(USDC_ETH);
     expect(row.upstream).toBe(CGK);
-    expect(row.upstreamLocalName).toBe("issued:usd-coin"); // ← 不是裸 "usd-coin"
+    expect(row.upstreamLocalName).toBe("issued:usd-coin"); // not the bare "usd-coin"
   });
 
-  it("查另一个上游查不到 —— 主键带 upstream,两家各成一套", async () => {
+  it("another upstream finds nothing: the primary key includes upstream, so each has its own set", async () => {
     const s = store();
     await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cgk("usd-coin") }], 1000);
     expect((await s.lookup(CMC, [USDC_ETH])).size).toBe(0);
   });
 
-  it("同一个地址可以同时有两家的叫法,刷一家不动另一家", async () => {
+  it("one address can carry both upstreams' names; refreshing one leaves the other", async () => {
     const s = store();
     await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cgk("usd-coin") }], 1000);
-    // 刷 CMC(差量按 upstream 作用域):CGK 那行一条都不该被扫到、更不该被删。
+    // Refreshing CMC (diff scoped by upstream): no CGK row may be scanned, let alone deleted.
     const counts = await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cmc("3408") }], 1000);
     expect(counts).toEqual({ updated: 0, inserted: 1, deleted: 0 });
     expect((await s.lookup(CGK, [USDC_ETH])).get(USDC_ETH)).toBe(cgk("usd-coin"));
     expect((await s.lookup(CMC, [USDC_ETH])).get(USDC_ETH)).toBe(cmc("3408"));
   });
 
-  it("空输入不查库、空行不写", async () => {
+  it("empty input doesn't query, empty rows aren't written", async () => {
     const s = store();
     expect((await s.lookup(CGK, [])).size).toBe(0);
     expect(await s.putAll([], 1000)).toEqual({ updated: 0, inserted: 0, deleted: 0 });
@@ -84,18 +80,18 @@ describe("整份灌 + 正查", () => {
   });
 });
 
-describe("查之前先归一", () => {
-  // 表里 chain_ref 存的是规范形(灌表时经文法构造)。调用方给的串大小写可能不同 —— 不归一就查不到。
-  it("EVM 地址大小写不影响命中,返回的键是调用方原样给的那个串", async () => {
+describe("normalised before lookup", () => {
+  // chain_ref is stored in canonical form; callers' strings may differ in case and would miss without normalising.
+  it("EVM address case doesn't affect hits; the returned key is the caller's original string", async () => {
     const s = store();
     await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cgk("usd-coin") }], 1000);
     const upper = "EVM:1/contract:0xA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48";
     const got = await s.lookup(CGK, [upper]);
-    // 键必须是入参那个串 —— 调用方拿它去 .get()。
+    // The key must be the input string: callers use it for .get().
     expect(got.get(upper)).toBe(cgk("usd-coin"));
   });
 
-  it("读不懂的串不查、不抛", async () => {
+  it("unparseable strings are neither queried nor thrown", async () => {
     const s = store();
     await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cgk("usd-coin") }], 1000);
     const got = await s.lookup(CGK, ["nonsense", "a/b/c", USDC_ETH]);
@@ -104,20 +100,20 @@ describe("查之前先归一", () => {
   });
 });
 
-describe("差量写(#FOL-68)", () => {
+describe("diff write", () => {
   const ethRow = { chainRef: USDC_ETH, upstreamRef: cgk("usd-coin") };
   const solRow = { chainRef: USDC_SOL, upstreamRef: cgk("usd-coin") };
 
-  it("库已是上游全集 → 再刷一次 0 写(省额度的核心)", async () => {
+  it("when the db already holds the upstream full set, refreshing again writes 0 (the quota saver)", async () => {
     const s = store();
     await s.putAll([ethRow, solRow], 1000);
     const counts = await s.putAll([ethRow, solRow], 2000);
     expect(counts).toEqual({ updated: 0, inserted: 0, deleted: 0 });
-    // 一字没写 → updated_at 也不动,还是首刷那轮的 1000。
+    // Nothing written, so updated_at stays at the first refresh's 1000.
     expect(await s.refreshedAt(CGK)).toEqual(Option.some(1000));
   });
 
-  it("改了叫法 → 只 update 那一行", async () => {
+  it("a renamed ref updates only that row", async () => {
     const s = store();
     await s.putAll([ethRow], 1000);
     const counts = await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cgk("usd-coin-v2") }], 2000);
@@ -127,7 +123,7 @@ describe("差量写(#FOL-68)", () => {
     expect(await s.refreshedAt(CGK)).toEqual(Option.some(2000));
   });
 
-  it("上游新增 → insert 新行,旧行不动", async () => {
+  it("a new upstream entry inserts a new row, the old row untouched", async () => {
     const s = store();
     await s.putAll([ethRow], 1000);
     const counts = await s.putAll([ethRow, solRow], 2000);
@@ -135,10 +131,10 @@ describe("差量写(#FOL-68)", () => {
     expect(await rowCount()).toBe(2);
   });
 
-  it("上游下架 → delete 那一行(ADR 0022 改为差量删)", async () => {
+  it("a delisted upstream entry deletes that row", async () => {
     const s = store();
     await s.putAll([ethRow, solRow], 1000);
-    // 这轮上游只剩 ETH,SOL 已下架。
+    // This round upstream only has ETH; SOL is delisted.
     const counts = await s.putAll([ethRow], 2000);
     expect(counts).toEqual({ updated: 0, inserted: 0, deleted: 1 });
     expect(await rowCount()).toBe(1);
@@ -146,7 +142,7 @@ describe("差量写(#FOL-68)", () => {
     expect((await s.lookup(CGK, [USDC_ETH])).get(USDC_ETH)).toBe(cgk("usd-coin"));
   });
 
-  it("改+增+删 一轮里同时发生,计数各就各位", async () => {
+  it("rename + add + delist in one round: counts line up", async () => {
     const s = store();
     const A = "evm:1/contract:0x000000000000000000000000000000000000000a";
     const B = "evm:1/contract:0x000000000000000000000000000000000000000b";
@@ -158,7 +154,7 @@ describe("差量写(#FOL-68)", () => {
       ],
       1000,
     );
-    // A 改名、B 下架、C 新增。
+    // A renamed, B delisted, C added.
     const counts = await s.putAll(
       [
         { chainRef: A, upstreamRef: cgk("a2") },
@@ -172,28 +168,28 @@ describe("差量写(#FOL-68)", () => {
     expect((await s.lookup(CGK, [C])).get(C)).toBe(cgk("c"));
   });
 
-  it("**空上游全集绝不清表**:可疑的空响应当 no-op,库原样保留", async () => {
+  it("**an empty upstream full set never clears the table**: a suspicious empty response is a no-op", async () => {
     const s = store();
     await s.putAll([ethRow, solRow], 1000);
     const counts = await s.putAll([], 2000);
     expect(counts).toEqual({ updated: 0, inserted: 0, deleted: 0 });
-    expect(await rowCount()).toBe(2); // 没被清
+    expect(await rowCount()).toBe(2); // not cleared
   });
 
-  it("删除按 upstream 作用域:刷 CGK 不碰 CMC 的行", async () => {
+  it("deletes are scoped by upstream: refreshing CGK doesn't touch CMC rows", async () => {
     const s = store();
     await s.putAll([ethRow], 1000); // CGK
-    await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cmc("3408") }], 1000); // CMC 另立一套
-    // 再刷 CGK,且这轮 CGK 全下架(空的 CGK 全集但非空 payload)—— 只应删 CGK 那条,CMC 保留。
+    await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cmc("3408") }], 1000); // CMC has its own set
+    // Refresh CGK again with CGK fully delisted (empty CGK set but non-empty payload): only the CGK row goes, CMC stays.
     const counts = await s.putAll([{ chainRef: USDC_SOL, upstreamRef: cgk("usd-coin") }], 2000);
-    expect(counts).toEqual({ updated: 0, inserted: 1, deleted: 1 }); // 删 ETH@CGK、增 SOL@CGK
-    expect((await s.lookup(CMC, [USDC_ETH])).get(USDC_ETH)).toBe(cmc("3408")); // CMC 没被动
-    expect((await s.lookup(CGK, [USDC_ETH])).size).toBe(0); // CGK 的 ETH 下架了
+    expect(counts).toEqual({ updated: 0, inserted: 1, deleted: 1 }); // delete ETH@CGK, add SOL@CGK
+    expect((await s.lookup(CMC, [USDC_ETH])).get(USDC_ETH)).toBe(cmc("3408")); // CMC untouched
+    expect((await s.lookup(CGK, [USDC_ETH])).size).toBe(0); // CGK's ETH is delisted
   });
 
-  it("跨 keyset 分页(>5000 行):游标不漏行,末页的改动照样落库", async () => {
+  it("keyset pagination across pages (>5000 rows): the cursor misses no rows and the last page's changes are persisted", async () => {
     const s = store();
-    const N = 5001; // > PAGE_ROWS(5000),强制两页
+    const N = 5001; // > PAGE_ROWS (5000): forces two pages
     const chainRef = (i: number) => `evm:1/contract:0x${i.toString(16).padStart(40, "0")}`;
     const first = Array.from({ length: N }, (_, i) => ({
       chainRef: chainRef(i),
@@ -203,7 +199,7 @@ describe("差量写(#FOL-68)", () => {
     expect(ins).toEqual({ updated: 0, inserted: N, deleted: 0 });
     expect(await rowCount()).toBe(N);
 
-    // 改末行(排序后大概率落在第 2 页)、删首行,其余原样。
+    // Change the last row (likely on page 2 after sorting) and delete the first; the rest are unchanged.
     const last = first.length - 1;
     const second = first
       .filter((_, i) => i !== 0)
@@ -211,32 +207,31 @@ describe("差量写(#FOL-68)", () => {
     const counts = await s.putAll(second, 2000);
     expect(counts).toEqual({ updated: 1, inserted: 0, deleted: 1 });
     expect(await rowCount()).toBe(N - 1);
-    expect((await s.lookup(CGK, [chainRef(0)])).size).toBe(0); // 首行删了
+    expect((await s.lookup(CGK, [chainRef(0)])).size).toBe(0); // first row deleted
     expect((await s.lookup(CGK, [chainRef(last)])).get(chainRef(last))).toBe(cgk("changed"));
   });
 });
 
-describe("刷新时刻", () => {
-  it("从未刷过 → null;刷过 → 该上游行里最大的 updated_at(只随真变动推进)", async () => {
+describe("refresh time", () => {
+  it("null if never refreshed; once refreshed, the max updated_at among that upstream's rows (advances only on real changes)", async () => {
     const s = store();
     expect(await s.refreshedAt(CGK)).toEqual(Option.none());
 
     await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cgk("usd-coin") }], 1000);
     expect(await s.refreshedAt(CGK)).toEqual(Option.some(1000));
-    expect(await s.refreshedAt(CMC)).toEqual(Option.none()); // 另一家还没刷过
+    expect(await s.refreshedAt(CMC)).toEqual(Option.none()); // the other upstream was never refreshed
 
-    // 同一份全集再刷:0 写 → 时刻不动(#FOL-68 语义:漂成「上次有变更的时间」)。
+    // Refreshing the same full set again: 0 writes, so the time doesn't move (it drifts to "last time anything changed").
     await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cgk("usd-coin") }], 5000);
     expect(await s.refreshedAt(CGK)).toEqual(Option.some(1000));
 
-    // 有真变动才推进。
+    // Only a real change advances it.
     await s.putAll([{ chainRef: USDC_ETH, upstreamRef: cgk("usd-coin-v2") }], 9000);
     expect(await s.refreshedAt(CGK)).toEqual(Option.some(9000));
   });
 });
 
-// —— 差量核心的纯函数单测(零 I/O,四类边界)——
-describe("diffRefIndexPage(纯函数)", () => {
+describe("diffRefIndexPage (pure function)", () => {
   const row = (chainRef: string, name: string): RefIndexRow => ({
     chainRef,
     upstream: CGK,
@@ -245,14 +240,14 @@ describe("diffRefIndexPage(纯函数)", () => {
   const expectedOf = (rows: RefIndexRow[]) =>
     new Map(rows.map((r) => [refKey(r.chainRef, r.upstream), r]));
 
-  it("完全相同 → 空输出,且期望全被消费(剩下的才是新增)", () => {
+  it("identical: empty output, and all expectations consumed (what's left is the additions)", () => {
     const expected = expectedOf([row("a", "issued:a"), row("b", "issued:b")]);
     const page = [row("a", "issued:a"), row("b", "issued:b")];
     expect(diffRefIndexPage(expected, page)).toEqual({ updates: [], deletes: [] });
-    expect(expected.size).toBe(0); // 全命中 → 无新增
+    expect(expected.size).toBe(0); // all hit, no additions
   });
 
-  it("叫法变了 → 1 update(收的是期望那条)", () => {
+  it("a renamed ref: 1 update (carrying the expected one)", () => {
     const expected = expectedOf([row("a", "issued:a-new")]);
     const page = [row("a", "issued:a-old")];
     const diff = diffRefIndexPage(expected, page);
@@ -261,7 +256,7 @@ describe("diffRefIndexPage(纯函数)", () => {
     expect(expected.size).toBe(0);
   });
 
-  it("库有、期望无 → 1 delete", () => {
+  it("in the db but not expected: 1 delete", () => {
     const expected = expectedOf([]);
     const page = [row("a", "issued:a")];
     expect(diffRefIndexPage(expected, page)).toEqual({
@@ -270,11 +265,11 @@ describe("diffRefIndexPage(纯函数)", () => {
     });
   });
 
-  it("期望有、库无 → 不在这页产出,留在 expected 里(调用方扫完后 insert)", () => {
+  it("expected but not in the db: not emitted on this page, left in expected (the caller inserts after the scan)", () => {
     const expected = expectedOf([row("a", "issued:a"), row("b", "issued:b")]);
-    const page = [row("a", "issued:a")]; // 只有 a 在库里
+    const page = [row("a", "issued:a")]; // only a is in the db
     const diff = diffRefIndexPage(expected, page);
     expect(diff).toEqual({ updates: [], deletes: [] });
-    expect([...expected.values()]).toEqual([row("b", "issued:b")]); // b 是新增
+    expect([...expected.values()]).toEqual([row("b", "issued:b")]); // b is an addition
   });
 });
