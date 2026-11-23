@@ -1,8 +1,7 @@
-// 设置页 passkey 列表的展示辅助:认证器友好名(aaguid → 名字)+ 类型/同步类别。
-// aaguid 映射数据取自 @better-auth/passkey 的 commonAuthenticatorNames —— 该导出在服务端 index,
-// 前端直接 import 会把 SimpleWebAuthn 等服务端依赖一并打进 bundle,故这里复制这张纯数据表。见 ADR 0028。
+// Copied from @better-auth/passkey's commonAuthenticatorNames: that export lives in the server
+// entry, and importing it would bundle SimpleWebAuthn into the client.
 
-// 认证器不透露型号时用的全零 aaguid → 视作「无名字」。
+// All-zero aaguid = the authenticator doesn't disclose its model.
 const ANONYMOUS_AAGUID = "00000000-0000-0000-0000-000000000000";
 
 const COMMON_AUTHENTICATOR_NAMES: Record<string, string> = {
@@ -22,14 +21,12 @@ const COMMON_AUTHENTICATOR_NAMES: Record<string, string> = {
   "53414d53-554e-4700-0000-000000000000": "Samsung Pass",
 };
 
-// aaguid → 友好名;无 / 全零 / 未知型号 → undefined(调用方回退到用户命名或通用「Passkey」)。
 export function getAuthenticatorName(aaguid?: string | null): string | undefined {
   const normalized = aaguid?.trim().toLowerCase();
   if (!normalized || normalized === ANONYMOUS_AAGUID) return undefined;
   return COMMON_AUTHENTICATOR_NAMES[normalized];
 }
 
-// passkey 的类型/同步类别 —— 从 transports + backedUp 推断,给一个稳定 kind 供 i18n 取标签。
 export type PasskeyKind = "synced" | "platform" | "security-key" | "cross-device" | "unknown";
 
 export function passkeyKind(pk: {
@@ -37,20 +34,17 @@ export function passkeyKind(pk: {
   transports?: string | null;
 }): PasskeyKind {
   const transports = pk.transports?.split(",").map((s) => s.trim()) ?? [];
-  // 硬件安全钥匙(明确的物理认证器)优先判。
   if (transports.includes("usb") || transports.includes("nfc") || transports.includes("ble")) {
     return "security-key";
   }
-  // 云同步的 passkey(iCloud 钥匙串 / Google 密码管理器等)—— 最有用的一条信息。
   if (pk.backedUp) return "synced";
-  if (transports.includes("hybrid")) return "cross-device"; // 扫码跨设备用过
-  if (transports.includes("internal")) return "platform"; // 本机生物识别,未同步
+  if (transports.includes("hybrid")) return "cross-device";
+  if (transports.includes("internal")) return "platform";
   return "unknown";
 }
 
-// 注册 passkey 时用当前浏览器/系统生成默认名(如「Chrome on macOS」)存进 name,供列表识别 —— passkey
-// 自身不带浏览器信息(见 ADR 0028),name 是「添加时这台」的准确快照,用户可随后改名。粗解析 UA 够用;
-// 判定顺序有讲究:Chrome 的 UA 含 "Safari"、Edge 的含 "Chrome",故更具体的排前面。
+// Default name stored at registration (passkeys carry no browser info). Order matters: Chrome's UA
+// contains "Safari" and Edge's contains "Chrome", so the more specific checks come first.
 export function detectDeviceLabel(ua: string): string {
   const os = /iPhone|iPad|iPod/.test(ua)
     ? "iOS"
@@ -75,5 +69,5 @@ export function detectDeviceLabel(ua: string): string {
             ? "Safari"
             : null;
   if (browser && os) return `${browser} on ${os}`;
-  return browser ?? os ?? "Passkey"; // 都识别不出时的兜底默认名
+  return browser ?? os ?? "Passkey";
 }

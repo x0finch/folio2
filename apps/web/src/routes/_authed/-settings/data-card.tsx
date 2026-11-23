@@ -15,8 +15,7 @@ import { invalidateFor } from "@/lib/queries/refresh";
 import { dataStatsQuery } from "@/lib/queries/settings";
 import type { ImportCounts } from "@/lib/server/io/import-data";
 
-// 数据卡(合一):导出段 + 分隔线 + 导入段。复用现有 /api/export、/api/import 路由。
-// 导入文案沿用 Accounts 命名空间的 import* 键(与账户页导入同源)。
+// Import copy reuses the Accounts namespace's import* keys.
 export function DataCard() {
   const queryClient = useQueryClient();
   const t = useTranslations("Settings");
@@ -24,20 +23,16 @@ export function DataCard() {
   const tc = useTranslations("Common");
   const inputRef = useRef<HTMLInputElement>(null);
   const statsQuery = useQuery(dataStatsQuery());
-  // 非空库导入是合并式(幂等,不翻倍),但先弹一道确认 —— 让用户明确知道是「并进已有数据」。
-  // 统计还没到或失败:按「库可能非空」多问一次,不要在未知时直接写入。
+  // Importing into a non-empty library merges, so confirm first; unknown stats count as non-empty.
   const [pendingFile, setPendingFile] = useState<File | null>(null);
 
   function clearInput() {
     if (inputRef.current) inputRef.current.value = "";
   }
 
-  // 导入是「选了文件才发生一次的写」——用 useMutation 而非手搓 msg/error/busy 三个 state:
-  // isPending 是单一事实源(直接接到 input/按钮的 disabled 上),连点两次也只跑一个;
-  // 成功/失败各自的文案直接读 data/error,后回来的请求不会覆写前一条的状态(#241)。
   const importMutation = useMutation({
     mutationFn: importData,
-    // 导入什么都可能变(账户 / 快照 / 标签 / 组合);流式写入中途失败也可能已落部分行,成败都刷。
+    // A streamed import can partially land even on failure, so refresh either way.
     onSettled: () => {
       clearInput();
       invalidateFor(queryClient, "settings.data");
@@ -138,8 +133,7 @@ export function DataCard() {
   );
 }
 
-// 走 `/api/import` 而不是 server function:传的是文件本体,二进制塞进 server fn 得先 base64。
-// 失败把服务端纯文本错误原样抛出,不在这里重试。
+// A route, not a server fn: a server fn would need the file base64-encoded.
 async function importData(file: File): Promise<{ imported: ImportCounts }> {
   const res = await fetch("/api/import", { method: "POST", body: file });
   if (!res.ok) throw new Error(await res.text());

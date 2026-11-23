@@ -29,9 +29,7 @@ const KIND_COPY = {
   unknown: null,
 } as const satisfies Record<PasskeyKind, string | null>;
 
-// Passkey 卡(#283 注册 + #284 管理):用 Face ID / Touch ID / 安全钥匙登录(首因子,与密码并列)。
-// 仅浏览器支持 WebAuthn 时露入口。列表 / 重命名 / 删除全走 authClient.passkey.*(client 处理 WebAuthn
-// ceremony,非 server fn);删除带二次确认。删光不影响密码登录,故无「至少留一个」下限。见 ADR 0028。
+// Deleting every passkey is allowed: password sign-in is unaffected.
 export function PasskeysCard() {
   const t = useTranslations("Settings");
   const locale = useLocale();
@@ -41,7 +39,6 @@ export function PasskeysCard() {
   const [adding, setAdding] = useState(false);
   const { credentialId: deviceCredentialId, clearReady } = useLockDevice();
 
-  // 列表用 useQuery;supported 为真才拉。data undefined=加载中、[]=空。
   const passkeysQuery = useQuery<PasskeyRow[]>({
     queryKey: ["passkeys"],
     queryFn: async () => (await authClient.passkey.listUserPasskeys()).data ?? [],
@@ -53,7 +50,7 @@ export function PasskeysCard() {
     setAdding(true);
     try {
       let res = await registerPasskey();
-      // session 过了新鲜期 → 验证一次刷新它,再重试注册。账户里一条 passkey 都没有时验证注定不成。
+      // Stale session: verifying refreshes it, then retry. Can't succeed with zero passkeys.
       if (errorCode(res?.error) === SESSION_NOT_FRESH) {
         const asserted = await signIn.passkey();
         if (!asserted?.data) {
@@ -86,7 +83,7 @@ export function PasskeysCard() {
     }
     toast.success(t("passkeyRemoved"));
     await passkeysQuery.refetch();
-    // 删掉的正是本机那条 → 清掉本机标记。锁不跟着关。
+    // Removing this device's credential clears the marker only; the lock stays on.
     if (pk.credentialID === deviceCredentialId) clearReady();
   }
 
@@ -149,7 +146,6 @@ function PasskeysSupported({
   onRenamed: () => Promise<unknown>;
 }) {
   const t = useTranslations("Settings");
-  // SharedLayoutBg:hover 时 bg-muted pill 滑到当前行。inset=0 让 pill 贴合行宽。
   const list =
     passkeys && passkeys.length > 0 ? (
       <SharedLayoutBg className="gap-1" inset={0} pillClassName="rounded-lg bg-muted">
@@ -281,7 +277,7 @@ function RemovePasskeyModal({
   );
 }
 
-// 浏览器是否支持 WebAuthn。SSR / hydration：render 期恒 false，挂载后才可能置真。
+// False during SSR/hydration; may flip true after mount.
 function usePasskeySupport(): boolean {
   const [supported, setSupported] = useState(false);
   useEffect(() => {

@@ -7,8 +7,7 @@ import { updateValuationSettings } from "@/lib/server/settings";
 
 const KEEP_TRYING = { retry: true as const };
 
-// 估值模式(Phase 3,#82):勾选 = source-first(统一采用市场源价);不勾 = self-first(默认)。
-// 切换即写 user_settings + invalidate → 主页/图表现推立即改(历史冻结,无需重 sync)。
+// Checked = source-first, unchecked = self-first (default). Past snapshots stay frozen.
 export function ValuationCard() {
   const queryClient = useQueryClient();
   const t = useTranslations("Settings");
