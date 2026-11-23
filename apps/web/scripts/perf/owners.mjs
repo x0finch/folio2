@@ -1,17 +1,12 @@
-// 采样帧 → 「这毫秒是谁的」。
-//
-// 不按 chunk 文件名猜(`Effect-DrAECYHU.js` 的散列每次构建都变,`format-number-*.js` 这种名字
-// 只是 rolldown 挑的第一个模块,里面装的是一堆别的):服务端构建产物没压缩,rolldown 给每个
-// 源模块留了 `//#region <源路径>` … `//#endregion` 注释。按帧的行号落进哪个 region,就知道它
-// 来自哪个源文件、哪个包 —— 构建怎么切 chunk 都不影响归属。
+// Sampled frame to "whose millisecond is this". Not guessed from chunk file names (hashes change per build and names like `format-number-*.js` are just rolldown's first module): the unminified server build keeps `//#region <source path>` ... `//#endregion` comments per source module, so a frame's line number lands in a region and gives its source file and package regardless of chunking.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { DIST_SERVER_DIR, WEB_ROOT } from "./constants.mjs";
 
-/** V8 的伪帧:不是 JS 在跑。`(program)` 是 V8 说不清归谁的原生时间,最初那轮测量的口径也不计入。 */
+/** V8 pseudo-frames, not JS running. `(program)` is native time V8 can't attribute, excluded from the original measurements too. */
 export const NON_CPU_FRAMES = new Set(["(idle)", "(program)", "(root)"]);
 
-// 包名 → 归属组。只列真正值得单独看的;其余第三方包按包名自成一组(见 classifyModule)。
+// Package to owner group; only the ones worth seeing alone are listed, other third-party packages form a group by package name (see classifyModule).
 const PACKAGE_GROUPS = [
   [/^effect$|^@effect\//, "Effect"],
   [/^@tanstack\/(react-start|start-)/, "TanStack Start"],
@@ -27,7 +22,7 @@ const PACKAGE_GROUPS = [
   [/^unenv$|^@cloudflare\/unenv-preset$/, "workerd built-ins"],
 ];
 
-// 不带文件路径的帧(workerd 内部模块 / V8 原生)。
+// Frames without a file path (workerd internals / V8 native).
 const URL_GROUPS = [
   [/^cloudflare-internal:d1-api$/, "D1 driver"],
   [/^(cloudflare-internal|cloudflare|node-internal|node|workerd):/, "workerd built-ins"],
@@ -35,7 +30,7 @@ const URL_GROUPS = [
 
 const PNPM_PKG = /node_modules\/\.pnpm\/[^/]+\/node_modules\/((?:@[^/]+\/)?[^/]+)\//;
 
-/** 源路径(相对 apps/web)→ 所在 workspace 包名;读最近的 package.json,缓存住。 */
+/** Source path (relative to apps/web) to its workspace package name; reads the nearest package.json, cached. */
 const workspaceNameCache = new Map();
 function workspacePackageOf(sourcePath) {
   let dir = dirname(resolve(WEB_ROOT, sourcePath));
@@ -52,9 +47,9 @@ function workspacePackageOf(sourcePath) {
   return sourcePath;
 }
 
-/** 一个源模块路径 → { pkg, group }。 */
+/** A source module path to { pkg, group }. */
 function classifyModule(sourcePath) {
-  // 虚拟模块:rolldown 把前缀的 NUL 字面写成两个字符 `\0`。
+  // Virtual modules: rolldown writes the prefix NUL as the two characters `\0`.
   if (sourcePath.startsWith("\\0") || sourcePath.startsWith("__vite")) {
     if (sourcePath.includes("tanstack-start")) return { pkg: sourcePath, group: "TanStack Start" };
     if (sourcePath.includes("cloudflare")) return { pkg: sourcePath, group: "workerd built-ins" };
@@ -66,14 +61,11 @@ function classifyModule(sourcePath) {
     const hit = PACKAGE_GROUPS.find(([re]) => re.test(pkg));
     return { pkg, group: hit ? hit[1] : `vendor: ${pkg}` };
   }
-  // 不在 node_modules 里 → 本仓代码(apps/web/src 或 packages/*)。
+  // Not under node_modules: this repo's code (apps/web/src or packages/*).
   return { pkg: workspacePackageOf(sourcePath), group: "app code (@folio/*)" };
 }
 
-/**
- * 一个 chunk 的 region 表:按行号升序的 [startLine, endLine, sourcePath]。
- * 行号从 0 起,与 CDP 的 callFrame.lineNumber 一致。
- */
+/** One chunk's region table: [startLine, endLine, sourcePath] ascending by line, 0-based like CDP's callFrame.lineNumber. */
 const regionCache = new Map();
 function regionsOf(url) {
   if (regionCache.has(url)) return regionCache.get(url);
@@ -95,10 +87,7 @@ function regionsOf(url) {
   return regions;
 }
 
-/**
- * 构建产物里全部 chunk 的 region 表 —— perf:cpu:jobs 把它存进输出目录(`regions.json`),
- * `perf:cpu:analyze` 读回来:profile 里的行号只对产出它的那次构建有效,`dist/` 一重建就对不上了。
- */
+/** Region tables of every chunk in the build. perf:cpu:jobs stores them in the output dir (`regions.json`) for `perf:cpu:analyze`: line numbers are valid only for the build that produced the profile, and rebuilding `dist/` invalidates them. */
 export function snapshotRegions() {
   const dir = join(DIST_SERVER_DIR, "assets");
   const out = {};
@@ -111,7 +100,7 @@ export function snapshotRegions() {
   return out;
 }
 
-/** 用存下来的 region 表代替当前 `dist/`(见 `snapshotRegions`)。 */
+/** Uses a stored region table instead of the current `dist/` (see `snapshotRegions`). */
 export function loadRegions(snapshot) {
   regionCache.clear();
   for (const [url, regions] of Object.entries(snapshot)) regionCache.set(url, regions);
@@ -131,9 +120,7 @@ function regionAt(url, line) {
   return undefined;
 }
 
-/**
- * 一个 CDP callFrame → { group, pkg, module }。group 是报表里那一列;pkg/module 进 JSON 明细。
- */
+/** A CDP callFrame to { group, pkg, module }: group is the report column, pkg/module go into the JSON detail. */
 export function ownerOf(callFrame) {
   const { url, lineNumber, functionName } = callFrame;
   if (!url) {
