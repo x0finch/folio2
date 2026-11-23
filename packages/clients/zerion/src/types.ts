@@ -1,15 +1,14 @@
 import { maybe } from "@folio/client-core";
 import { Schema } from "effect";
 
-// Zerion 响应的**最小形状**(仅取用到的字段)。字段一个没动 —— 换的是「谁说了算」:
-// 以前是 `interface` + 一次 `as`,现在是 schema,类型从它推出来。
+// Minimal shape of the Zerion response (only the fields used). Types derive from the schema.
 
 export const ZerionQuantity = Schema.Struct({ float: maybe(Schema.Number) });
 export type ZerionQuantity = typeof ZerionQuantity.Type;
 
 export const ZerionImplementation = Schema.Struct({
   chain_id: maybe(Schema.String),
-  address: Schema.optional(Schema.NullOr(Schema.String)), // 原生币为 null
+  address: Schema.optional(Schema.NullOr(Schema.String)), // null for native coins
 });
 export type ZerionImplementation = typeof ZerionImplementation.Type;
 
@@ -44,8 +43,8 @@ export const ZerionPositionsResponse = Schema.Struct({ data: maybe(Schema.Array(
 export type ZerionPositionsResponse = typeof ZerionPositionsResponse.Type;
 
 export const ZerionChain = Schema.Struct({
-  id: maybe(Schema.String), // slug(与 positions 的 relationships.chain 同口径)
-  attributes: maybe(Schema.Struct({ external_id: maybe(Schema.String) })), // hex 数字 chainId(如 "0x1")—— 只在此端点给
+  id: maybe(Schema.String), // slug (same convention as positions' relationships.chain)
+  attributes: maybe(Schema.Struct({ external_id: maybe(Schema.String) })), // hex chainId (e.g. "0x1"), given only by this endpoint
 });
 export type ZerionChain = typeof ZerionChain.Type;
 
