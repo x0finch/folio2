@@ -7,14 +7,8 @@ import { messages } from "@/lib/i18n/messages";
 import type { AccountHoldings, AccountListItem } from "@/lib/queries/accounts";
 import { accountKeys, tagKeys } from "@/lib/queries/keys";
 
-// 账户页名单(不含抽屉 / 加账户弹窗本身 —— 它们各有自己的测试文件,这里换成替身,只看这页
-// 递给它们的是什么)。钉住的用户可见行为:
-// ① 名单:活跃账户按市值从大到小、标题数的是活跃数;归档的收进折叠段;一个都没有时给空态;
-// ② 金额没到时别把市值写成 0 —— 名单照出,金额位是骨架,也别按假 0 排序;
-// ③ 每行的状态句:缺凭据 → 可点的「补凭据」(点它进补录、不打开抽屉);手记 → 「实时」;
-//    从没同步 → 「从未同步」;
-// ④ 点一行打开那个账户的抽屉;页头 + 段打开加账户弹窗;
-// ⑤ 同步面板跨页带来的 `?focus=<id>`:滚到那一行,然后从地址上抹掉(一次性命令)。
+// Accounts page list. The sheet and add-account modal have their own tests and are stubbed here;
+// we check what the page hands them.
 const { navigate, routeSearch, holdingsView } = vi.hoisted(() => ({
   navigate: vi.fn(),
   routeSearch: { current: {} as { focus?: string } },
@@ -29,7 +23,7 @@ vi.mock("@tanstack/react-router", async (orig) => ({
   }),
 }));
 vi.mock("@/lib/hooks/use-portfolio", () => ({ usePortfolio: () => ({ selectedId: "p1" }) }));
-// 金额那一层:由用例决定「已到」(返回视图)还是「在路上」(挂起)。
+// Values layer: each test decides "arrived" (returns a view) or "in flight" (suspends).
 vi.mock("@/lib/queries/account-holdings-compose", () => ({
   useAccountHoldingsView: () => holdingsView.current(),
 }));
@@ -73,7 +67,7 @@ vi.mock("@/routes/_authed/-accounts/add-account-modal", () => ({
     </div>
   ),
 }));
-// 种了缓存的查询不会去拉;这几条只是挡住 server fn 模块在 jsdom 里加载。
+// Seeded queries never fetch; these only keep server fn modules from loading in jsdom.
 const never = () => new Promise(() => {});
 vi.mock("@/lib/server/accounts", () => ({
   listAccounts: vi.fn(never),
@@ -126,10 +120,10 @@ function mount(accounts: AccountListItem[], tagLinks: AccountTagLink[] = []) {
   );
 }
 
-// 一行就是一个 <button>(整行可点开抽屉)。
+// Each row is a <button> (the whole row opens the sheet).
 const rowButton = (label: string) => screen.getByText(label).closest("button") as HTMLButtonElement;
 
-// jsdom 的元素没有 scrollIntoView → 记下被滚到的是哪一行。
+// jsdom elements lack scrollIntoView → record which row was scrolled to.
 let scrolled: string[] = [];
 
 beforeEach(() => {
@@ -143,8 +137,8 @@ beforeEach(() => {
   holdingsView.current = () => ({ rows: [] }) satisfies AccountHoldings;
 });
 
-describe("名单", () => {
-  it("活跃账户按市值从大到小排,标题数的是活跃数", async () => {
+describe("list", () => {
+  it("active accounts sorted by value descending; heading counts active accounts", async () => {
     holdingsView.current = () => ({
       rows: [holdingRow("a", 100), holdingRow("b", 5_000), holdingRow("c", 900)],
     });
@@ -162,7 +156,7 @@ describe("名单", () => {
     expect(order).toEqual(["Big", "Mid", "Small"]);
   });
 
-  it("归档账户不算进标题,收进「已归档」折叠段", async () => {
+  it("archived accounts excluded from the heading count, collapsed into the archived section", async () => {
     mount([
       acct({ id: "a", label: "Live one" }),
       acct({ id: "z", label: "Old one", archivedAt: Date.UTC(2025, 0, 2) }),
@@ -172,19 +166,19 @@ describe("名单", () => {
     const archived = screen.getByText("Archived (1)").closest("details") as HTMLElement;
     expect(within(archived).getByText("Old one")).toBeTruthy();
     expect(within(archived).queryByText("Live one")).toBeNull();
-    // 封存那一行写的是静态日期,不是相对时间。
+    // Archived rows show a static date, not relative time.
     expect(within(archived).getByText("Sealed Jan 2, 25")).toBeTruthy();
   });
 
-  it("一个账户都没有 → 空态", async () => {
+  it("no accounts → empty state", async () => {
     mount([]);
     await screen.findByText("No accounts yet.");
     expect(screen.getByText("0 accounts")).toBeTruthy();
   });
 
-  it("金额没到 → 名单照出、按原顺序,市值位不写 0", async () => {
+  it("values not loaded → list renders in original order, value slot not 0", async () => {
     holdingsView.current = () => {
-      throw new Promise(() => {}); // 挂起:金额还在路上
+      throw new Promise(() => {}); // suspend: values in flight
     };
     mount([acct({ id: "a", label: "First" }), acct({ id: "b", label: "Second" })]);
 
@@ -194,9 +188,9 @@ describe("名单", () => {
     expect(screen.queryByText(/\$0/)).toBeNull();
   });
 
-  it("金额没到 → 名单里已能确定的状态句(缺凭据 / 手记 / 封存日)照样立刻写出", async () => {
+  it("values not loaded → statuses already known (missing creds / manual / archive date) render immediately", async () => {
     holdingsView.current = () => {
-      throw new Promise(() => {}); // 挂起:金额还在路上
+      throw new Promise(() => {}); // suspend: values in flight
     };
     mount([
       acct({ id: "x", label: "My CEX", connectorId: "binance", needsCredentials: true }),
@@ -211,8 +205,8 @@ describe("名单", () => {
   });
 });
 
-describe("行内状态句", () => {
-  it("手记账户 → 「实时」;从没同步 → 「从未同步」", async () => {
+describe("row status line", () => {
+  it("manual account → 'live'; never synced → 'never synced'", async () => {
     holdingsView.current = () => ({
       rows: [holdingRow("m", 10, null), holdingRow("n", 20, null)],
     });
@@ -226,7 +220,7 @@ describe("行内状态句", () => {
     expect(within(rowButton("Fresh wallet")).getByText("Never synced")).toBeTruthy();
   });
 
-  it("缺凭据 → 点「补凭据」把这个账户交给补录弹窗,且不打开抽屉", async () => {
+  it("missing creds → clicking 'add credentials' hands the account to the creds modal, sheet stays closed", async () => {
     mount([
       acct({
         id: "x",
@@ -245,7 +239,7 @@ describe("行内状态句", () => {
     expect(screen.queryByTestId("sheet")).toBeNull();
   });
 
-  it("缺凭据 → 键盘在「补凭据」上按 Enter 也进补录,且不打开抽屉", async () => {
+  it("missing creds → Enter on 'add credentials' also opens the creds modal, sheet stays closed", async () => {
     mount([
       acct({
         id: "x",
@@ -264,8 +258,8 @@ describe("行内状态句", () => {
   });
 });
 
-describe("打开抽屉与弹窗", () => {
-  it("点一行 → 抽屉打开的是这个账户;关掉就收起", async () => {
+describe("opening the sheet and modals", () => {
+  it("clicking a row opens the sheet for that account; closing hides it", async () => {
     mount([acct({ id: "a", label: "Alpha" }), acct({ id: "b", label: "Beta" })]);
 
     await screen.findByText("Beta");
@@ -276,7 +270,7 @@ describe("打开抽屉与弹窗", () => {
     expect(screen.queryByTestId("sheet")).toBeNull();
   });
 
-  it("点归档段里的一行 → 也打开那个账户的抽屉", async () => {
+  it("clicking a row in the archived section also opens that account's sheet", async () => {
     mount([
       acct({ id: "a", label: "Alpha" }),
       acct({ id: "z", label: "Old one", archivedAt: Date.UTC(2025, 0, 2) }),
@@ -287,7 +281,7 @@ describe("打开抽屉与弹窗", () => {
     expect(within(screen.getByTestId("sheet")).getByText("Old one")).toBeTruthy();
   });
 
-  it("页头 + 段 → 打开加账户弹窗", async () => {
+  it("header + button → opens the add-account modal", async () => {
     mount([acct({ id: "a", label: "Alpha" })]);
     expect(screen.getByTestId("add-modal").textContent).toContain("add-closed");
 
@@ -297,8 +291,8 @@ describe("打开抽屉与弹窗", () => {
   });
 });
 
-describe("?focus=<id> 一次性命令", () => {
-  it("滚到那一行,然后从地址上抹掉 focus(replace,不动滚动)", async () => {
+describe("?focus=<id> one-shot command", () => {
+  it("scrolls to that row, then strips focus from the URL (replace, no scroll reset)", async () => {
     routeSearch.current = { focus: "b" };
     mount([acct({ id: "a", label: "Alpha" }), acct({ id: "b", label: "Beta" })]);
 
@@ -312,7 +306,7 @@ describe("?focus=<id> 一次性命令", () => {
     });
   });
 
-  it("那一行已不在名单里 → 不滚,但照样抹掉 focus", async () => {
+  it("row no longer in the list → no scroll, but focus is still stripped", async () => {
     routeSearch.current = { focus: "gone" };
     mount([acct({ id: "a", label: "Alpha" })]);
 

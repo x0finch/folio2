@@ -7,13 +7,8 @@ import type { TokenOption } from "@/lib/core/token-model";
 import { messages } from "@/lib/i18n/messages";
 import type { InputSpec } from "@/lib/server/creds";
 
-// 加账户表单(AccountForm)。三条分支各有自己的录入规则,最后都汇成同一句 createAccount:
-// · 通用(交易所 / 链上):按 specs 渲染,secret 是密码框,填什么原样交上去;
-// · Bitcoin:只有**裸 xpub** 才要用户选脚本类型(默认 Native);ypub/zpub 只读显示推断结果、不带 scriptType;
-//   普通地址没有这一栏;
-// · 手记:选币 → 代号 + 票 + 单价(下拉里正显示的价,没有才回源现取)序列化成 `values.tokens`;
-//   找不到的币转手填代号,单价清空、票不带。
-// 另外:落在当前选中的组合(看默认时不传);失败把服务端的话原样显示;在飞时按钮禁用。
+// AccountForm: generic, Bitcoin and manual branches each validate differently but all end in createAccount.
+// Bitcoin asks for a script type only for a bare xpub; ypub/zpub imply it.
 const s = vi.hoisted(() => ({
   createAccount: vi.fn(),
   getTokenPrice: vi.fn(),
@@ -88,15 +83,15 @@ beforeEach(() => {
   s.listFiatOptions.mockResolvedValue([]);
 });
 
-describe("AccountForm — 通用字段", () => {
-  it("按 specs 渲染:secret 是密码框且不让浏览器回填登录密码", () => {
+describe("AccountForm — generic fields", () => {
+  it("renders from specs: secret is a password field that blocks login autofill", () => {
     const { field } = mount("binance", EXCHANGE_SPECS);
     expect(field("add-apiKey").type).toBe("text");
     expect(field("add-apiSecret").type).toBe("password");
     expect(field("add-apiSecret").autocomplete).toBe("new-password");
   });
 
-  it("提交 → createAccount(connector, 名字, 原样字段);看默认组合时不带 portfolioId;成功 onDone(新 id)", async () => {
+  it("submit → createAccount(connector, name, raw fields); no portfolioId on the default portfolio; onDone(new id)", async () => {
     const { set, submit, onDone } = mount("binance", EXCHANGE_SPECS);
     set("add-label", "Main CEX");
     set("add-apiKey", "k123");
@@ -113,7 +108,7 @@ describe("AccountForm — 通用字段", () => {
     });
   });
 
-  it("正看着非默认组合 → 新账户落到那个组合", async () => {
+  it("viewing a non-default portfolio → new account lands there", async () => {
     s.portfolio.selectedId = "p2";
     const { set, submit, sent } = mount("binance", EXCHANGE_SPECS);
     set("add-label", "x");
@@ -122,7 +117,7 @@ describe("AccountForm — 通用字段", () => {
     expect(sent().portfolioId).toBe("p2");
   });
 
-  it("服务端拒绝 → 原样显示原因,不 onDone", async () => {
+  it("server rejects → shows the reason verbatim, no onDone", async () => {
     s.createAccount.mockRejectedValue(new Error("Invalid API key"));
     const { set, submit, text, onDone } = mount("binance", EXCHANGE_SPECS);
     set("add-label", "x");
@@ -131,7 +126,7 @@ describe("AccountForm — 通用字段", () => {
     expect(onDone).not.toHaveBeenCalled();
   });
 
-  it("在飞时提交钮禁用", async () => {
+  it("submit button disabled while in flight", async () => {
     s.createAccount.mockImplementation(() => new Promise(() => {}));
     const { set, submit, submitBtn } = mount("binance", EXCHANGE_SPECS);
     set("add-label", "x");
@@ -140,7 +135,7 @@ describe("AccountForm — 通用字段", () => {
     await waitFor(() => expect(submitBtn().disabled).toBe(true));
   });
 
-  it("名字框的占位文案:钱包类与手记类不同", () => {
+  it("name placeholder differs for wallet and manual accounts", () => {
     expect(mount("binance", EXCHANGE_SPECS).field("add-label").placeholder).toBe(
       ta.walletLabelPlaceholder,
     );
@@ -148,7 +143,7 @@ describe("AccountForm — 通用字段", () => {
 });
 
 describe("AccountForm — Bitcoin", () => {
-  it("普通地址 → 没有地址类型这一栏,提交只带地址", async () => {
+  it("plain address → no address-type field, submits only the address", async () => {
     const { set, submit, text, sent } = mount("bitcoin", BTC_SPECS);
     set("add-label", "cold");
     set("add-addressOrXpub", "bc1qexample");
@@ -158,7 +153,7 @@ describe("AccountForm — Bitcoin", () => {
     expect(sent().values).toEqual({ addressOrXpub: "bc1qexample" });
   });
 
-  it("裸 xpub → 出现类型下拉,默认 Native;改选 Taproot 后随提交带上", async () => {
+  it("bare xpub → type dropdown defaults to Native; picking Taproot is submitted", async () => {
     const { set, submit, sent, container } = mount("bitcoin", BTC_SPECS);
     set("add-label", "hw");
     set("add-addressOrXpub", "xpub6ABC");
@@ -175,7 +170,7 @@ describe("AccountForm — Bitcoin", () => {
     expect(sent().values).toEqual({ addressOrXpub: "xpub6ABC", scriptType: "taproot" });
   });
 
-  it("裸 xpub 不改选 → 带默认 native", async () => {
+  it("bare xpub without a pick → submits default native", async () => {
     const { set, submit, sent } = mount("bitcoin", BTC_SPECS);
     set("add-label", "hw");
     set("add-addressOrXpub", "xpub6ABC");
@@ -184,7 +179,7 @@ describe("AccountForm — Bitcoin", () => {
     expect(sent().values).toEqual({ addressOrXpub: "xpub6ABC", scriptType: "native" });
   });
 
-  it("ypub / zpub → 只读显示推断出的类型,不带 scriptType", async () => {
+  it("ypub / zpub → shows the inferred type read-only, no scriptType", async () => {
     const { set, submit, sent, text, container } = mount("bitcoin", BTC_SPECS);
     set("add-label", "hw");
     set("add-addressOrXpub", "ypub6ABC");
@@ -198,7 +193,7 @@ describe("AccountForm — Bitcoin", () => {
     expect(sent().values).toEqual({ addressOrXpub: "zpub6ABC" });
   });
 
-  it("xpub 改回普通地址 → 之前的 scriptType 不残留", async () => {
+  it("switching from xpub back to an address drops the old scriptType", async () => {
     const { set, submit, sent } = mount("bitcoin", BTC_SPECS);
     set("add-label", "hw");
     set("add-addressOrXpub", "xpub6ABC");
@@ -209,7 +204,7 @@ describe("AccountForm — Bitcoin", () => {
   });
 });
 
-describe("AccountForm — 手记", () => {
+describe("AccountForm — manual", () => {
   const BTC: TokenOption = {
     ticket: "tk:btc",
     symbol: "btc",
@@ -242,7 +237,7 @@ describe("AccountForm — 手记", () => {
 
   const tokensSent = (m: ReturnType<typeof mount>) => JSON.parse(m.sent().values.tokens);
 
-  it("选币 → 用下拉里显示的价回填单价(不再回源),提交带代号 + 票 + 数量 + 单价", async () => {
+  it("picking a token reuses the dropdown's price (no refetch); submits symbol + ref + amount + price", async () => {
     s.listTokenCatalogue.mockResolvedValue([BTC]);
     const m = mount("manual");
     expect(m.field("add-label").placeholder).toBe(ta.manualLabelPlaceholder);
@@ -260,7 +255,7 @@ describe("AccountForm — 手记", () => {
     ]);
   });
 
-  it("选的币下拉里没价 → 回源现取一次填进单价", async () => {
+  it("picked token has no price in the dropdown → fetches once and fills the price", async () => {
     s.listTokenCatalogue.mockResolvedValue([NOPRICE]);
     s.getTokenPrice.mockResolvedValue({ unitPrice: 1.23 });
     const m = mount("manual");
@@ -269,7 +264,7 @@ describe("AccountForm — 手记", () => {
     expect(s.getTokenPrice).toHaveBeenCalledWith({ data: { ticket: "tk:obscure" } });
   });
 
-  it("取价在飞时提示「正在取价」,并且转手填后回来的价不会把单价填上", async () => {
+  it("shows 'fetching price' while in flight; a price arriving after switching to manual entry is ignored", async () => {
     s.listTokenCatalogue.mockResolvedValue([NOPRICE]);
     let resolve: (v: { unitPrice: number }) => void = () => {};
     s.getTokenPrice.mockImplementation(() => new Promise((r) => (resolve = r)));
@@ -284,14 +279,14 @@ describe("AccountForm — 手记", () => {
     expect(m.field("m-price").value).toBe("");
   });
 
-  it("转手填代号 → 单价清空、不带票;再转回搜索 → 代号也清掉", async () => {
+  it("switching to manual symbol clears price and ref; switching back to search clears the symbol too", async () => {
     s.listTokenCatalogue.mockResolvedValue([BTC]);
     const m = mount("manual");
     await pick(m, "Bitcoin");
     await waitFor(() => expect(m.field("m-price").value).toBe("60000"));
 
     fireEvent.click(m.button(ta.enterManually));
-    // 手填框带着刚才的代号,单价清空(自定义资产没有市价)。
+    // The manual input keeps the symbol; price is cleared (custom assets have no market price).
     expect(m.field("m-token").value).toBe("BTC");
     expect(m.field("m-price").value).toBe("");
 
@@ -308,7 +303,7 @@ describe("AccountForm — 手记", () => {
     expect(m.field("m-price").value).toBe("");
   });
 
-  it("取价在飞时清掉已选币 → 回来的价不再填进单价框", async () => {
+  it("clearing the picked token while a price is in flight → the late price is not filled in", async () => {
     s.listTokenCatalogue.mockResolvedValue([NOPRICE]);
     let resolve: (v: { unitPrice: number }) => void = () => {};
     s.getTokenPrice.mockImplementation(() => new Promise((r) => (resolve = r)));
@@ -325,13 +320,13 @@ describe("AccountForm — 手记", () => {
     expect(m.field("m-price").value).toBe("");
   });
 
-  it("清掉已选币 → 代号 / 单价 / 票一起清", async () => {
+  it("clearing the picked token clears symbol, price and ref together", async () => {
     s.listTokenCatalogue.mockResolvedValue([BTC]);
     const m = mount("manual");
     await pick(m, "Bitcoin");
     await waitFor(() => expect(m.field("m-price").value).toBe("60000"));
 
-    // 收起态触发器右侧的 ×。
+    // The × on the right of the collapsed trigger.
     const trigger = [...m.container.querySelectorAll("button")].find((b) =>
       b.textContent?.includes("Bitcoin"),
     ) as HTMLElement;

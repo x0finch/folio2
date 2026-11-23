@@ -22,16 +22,16 @@ describe("toAccountSections", () => {
     expect(s.perp).toBeNull();
   });
 
-  it("过滤掉尘埃现货(无价/空投,< 尘埃阈值)", () => {
+  it("drops dust spot rows (unpriced/airdrops, below the dust threshold)", () => {
     const s = toAccountSections([
       b({ id: "1", symbol: "ETH", usdValue: 5000, kind: "spot" }),
-      b({ id: "2", symbol: "SPAM", usdValue: 0, kind: "spot" }), // 无价 → 排除
-      b({ id: "3", symbol: "DUST", usdValue: 0.05, kind: "spot" }), // < ZERO_DISPLAY_USD($0.10)→ 排除
+      b({ id: "2", symbol: "SPAM", usdValue: 0, kind: "spot" }), // unpriced → excluded
+      b({ id: "3", symbol: "DUST", usdValue: 0.05, kind: "spot" }), // < ZERO_DISPLAY_USD ($0.10) → excluded
     ]);
     expect(s.spot.map((r) => r.symbol)).toEqual(["ETH"]);
   });
 
-  it("balance 级 note(单个 Note)透传到 SpotRow.note(note 重设计)", () => {
+  it("passes a balance-level note through to SpotRow.note", () => {
     const note = {
       title: "Locked",
       icon: "warning" as const,
@@ -39,7 +39,7 @@ describe("toAccountSections", () => {
     };
     const s = toAccountSections([
       b({ id: "1", symbol: "ETH", usdValue: 5000, kind: "spot", note }),
-      b({ id: "2", symbol: "BTC", usdValue: 100, kind: "spot" }), // 无 note 的行
+      b({ id: "2", symbol: "BTC", usdValue: 100, kind: "spot" }), // row without a note
     ]);
     expect(s.spot.find((r) => r.symbol === "ETH")?.note).toEqual(note);
     expect(s.spot.find((r) => r.symbol === "BTC")?.note).toBeUndefined();
@@ -68,12 +68,12 @@ describe("toAccountSections", () => {
         usdValue: -2500,
         metaJson: JSON.stringify({ protocol: "Aave", positionType: "loan" }),
       }),
-      b({ id: "4", symbol: "MYST", kind: "defi", usdValue: 10, metaJson: null }), // 无 protocol → fallback
+      b({ id: "4", symbol: "MYST", kind: "defi", usdValue: 10, metaJson: null }), // no protocol → fallback
     ]);
     expect(s.defi.map((g) => g.protocol)).toEqual(["Aave", "Uniswap", "Other"]);
     const aave = s.defi[0];
     expect(aave.rows.map((r) => r.symbol)).toEqual(["aUSDC", "aETH"]);
-    expect(aave.rows[1].usdValue).toBe(-2500); // 负债保留
+    expect(aave.rows[1].usdValue).toBe(-2500); // debt kept
     expect(aave.rows[0].positionType).toBe("deposit");
   });
 
@@ -121,14 +121,12 @@ describe("toAccountSections", () => {
     });
   });
 
-  // BTC 的展示明细(未确认/派生/收款)已提到账户级 note(note 重设计),不再由 toAccountSections
-  // 从 per-balance meta 抽出 —— meta 里的 pendingSats 不影响归表。
-  it("遗留 kind=utxo 老化归现货表(ADR 0010:utxo 并回 spot,viewKind default 兜底)", () => {
+  it("legacy kind=utxo falls into the spot table (viewKind default)", () => {
     const s = toAccountSections([
       b({
         id: "1",
         symbol: "BTC",
-        kind: "utxo", // 旧快照遗留 kind;viewKind 经 default 归 spot
+        kind: "utxo", // legacy kind from old snapshots; viewKind defaults to spot
         usdValue: 5000,
         metaJson: JSON.stringify({ pendingSats: 12345 }),
       }),
@@ -136,7 +134,7 @@ describe("toAccountSections", () => {
     expect(s.spot.map((r) => r.symbol)).toEqual(["BTC"]);
   });
 
-  it("新 kind=perp_equity/perp_position:走 perp 视图", () => {
+  it("kind=perp_equity/perp_position use the perp view", () => {
     const s = toAccountSections([
       b({
         id: "1",
@@ -167,22 +165,20 @@ describe("toAccountSections", () => {
     expect(s.spot).toEqual([]);
   });
 
-  it("未知 kind 兜底为现货(不 throw)", () => {
+  it("unknown kind falls back to spot (no throw)", () => {
     const s = toAccountSections([b({ id: "1", symbol: "???", kind: "mystery", usdValue: 1 })]);
     expect(s.spot.map((r) => r.symbol)).toEqual(["???"]);
   });
 });
 
-// —— H5 #120:跨账户协议合并 + 协议级 24h 聚合 ——
-
 import { type DefiRow, defiMeaningfulLegs, mergeDefiGroups } from "@/lib/core/account-view";
 
-describe("mergeDefiGroups —— 跨账户按协议保序合并", () => {
+describe("mergeDefiGroups — merges by protocol across accounts, order preserved", () => {
   const g = (protocol: string, id: string, usdValue = 1) => ({
     protocol,
     rows: [{ id, symbol: "X", amount: 1, usdValue }],
   });
-  it("同协议行并入首次出现的组,组序按首见", () => {
+  it("same-protocol rows join the first-seen group; groups ordered by first appearance", () => {
     const merged = mergeDefiGroups([
       { defi: [g("Aave", "a1"), g("Lido", "l1")] },
       { defi: [g("Aave", "a2")] },
@@ -191,7 +187,7 @@ describe("mergeDefiGroups —— 跨账户按协议保序合并", () => {
     expect(merged.map((x) => x.protocol)).toEqual(["Aave", "Lido"]);
     expect(merged[0].rows.map((r) => r.id)).toEqual(["a1", "a2"]);
   });
-  it("全空 → []", () => {
+  it("all empty → []", () => {
     expect(mergeDefiGroups([{ defi: [] }])).toEqual([]);
   });
 });
@@ -203,25 +199,23 @@ describe("defiMeaningfulLegs", () => {
     amount: usdValue,
     usdValue,
   });
-  it("丢掉四舍五入为 0 的空腿,只留有值腿", () => {
+  it("drops legs that round to 0, keeps those with value", () => {
     const legs = defiMeaningfulLegs([r("a", 500, "ETH"), r("b", 0), r("c", 0), r("d", 0)]);
     expect(legs.map((l) => l.symbol)).toEqual(["ETH"]);
   });
-  it("按 |美元值| 降序", () => {
+  it("sorts by |USD value| descending", () => {
     const legs = defiMeaningfulLegs([r("a", 10), r("b", 500), r("c", 50), r("d", 200), r("e", 5)]);
     expect(legs.map((l) => l.usdValue)).toEqual([500, 200, 50, 10, 5]);
   });
-  it("负债(负值)按绝对值排序参与", () => {
+  it("debts (negative) sort by absolute value", () => {
     const legs = defiMeaningfulLegs([r("a", 100), r("b", -9000)]);
     expect(legs[0].usdValue).toBe(-9000);
   });
-  it("全是 sub-cent(组已过毛敞口阈值)→ 全展示,不截 1(否则漏腿)", () => {
+  it("all sub-cent (group already past the gross threshold) → show all, don't cut to 1 (would hide legs)", () => {
     const legs = defiMeaningfulLegs([r("a", 0.003, "stETH"), r("b", 0.002, "rETH")]);
     expect(legs.map((l) => l.symbol)).toEqual(["stETH", "rETH"]);
   });
 });
-
-// —— H5 评审:摘要腿按角色分组(每条腿对应哪个角色) ——
 
 import { groupLegsByRole } from "@/lib/core/account-view";
 
@@ -233,50 +227,50 @@ describe("groupLegsByRole", () => {
     usdValue: 1,
     positionType,
   });
-  it("按 positionType 分组,保持传入顺序(值降序)", () => {
+  it("groups by positionType, preserving input order (value descending)", () => {
     const g = groupLegsByRole([r("a", "deposit"), r("b", "deposit"), r("c", "loan")]);
     expect(g.map((x) => x.role)).toEqual(["deposit", "loan"]);
     expect(g[0].legs.map((l) => l.id)).toEqual(["a", "b"]);
     expect(g[1].legs.map((l) => l.id)).toEqual(["c"]);
   });
-  it("无 positionType → role undefined 组", () => {
+  it("no positionType → group with role undefined", () => {
     const g = groupLegsByRole([r("a")]);
     expect(g).toEqual([{ role: undefined, legs: [r("a")] }]);
   });
 });
 
-// —— 空仓协议丢弃(整组毛敞口 < 半分钱 → 不展示,避免「协议 $0.00」噪音行) ——
+// Groups with gross exposure under half a cent are dropped to avoid "$0.00" protocol rows.
 
 import { dropEmptyDefiGroups } from "@/lib/core/account-view";
 
 describe("dropEmptyDefiGroups", () => {
   const leg = (usdValue: number): DefiRow => ({ id: "x", symbol: "X", amount: usdValue, usdValue });
-  it("丢掉整组毛敞口≈0 的空仓(全 0 值残腿)", () => {
+  it("drops a group whose gross exposure ≈ 0 (all-zero leftover legs)", () => {
     const groups = [
       { protocol: "Morpho", rows: [leg(0), leg(0), leg(0)] },
       { protocol: "Lido", rows: [leg(92)] },
     ];
     expect(dropEmptyDefiGroups(groups).map((g) => g.protocol)).toEqual(["Lido"]);
   });
-  it("保留净≈0 但有真实毛敞口的对冲仓(存+借相抵)", () => {
+  it("keeps a hedge netting ≈ 0 with real gross exposure (supply + borrow)", () => {
     const groups = [{ protocol: "Aave", rows: [leg(1000), leg(-1000)] }];
     expect(dropEmptyDefiGroups(groups).map((g) => g.protocol)).toEqual(["Aave"]);
   });
-  it("单条 dust(<半分钱)也丢", () => {
+  it("drops a single dust leg (< half a cent) too", () => {
     const groups = [{ protocol: "Dust", rows: [leg(0.001)] }];
     expect(dropEmptyDefiGroups(groups)).toEqual([]);
   });
 });
 
-describe("mergeDefiGroups —— 24h 盈亏跨账户合并(ADR 0050,两端相减)", () => {
+describe("mergeDefiGroups — 24h P&L merged across accounts (endpoint subtraction)", () => {
   const g = (protocol: string, amount: number, start: number) => ({
     protocol,
     rows: [{ id: "x", symbol: "S", amount: 1, usdValue: 100 }],
     gain24h: { amount, pct: start > 0 ? (amount / start) * 100 : null, start },
   });
 
-  it("金额相加,百分比**重算**(Σ金额 ÷ Σ起点净值),不是各账户百分比取平均", () => {
-    // A:赚 10、起点 100(+10%);B:赚 10、起点 900(+1.11%)。平均是 5.56%,正确答案是 20/1000 = 2%。
+  it("amounts add, percent is recomputed (Σ amount ÷ Σ start value), not averaged per account", () => {
+    // A: +10 from 100 (+10%); B: +10 from 900 (+1.11%). Average is 5.56%; correct is 20/1000 = 2%.
     const merged = mergeDefiGroups([
       { defi: [g("Lido", 10, 100)] },
       { defi: [g("Lido", 10, 900)] },
@@ -286,7 +280,7 @@ describe("mergeDefiGroups —— 24h 盈亏跨账户合并(ADR 0050,两端相减
     expect(merged[0].gain24h?.pct).not.toBeCloseTo(5.56, 1);
   });
 
-  it("一个账户算得出就算 —— 与「有基准的线才参与」同一个态度", () => {
+  it("computable if any one account is — same stance as 'only lines with a baseline count'", () => {
     const merged = mergeDefiGroups([
       { defi: [g("Lido", 10, 100)] },
       { defi: [{ protocol: "Lido", rows: [], gain24h: null }] },
@@ -294,7 +288,7 @@ describe("mergeDefiGroups —— 24h 盈亏跨账户合并(ADR 0050,两端相减
     expect(merged[0].gain24h?.amount).toBeCloseTo(10, 6);
   });
 
-  it("一个都算不出 → null", () => {
+  it("none computable → null", () => {
     const merged = mergeDefiGroups([{ defi: [{ protocol: "Lido", rows: [], gain24h: null }] }]);
     expect(merged[0].gain24h).toBeNull();
   });

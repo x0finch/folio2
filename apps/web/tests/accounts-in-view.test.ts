@@ -8,14 +8,14 @@ import {
   toTabPin,
 } from "@/lib/core/accounts-in-view";
 
-// accountsInView(ADR 0033):活跃 && 归属选中 Portfolio;未归属的账户兜底进默认视图。
+// Active accounts in the selected portfolio; unassigned accounts fall back into the default view.
 
 const acc = (id: string, archivedAt: number | null = null) => ({ id, archivedAt });
 const DEFAULT = "pf-default";
 const WATCH = "pf-watch";
 
 describe("accountsInView", () => {
-  it("只返回归属选中 Portfolio 的账户", () => {
+  it("returns only accounts in the selected portfolio", () => {
     const accounts = [acc("a"), acc("b"), acc("c")];
     const memberships = [
       { accountId: "a", portfolioId: DEFAULT },
@@ -29,7 +29,7 @@ describe("accountsInView", () => {
     expect(accountsInView(accounts, memberships, WATCH, DEFAULT).map((a) => a.id)).toEqual(["b"]);
   });
 
-  it("排除归档账户(与 Portfolio 归属正交)", () => {
+  it("excludes archived accounts (orthogonal to portfolio membership)", () => {
     const accounts = [acc("a"), acc("b", 123)];
     const memberships = [
       { accountId: "a", portfolioId: DEFAULT },
@@ -38,19 +38,19 @@ describe("accountsInView", () => {
     expect(accountsInView(accounts, memberships, DEFAULT, DEFAULT).map((a) => a.id)).toEqual(["a"]);
   });
 
-  it("未归属账户兜底进**默认**视图(钱不隐形)", () => {
+  it("unassigned accounts fall back into the default view (money never disappears)", () => {
     const accounts = [acc("a"), acc("orphan")];
     const memberships = [{ accountId: "a", portfolioId: DEFAULT }];
-    // 看默认:orphan 兜底计入。
+    // Default view: orphan is included.
     expect(accountsInView(accounts, memberships, DEFAULT, DEFAULT).map((a) => a.id)).toEqual([
       "a",
       "orphan",
     ]);
-    // 看非默认:orphan 不兜底。
+    // Non-default view: no fallback.
     expect(accountsInView(accounts, memberships, WATCH, DEFAULT)).toEqual([]);
   });
 
-  it("空归属 + 看默认 → 全部活跃账户(片2 的向后兼容前提)", () => {
+  it("no memberships + default view → all active accounts (backward compatible)", () => {
     const accounts = [acc("a"), acc("b"), acc("c", 999)];
     expect(accountsInView(accounts, [], DEFAULT, DEFAULT).map((a) => a.id)).toEqual(["a", "b"]);
   });
@@ -63,20 +63,19 @@ describe("accountIdsInView", () => {
     { accountId: "arch", portfolioId: WATCH },
   ];
 
-  it("与归档无关:归属选中的 id 全收(含已归档成员,供曲线过去点)", () => {
-    // arch 归档与否都在 Watch 成员集里 —— 曲线保留其历史贡献。
+  it("ignores archiving: every member id is included (archived members feed past chart points)", () => {
     const set = accountIdsInView(["a", "b", "arch"], memberships, WATCH, DEFAULT);
     expect([...set].sort()).toEqual(["arch", "b"]);
   });
 
-  it("未归属 id 兜底进默认成员集,非默认则不兜底", () => {
+  it("unassigned ids fall back into the default set, not into others", () => {
     const ids = ["a", "b", "orphan"];
     expect(accountIdsInView(ids, memberships, DEFAULT, DEFAULT).has("orphan")).toBe(true);
     expect(accountIdsInView(ids, memberships, WATCH, DEFAULT).has("orphan")).toBe(false);
   });
 });
 
-// 自定义 Tab pin 过滤(ADR 0034):在已按 Portfolio 过滤的集上再收窄。
+// Custom tab pins narrow the set already filtered by portfolio.
 describe("accountsMatchingPin", () => {
   const accs = [
     { id: "a", connectorId: "binance" },
@@ -89,33 +88,33 @@ describe("accountsMatchingPin", () => {
     { accountId: "b", tagId: "t-farm" },
   ];
 
-  it("pin=null → 原样返回(默认视图不收窄)", () => {
+  it("pin=null → returned as-is (default view not narrowed)", () => {
     expect(accountsMatchingPin(accs, null, tagLinks)).toEqual(accs);
   });
 
-  it("connector pin → 只留该 Connector 的账户", () => {
+  it("connector pin → only that connector's accounts", () => {
     const pin: TabPin = { kind: "connector", connectorId: "binance" };
     expect(accountsMatchingPin(accs, pin, tagLinks).map((a) => a.id)).toEqual(["a", "c"]);
   });
 
-  it("tag pin → 只留打了该 Tag 的账户", () => {
+  it("tag pin → only accounts with that tag", () => {
     const pin: TabPin = { kind: "tag", tagId: "t-long" };
     expect(accountsMatchingPin(accs, pin, tagLinks).map((a) => a.id)).toEqual(["a", "c"]);
   });
 
-  it("tag pin 无匹配 → 空", () => {
+  it("tag pin with no match → empty", () => {
     const pin: TabPin = { kind: "tag", tagId: "t-none" };
     expect(accountsMatchingPin(accs, pin, tagLinks)).toEqual([]);
   });
 
-  it("account pin → 只留该账户", () => {
+  it("account pin → only that account", () => {
     const pin: TabPin = { kind: "account", accountId: "b" };
     expect(accountsMatchingPin(accs, pin, tagLinks).map((a) => a.id)).toEqual(["b"]);
   });
 });
 
 describe("toTabPin", () => {
-  it("三种 kind 带对应 id → 规范化成 TabPin", () => {
+  it("each of the three kinds with its id → normalized TabPin", () => {
     expect(toTabPin({ kind: "connector", connectorId: "binance" })).toEqual({
       kind: "connector",
       connectorId: "binance",
@@ -127,19 +126,19 @@ describe("toTabPin", () => {
     });
   });
 
-  it("缺省 / 缺对应 id → null(退回不收窄)", () => {
+  it("missing kind / missing matching id → null (no narrowing)", () => {
     expect(toTabPin(undefined)).toBeNull();
     expect(toTabPin(null)).toBeNull();
     expect(toTabPin({ kind: "connector" })).toBeNull();
     expect(toTabPin({ kind: "tag" })).toBeNull();
     expect(toTabPin({ kind: "account" })).toBeNull();
-    // kind 与 id 错配(account kind 只带 tagId)→ null,不误当 tag
+    // kind/id mismatch (account kind with only tagId) → null, not mistaken for a tag
     expect(toTabPin({ kind: "account", tagId: "t1" })).toBeNull();
   });
 });
 
-// 「这个组合里哪些自定义 Tab 说得通」(ADR 0034 / 0047)。摆不摆与上限算几个共用这一个函数,
-// 所以它错一次会同时错两处 —— 值得逐类钉住。
+// Which custom tabs make sense in this portfolio. Shared by placement and the cap count,
+// so a bug here breaks both — pinned per kind.
 describe("pinsInView", () => {
   const view = {
     accounts: [
@@ -149,7 +148,7 @@ describe("pinsInView", () => {
     tagIds: new Set(["t1"]),
   };
 
-  it("tag pin:标签属于这个组合才摆", () => {
+  it("tag pin: shown only if the tag belongs to this portfolio", () => {
     const pins = [
       { id: "p1", kind: "tag" as const, tagId: "t1" },
       { id: "p2", kind: "tag" as const, tagId: "t-other" },
@@ -157,7 +156,7 @@ describe("pinsInView", () => {
     expect(pinsInView(pins, view).map((p) => p.id)).toEqual(["p1"]);
   });
 
-  it("账户 pin:账户在这个视图里才摆", () => {
+  it("account pin: shown only if the account is in this view", () => {
     const pins = [
       { id: "p1", kind: "account" as const, accountId: "a2" },
       { id: "p2", kind: "account" as const, accountId: "a-elsewhere" },
@@ -165,7 +164,7 @@ describe("pinsInView", () => {
     expect(pinsInView(pins, view).map((p) => p.id)).toEqual(["p1"]);
   });
 
-  it("connector pin:视图里有这个 connector 的账户才摆", () => {
+  it("connector pin: shown only if the view has an account of that connector", () => {
     const pins = [
       { id: "p1", kind: "connector" as const, connectorId: "binance" },
       { id: "p2", kind: "connector" as const, connectorId: "okx" },
@@ -173,7 +172,7 @@ describe("pinsInView", () => {
     expect(pinsInView(pins, view).map((p) => p.id)).toEqual(["p1"]);
   });
 
-  it("目标 id 缺失的 pin 不摆(哪一类都一样)", () => {
+  it("pin with a missing target id is not shown (any kind)", () => {
     const pins = [
       { id: "p1", kind: "tag" as const, tagId: null },
       { id: "p2", kind: "account" as const, accountId: null },
@@ -182,7 +181,7 @@ describe("pinsInView", () => {
     expect(pinsInView(pins, view)).toEqual([]);
   });
 
-  it("空视图(组合里一个账户都没有)→ 一个都不摆", () => {
+  it("empty view (no accounts in the portfolio) → nothing shown", () => {
     const pins = [{ id: "p1", kind: "connector" as const, connectorId: "binance" }];
     expect(pinsInView(pins, { accounts: [], tagIds: new Set<string>() })).toEqual([]);
   });
