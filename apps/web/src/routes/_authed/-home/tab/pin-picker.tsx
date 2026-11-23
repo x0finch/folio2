@@ -6,10 +6,9 @@ import { connectorLabelFallback } from "@/lib/core/logo";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 import { PinTargetMark } from "./pin-target-mark";
 
-// 自定义 Tab 的添加/改指向选择器(ADR 0034):**裸内容**,面板 chrome 由承载它的 beUI hover Popover 提供
-//(＋按钮 / pin 药丸 hover 弹出)。分三段 —— Tag / Connector / Account。选中即回调 onPick;空显空态。
-// selected 传入当前指向 → 命中项右侧打勾(改指向面板用;添加面板不传)。行内 hover 高亮走 SharedLayoutBg
-// 滑动药丸。三段现在渲染一致(纯 name + 勾,tag 不再带色点),抽成 PickerSection。
+// Bare picker content (panel chrome comes from the hosting beUI Popover) with three sections: Tag /
+// Connector / Account. Picking calls onPick; `selected` marks the current target with a check
+// (change-target panel only).
 export interface PinTargetChoice {
   kind: "connector" | "tag" | "account";
   connectorId?: string;
@@ -20,7 +19,7 @@ export interface PinTargetChoice {
 const headerClass = "px-2 py-1 text-muted-foreground text-xs uppercase tracking-widest";
 const rowClass = "rounded-md px-2 py-1.5 text-left text-sm";
 
-// 选择器用:仍走连接器目录(打开选择器才拉)。tab 条不要用它 —— 一挂就打目录。
+// Uses the connector catalog (fetched on open). The tab strip must not use this: it would fetch the catalog on mount.
 function PinTargetLabel({
   target,
   name,
@@ -28,8 +27,8 @@ function PinTargetLabel({
   className,
 }: {
   target: PinTargetChoice;
-  name?: string; // tag / account 的名字(connector 走 registry 类型名,不用它)
-  onPrimary?: boolean; // 落在激活药丸(bg-primary 浅底)上 → logo 底盘随之改色
+  name?: string; // tag / account name (connectors use the registry type name)
+  onPrimary?: boolean; // on the active pill (light bg-primary): the logo backing recolors
   className?: string;
 }) {
   const { data: catalog } = useQuery(connectorCatalogQuery());
@@ -71,7 +70,7 @@ function PickerSection({
         {options.map((o) => (
           <button key={o.id} type="button" onClick={() => onPick(o.id)} className={rowClass}>
             <span className="flex items-center gap-2">
-              {/* 前导标记与 pin 药丸同一份渲染(PinTargetLabel)→ 选择器里看到什么,固定后药丸就是什么。 */}
+              {/* Same mark as the pin pill (PinTargetLabel), so the picker previews the pill. */}
               <PinTargetLabel
                 target={targetOf(kind, o.id)}
                 name={o.label}
@@ -88,7 +87,7 @@ function PickerSection({
   );
 }
 
-// (kind, id) → PinTargetChoice。选项行渲染标记与 onPick 回调用的是同一个形状。
+// (kind, id) -> PinTargetChoice, the shape used for both the row mark and onPick.
 function targetOf(kind: PinTargetChoice["kind"], id: string): PinTargetChoice {
   if (kind === "tag") return { kind, tagId: id };
   if (kind === "account") return { kind, accountId: id };
@@ -111,7 +110,7 @@ export function TabPinPicker({
   const t = useTranslations("CustomTabs");
   const empty =
     connectorOptions.length === 0 && tagOptions.length === 0 && accountOptions.length === 0;
-  // 选项多(尤其 Tag/Account 无上限)时整份选择器限高 + 竖向滚动 —— 面板不无限撑高、不越过视口(用户要求)。
+  // Cap the height and scroll vertically: Tag/Account options are unbounded.
   return (
     <div className="flex max-h-64 min-w-44 flex-col gap-3 overflow-y-auto">
       {empty && <div className="px-1 py-2 text-muted-foreground text-sm">{t("noOptions")}</div>}

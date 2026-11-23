@@ -17,15 +17,14 @@ import { HomeViewStateProvider } from "./view-state";
 export function Overview() {
   const { selectedId } = usePortfolio();
   const now = floorToHour(Date.now());
-  // 两岛共用原子快照这份数据,所以会一起亮;失败则只塌那一格,壳(HeaderSync)不受影响。
+  // Both islands share the atomic snapshot so they light up together; a failure collapses only its own slot.
   const snapshotsKey = JSON.stringify(portfolioKeys.snapshots(selectedId, now));
   const tabsKey = JSON.stringify(portfolioKeys.tabPins(selectedId));
   return (
-    // 主 tab 与代币抽屉的页内状态住这层 Provider(FOL-80):tab 条与两个 TokenHoldings 实例共读一份。
+    // Tab and token-drawer state live in this Provider: the tab strip and both TokenHoldings read one copy.
     <HomeViewStateProvider>
-      {/* 同步条留在进场容器**之外**:它 absolute 定位到外壳 `<main>`,被带 transform 的层裹住会顶跳
-          约 24px(见 StaggerReveal)。它每页都一样、是常驻壳件,不跟着进场才是对的。 */}
-      {/* 首页 opt-in 自动补同步(FOL-18 子票 2):进来数据过期就静默补一轮。 */}
+      {/* HeaderSync stays outside the entrance container: it is absolute against `<main>` and a
+          transformed wrapper would shift it (see StaggerReveal). Opt-in auto-sync when data is stale. */}
       <HeaderSync autoSyncWhenStale />
       <StaggerReveal className="flex flex-col gap-6">
         <QueryBoundary
@@ -56,7 +55,7 @@ export function Overview() {
   );
 }
 
-// 没账户是这一页下半截的空态,不是 tab 条自己的事 —— 条只在有账户时才挂。
+// The empty state is the lower half of the page, not the tab strip's concern; the strip mounts only with accounts.
 function TabStripSlot() {
   const { selectedId } = usePortfolio();
   const strip = useHomeTabStrip(selectedId);
@@ -81,7 +80,7 @@ function IslandFailed() {
 }
 
 function HeroSkeleton() {
-  // 与 PortfolioHero 外框 `min-h-60` 同高,tab 条不会在数字到位时被顶下去。
+  // Same height as PortfolioHero's `min-h-60` so the tab strip isn't pushed down when numbers arrive.
   return <Skeleton className="min-h-60 w-full" />;
 }
 
