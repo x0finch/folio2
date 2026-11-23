@@ -470,7 +470,7 @@ describe("scenario: an on-chain wallet syncs one USDC", () => {
       JSON.stringify([{ symbol: "USDC", unitPrice: "1", amount: "10", ticket: ticketOf(USDC_ID) }]),
     );
     const rows = await tokenRows();
-    // Same upstream ref -> same row, no second one created.
+    expect(rows).toHaveLength(1); // same upstream ref -> same row, no second one created
     await upstreamRefreshed(rows[0].id);
 
     const view = await overview();
