@@ -1,29 +1,20 @@
 import type { RemoteSql, RemoteStatement } from "@folio/db";
 
-// Cloudflare D1 的 REST API 当作一条 SQL 传输(FOL-85)。GitHub Actions 里没有 D1 绑定,只有 API token;
-// 这里把「一条语句 / 一批语句」各翻成一次 HTTPS 往返,上面接的是 `@folio/db` 的 `provideRemoteDbClient`
-// —— 差量怎么算、一批塞几条、每条塞几行,全是 `putAll` 自己的事,这一层只管往返与守限。
+// Cloudflare D1's REST API as a SQL transport: GitHub Actions has no D1 binding, only an API token. Each statement or batch is one HTTPS round trip, under `@folio/db`'s `provideRemoteDbClient`; diffing and batching belong to `putAll`.
 //
-// 用 `/raw` 而不是 `/query`:两者同一个请求体(单条 `{ sql, params }` 或 `{ batch: [...] }`),`/raw`
-// 回的行是**值数组**(`{ columns, rows }`),正是 drizzle 的代理驱动要的形状 —— `/query` 回对象,
-// 同名列会互相覆盖,还得再按列序拆回数组。
+// `/raw` rather than `/query`: same request body, but `/raw` returns rows as value arrays (`{ columns, rows }`), the shape drizzle's proxy driver wants; `/query` returns objects whose duplicate column names overwrite each other.
 //
-// **token 只进 Authorization 头**:报错信息里只有状态码 + Cloudflare 回的 `errors[]`(code + message),
-// 不带请求头、不带 URL 以外的任何东西。测试钉着「token 不出现在任何错误里」。
+// The token goes only in the Authorization header; errors carry only the status and Cloudflare's `errors[]` (code + message). Tests pin that the token appears in no error.
 
 export const D1_API_BASE = "https://api.cloudflare.com/client/v4";
 
-/** D1 一条语句的绑定参数上限。超了 D1 会拒整批 —— 在这里先拦,错误信息说清是谁超了。 */
+/** D1's bound-parameter cap per statement; over it D1 rejects the whole batch, so check here and name the offender. */
 export const MAX_BOUND_PARAMS = 100;
 
-/**
- * 一次请求体的上限(字节)。D1 自己对单条 SQL 的限制是 100 KB;这里给**整个请求**定一个保守的顶,
- * 让「一批塞太多」在本地就红,而不是在 Cloudflare 那头变成一个含糊的 413。`putAll` 的一批
- * (50 条 × 20 行)实测约 100–150 KB,远在其内。
- */
+/** Request body cap in bytes. D1 limits one SQL statement to 100 KB; this is a conservative cap on the whole request so oversized batches fail locally instead of as a vague 413 (a `putAll` batch is ~100-150 KB). */
 export const MAX_REQUEST_BYTES = 1_000_000;
 
-/** 瞬时失败(429 / 5xx / 网络断)的总尝试次数与退避基数。写是幂等的(upsert / 按主键删),重发安全。 */
+/** Attempts and backoff base for transient failures (429 / 5xx / network). Writes are idempotent (upsert / delete by PK), so resending is safe. */
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_MS = 1_000;
 
@@ -33,7 +24,7 @@ export interface D1HttpConfig {
   readonly token: string;
 }
 
-// `/raw` 的响应。只声明读到的字段。
+// `/raw` response; only the fields we read.
 interface RawResult {
   readonly results?: { readonly columns?: readonly string[]; readonly rows?: unknown[][] };
   readonly success?: boolean;
@@ -44,7 +35,7 @@ interface ApiEnvelope {
   readonly result?: readonly RawResult[];
 }
 
-/** API 回的失败。`retryable` 决定要不要再发一次;消息里只有状态码与 Cloudflare 的 errors[]。 */
+/** An API failure. `retryable` decides whether to resend; the message holds only the status and Cloudflare's errors[]. */
 type D1HttpError = Error & { readonly status: number; readonly retryable: boolean };
 
 const d1Error = (message: string, status: number, retryable: boolean): D1HttpError =>
@@ -79,7 +70,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export function createD1HttpSql(config: D1HttpConfig): RemoteSql {
   const url = `${D1_API_BASE}/accounts/${encodeURIComponent(config.accountId)}/d1/database/${encodeURIComponent(config.databaseId)}/raw`;
 
-  // 一次往返(不重试)。成功 → 每条语句一份行数组。
+  // One round trip (no retry). On success, one row array per statement.
   const once = async (body: string, expected: number): Promise<unknown[][][]> => {
     let res: Response;
     try {
@@ -92,7 +83,7 @@ export function createD1HttpSql(config: D1HttpConfig): RemoteSql {
         body,
       });
     } catch (err) {
-      // 网络层失败(DNS / 连接被断)。原始错误只取 message:undici 的 cause 链里可能带请求选项。
+      // Network-layer failure (DNS / dropped connection). Take only the message: undici's cause chain can carry request options.
       throw d1Error(
         `D1 API unreachable: ${err instanceof Error ? err.message : String(err)}`,
         0,

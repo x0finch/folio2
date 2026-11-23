@@ -4,14 +4,9 @@ import { type CoinGeckoConfig, coinGeckoUpstreamLayers } from "@folio/oracle-ups
 import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { toError } from "@/lib/server/errors";
 
-// 刷全局映射表的**第二个装配点**(FOL-85,ADR 0056)。第一个曾是 Worker 的 23:00 cron —— 同一个
-// `GlobalRefIndexService`、同一张 `GlobalDatabase` 门票、同一个 CoinGecko adapter,只是:
-//   · 连接不是 D1 绑定,是调用方给的一条 SQL 传输(D1 REST / 本机 SQLite / 干跑包装);
-//   · 跑在 Node 上,没有 10ms CPU 的顶。
-// **这里一行业务逻辑都没有**:拉两个端点 → 纯转换(`toRefIndexRows`)→ 差量写(`putAll`:keyset 扫库、
-// 只写真变了的行、空全集不动、按 upstream 作用域删),全在原来的包里,Worker 那边有过的测试照样钉着。
+// Second assembly point for the global ref-index refresh (the first is the Worker cron): same `GlobalRefIndexService`, `GlobalDatabase` ticket and CoinGecko adapter, but with a caller-supplied SQL transport (D1 REST / local SQLite / dry-run wrapper) on Node, with no 10ms CPU cap. No business logic here: fetch two endpoints, pure transform, diff write (`putAll`).
 
-/** 一轮的账:刷之前表上最近一次变更的时刻,上游给了多少行 / 跳过多少 / 哪些链对不上,落库改增删各几行。 */
+/** One round's tally: last change time before the refresh, rows given / skipped / chain mismatches, and rows updated / inserted / deleted. */
 export interface RefreshReport {
   readonly lastRefreshedAt: number | null;
   readonly rows: number;
@@ -22,10 +17,7 @@ export interface RefreshReport {
   readonly deleted: number;
 }
 
-/**
- * 跑一轮。失败 → reject 一个 `Error`:上游的类型化失败经 app 的 `toError` 变成人话(与 Worker 那边同一句),
- * 传输层的 reject(D1 挂了)是 defect,原样拿出来。
- */
+/** Runs one round. Failure rejects an `Error`: upstream typed failures become readable text via the app's `toError` (same as the Worker); transport rejects (D1 down) are defects, surfaced as-is. */
 export async function refreshRefIndex(
   sql: RemoteSql,
   coingecko: CoinGeckoConfig,
@@ -47,19 +39,14 @@ export async function refreshRefIndex(
   throw failure instanceof Error ? failure : new Error(String(failure));
 }
 
-/** 这一轮经传输层发了什么:读几条、写几批几条(干跑时写的那部分只数不发)。 */
+/** What this round sent over the transport: reads, and write batches (dry-run writes are counted, not sent). */
 export interface SqlTally {
   reads: number;
   writeBatches: number;
   writeStatements: number;
 }
 
-/**
- * 给传输层套一层计数;`dryRun` 时**写一条都不往下发**(读照常,差量要对着真实的表算)。
- *
- * 判据是「这是不是一批写」:`putAll` 的读全走 `query`(keyset 分页的 SELECT),写全走 `batch`。
- * 万一哪天有一条写从 `query` 过来(method `run`),干跑同样把它拦下 —— 宁可少读,不可多写。
- */
+/** Wraps the transport with counting; with `dryRun` no write is sent down (reads still run so the diff uses the real table). A write is anything via `batch`; should one arrive via `query` (method `run`) it is blocked too: better to under-read than over-write. */
 export function tallied(inner: RemoteSql, dryRun: boolean): { sql: RemoteSql; tally: SqlTally } {
   const tally: SqlTally = { reads: 0, writeBatches: 0, writeStatements: 0 };
   return {

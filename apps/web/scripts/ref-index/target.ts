@@ -1,12 +1,10 @@
 import { unstable_readConfig } from "wrangler";
 
-// 刷哪个远端库:account_id 与 database_id **只写在 `apps/web/wrangler.jsonc` 里一次**,这里照读,不另抄。
+// Which remote DB to refresh: account_id and database_id live only in `apps/web/wrangler.jsonc`, read here.
 //
-// 用 wrangler 自己的读法(`unstable_readConfig`)而不是正则抠:它懂 JSONC、懂 `env` 不继承的规矩
-// (`--env preview` 拿到的是 `folio-preview` 那个库),与 `wrangler d1 migrations apply` 看到的是同一份。
-// `unstable_` 前缀是 wrangler 对 API 稳定性的说法;wrangler 版本在 catalog 里钉着,升级时这里跟着验一次。
+// Uses wrangler's own `unstable_readConfig` (understands JSONC and non-inherited `env`, so `--env preview` gets `folio-preview`), the same view as `wrangler d1 migrations apply`. The `unstable_` prefix is wrangler's API-stability note; the wrangler version is pinned in the catalog, so recheck on upgrade.
 
-/** Worker 里那个 D1 绑定的名字(与 wrangler.jsonc 的 `d1_databases[].binding` 一致)。 */
+/** The D1 binding name in the Worker (matches wrangler.jsonc `d1_databases[].binding`). */
 const DB_BINDING = "DB";
 
 export interface D1Target {
