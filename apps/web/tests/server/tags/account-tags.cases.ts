@@ -5,22 +5,20 @@ import { blockOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 tags/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
+// Runs inside tags/index.test.ts: each vitest file re-evaluates the whole import graph in workerd (~9s/file), so cases are merged per directory.
 describe("tags/account-tags", () => {
-  // #527 · listAccountTags
   const USER = "h-tags-links";
 
   const seed = async (userId: string) => {
     const pf = await db(userId).portfolios.ensureDefault();
     const account = await db(userId).accounts.create({
       connectorId: "manual",
-      label: "甲",
+      label: "Alpha",
       creds: null,
     });
     await db(userId).portfolios.assignAccount(account.id, pf.id);
-    const one = await db(userId).tags.create({ portfolioId: pf.id, name: "长期" });
-    const two = await db(userId).tags.create({ portfolioId: pf.id, name: "短线" });
+    const one = await db(userId).tags.create({ portfolioId: pf.id, name: "Long-term" });
+    const two = await db(userId).tags.create({ portfolioId: pf.id, name: "Short-term" });
     return { pf, account, one, two };
   };
 
@@ -31,7 +29,7 @@ describe("tags/account-tags", () => {
   });
 
   describe("listAccountTags", () => {
-    it("一个账户挂两个 tag → 两条关联都在", async () => {
+    it("one account with two tags attached -> both associations present", async () => {
       const { account, one, two } = await seed(USER);
       await db(USER).tags.attach(account.id, one.id);
       await db(USER).tags.attach(account.id, two.id);
@@ -43,13 +41,13 @@ describe("tags/account-tags", () => {
       expect(new Set(links.map((l) => l.accountId))).toEqual(new Set([account.id]));
     });
 
-    it("没有任何关联 → 空数组,不是 null", async () => {
+    it("no associations at all -> empty array, not null", async () => {
       await seed(USER);
 
       expect(await call(USER, handleListAccountTags())).toEqual([]);
     });
 
-    it("别人的关联不出现在我的清单里", async () => {
+    it("someone else's associations don't appear in my list", async () => {
       const theirs = await seed(otherUser(USER));
       await db(otherUser(USER)).tags.attach(theirs.account.id, theirs.one.id);
       await seed(USER);
