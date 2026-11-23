@@ -4,12 +4,6 @@ import { IntlProvider } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "@/lib/i18n/messages";
 
-// 设置页「用户」卡:登录的是谁、登出、手动查更新。
-// 钉住三件用户看得见的事:
-// ① 身份行 —— 有名有邮箱时两行都显示;
-// ② 登出要过一道确认,成功后清掉闲置锁状态 + 查询缓存再去 /login;失败只报错、不跳走
-//    (锁标志不清的话重新登录会当场又被锁上,见 clearIdleLockState 的注释);
-// ③ 查更新:有新版走更新 toast,没有就说「已是最新」(与自动提示共用同一个 id)。
 const {
   signOut,
   navigate,
@@ -38,7 +32,6 @@ vi.mock("@/lib/pwa/service-worker", () => ({
   showUpdateToast,
   UPDATE_TOAST_ID: "sw-update",
 }));
-// 真实现底下是 IndexedDB(jsdom 没有);这里只关心「登出时清了」。
 vi.mock("@/lib/queries/persist", () => ({ forgetQueryCache }));
 vi.mock("@folio/ui", async (orig) => ({
   ...(await orig<object>()),
@@ -61,7 +54,6 @@ function mount(user: { name?: string | null; email?: string | null }) {
   );
 }
 
-// 卡上那个按钮打开确认框;确认框里同名的那个才真登出(弹层后挂,取最后一个)。
 async function confirmSignOut() {
   fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
   await screen.findByText("Sign out?");
@@ -80,8 +72,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("身份行", () => {
-  it("有名字也有邮箱 → 名字作主行、邮箱作副行、首字母作头像", () => {
+describe("identity row", () => {
+  it("with name and email: name is the main row, email the sub row, initial as avatar", () => {
     mount({ name: "alice", email: "alice@example.com" });
     expect(screen.getByText("alice")).toBeTruthy();
     expect(screen.getByText("alice@example.com")).toBeTruthy();
@@ -90,15 +82,15 @@ describe("身份行", () => {
   });
 });
 
-describe("登出", () => {
-  it("点卡上的按钮只弹确认,不直接登出", async () => {
+describe("sign out", () => {
+  it("clicking the card button only opens a confirmation, does not sign out directly", async () => {
     mount({ name: "alice", email: "alice@example.com" });
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
     await screen.findByText("Sign out?");
     expect(signOut).not.toHaveBeenCalled();
   });
 
-  it("确认 → 登出,清闲置锁状态与查询缓存,再去 /login", async () => {
+  it("confirm: signs out, clears idle-lock state and query cache, then goes to /login", async () => {
     localStorage.setItem(LOCK_FLAG, "123");
     localStorage.setItem(LAST_ACTIVE, "456");
     signOut.mockResolvedValue({ data: {} });
@@ -114,7 +106,7 @@ describe("登出", () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it("服务端回错 → 报出那条错误,不跳走、不清缓存", async () => {
+  it("server returns an error: reports it, does not navigate or clear the cache", async () => {
     localStorage.setItem(LOCK_FLAG, "123");
     signOut.mockResolvedValue({ error: { message: "server said no" } });
     mount({ name: "alice", email: "alice@example.com" });
@@ -127,7 +119,7 @@ describe("登出", () => {
     expect(localStorage.getItem(LOCK_FLAG)).toBe("123");
   });
 
-  it("服务端回错但没带文案 → 用本地化的兜底文案", async () => {
+  it("server returns an error without a message: uses the localized fallback copy", async () => {
     signOut.mockResolvedValue({ error: {} });
     mount({ name: "alice", email: "alice@example.com" });
 
@@ -137,11 +129,11 @@ describe("登出", () => {
   });
 });
 
-describe("手动查更新", () => {
+describe("manual update check", () => {
   const clickCheck = () =>
     fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
 
-  it("有新版 → 弹「有更新」toast", async () => {
+  it('new version: shows the "update available" toast', async () => {
     vi.useFakeTimers();
     checkForUpdate.mockResolvedValue(true);
     mount({ name: "alice", email: "alice@example.com" });
@@ -159,7 +151,7 @@ describe("手动查更新", () => {
     expect(toastSuccess).not.toHaveBeenCalled();
   });
 
-  it("没有新版 → 「已是最新」,与自动提示共用同一个 toast id", async () => {
+  it('no new version: "up to date", sharing the same toast id as the automatic prompt', async () => {
     vi.useFakeTimers();
     checkForUpdate.mockResolvedValue(false);
     mount({ name: "alice", email: "alice@example.com" });

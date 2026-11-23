@@ -4,18 +4,10 @@ import { describe, expect, it } from "vitest";
 import { revalue } from "@/lib/server/sync/revalue";
 import { runWithOracle } from "./oracle-stub";
 
-// **本文件只测估值,不测认币。** #202 之前 revalue 自己调 `tokens.resolve` 解析身份,所以这里曾经
-// 搭着一整套假 store + 假 source,还顺带测「按 symbol 认得出 BTC」之类 —— 那些断言现在归
-// `packages/oracle/entry/tests/mint.test.ts`。revalue 只剩三件事:按 mode 定 value、捕获 selfPrice、
-// 法币走 FX(ADR 0025)。
 //
-// 于是假件塌成一个 `pricesOf`(只读价表的批读,FOL-87)。**记问过哪些 id、问了几次**:
-// 「有自带价就不查价」是一条性能承诺(self-first 下 CEX 不该为每个币查一次价),
-// 「一次同步只批读一次」是另一条 —— 不数就测不到。
 function fakeTokens(prices: Record<string, number>) {
   const asked: string[] = [];
   const batches: string[][] = [];
-  // revalue 只碰 pricesOf;其余能力由共用桩(oracle-stub)填空。
   const tokens = {
     pricesOf: (tokenIds: readonly string[]) =>
       Effect.sync(() => {
@@ -32,7 +24,6 @@ function fakeTokens(prices: Record<string, number>) {
   return { tokens, asked, batches };
 }
 
-// 假 FX:USD 恒 1(与真 FxRates.resolve 同口径);其余按注入表,缺失 → undefined(降级触发点)。
 function fakeFx(rates: Record<string, number> = {}) {
   const asked: string[] = [];
   const fx = {
@@ -46,24 +37,22 @@ function fakeFx(rates: Record<string, number> = {}) {
   return { fx, asked };
 }
 
-const NO_FX = fakeFx().fx; // 非法币用例够不着 fx,给个占位免得每处都造
+const NO_FX = fakeFx().fx;
 
 const PRICES = { tk_btc: 65000, tk_ton: 5 };
-// mint 那一步的产物:tokenRef → token_id。认不出来的 ref 不在里面。
 const IDS = new Map([
   ["bitcoin/native", "tk_btc"],
   ["binance/issued:BTC", "tk_btc"],
   ["coingecko/issued:bitcoin", "tk_btc"],
   ["coingecko/issued:the-open-network", "tk_ton"],
-  // 认得出但上游没价 —— 与「压根认不出」是两种情况,都该回退自带价。
   ["binance/issued:PRIVATETOKEN", "tk_private"],
 ]);
 
 const spot = (over: Partial<Balance> & Pick<Balance, "symbol" | "amount" | "value">): Balance =>
   ({ kind: "spot", ...over }) as Balance;
 
-describe("revalue —— 盯市类型(无权威自带价,恒用源价)", () => {
-  it("认得出 → value = 数量 × 市价", async () => {
+describe("revalue: mark-to-market kinds (no authoritative own price, always source price)", () => {
+  it("recognized: value = quantity × market price", async () => {
     const { tokens } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: NO_FX },
@@ -76,8 +65,7 @@ describe("revalue —— 盯市类型(无权威自带价,恒用源价)", () => {
     expect(out[0].value).toBe(32500); // 0.5 × 65000
   });
 
-  // FOL-87:以前逐笔 `priceOf`(stale 就回源),一次同步 = 每个币一发上游。现在一次批读价表。
-  it("多笔持仓 → 价表只批读一次,同一个 id 只问一遍", async () => {
+  it("several holdings: price table read once in batch, each id asked once", async () => {
     const { tokens, batches } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: NO_FX },
@@ -100,7 +88,7 @@ describe("revalue —— 盯市类型(无权威自带价,恒用源价)", () => {
     expect(batches).toEqual([["tk_btc", "tk_ton"]]);
   });
 
-  it("bitcoin:provider 只给 amount(value=0)→ 按市价算出来", async () => {
+  it("bitcoin:provider gives only amount (value=0): computed at market price", async () => {
     const { tokens } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: NO_FX },
@@ -113,8 +101,7 @@ describe("revalue —— 盯市类型(无权威自带价,恒用源价)", () => {
     expect(out[0].value).toBe(5200); // 0.08 × 65000
   });
 
-  // mint 没认出来 → 这里**不猜**(以前会掉回 symbol 解析,那条路已经堵了,见 ADR 0020 第三轮)。
-  it("mint 没给出 id → 保留 provider 原值,且一次都不问价", async () => {
+  it("mint without id: keeps the provider value and never asks for a price", async () => {
     const { tokens, asked } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: NO_FX },
@@ -135,7 +122,7 @@ describe("revalue —— 盯市类型(无权威自带价,恒用源价)", () => {
     expect(asked).toEqual([]);
   });
 
-  it("压根没有 tokenRef(导入的旧行)→ 同样保留原值、不问价", async () => {
+  it("no tokenRef at all (imported legacy row): keeps the value, no price lookup", async () => {
     const { tokens, asked } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: NO_FX },
@@ -146,8 +133,8 @@ describe("revalue —— 盯市类型(无权威自带价,恒用源价)", () => {
   });
 });
 
-describe("revalue —— 非盯市类型(有权威自带价)", () => {
-  it("self-first:捕获 selfPrice、value 不变、**不回源**", async () => {
+describe("revalue: non-mark-to-market kinds (authoritative own price)", () => {
+  it("self-first: captures selfPrice, value unchanged, **no upstream call**", async () => {
     const { tokens, asked } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: NO_FX },
@@ -157,14 +144,12 @@ describe("revalue —— 非盯市类型(有权威自带价)", () => {
         IDS,
       ),
     );
-    expect(out[0].value).toBe(120000); // 自带价权威,不动
-    expect(out[0].selfPrice).toBe(60000); // 120000 / 2,捕获为原料
-    expect(asked).toEqual([]); // 与旧行为同开销:CEX 有自带价即不问价
+    expect(out[0].value).toBe(120000);
+    expect(out[0].selfPrice).toBe(60000);
+    expect(asked).toEqual([]);
   });
 
-  // 交易所报「价 0」不是一个价,是「我不知道」(FOL-108:OKX 不报价的币就是这样来的)。当成有效自带价的话,
-  // self-first 下永远不回源,这个币就钉死在 $0。所以 0 与「没给价」同等对待:去 oracle 取。
-  it("self-first 但自带价是 0 → 当作没给价,改用源价", async () => {
+  it("self-first with own price 0: treated as no price, falls back to source price", async () => {
     const { tokens, asked } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: NO_FX },
@@ -179,7 +164,7 @@ describe("revalue —— 非盯市类型(有权威自带价)", () => {
     expect(out[0].selfPrice).toBeUndefined();
   });
 
-  it("source-first:改用源价,selfPrice 仍留存(可切回)", async () => {
+  it("source-first: uses source price, selfPrice kept (switchable back)", async () => {
     const { tokens } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: NO_FX },
@@ -195,7 +180,7 @@ describe("revalue —— 非盯市类型(有权威自带价)", () => {
     expect(out[0].selfPrice).toBe(60000);
   });
 
-  it("source-first 但上游没这个币的价 → 回退自带价", async () => {
+  it("source-first but upstream has no price for the token: falls back to own price", async () => {
     const { tokens, asked } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: NO_FX },
@@ -215,12 +200,11 @@ describe("revalue —— 非盯市类型(有权威自带价)", () => {
     );
     expect(out[0].value).toBe(99);
     expect(out[0].selfPrice).toBe(9.9);
-    expect(asked).toEqual(["tk_private"]); // 问过了,只是上游没有
+    expect(asked).toEqual(["tk_private"]);
   });
 });
 
-// —— 永续行不按市价重估(P5.1:仓位 value 恒 0、权益 = 账户净值;否则净值被名义敞口污染) ——
-describe("revalue —— 永续行保留 provider value", () => {
+describe("revalue: perp rows keep the provider value", () => {
   const perp = (kind: "perp_position" | "perp_equity", amount: number, value: number): Balance =>
     ({
       symbol: "ETH",
@@ -230,17 +214,17 @@ describe("revalue —— 永续行保留 provider value", () => {
       tokenRef: "hyperliquid/issued:ETH",
     }) as unknown as Balance;
 
-  it("perp_position value 恒 0(即便数量大、币认得出),不重估成 数量×币价", async () => {
+  it("perp_position value stays 0 (even with a big quantity and a known token), not repriced to quantity × token price", async () => {
     const { tokens, asked } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: NO_FX },
       revalue(true, [perp("perp_position", -40391.56, 0)], IDS),
     );
     expect(out[0].value).toBe(0);
-    expect(asked).toEqual([]); // 连价都不问
+    expect(asked).toEqual([]);
   });
 
-  it("perp_equity 保留账户净值,不按 数量×币价 覆写", async () => {
+  it("perp_equity keeps the account equity, not overwritten by quantity × token price", async () => {
     const { tokens } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: NO_FX },
@@ -250,12 +234,11 @@ describe("revalue —— 永续行保留 provider value", () => {
   });
 });
 
-// —— 法币:USD 值 = 数量 × FX 汇率(usd_per_unit,USD=1),现算不冻价(ADR 0025) ——
-describe("revalue —— 法币走 FX", () => {
+describe("revalue: fiat goes through FX", () => {
   const fiat = (code: string, amount: number, value = 0): Balance =>
     ({ kind: "spot", symbol: code, amount, value, tokenRef: `fiat/issued:${code}` }) as Balance;
 
-  it("USD:显示价恒 1、value = 数量(不因汇率抖动)", async () => {
+  it("USD: display price always 1, value = quantity (unaffected by rate jitter)", async () => {
     const { tokens } = fakeTokens(PRICES);
     const { fx } = fakeFx();
     const out = await runWithOracle({ tokens, fx: fx }, revalue(true, [fiat("USD", 100)], IDS));
@@ -263,7 +246,7 @@ describe("revalue —— 法币走 FX", () => {
     expect(out[0].value).toBe(100);
   });
 
-  it("非美元:value = 数量 × 注入汇率;汇率变则值随之变", async () => {
+  it("non-USD: value = quantity × injected rate; value follows rate changes", async () => {
     const { tokens } = fakeTokens(PRICES);
     const out1 = await runWithOracle(
       { tokens, fx: fakeFx({ CNY: 0.14 }).fx },
@@ -276,10 +259,10 @@ describe("revalue —— 法币走 FX", () => {
       { tokens, fx: fakeFx({ CNY: 0.15 }).fx },
       revalue(true, [fiat("CNY", 1000)], IDS),
     );
-    expect(out2[0].value).toBeCloseTo(150); // 汇率变 → 值变(不冻)
+    expect(out2[0].value).toBeCloseTo(150);
   });
 
-  it("每次现算:不冻 selfPrice(下次重估仍按当时汇率)", async () => {
+  it("computed on every call: selfPrice not frozen (next revalue uses the then-current rate)", async () => {
     const { tokens } = fakeTokens(PRICES);
     const out = await runWithOracle(
       { tokens, fx: fakeFx({ EUR: 1.1 }).fx },
@@ -288,7 +271,7 @@ describe("revalue —— 法币走 FX", () => {
     expect(out[0].selfPrice).toBeUndefined();
   });
 
-  it("不问代币价:法币不走 pricesOf(它没有上游价)", async () => {
+  it("no token price lookup: fiat does not go through pricesOf (it has no upstream price)", async () => {
     const { tokens, asked } = fakeTokens(PRICES);
     await runWithOracle(
       { tokens, fx: fakeFx({ EUR: 1.1 }).fx },
@@ -297,18 +280,18 @@ describe("revalue —— 法币走 FX", () => {
     expect(asked).toEqual([]);
   });
 
-  it("FX 缺该 code(缓存冷)→ 降级:保留 provider 原值,不抛", async () => {
+  it("FX lacks the code (cold cache): degrades, keeps the provider value, no throw", async () => {
     const { tokens } = fakeTokens(PRICES);
-    const { fx, asked } = fakeFx({}); // 没有 CNY 汇率
+    const { fx, asked } = fakeFx({});
     const out = await runWithOracle(
       { tokens, fx: fx },
       revalue(true, [fiat("CNY", 1000, 130)], IDS),
     );
-    expect(out[0].value).toBe(130); // provider 原值保留
-    expect(asked).toEqual(["CNY"]); // 问过了,只是缓存冷
+    expect(out[0].value).toBe(130);
+    expect(asked).toEqual(["CNY"]);
   });
 
-  it("非白名单的 fiat/issued:XXX 不当法币 → 走普通路径(mint 没给 id → 保留原值)", async () => {
+  it("non-allowlisted fiat/issued:XXX is not treated as fiat: takes the normal path (mint without id keeps the value)", async () => {
     const { tokens } = fakeTokens(PRICES);
     const { asked: fxAsked, fx } = fakeFx({ XXX: 2 });
     const b = {
@@ -319,7 +302,7 @@ describe("revalue —— 法币走 FX", () => {
       tokenRef: "fiat/issued:XXX",
     } as Balance;
     const out = await runWithOracle({ tokens, fx: fx }, revalue(true, [b], IDS));
-    expect(out[0].value).toBe(7); // 未认出 → 原值(不会拿 XXX 汇率乱算)
-    expect(fxAsked).toEqual([]); // 压根没问 FX
+    expect(out[0].value).toBe(7);
+    expect(fxAsked).toEqual([]);
   });
 });
