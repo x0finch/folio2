@@ -1,8 +1,7 @@
-// 净值 hero 的三指标读模型(纯 —— 可脱离组件单测)。
-// best/worst = 24h 涨跌最高/最低的持仓;stableShare = 稳定币市值占比。
+// Read model for the hero's three metrics (pure, unit-testable): best/worst = highest/lowest 24h
+// PnL holdings, stableShare = stablecoin share of value.
 
-// 稳定币判定的【临时固定清单】(#102):按 CGK 分类的动态 facet(ADR 0016 / #99)落地前先用这份
-// 常见稳定币 symbol 兜底。#99 上线后应换成 tokens.is_stablecoin,并删掉此清单。
+// Temporary fixed stablecoin symbol list.
 const STABLECOIN_SYMBOLS: ReadonlySet<string> = new Set([
   "USDT",
   "USDC",
@@ -31,20 +30,19 @@ export function isStablecoin(symbol: string): boolean {
 }
 
 export interface HoldingLike {
-  // isFiat:法币身份(ADR 0025),由 fiat 命名者的 ref 经 fiatCodeOf 推出、不看裸 symbol —— 由上游
-  // (aggregate → overview-model)填好。稳定口径把所有法币都算稳定(现金类、非加密波动)。
+  // isFiat comes from the fiat namer ref via fiatCodeOf, never the bare symbol; stable counts all fiat.
   token: { symbol: string; isFiat?: boolean };
   totalValue: number;
-  // 24h 盈亏(ADR 0040),由 server 按快照历史 / 账本分段算好。null = 算不出。
+  // 24h PnL computed server-side from snapshot history / ledger segments; null = not computable.
   gain24h?: { amount: number; pct: number | null } | null;
 }
 
 export interface HeroMetrics {
-  /** 今天**赚得最多**的持仓(按 24h 盈亏金额);无可算的行则 null。 */
+  /** Today's biggest gainer by 24h PnL amount; null when no row is computable. */
   best: { symbol: string; amount: number } | null;
-  /** 今天**赚得最少 / 亏得最多**的持仓;无可算的行则 null。 */
+  /** Today's smallest gain / biggest loser; null when no row is computable. */
   worst: { symbol: string; amount: number } | null;
-  /** 稳定币市值 / 组合总额(0..1);总额 ≤ 0 时 null。 */
+  /** Stablecoin value / portfolio total (0..1); null when the total is <= 0. */
   stableShare: number | null;
 }
 
@@ -56,22 +54,19 @@ export function deriveHeroMetrics(
   let worst: HeroMetrics["worst"] = null;
   let stableSum = 0;
   for (const h of holdings) {
-    // 稳定 = 法币(身份驱动,USD 与非 USD 法币皆是)‖ 稳定币 symbol 表(#102 临时清单)。
+    // Stable = fiat (identity-driven) or a listed stablecoin symbol.
     if (h.token.isFiat || isStablecoin(h.token.symbol)) stableSum += h.totalValue;
-    // **按盈亏金额取,不按涨跌幅**(ADR 0040)。以前这里只看涨跌幅、完全不看持有多少,于是这两个
-    // 格子永远被小仓位的暴涨币占据 —— 持有 500 块的币涨 30%,就把最大的仓位顶掉了。它回答的是
-    // 「哪个币涨得最多」,而人想知道的是「今天谁让我赚得最多」。
-    if (h.gain24h == null) continue; // 算不出的行不参与择取
+    // By PnL amount, not percent: percent let tiny positions with big moves dominate the slots.
+    if (h.gain24h == null) continue; // not computable: skip
     const entry = { symbol: h.token.symbol, amount: h.gain24h.amount };
-    // 严格大于/小于 → 并列时保留先出现者(与设计的排序取首一致)。
+    // Strict comparison: ties keep the first seen.
     if (best == null || entry.amount > best.amount) best = entry;
     if (worst == null || entry.amount < worst.amount) worst = entry;
   }
   return {
     best,
     worst,
-    // clamp ≤ 1:稳定币市值可能 > 组合净值(perp/保证金亏损压低净值,或 defi 不计入 holdings),
-    // 不 clamp 会渲染出 >100% 的占比。
+    // Clamp to <= 1: stablecoin value can exceed net worth (perp margin losses, or DeFi not in holdings).
     stableShare: totalValue > 0 ? Math.min(1, stableSum / totalValue) : null,
   };
 }
