@@ -2,21 +2,14 @@ import { env } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { handleGetProviderKeyStatus } from "@/lib/server/settings/provider-keys";
 
-// 合并进 settings/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("settings/provider-keys", () => {
-  // #527 · getProviderKeyStatus
-  //
-  // **这个 handler 不经 runEffect**(它一个服务都不要,只读两个 env 开关),所以这里直接调它 ——
-  // 不需要用户、不需要 D1。这也是清单里那句「只读 env 的那几个刻意不套」的可执行形式。
-  //
-  // 它读的是 `cloudflare:workers` 的 env,而 workers-pool 里那份与 `cloudflare:test` 的 `env`
-  // 是同一个对象,所以改这里就能改被测代码看到的值。
+  // This handler needs no services (it only reads two env flags), so it's called directly. It reads
+  // `cloudflare:workers` env, the same object as `cloudflare:test`'s `env` in the workers pool.
 
   const withKeys = (patch: Record<string, string | undefined>) => {
     const target = env as unknown as Record<string, string | undefined>;
     for (const [k, v] of Object.entries(patch)) {
-      if (v === undefined) vi.stubEnv(k, ""); // 占位;真正生效的是下面这行
+      if (v === undefined) vi.stubEnv(k, ""); // placeholder; the next line is what takes effect
       target[k] = v;
     }
   };
@@ -29,7 +22,7 @@ describe("settings/provider-keys", () => {
   });
 
   describe("getProviderKeyStatus", () => {
-    it("两个都配了 → 两个 true", () => {
+    it("both configured → both true", () => {
       withKeys({ ZERION_API_KEY: "zk", COINSTATS_API_KEY: "ck" });
 
       expect(handleGetProviderKeyStatus()).toEqual({
@@ -38,7 +31,7 @@ describe("settings/provider-keys", () => {
       });
     });
 
-    it("只配了一个 → 一 true 一 false", () => {
+    it("one configured → one true, one false", () => {
       withKeys({ ZERION_API_KEY: "zk", COINSTATS_API_KEY: undefined });
 
       expect(handleGetProviderKeyStatus()).toEqual({
@@ -47,7 +40,7 @@ describe("settings/provider-keys", () => {
       });
     });
 
-    it("env 里是空串 → 算没配,不是配了", () => {
+    it("empty string in env → not configured", () => {
       withKeys({ ZERION_API_KEY: "", COINSTATS_API_KEY: "" });
 
       expect(handleGetProviderKeyStatus()).toEqual({
@@ -56,9 +49,8 @@ describe("settings/provider-keys", () => {
       });
     });
 
-    it("返回的必须是布尔 —— 连 key 的一个字符都不许漏出去", () => {
-      // **红线。** 这个接口存在的意义就是「告诉界面某个 provider 能不能用」,而不是回显配置。
-      // 断言值的类型,而不只是真假:有人把它「顺手」改成返回前四位做提示,这条会红。
+    it("returns booleans only; no character of the key leaks", () => {
+      // Asserts the value type, not just truthiness, so returning e.g. a key prefix as a hint fails.
       withKeys({ ZERION_API_KEY: "super-secret-zerion", COINSTATS_API_KEY: "super-secret-cs" });
 
       const out = handleGetProviderKeyStatus();

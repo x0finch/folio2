@@ -6,8 +6,8 @@ import { call } from "../_kit/run";
 import { seedAccount } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
-// FOL-94 · getDataVersion:浏览器只问这一个数决定要不要重拉。号由库里的触发器抬
-// (覆盖面在 `@folio/db` 的 data-version.test.ts 数着),这里钉的是 server fn 这一面。
+// The browser polls this one number to decide whether to refetch; DB triggers bump it (coverage of
+// those lives in @folio/db), this pins the server-fn side.
 describe("settings/data-version", () => {
   const USER = "h-set-dv";
 
@@ -17,11 +17,11 @@ describe("settings/data-version", () => {
     await freshUser(otherUser(USER));
   });
 
-  it("全新用户 → 0", async () => {
+  it("new user → 0", async () => {
     expect(await call(USER, handleGetDataVersion())).toEqual({ version: 0 });
   });
 
-  it("写了之后变;再读一次不变", async () => {
+  it("changes after a write; stable on re-read", async () => {
     const before = (await call(USER, handleGetDataVersion())).version;
     const acc = await seedAccount(USER, "甲");
     const afterCreate = (await call(USER, handleGetDataVersion())).version;
@@ -33,7 +33,7 @@ describe("settings/data-version", () => {
     expect((await call(USER, handleGetDataVersion())).version).toBe(afterRename);
   });
 
-  it("别人的写不动我的号", async () => {
+  it("other users' writes don't bump mine", async () => {
     await seedAccount(otherUser(USER), "他们的");
     expect(await call(USER, handleGetDataVersion())).toEqual({ version: 0 });
   });
