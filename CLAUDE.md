@@ -2,17 +2,15 @@
 
 > **Folio** is a self-hosted crypto portfolio tracker (on-chain wallets + Bitcoin + CEX + perp DEX + manual assets → one dashboard). M1–M6 (foundation → on-chain → CEX → perp → polish) are complete and shipped — architecture overview in [docs/architecture/](docs/architecture/00-overview.md); decision history in git log + [docs/adr/](docs/adr/). Forward work: [docs/roadmap.md](docs/roadmap.md) (narrative + scope; links the epic board). Read this file first every session. Coding conventions (imports, naming, UI, React, tests, commits): see [CODING.md](CODING.md).
 
-## 0. 说人话(高于本文件其余一切)
+## 0. Language and comments (overrides everything below)
 
-**全程中文。默认短。结论先行。**
+**Language.** Talk to the maintainer in Chinese — short, answer first, plain words, reasons only when asked; honest over brief. **Everything written into the repo is English**: code comments, docs, commit messages, issues, PR titles and bodies.
 
-- **先给答案,再给理由。** 一两句话说完的事就一两句话说完;背景、权衡、边界情况等被问了再给。
-- **别倒术语。** 内部黑话("mint 决策树"、"锚"、"SWR 编排")在自己脑子里用,对外换成日常说法("怎么认出这是哪个币")。首次不得不用某个词时,顺手一句解释。
-- **别一次铺一堆表格。** 表格是被要求"逐个列出"时才用的形状,不是默认形状。
-- **诚实优先于简短。** 说人话不等于打包票:没验过的就说没验过,做砸了就直说,坏消息别裹在长段落里。
-- 用户明确要"详细/逐条/全部列出"时照做 —— 那时长是对的。
-
-**为什么写在这:** 这条被反复纠正过多次("说人话"、"太长了")。它不是风格偏好,是返工成本 —— 一段读不进去的回复等于没回复。
+**Comments.** The code explains itself; a comment earns its place only by saying what the code cannot:
+- Keep: the *why* behind a non-obvious choice — platform constraints, upstream API quirks, workarounds, invariants a reader would otherwise break. One or two lines.
+- Drop: anything that restates the code, narrates history ("used to…", "changed from…"), or cites issues / PRs / ADRs / tickets. History lives in git.
+- Prefer a better name or a smaller function over a comment.
+- Tool directives (`biome-ignore`, `/// <reference>`, `@ts-expect-error`) are not comments — keep them.
 
 ## Tech stack
 - TanStack Start (`@tanstack/react-start`) + Vite — full-stack, server functions
@@ -49,11 +47,8 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 - Package prefix `@folio/*`。上游客户端叫 `@folio/<upstream>-client`(`packages/clients/<upstream>`);`@folio/connectors-provider-<name>` 是**待退场的老形状**,别新建(ADR 0036)。
 
 ## Git & PR 工作流
-- **issue 一律建在 Linear,不在 GitHub**(team `FOL`)。手边有 `gh` 不是理由 —— `gh issue create` / `edit` / `comment` / `close` 已在 [.claude/settings.json](.claude/settings.json) 里 deny 掉。**只有读历史才用 `gh issue view/list`**(仓库里那些 `#N` 引用指向 GitHub)。怎么操作见 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)。
-- **功能开发走技能链**:think → grill-with-docs → ADR(难回退的决策)→ to-spec → to-tickets → 开分支 → implement(内驱 tdd)→ code-review。路由见 `/ask-matt`。
 - **main 只经 PR 收代码**:动代码前从 main 开 `feat/*` 分支;直推 main 被禁。ADR 这类文档基线可先提交 main,代码走 PR。
 - **合并用 Squash**:保留 GitHub 的 Verified 签名;**不要 rebase-merge**(会把提交变 Unverified)。
-- **PR 关 issue 靠分支名,不靠正文关键字**:issue 在 Linear,`Closes #N` 只对 GitHub issue 有效。分支名带 `fol-<n>`(如 `feat/fol-21-stablecoin-facet`)让 Linear 认领这条 PR;**Linear 的 GitHub 集成没装之前,合并后手动把 issue 挪到 `Done`**。正文里仍可写 `Closes #N` 关联遗留的 GitHub issue —— 但注意「`close` 这个词出现在正文里就会被当成关闭指令」,别顺口写。
 - **提交已签名(GPG)**:别引入破坏 Verified 的操作。
 - **每片 tracer-bullet 独立可验收**:一片一提交,过四闸(typecheck / test / biome / build)+ code-review 再进下一片。
 
@@ -94,22 +89,4 @@ Architecture & security principles (1–6) live here; coding-style principles (7
 
 **M1–M6 complete** — foundation → on-chain → CEX → perp → polish, deploy-ready (see [apps/web/DEPLOY.md](apps/web/DEPLOY.md); going live is user-run per safety rules). Shipped-work history lives in git log + [docs/adr/](docs/adr/) — no in-repo phase archive.
 
-**前向路线**:见 **[docs/roadmap.md](docs/roadmap.md)**(叙事 / 范围 / 依赖,并链到 epic 看板 —— Linear `FOL` team 的 board 视图;看板是进度事实源)。规划 epic **不打 `ready-for-agent`**;开工某条时经技能链(grill → to-spec → to-tickets)拆竖切片才给 agent-ready 标签。规划草稿(plans)写本地 **`.scratch/plans/`**(gitignore,一次性、不入库);耐久产出落 ADR + Linear issue,不留 plan 文件在仓库。
-
----
-
-## Agent skills
-
-引用的工程技能(`/ask-matt`、`/grill-with-docs`、`/implement`、`/code-review` 等)经 **`npx skills@latest add mattpocock/skills`** 安装到 `.agents/skills/`(gitignore,不随仓库分发,按开发者各自安装)。仓库只带**配置**(下方 + `docs/agents/*`,由 `setup-matt-pocock-skills` 落地)。
-
-### Issue tracker
-
-**Linear**(workspace `x0finch`,team `Folio` / key `FOL`),经 **GraphQL API 直接 curl**(不用 MCP,理由见文档);认证走个人 API key(`$LINEAR_API_KEY`,不入库)。**PR 仍在 GitHub**,且不是需求入口。见 [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)。
-
-### Triage labels
-
-五个角色沿用同名 label:`needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`(已在 `FOL` team 建好)。**进度归 workflow state,分诊归 label**,两者别混。见 [docs/agents/triage-labels.md](docs/agents/triage-labels.md)。
-
-### Domain docs
-
-Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See [docs/agents/domain.md](docs/agents/domain.md).
+**Roadmap**: [docs/roadmap.md](docs/roadmap.md). Planning drafts go in `.scratch/plans/` (gitignored).
