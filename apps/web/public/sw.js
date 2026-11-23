@@ -1,62 +1,45 @@
-// 手搓运行时缓存 Service Worker(ADR 0027:可安装的移动外壳,**不做离线优先**)。
-// 策略:
-//   · 导航(文档)→ network-first,失败回退中立的 offline.html(不缓存 SSR 响应 —— 那里带用户数据,
-//     离线显示旧余额比诚实报离线更危险)。
-//   · hashed 静态(script/style/font,Vite 产物不可变)→ cache-first(秒开、可离线启动外壳)。
-//   · 其余(/api、server fn、图片、跨源、非 GET)→ network-only、永不进缓存。
-// 更新(ADR 0051,取代 0027):新版装好后**停在 waiting**,不再自动 skipWaiting —— 换版时机交给页面:
-//   闪屏阶段自动静默换、运行中弹提示。页面同意时 postMessage `{type:"SKIP_WAITING"}`,这里才接管,
-//   随后 controllerchange 触发页面 reload(客户端逻辑见 src/lib/pwa/service-worker.ts)。
-// 纯路由决策 swRoute 导出供单测;vitest(node)里 self 无 skipWaiting → 只导出、不挂事件。
+// Runtime-cache service worker for the installable mobile shell; not offline-first.
+//   - navigation: network-first, falling back to a neutral offline.html. SSR responses are never
+//     cached: they carry user data, and stale balances are worse than an honest offline page.
+//   - /assets/ script/style/font (content-hashed, immutable): cache-first.
+//   - everything else (/api, server fns, images, cross-origin, non-GET): network-only.
+// A new worker stays in waiting; the page posts {type:"SKIP_WAITING"} to take over.
+// swRoute is exported for unit tests; under node `self` has no skipWaiting, so no listeners attach.
 
-// **构建版本戳**:占位 `__SW_BUILD__` 由 vite 插件(见 vite.config 的 stampSwVersion)在打包时换成
-// git describe 版本号。作用是让**每次发版 sw.js 的内容都不同** —— 浏览器逐字节比对 sw.js 才认得出
-// 「有新版」,而 app 改代码只换 /assets 的 hash、不动 sw.js;没有这行,更新检测(waiting worker)对
-// 普通发版永远不触发。纯注释、不影响行为。dev 下保持占位原文(不构建、不注册 SW)。
+// The vite plugin stampSwVersion replaces the placeholder with a git describe string so sw.js
+// differs byte-wise on every release; otherwise browsers never detect an update.
 // @sw-build __SW_BUILD__
 
-// v2:v1 里存过没哈希的 URL(见 swRoute 里那条注释),换桶名让 activate 顺手清掉。
+// Bumped when unhashed URLs may have been cached; activate deletes old buckets.
 const CACHE = "folio-shell-v2";
 const OFFLINE_URL = "/offline.html";
 
-/**
- * 「改一个字节就换 URL」的产物前缀。Vite 把 js/css/字体都输出到 /assets/,文件名带内容哈希,
- * 所以只有它们配得上 cache-first —— 缓存一条永不过期的记录,而它本来也永远不会变。
- */
+// Vite emits content-hashed js/css/fonts here, so only these are safe to cache forever.
 const IMMUTABLE_PREFIX = "/assets/";
 
 /**
- * 按请求特征选缓存策略(纯函数,便于单测)。
  * @param {{ method: string, mode: string, destination: string, sameOrigin: boolean, pathname: string }} req
  * @returns {"navigation" | "cache-first" | "network-only"}
  */
 export function swRoute(req) {
-  if (req.method !== "GET") return "network-only"; // 变更类(server fn / mutation),不缓存
-  if (req.mode === "navigate") return "navigation"; // 文档:network-first + 外壳兜底
-  if (!req.sameOrigin) return "network-only"; // 跨源(如 logo 代理目标)
-  if (req.pathname.startsWith("/api/")) return "network-only"; // 数据 / 鉴权,永不缓存
-  // **必须同时满足「是静态资源」和「URL 带哈希」**。早先只看 destination,注释写着「hashed 不可变
-  // 资源」但代码没验证过这一点 —— 于是任何同源的 script/style/font URL 都被永久钉死:命中即返回、
-  // 永不回网络、也没有版本号能淘汰它。真踩过:SW 只在 PROD 注册,可一旦某个域名上跑过一次
-  // preview/prod 构建,SW 就长驻;之后在同一域名跑 dev(`dev:tunnel` 的日常),它照样拦
-  // `/src/styles.css` 这种不带哈希、内容天天变的 URL,把上一轮的 CSS 一直发下去。表现是
-  // 「改了样式手机上不生效,私密标签页却正常」,能查半天。
+  if (req.method !== "GET") return "network-only";
+  if (req.mode === "navigate") return "navigation";
+  if (!req.sameOrigin) return "network-only";
+  if (req.pathname.startsWith("/api/")) return "network-only";
+  // Require both a static destination and the hashed prefix: a SW left on a host by a prod build
+  // would otherwise pin unhashed dev URLs like /src/styles.css and serve stale CSS forever.
   const staticDest =
     req.destination === "script" || req.destination === "style" || req.destination === "font";
   if (staticDest && req.pathname.startsWith(IMMUTABLE_PREFIX)) {
     return "cache-first";
   }
-  return "network-only"; // 其余默认不缓存(图片 / manifest 等保持新鲜)
+  return "network-only";
 }
 
 /**
- * cache-first 的第二道门:**响应的内容类型必须与请求的 destination 对得上**,否则不进缓存。
- *
- * 为什么要有它:壳化之后 wrangler `assets.run_worker_first` 给的是数组,平台文档明写这会**放弃**
- * 「只对导航请求做 SPA 回退」的判断 —— 于是一个已被新版删掉的 `/assets/<旧哈希>.js`(旧标签页
- * 在发版后懒加载 chunk 时会请求它)拿到的不再是 404,而是 200 的 `index.html`。chunk 照样加载
- * 失败、刷新即好,这一点与今天的 404 同级;但 `res.ok` 为真,不加这道门 SW 就会把那份 HTML
- * 永久钉在 JS 的地址上。守卫只看内容类型,不改 swRoute 的任何决策,导航策略与更新流不受影响。
+ * Content type must match the request destination before caching. With `assets.run_worker_first`
+ * as an array, a deleted `/assets/<old-hash>.js` returns 200 index.html instead of 404, and
+ * `res.ok` alone would pin that HTML to the JS URL.
  * @param {string} destination
  * @param {string | null} contentType
  * @returns {boolean}
@@ -69,16 +52,13 @@ export function isCacheableAsset(destination, contentType) {
   return false;
 }
 
-// SW 全局特征探测:window / node 都没有 skipWaiting → 只有真在 Service Worker 里才挂事件
-//(node 单测 self 未定义,短路;只导出 swRoute)。
+// Only a real Service Worker scope has self.skipWaiting (not window, not node).
 if (typeof self !== "undefined" && typeof self.skipWaiting === "function") {
   self.addEventListener("install", (event) => {
-    // **不再 skipWaiting**:新版装好后停在 waiting,换版时机交给页面(ADR 0051)。首次安装(无旧
-    // controller)时页面不会催换,新版随 activate 自然接手 —— 见 service-worker.ts 对 controller 的判断。
+    // No skipWaiting: the page decides when to swap. First installs (no controller) activate naturally.
     event.waitUntil(caches.open(CACHE).then((c) => c.add(OFFLINE_URL)));
   });
 
-  // 页面同意换版:收到 SKIP_WAITING 才让 waiting 的新版接管(接管后触发 clients 的 controllerchange)。
   self.addEventListener("message", (event) => {
     if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
   });
@@ -86,7 +66,6 @@ if (typeof self !== "undefined" && typeof self.skipWaiting === "function") {
   self.addEventListener("activate", (event) => {
     event.waitUntil(
       (async () => {
-        // 清掉旧版本缓存桶(改 CACHE 版本号即淘汰)。
         const keys = await caches.keys();
         await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
         await self.clients.claim();
@@ -105,12 +84,11 @@ if (typeof self !== "undefined" && typeof self.skipWaiting === "function") {
       pathname: url.pathname,
     });
 
-    if (strategy === "network-only") return; // 不拦截,走浏览器默认网络路径
+    if (strategy === "network-only") return;
 
     if (strategy === "navigation") {
       event.respondWith(
         fetch(req).catch(async () => {
-          // 离线:回退中立 offline.html,不返回带数据的旧 SSR 页。
           const cache = await caches.open(CACHE);
           return (await cache.match(OFFLINE_URL)) ?? Response.error();
         }),
@@ -118,7 +96,6 @@ if (typeof self !== "undefined" && typeof self.skipWaiting === "function") {
       return;
     }
 
-    // cache-first(hashed 不可变):命中即用,否则取网络并入缓存。
     event.respondWith(
       (async () => {
         const cache = await caches.open(CACHE);

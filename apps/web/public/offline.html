@@ -6,9 +6,7 @@
     <meta name="theme-color" content="#151515" />
     <title>Folio — Offline</title>
     <style>
-      /* 自包含、无外链:SW 缓存的兜底页,离线时也必须能独立渲染。深色对齐 App ——
-         这里的色值是 globals.css 暗色 token 的手抄镜像(foreground/muted-foreground/primary),
-         那边改了要跟(镜像清单见 globals.css 头注)。 */
+      /* Self-contained: must render offline. Colours hand-mirror the dark tokens in globals.css. */
       :root { color-scheme: dark; }
       html, body { height: 100%; margin: 0; }
       body {

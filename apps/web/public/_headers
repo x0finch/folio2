@@ -1,4 +1,3 @@
-# Cloudflare Workers 静态资源自定义头。SW 脚本必须不被边缘缓存,否则用户卡在旧 SW / 旧外壳
-# (ADR 0027)。生产由 Workers Assets 应用;需部署后实测确认响应头。
+# The SW script must not be edge-cached, or users get stuck on an old SW / shell.
 /sw.js
   Cache-Control: no-cache
