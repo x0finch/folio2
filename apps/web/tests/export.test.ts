@@ -9,13 +9,12 @@ import {
   tokenRecord,
 } from "@/lib/server/io/export";
 
-// 注:脱敏(secret 剥 / semi 打码 / public 留)逻辑是 lib/creds.ts safeView(在 creds.test 覆盖);
-// 这里只测 v3 记录映射形状。route 把 safeView 的结果传给 accountRecord。
+// Redaction is safeView's job (covered in creds.test); this only checks v3 record shapes.
 
-const line = (rec: unknown) => JSON.parse(ndjsonLine(rec)); // 走一遍 JSON:undefined 字段应消失
+const line = (rec: unknown) => JSON.parse(ndjsonLine(rec)); // round-trip through JSON: undefined fields disappear
 
 describe("metaRecord", () => {
-  it("v3:version=3 + app + exportedAt(首行)", () => {
+  it("v3: version=3 + app + exportedAt (first line)", () => {
     expect(EXPORT_VERSION).toBe(3);
     expect(metaRecord(1700000000000)).toEqual({
       type: "meta",
@@ -27,7 +26,7 @@ describe("metaRecord", () => {
 });
 
 describe("tokenRecord", () => {
-  it("ref 嵌在里头;null 字段序列化后省略", () => {
+  it("ref nested inside; null fields omitted after serialization", () => {
     const rec = tokenRecord({
       id: "tk1",
       symbol: "USDC",
@@ -42,12 +41,12 @@ describe("tokenRecord", () => {
     const parsed = line(rec);
     expect(parsed.logo).toBe("u.png");
     expect(parsed.marketCapRank).toBe(7);
-    expect(parsed).not.toHaveProperty("providerLogo"); // null → 省略
+    expect(parsed).not.toHaveProperty("providerLogo"); // null → omitted
   });
 });
 
 describe("accountRecord", () => {
-  it("v3 输出 platform 字段(旧名 network 已随版本提升改掉);creds 原样", () => {
+  it("v3 emits a platform field (not network); creds as-is", () => {
     const rec = accountRecord(
       { id: "m", connectorId: "manual", platform: "manual", label: "M", archivedAt: null },
       { symbol: "BTC", amount: "0.5", usdValue: "32000" },
@@ -60,12 +59,12 @@ describe("accountRecord", () => {
     });
     expect(rec.creds).toEqual({ symbol: "BTC", amount: "0.5", usdValue: "32000" });
     const parsed = line(rec);
-    expect(parsed).not.toHaveProperty("network"); // v2 的旧字段名不再出现
+    expect(parsed).not.toHaveProperty("network"); // v2's network field is gone
     expect(parsed).not.toHaveProperty("data");
-    expect(parsed).not.toHaveProperty("archivedAt"); // 活跃账户不带
+    expect(parsed).not.toHaveProperty("archivedAt"); // absent on active accounts
   });
 
-  it("platform 为 null → 省略;archivedAt 有值 → 带上(归档态保真)", () => {
+  it("platform null → omitted; archivedAt set → included (archived state preserved)", () => {
     expect(
       line(
         accountRecord(
@@ -86,7 +85,7 @@ describe("accountRecord", () => {
 });
 
 describe("snapshotRecord", () => {
-  it("v3:余额按 tokenId(无 symbol),解析 metaJson,带 selfPrice", () => {
+  it("v3: balances keyed by tokenId (no symbol), metaJson parsed, selfPrice included", () => {
     const rec = snapshotRecord({ accountId: "a1", takenAt: 1000, totalUsd: 50, note: null }, [
       {
         tokenId: "tk-eth",
@@ -109,10 +108,10 @@ describe("snapshotRecord", () => {
       platform: "evm:1",
       meta: { chain: "ethereum" },
     });
-    expect(line(rec).balances[0]).not.toHaveProperty("symbol"); // v3 余额不带 symbol
+    expect(line(rec).balances[0]).not.toHaveProperty("symbol"); // v3 balances have no symbol
   });
 
-  it("账户级 note 从 JSON 解析回来", () => {
+  it("account-level note parsed back from JSON", () => {
     const rec = snapshotRecord(
       { accountId: "a", takenAt: 1, totalUsd: 0, note: JSON.stringify([{ title: "Unconfirmed" }]) },
       [],
@@ -122,7 +121,7 @@ describe("snapshotRecord", () => {
 });
 
 describe("manualActivityRecord", () => {
-  it("扁平记录、保留 createdAt、null 字段省略", () => {
+  it("flat record, createdAt kept, null fields omitted", () => {
     const rec = manualActivityRecord({
       accountId: "a",
       tokenId: "tk",

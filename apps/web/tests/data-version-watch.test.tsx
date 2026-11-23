@@ -5,15 +5,9 @@ import { type DataVersionOptions, watchDataVersion } from "@/lib/queries/data-ve
 import { accountKeys, dataVersionKeys, portfolioKeys } from "@/lib/queries/keys";
 import { lockQueryCache } from "@/lib/queries/persist";
 
-// 数据版本号驱动的刷新(FOL-94)。钉三件事:
-//   ① 回到页面 / 定时 → **只问版本号**,挂着的数据查询一发都不重拉(它们的 staleTime 还没到);
-//   ② 号变了 → 数据查询被失效、挂着的当场重拉;
-//   ③ 缓存里本来没有号(头一回打开)→ 第一次读到只记下,不失效。
-// 真 QueryClient + QueryObserver(不是 mock):刷不刷、刷谁是 react-query 的行为,mock 掉就等于
-// 把要验的东西自己实现了一遍。
-//
-// **是 `.tsx` 不是因为渲染了什么**:react-query 在没有 `window` 的环境里当自己在服务端,
-// 定时轮询(`refetchInterval`)直接关掉 —— 要验的正是它,所以得跑在 jsdom 那一档。
+// Data-version-driven refresh: focus/interval only asks for the version; a changed version invalidates
+// data queries; the first version read with none cached is just recorded. Uses a real QueryClient since
+// refetch behaviour is react-query's. `.tsx` because react-query disables refetchInterval without `window`.
 
 const PF = "pf-1";
 let queryClient: QueryClient;
@@ -32,7 +26,7 @@ const versionOptions = (): DataVersionOptions => ({
   refetchInterval: POLL_INTERVAL.dataVersion,
 });
 
-// 挂两条数据查询(像页面那样有观察者),数据已在缓存里且新鲜。
+// Two data queries with observers (as on a page), already cached and fresh.
 function mountDataQueries() {
   for (const [name, queryKey] of [
     ["accounts", accountKeys.list(PF)],
@@ -56,7 +50,7 @@ const flush = () => vi.advanceTimersByTimeAsync(0);
 beforeEach(() => {
   vi.useFakeTimers();
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  queryClient.mount(); // 订阅 focusManager —— 页面里是 QueryClientProvider 做的
+  queryClient.mount(); // subscribes to focusManager (QueryClientProvider does this in the app)
   serverVersion = 1;
   versionFetches = 0;
   dataFetches.accounts = 0;
@@ -72,13 +66,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("数据版本号驱动的刷新", () => {
-  it("回到页面:只问版本号,号没变就一条数据查询都不重拉", async () => {
-    queryClient.setQueryData(dataVersionKeys.all, { version: 1 }); // 上次存下的号
+describe("data-version-driven refresh", () => {
+  it("on focus: asks only for the version; unchanged → no data query refetches", async () => {
+    queryClient.setQueryData(dataVersionKeys.all, { version: 1 }); // version saved last time
     mountDataQueries();
     unsubs.push(watchDataVersion(queryClient, versionOptions()));
     await flush();
-    expect(versionFetches).toBe(1); // 挂载那一发
+    expect(versionFetches).toBe(1); // the mount fetch
 
     focusManager.setFocused(false);
     focusManager.setFocused(true);
@@ -88,7 +82,7 @@ describe("数据版本号驱动的刷新", () => {
     expect(dataFetches).toEqual({ accounts: 0, snapshots: 0 });
   });
 
-  it("可见时每分钟问一次版本号,数据查询不跟着动", async () => {
+  it("polls the version every minute while visible; data queries stay put", async () => {
     queryClient.setQueryData(dataVersionKeys.all, { version: 1 });
     mountDataQueries();
     unsubs.push(watchDataVersion(queryClient, versionOptions()));
@@ -100,24 +94,24 @@ describe("数据版本号驱动的刷新", () => {
     expect(dataFetches).toEqual({ accounts: 0, snapshots: 0 });
   });
 
-  it("号变了 → 数据查询失效,挂着的当场重拉", async () => {
+  it("version changed → data queries invalidated, mounted ones refetch at once", async () => {
     queryClient.setQueryData(dataVersionKeys.all, { version: 1 });
     mountDataQueries();
     unsubs.push(watchDataVersion(queryClient, versionOptions()));
     await flush();
     expect(dataFetches).toEqual({ accounts: 0, snapshots: 0 });
 
-    serverVersion = 2; // 别处(后台同步 / 另一台设备)写过了
+    serverVersion = 2; // written elsewhere (background sync / another device)
     focusManager.setFocused(false);
     focusManager.setFocused(true);
     await flush();
 
     expect(dataFetches).toEqual({ accounts: 1, snapshots: 1 });
-    // 版本号自己不在被失效的那批里 —— 不会因为失效再问一遍。
+    // The version query itself isn't invalidated, so it isn't asked again.
     expect(versionFetches).toBe(2);
   });
 
-  it("重开页面时存下的号已经旧了 → 挂载那一发就失效数据查询", async () => {
+  it("stored version stale on reopen → the mount fetch invalidates data queries", async () => {
     queryClient.setQueryData(dataVersionKeys.all, { version: 1 });
     serverVersion = 5;
     mountDataQueries();
@@ -127,7 +121,7 @@ describe("数据版本号驱动的刷新", () => {
     expect(dataFetches).toEqual({ accounts: 1, snapshots: 1 });
   });
 
-  it("缓存里没有号(头一回打开)→ 第一次读到只记下,不失效", async () => {
+  it("no cached version (first open) → first read is just recorded, no invalidation", async () => {
     mountDataQueries();
     unsubs.push(watchDataVersion(queryClient, versionOptions()));
     await flush();
@@ -136,21 +130,21 @@ describe("数据版本号驱动的刷新", () => {
     expect(dataFetches).toEqual({ accounts: 0, snapshots: 0 });
   });
 
-  it("锁屏扔内存缓存时留下版本号 → 解锁后第一次读到的号变了就失效(review #24)", async () => {
+  it("lock drops the memory cache but keeps the version → a changed version after unlock invalidates", async () => {
     queryClient.setQueryData(dataVersionKeys.all, { version: 1 });
     mountDataQueries();
     const stopWatching = watchDataVersion(queryClient, versionOptions());
     await flush();
 
-    // 锁上:页面(连同监视器)卸载,没人挂着的查询被扔掉 —— 版本号除外。
+    // Lock: page (and watcher) unmount; unobserved queries are dropped — except the version.
     stopWatching();
     for (const u of unsubs.splice(0)) u();
     await lockQueryCache(queryClient);
     expect(queryClient.getQueryData(dataVersionKeys.all)).toEqual({ version: 1 });
     expect(queryClient.getQueryData([...accountKeys.list(PF)])).toBeUndefined();
 
-    // 解锁:页面重挂、重新拉数据(那一刻号还是 1),而监视器第一次问到的号已经是 2 了
-    // (解锁那一瞬后台同步落了一笔)—— 必须失效,不能把 2 当基准吞掉。
+    // Unlock: page remounts and refetches (version still 1), but the watcher's first read is already 2
+    // (a background sync landed meanwhile) — must invalidate, not adopt 2 as the baseline.
     mountDataQueries();
     serverVersion = 2;
     unsubs.push(watchDataVersion(queryClient, versionOptions()));

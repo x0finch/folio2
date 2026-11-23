@@ -7,12 +7,8 @@ import { BalancePrivacyProvider } from "@/lib/hooks/use-balance-privacy";
 import { messages } from "@/lib/i18n/messages";
 import { DefiPositions } from "@/routes/_authed/-home/holdings/defi";
 
-// DeFi 持仓(首页「DeFi」tab 与账户抽屉共用)屏幕上写的是什么:
-//   · 每协议一行:协议名 + 净小计(资产 − 负债)+ 24h 增量(算不出 → `—`,还在取 → 骨架)
-//   · 构成条:按角色分段、角色名排在条上方
-//   · hover 明细:按角色分组列出每条腿的数量与美元值,负债腿带「−」
-//   · 隐私:腿的数量与美元值都遮
-// beUI hover Popover 关着时也把明细渲染在 DOM 里(只是 inert),所以直接读那段 DOM。
+// DeFi positions (home DeFi tab and account sheet). The beUI hover Popover keeps its detail in the DOM
+// while closed (just inert), so tests read that DOM directly.
 
 afterEach(cleanup);
 
@@ -55,7 +51,7 @@ const aave: DefiGroup = {
   ],
 };
 
-// 协议行右侧 ValueDelta:第一行市值,第二行增量。
+// Protocol row's ValueDelta: line 1 value, line 2 delta.
 const protocolRow = (name: string) =>
   screen.getByText(name, { selector: ".truncate" }).parentElement?.parentElement as HTMLElement;
 const valueLines = (name: string) =>
@@ -63,24 +59,24 @@ const valueLines = (name: string) =>
 
 const detail = (container: HTMLElement) => container.querySelector("[role=dialog]") as HTMLElement;
 
-describe("协议行", () => {
-  it("净小计 = 资产 − 负债;24h 增量带符号和百分比", () => {
+describe("protocol row", () => {
+  it("net subtotal = assets − debts; 24h delta with sign and percent", () => {
     wrap(<DefiPositions groups={[aave]} />);
     expect(valueLines("Aave")).toEqual(["$1,224.00", "+$12.00 1.50%"]);
   });
 
-  it("24h 算不出 → `—`,不是留白", () => {
+  it("24h not computable → `—`, not blank", () => {
     wrap(<DefiPositions groups={[{ ...aave, gain24h: null }]} />);
     expect(valueLines("Aave")).toEqual(["$1,224.00", "—"]);
   });
 
-  it("24h 还在取 → 骨架,不是破折号", () => {
+  it("24h still loading → skeleton, not a dash", () => {
     wrap(<DefiPositions groups={[{ ...aave, gain24h: null }]} gainPending />);
     expect(valueLines("Aave")[1]).not.toBe("—");
     expect(protocolRow("Aave").querySelector("[data-slot=skeleton]")).toBeTruthy();
   });
 
-  it("每个协议一行", () => {
+  it("one row per protocol", () => {
     wrap(
       <DefiPositions groups={[aave, { protocol: "Lido", rows: [row("x", "stETH", 1, 3000)] }]} />,
     );
@@ -89,27 +85,27 @@ describe("协议行", () => {
   });
 });
 
-describe("构成条与明细", () => {
-  it("条上按角色写名字;条本身以协议名为可读标签", () => {
+describe("composition bar and detail", () => {
+  it("bar labels each role; the bar's accessible label is the protocol name", () => {
     const { container } = wrap(<DefiPositions groups={[aave]} />);
     const labels = [...container.querySelectorAll("[data-lab]")].map((e) => e.textContent);
     expect(labels).toEqual(["deposit", "loan"]);
     expect(screen.getByRole("button", { name: "Aave" })).toBeTruthy();
   });
 
-  it("明细按角色分组列出每条腿;负债腿的数量与金额都带「−」", () => {
+  it("detail groups legs by role; debt legs show − on amount and value", () => {
     const { container } = wrap(<DefiPositions groups={[aave]} />);
     const text = detail(container).textContent ?? "";
     expect(text).toContain("843 GHO$843.00");
     expect(text).toContain("0.24 WETH$600.00");
     expect(text).toContain("−219 GHO−$219.00");
-    // 角色顺序:deposit 那组在前(腿按 |usd| 降序,先出现的角色先排)。
+    // Role order: deposit first (legs sorted by |usd| desc, first-seen role first).
     expect(text.indexOf("deposit")).toBeLessThan(text.indexOf("loan"));
   });
 });
 
-describe("隐私", () => {
-  it("开着 → 明细里每条腿的数量与金额都被遮", () => {
+describe("privacy", () => {
+  it("on → every leg's amount and value in the detail are masked", () => {
     const { container } = wrap(<DefiPositions groups={[aave]} />, true);
     const masked = [...detail(container).querySelectorAll("[role=button]")].map(
       (m) => m.textContent,
