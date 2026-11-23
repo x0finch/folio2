@@ -13,12 +13,9 @@ import { pickByConfidence } from "../src/tokens/mint";
 import { WARM_KEY } from "../src/tokens/warm";
 import { harness, now0, upstreamDown } from "./fakes";
 
-// 测的是 warm blob 这一件事:一张 per-user 缓存表上的 `warm` 键,**三个读者共用一份**。
-// 直接 import `../src/*` 并把假端口当参数传进去 —— 这些函数的 `R` 是 `never`,
-// 这正是「服务的依赖不外泄」的那个设计。
-//
-// 三个读者住在用它们的文件里(`warmMarkets` / `refreshWarmCatalogue` 在 tokens,
-// `warmCatalogue` 在 candidates),但判据是一组对照关系,所以一起测。
+// The warm blob: one `warm` key in the per-user cache table shared by three readers. Imports `../src/*` and passes fake ports as
+// arguments (the functions' `R` is `never`, so a service's dependencies do not leak). The readers live in the files that use them
+// but their criteria are a set of contrasts, so they are tested together.
 
 const coin = (id: string, symbol: string, rank?: number): UpstreamToken => ({
   ref: `src/issued:${id}`,
@@ -33,8 +30,8 @@ const setup = (markets: UpstreamToken[] = []) => {
   return h;
 };
 
-describe("warm 走 SWR,一次整份写", () => {
-  it("三个币一次写;没过期就不拉上游", async () => {
+describe("warm goes through SWR, one whole write", () => {
+  it("three tokens in one write; no upstream fetch until it expires", async () => {
     const h = setup([
       coin("bitcoin", "BTC", 1),
       coin("ethereum", "ETH", 2),
@@ -43,30 +40,30 @@ describe("warm 走 SWR,一次整份写", () => {
     await h.run(
       Effect.gen(function* () {
         expect(yield* warmMarkets(h.cache, h.upstream, 50)).toHaveLength(3);
-        expect(h.cache.writes).toBe(1); // 三个币,一次写
+        expect(h.cache.writes).toBe(1); // three tokens, one write
         expect(h.cache.entries.size).toBe(1);
 
         yield* warmMarkets(h.cache, h.upstream, 50);
-        expect(h.upstream.calls).toEqual(["fetchMarkets:50"]); // 只拉过一次
+        expect(h.upstream.calls).toEqual(["fetchMarkets:50"]); // fetched only once
       }),
     );
   });
 
-  it("TTL 按**目录**的寿命盖戳,不按价(#216)", async () => {
+  it("TTL is stamped by the catalogue's lifetime, not the price's", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(warmMarkets(h.cache, h.upstream, 10));
 
     expect(h.cache.entries.get(WARM_KEY)?.expiresAt).toBe(now0 + WARM_TTL_MS);
-    // 目录与「链/场馆的名与图」同一量级(都近静态),都远长于价。
+    // The catalogue is as static as chain/venue names and logos, far longer-lived than prices.
     expect(WARM_TTL_MS).toBeGreaterThan(PRICE_TTL_MS * 10);
   });
 
-  it("橱窗:**价**旧了才重拉 —— 判据是 blob 的 asOf,不是缓存条目的过期戳", async () => {
+  it("showcase: refetches only when the price is old; the criterion is the blob's asOf, not the cache entry's expiry", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
         yield* warmMarkets(h.cache, h.upstream, 50);
-        // 远早于 WARM_TTL_MS(一周),条目本身还没过期
+        // Far earlier than WARM_TTL_MS (one week); the entry itself has not expired
         yield* TestClock.adjust(Duration.millis(PRICE_TTL_MS + 1));
         yield* warmMarkets(h.cache, h.upstream, 50);
         expect(h.upstream.calls).toHaveLength(2);
@@ -74,7 +71,7 @@ describe("warm 走 SWR,一次整份写", () => {
     );
   });
 
-  it("上游挂了 → 给旧的那份,不抛(SWR 兜的)", async () => {
+  it("upstream down: serves the old blob, no throw (SWR covers it)", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
@@ -87,12 +84,11 @@ describe("warm 走 SWR,一次整份写", () => {
   });
 });
 
-// 同一份 blob 的另一个读者。**它在写路径上**(mint 的 symbol 那一档),所以判据完全不同:
-// 有就用,多旧都用。这是 #216 的核心 —— 不让「哪个币叫 POL」这种几乎不变的数据把用户
-// 卡在 4 次目录请求上。「多旧都不回源 / 冷启取一次 / 冷启挂了给空」经 `CandidateSource`
-// 在 candidates.test 里测;这里只留它与橱窗共用一份 blob 的那条。
-describe("目录读者:有就用,只有完全没有才取一次", () => {
-  it("橱窗刷过之后,目录读者读到的是新的那份(同一个键,不是两份缓存)", async () => {
+// The other reader of the same blob sits on the write path (mint's symbol tier), so its criterion differs: use what exists however
+// old, so near-static data like "which token is POL" does not block the user on 4 catalogue requests. "Never refetches however old /
+// fetches once cold / empty when cold fetch fails" is tested via `CandidateSource` in candidates.test; only the shared blob is here.
+describe("catalogue reader: uses what exists, fetches once only when there is nothing", () => {
+  it("after the showcase refreshes, the catalogue reader sees the new blob (same key, not two caches)", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
@@ -100,7 +96,7 @@ describe("目录读者:有就用,只有完全没有才取一次", () => {
 
         yield* TestClock.adjust(Duration.millis(PRICE_TTL_MS + 1));
         h.upstream.markets = [coin("bitcoin", "BTC", 1), coin("newcoin", "NEW", 900)];
-        yield* warmMarkets(h.cache, h.upstream, 50); // 用户打开下拉 → 刷
+        yield* warmMarkets(h.cache, h.upstream, 50); // the user opens the dropdown: refresh
 
         expect(yield* warmCatalogue(h.cache, h.upstream, 50)).toHaveLength(2);
         expect([...h.cache.entries.keys()]).toEqual(["warm"]);
@@ -109,9 +105,9 @@ describe("目录读者:有就用,只有完全没有才取一次", () => {
   });
 });
 
-// 第三个读者:同步之后在后台跑。没有它,不打开选币下拉的用户目录会永远冻在第一次同步那一刻。
-describe("后台预热:目录旧了才刷", () => {
-  it("一周之内 → 零请求(绝大多数同步落在这里)", async () => {
+// The third reader runs in the background after sync; without it, a user who never opens the picker keeps a catalogue frozen at first sync.
+describe("background warm: refreshes only when the catalogue is old", () => {
+  it("within a week: zero requests (most syncs land here)", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
@@ -123,7 +119,7 @@ describe("后台预热:目录旧了才刷", () => {
     );
   });
 
-  it("超过一周 → 整份刷一次", async () => {
+  it("over a week: refreshes the whole blob once", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
@@ -136,15 +132,15 @@ describe("后台预热:目录旧了才刷", () => {
     );
   });
 
-  it("刷完之后 mint 的候选源立刻看得到新币 —— 这才是它存在的理由", async () => {
+  it("after the refresh, mint's candidate source sees the new token at once: the reason it exists", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
-        yield* warmCatalogue(h.cache, h.upstream, 50); // 第一次同步建起来的那份
+        yield* warmCatalogue(h.cache, h.upstream, 50); // the blob built at first sync
 
         yield* TestClock.adjust(Duration.millis(WARM_TTL_MS + 1));
         h.upstream.markets = [coin("bitcoin", "BTC", 1), coin("newcoin", "NEW", 900)];
-        yield* refreshWarmCatalogue(h.cache, h.upstream, 50); // 后台预热
+        yield* refreshWarmCatalogue(h.cache, h.upstream, 50); // background warm
 
         const rows = yield* warmCatalogue(h.cache, h.upstream, 50);
         expect(candidatesBySymbol(rows, "NEW")).toEqual([
@@ -154,7 +150,7 @@ describe("后台预热:目录旧了才刷", () => {
     );
   });
 
-  it("后台刷挂了 → 给旧的那份,不抛(它在 waitUntil 里,不该让同步收尾炸掉)", async () => {
+  it("background refresh fails: serves the old blob, no throw (it runs in waitUntil and must not break sync wrap-up)", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
@@ -167,19 +163,19 @@ describe("后台预热:目录旧了才刷", () => {
   });
 });
 
-// 队列那条 `catalogue` 活走的是 `makeCatalogue(...).refreshCatalogue()`:先看一眼 `asOf`,够新就
-// 不解码整份目录(FOL-83 第二轮)。判据必须与上面那组对得上。
-describe("refreshCatalogue():够新就只看 asOf", () => {
+// The queue's `catalogue` job calls `makeCatalogue(...).refreshCatalogue()`: peeks `asOf` and skips decoding the catalogue when
+// fresh enough; its criterion must match the group above.
+describe("refreshCatalogue(): fresh enough means only look at asOf", () => {
   const refresh = (h: ReturnType<typeof setup>) =>
     makeCatalogue(h.cache, h.upstream).refreshCatalogue();
 
-  it("一周之内零请求,返回按 ref 去重后的条数;超过一周整份刷一次", async () => {
+  it("within a week: zero requests, returns the count deduped by ref; over a week refreshes the whole blob once", async () => {
     const h = setup([coin("bitcoin", "BTC", 1), coin("bitcoin", "BTC", 1), coin("eth", "ETH", 2)]);
     await h.run(
       Effect.gen(function* () {
-        expect(yield* refresh(h)).toBe(2); // 冷 → 回源,写回的那份去重后 2 条
+        expect(yield* refresh(h)).toBe(2); // cold: fetch, the written blob has 2 entries after dedupe
         yield* TestClock.adjust(Duration.millis(WARM_TTL_MS));
-        expect(yield* refresh(h)).toBe(2); // 恰好一周:仍算够新(与 `> WARM_TTL_MS` 同口径)
+        expect(yield* refresh(h)).toBe(2); // exactly one week: still fresh (same as `> WARM_TTL_MS`)
         expect(h.upstream.calls).toHaveLength(1);
         yield* TestClock.adjust(Duration.millis(1));
         h.upstream.markets = [coin("bitcoin", "BTC", 1)];
@@ -189,7 +185,7 @@ describe("refreshCatalogue():够新就只看 asOf", () => {
     );
   });
 
-  it("asOf 不是数 / rows 不是数组 → 当 miss,走完整那条路重拉", async () => {
+  it("asOf not a number / rows not an array: treated as a miss, takes the full path and refetches", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
@@ -203,8 +199,8 @@ describe("refreshCatalogue():够新就只看 asOf", () => {
   });
 });
 
-describe("排行榜与 symbol 候选出自同一份 rows", () => {
-  it("取前 N 名按市值升序,无 rank 者垫底", async () => {
+describe("leaderboard and symbol candidates come from the same rows", () => {
+  it("top N by market cap ascending, unranked last", async () => {
     const h = setup([
       coin("tether", "USDT", 3),
       coin("nameless", "XXX"),
@@ -219,7 +215,7 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
     expect(topByRank(rows, 9).at(-1)?.info.ref).toBe("src/issued:nameless");
   });
 
-  it("按 symbol 取候选不额外存一份 —— 缓存里仍只有一个键", async () => {
+  it("candidates by symbol store no extra copy: still one key in the cache", async () => {
     const h = setup([coin("usd-coin", "USDC", 6), coin("fake-usdc", "usdc", 4200)]);
     const rows = await h.run(warmMarkets(h.cache, h.upstream, 50));
 
@@ -230,10 +226,9 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
     expect([...h.cache.entries.keys()]).toEqual(["warm"]);
   });
 
-  // 目录里混进同一个币两次(上游分页来自不同快照,见 coingecko adapter)。**不去重的后果是
-  // 静默的**:消歧会拿这个币跟它自己比,谁也碾压不了谁 → 判定没把握 → 这个币从此认不出来,
-  // 表现只是「那个持仓没有实时价」。所以读这一侧再兜一道,不只指望上游。
-  it("同一个币在目录里出现两次 → 候选只留一条", async () => {
+  // The same token may appear twice (upstream pages come from different snapshots). Without dedupe it silently competes against
+  // itself in disambiguation and is never recognised, so the read side dedupes too rather than relying on upstream.
+  it("the same token twice in the catalogue: only one candidate kept", async () => {
     const h = setup([coin("usd-coin", "USDC", 6), coin("usd-coin", "USDC", 6)]);
     const rows = await h.run(warmMarkets(h.cache, h.upstream, 50));
 
@@ -242,9 +237,8 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
     ]);
   });
 
-  // 去重必须在**读**这一侧,不能只在上游那侧:修好之前存下的脏目录还躺在缓存里,而这份 blob
-  // 一周才刷一次 —— 只修上游的话,已经中招的用户还要再脏一周。
-  it("缓存里已经是脏的 → 读出来就是干净的,且不为此回一趟上游", async () => {
+  // Dedupe must be on the read side: a dirty blob stored before the fix is refreshed only weekly.
+  it("already dirty in cache: reads back clean, with no upstream fetch for it", async () => {
     const h = setup();
     const row = {
       info: { ref: "src/issued:usd-coin", symbol: "USDC", name: "USDC" },
@@ -255,13 +249,13 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
         yield* h.cache.put(WARM_KEY, { asOf: now0, rows: [row, row] }, WARM_TTL_MS);
         const rows = yield* warmMarkets(h.cache, h.upstream, 50);
         expect(rows).toHaveLength(1);
-        expect(h.upstream.calls).toEqual([]); // 治脏数据不该换来一次回源
+        expect(h.upstream.calls).toEqual([]); // healing dirty data must not cost a fetch
       }),
     );
   });
 
-  it("重复的币照样认得出来 —— 不去重的话它会输给自己", async () => {
-    // 排名 592:够不上「前 50 直接信」,只能靠碾压次席。自己跟自己比 = 比值 1 → 认不出来。
+  it("a duplicated token is still recognised: otherwise it would lose to itself", async () => {
+    // Rank 592: not top-50 trusted, only dominance can settle it; competing against itself gives ratio 1 and no recognition.
     const h = setup([coin("collector-crypt", "CARDS", 592), coin("collector-crypt", "CARDS", 592)]);
     const rows = await h.run(warmMarkets(h.cache, h.upstream, 50));
 
@@ -269,14 +263,13 @@ describe("排行榜与 symbol 候选出自同一份 rows", () => {
   });
 });
 
-// 缓存里躺着的可能是**上一个版本写的形状**(或者手动改过库)。迁移前这里是 `as WarmBlob` 加两处
-// 手写形状检查,漏掉的字段会一路流到展示层;现在整份走 Schema 解码,解不动就当没有 → 回源重写。
-describe("旧形状 / 坏形状 = miss,自愈", () => {
-  it("blob 缺字段 → 当没缓存,回源写一份新的", async () => {
+// The cache may hold an older version's shape (or a hand edit): decoded via Schema; undecodable counts as absent and refetches.
+describe("old / bad shape is a miss and heals", () => {
+  it("blob missing a field: treated as no cache, fetches and writes a fresh one", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {
-        // 少了 `price.asOf` —— 老代码的 `Array.isArray(rows)` 检查放它过关。
+        // Missing `price.asOf`: an `Array.isArray(rows)` check would let it pass.
         yield* h.cache.put(
           WARM_KEY,
           {
@@ -293,8 +286,8 @@ describe("旧形状 / 坏形状 = miss,自愈", () => {
   });
 });
 
-describe("整张清空", () => {
-  it("功能不坏,下一次访问自己填回来", async () => {
+describe("clearing the whole table", () => {
+  it("nothing breaks; the next access refills it", async () => {
     const h = setup([coin("bitcoin", "BTC", 1)]);
     await h.run(
       Effect.gen(function* () {

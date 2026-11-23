@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import { TokenService } from "../src/tokens";
 import { harness, now0, upstreamDown } from "./fakes";
 
-const NOW = now0; // 落在某个 UTC 日的中段
+const NOW = now0; // falls mid-way through a UTC day
 const TODAY = Math.floor(NOW / MS_PER_DAY);
 const SRC_BTC = "src/issued:bitcoin";
 
@@ -18,14 +18,14 @@ const info = (over: Partial<TokenInfo> & { id: string }): TokenInfo => ({
   ref: SRC_BTC,
   symbol: "BTC",
   name: "Bitcoin",
-  infoStale: false, // 默认已刷过 —— 要测刷新的用例自己传 true
+  infoStale: false, // refreshed by default; cases testing refresh pass true
   ...over,
 });
 
 const setup = (rows: TokenInfo[] = []) => harness({ seedRows: rows });
 
-describe("富化 —— 两个 store 各读自己那半,服务层合成整行", () => {
-  it("按 token_id 取,输入不再需要 symbol 或 tokenRef", async () => {
+describe("enrichment: each store reads its own half, the service composes the row", () => {
+  it("reads by token_id; input no longer needs symbol or tokenRef", async () => {
     const h = setup([
       info({ id: "tk_1", logo: "b.png" }),
       info({ id: "tk_2", ref: null, symbol: "WAT", name: "Whatever", providerLogo: "p.png" }),
@@ -46,28 +46,27 @@ describe("富化 —— 两个 store 各读自己那半,服务层合成整行", 
           marketCapRank: 1,
           stale: false,
         });
-        expect(got.get("tk_2")?.price).toBeUndefined(); // 没价的行照样出 info
+        expect(got.get("tk_2")?.price).toBeUndefined(); // a row without price still yields info
       }),
     );
   });
 
-  it("空输入不查库", async () => {
+  it("empty input does not query the db", async () => {
     const h = setup();
     expect(await h.run(Effect.flatMap(TokenService, (t) => t.enrich([])))).toEqual(new Map());
   });
 
-  it("「上游认没认出来」就看 ref 空不空,不存额外状态", async () => {
+  it('"did upstream recognise it" is just whether ref is empty, no extra state', async () => {
     const h = setup([info({ id: "tk_1" }), info({ id: "tk_2", ref: null, symbol: "WAT" })]);
     const got = await h.run(Effect.flatMap(TokenService, (t) => t.enrich(["tk_1", "tk_2"])));
 
     expect(got.get("tk_1")?.ref).toBe(SRC_BTC);
     expect(got.get("tk_2")?.ref).toBeNull();
-    // 行上没有孤儿标记、没有复查时刻,也没有任何带数据源名字的字段。
     const keys = Object.keys(got.get("tk_2") as object);
     expect(keys.some((k) => /cgk|coingecko|coin_?id|orphan|recheck/i.test(k))).toBe(false);
   });
 
-  it("logo 回退链:源给的优先,没有就用连接器自带那张", async () => {
+  it("logo fallback chain: the source's first, else the connector's own", async () => {
     const h = setup([
       info({ id: "tk_1", logo: "up.png", providerLogo: "p.png" }),
       info({ id: "tk_2", logo: undefined, providerLogo: "p.png" }),
@@ -85,8 +84,8 @@ describe("富化 —— 两个 store 各读自己那半,服务层合成整行", 
   });
 });
 
-describe("取价(有 id 的那档)—— 只读价表,一批一次,零网络(FOL-87)", () => {
-  it("新鲜的与 stale 的都原样给出,stale 标志带着;表里没有的不在结果里", async () => {
+describe("prices (the id tier): price table only, one read per batch, zero network", () => {
+  it("fresh and stale are both served as is with the stale flag; ids absent from the table are not in the result", async () => {
     const h = setup([info({ id: "tk_1" }), info({ id: "tk_2", ref: "src/issued:ethereum" })]);
     await h.run(
       Effect.gen(function* () {
@@ -99,25 +98,25 @@ describe("取价(有 id 的那档)—— 只读价表,一批一次,零网络(FOL
         expect(got.get("tk_1")).toMatchObject({ unitPrice: 60000, stale: false });
         expect(got.get("tk_2")).toMatchObject({ unitPrice: 3000, stale: true });
         expect(got.has("tk_missing")).toBe(false);
-        // stale 也不回源 —— 回源只归 `refreshStale`(队列的 prices 活)。
+        // Stale does not refetch either: fetching belongs to `refreshStale` (the queue's prices job).
         expect(h.upstream.calls).toEqual([]);
       }),
     );
   });
 
-  it("空输入 → 空 Map", async () => {
+  it("empty input gives an empty Map", async () => {
     const h = setup();
     expect(await h.run(Effect.flatMap(TokenService, (t) => t.pricesOf([])))).toEqual(new Map());
   });
 });
 
-describe("批量刷 stale 价", () => {
-  it("只刷「认得出来且价 stale/缺失」的,一次批量回源", async () => {
+describe("batch refresh of stale prices", () => {
+  it("refreshes only recognised tokens with stale / missing price, in one batched fetch", async () => {
     const h = setup([
       info({ id: "fresh" }),
       info({ id: "stale", ref: "src/issued:ethereum" }),
       info({ id: "nopricexyz", ref: "src/issued:tether" }),
-      info({ id: "unknown", ref: null }), // 上游没认出 → 跳过
+      info({ id: "unknown", ref: null }), // upstream did not recognise: skipped
     ]);
     await h.run(
       Effect.gen(function* () {
@@ -130,7 +129,7 @@ describe("批量刷 stale 价", () => {
         expect(
           (yield* tokens.refreshStale(["fresh", "stale", "nopricexyz", "unknown"])).prices,
         ).toBe(2);
-        // 只断言价那半问了什么 —— 两半现在同一个方法里跑,info 那半的调用不属于这条用例。
+        // Asserts only what the price half asked; both halves run in one method.
         expect(h.upstream.calls.filter((c) => c.startsWith("fetchPrices"))).toEqual([
           "fetchPrices:src/issued:ethereum,src/issued:tether",
         ]);
@@ -138,14 +137,14 @@ describe("批量刷 stale 价", () => {
     );
   });
 
-  it("没有要刷的 → 零调用", async () => {
+  it("nothing to refresh: zero calls", async () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
         const tokens = yield* TokenService;
         yield* h.prices.put([{ tokenId: "tk_1", unitPrice: 1, asOf: NOW }], PRICE_TTL_MS);
-        // info 也已刷过(`info()` 默认 infoStale: false)→ 价与 info 两半都没有目标;
-        // degraded 是 false —— 「没什么要刷」与「上游挂了」分得开。
+        // Info is already refreshed too (`info()` defaults to infoStale: false), so neither half has a target;
+        // degraded is false: "nothing to refresh" is distinguishable from "upstream down".
         const nothing = { prices: 0, infos: 0, degraded: false };
         expect(yield* tokens.refreshStale(["tk_1"])).toEqual(nothing);
         expect(yield* tokens.refreshStale([])).toEqual(nothing);
@@ -154,10 +153,9 @@ describe("批量刷 stale 价", () => {
     );
   });
 
-  // 迁移前刷价**往外抛**、刷 info 内部吞 —— 于是每个调用点都得记得给前者补 `.catch(() => 0)`。
-  // 现在是一个方法、一个口径:记一行、回 0,**而且把「挂了」写进返回值**(`degraded`)——
-  // 「没什么要刷」与「上游挂了」对调用方是两件事(#375 要的抓手)。
-  it("上游挂了 → 回 0 且 degraded、不抛", async () => {
+  // One method, one convention: log a line, return 0, and carry "down" in the return value (`degraded`),
+  // since "nothing to refresh" and "upstream down" differ for the caller.
+  it("upstream down: returns 0 and degraded, does not throw", async () => {
     const h = setup([info({ id: "tk_1" })]);
     h.upstream.fail = upstreamDown();
     expect(await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["tk_1"])))).toEqual({
@@ -168,9 +166,8 @@ describe("批量刷 stale 价", () => {
     expect(h.prices.current.size).toBe(0);
   });
 
-  // 同一批 id **只读一次 store**:迁移前是两个方法各读一遍(而且调用点成对并发,连
-  // 「第二次碰巧命中」都不存在)。这条断言就是那次合并的收据。
-  it("价与 info 共用那两次读 —— store 读一次、价 store 读一次", async () => {
+  // The same ids are read from the store only once, not once per half.
+  it("price and info share the two reads: store read once, price store read once", async () => {
     const h = setup([info({ id: "tk_1", infoStale: true })]);
     let storeReads = 0;
     const realGetByIds = h.store.getByIds;
@@ -183,17 +180,16 @@ describe("批量刷 stale 价", () => {
   });
 });
 
-// 元信息(symbol/name/logo)的**覆盖**刷新。与刷价分开的理由是 TTL 一长一短(30d / 30min)。
-//
-// 为什么必须是覆盖:代币行是拿连接器报的元信息建起来的,而链上合约的 symbol 是部署者写在合约里的
-// 字符串 —— 可能过时(MATIC 改名 POL 之后,链上那份还写着 MATIC)。合约那条 ref 是**按地址**
-// 认出来的、认定本身可信,错的只是显示名。不覆盖的话同一个币会因为哪个账户先同步而显示成不同的名字。
-describe("批量刷 stale 元信息(覆盖)", () => {
-  it("只刷「认得出来且 info stale」的,一次批量回源", async () => {
+// Overwriting refresh of metadata (symbol/name/logo), separate from price refresh because the TTLs differ (30d / 30min).
+// Overwrite is required: rows are built from connector metadata, and a contract's symbol is a deployer string that can go stale
+// (MATIC after the POL rename); the contract ref was recognised by address and is trusted, only the display name is wrong.
+// Without overwriting, one token would show different names depending on which account synced first.
+describe("batch refresh of stale metadata (overwrite)", () => {
+  it("refreshes only recognised tokens with stale info, in one batched fetch", async () => {
     const h = setup([
-      info({ id: "fresh" }), // 刷过了 → 跳过
+      info({ id: "fresh" }), // already refreshed: skipped
       info({ id: "stale", ref: "src/issued:ethereum", infoStale: true }),
-      info({ id: "unknown", ref: null, infoStale: true }), // 上游没认出 → 没名字可取,跳过
+      info({ id: "unknown", ref: null, infoStale: true }), // upstream did not recognise: no name to fetch, skipped
     ]);
     h.upstream.markets = [
       { ref: "src/issued:ethereum", symbol: "ETH", name: "Ethereum", logo: "eth.png" },
@@ -202,11 +198,11 @@ describe("批量刷 stale 元信息(覆盖)", () => {
       Effect.gen(function* () {
         const tokens = yield* TokenService;
         expect((yield* tokens.refreshStale(["fresh", "stale", "unknown"])).infos).toBe(1);
-        // 同上:只看 info 那半问了什么。
+        // Same: only what the info half asked.
         expect(h.upstream.calls.filter((c) => c.startsWith("fetchTokens"))).toEqual([
           "fetchTokens:src/issued:ethereum",
         ]);
-        // 刷过之后不再 stale → 下一次零调用(否则每次访问都白刷一趟上游)。
+        // Not stale after the refresh, so the next call makes none (else every visit would refetch).
         expect(h.store.rows.get("stale")?.infoStale).toBe(false);
         expect((yield* tokens.refreshStale(["fresh", "stale", "unknown"])).infos).toBe(0);
         expect(h.upstream.calls.filter((c) => c.startsWith("fetchTokens"))).toEqual([
@@ -216,11 +212,10 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     );
   });
 
-  // **大小写是我们的展示口径,不是上游的。** CoinGecko 给的 symbol 是小写(`usdc`),而建行那一侧
-  // 是大写 —— 不归一就出现「刷一次就变小写」:界面上从 `USDC` 跳成 `usdc`。而且 symbol 还是
-  // symbol 消歧的比较键(candidatesBySymbol),两个写者对同一列口径必须一致。
-  // 覆盖上游给的**名字**仍然是对的(MATIC→POL),那是内容;大小写不是内容。
-  it("上游的 symbol 归一成大写才写(名字照抄,大小写不照抄)", async () => {
+  // Case is our display convention, not upstream's: CoinGecko gives lowercase `usdc` while rows are built uppercase; unnormalised,
+  // a refresh would flip `USDC` to `usdc`, and symbol is also the disambiguation key (candidatesBySymbol), so both writers must agree.
+  // Overwriting the upstream name is still right (MATIC to POL); case is not content.
+  it("upstream's symbol is uppercased before writing (name copied as is, case not)", async () => {
     const h = setup([
       info({ id: "t1", ref: "src/issued:usd-coin", symbol: "USDC", infoStale: true }),
     ]);
@@ -236,8 +231,8 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     expect(h.store.rows.get("t1")?.logo).toBe("usdc.png");
   });
 
-  it("**链上 symbol 与上游不一致 → 上游那份赢**(MATIC→POL)", async () => {
-    // 行是按合约地址认出来的(认定可信),但建行时拿的是合约里写的 symbol —— 那份是旧名。
+  it("on-chain symbol differs from upstream: upstream wins (MATIC to POL)", async () => {
+    // The row was recognised by contract address (trusted) but built with the contract's symbol, which is the old name.
     const h = setup([
       info({
         id: "tk_pol",
@@ -261,14 +256,14 @@ describe("批量刷 stale 元信息(覆盖)", () => {
       (await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["tk_pol"])))).infos,
     ).toBe(1);
     const row = h.store.rows.get("tk_pol");
-    expect(row?.symbol).toBe("POL"); // 覆盖,不是填空槽
+    expect(row?.symbol).toBe("POL"); // overwritten, not an empty-slot fill
     expect(row?.name).toBe("POL (ex-MATIC)");
     expect(row?.logo).toBe("pol.png");
-    // 连接器自带的备用图不动 —— 上游无权覆盖它(它是展示回退链的第二档)。
+    // The connector's spare logo stays: upstream has no right to overwrite it (second tier of the display fallback chain).
     expect(row?.providerLogo).toBe("zerion-matic.png");
   });
 
-  it("上游这次没给图 → 保留原有的,别擦成空", async () => {
+  it("upstream gave no logo this time: keeps the existing one, does not blank it", async () => {
     const h = setup([info({ id: "tk_1", symbol: "OLD", logo: "old.png", infoStale: true })]);
     h.upstream.markets = [{ ref: SRC_BTC, symbol: "BTC", name: "Bitcoin" }];
 
@@ -276,7 +271,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     expect(h.store.rows.get("tk_1")).toMatchObject({ symbol: "BTC", logo: "old.png" });
   });
 
-  it("上游挂了 → 什么都不写、不抛,行保留连接器那份", async () => {
+  it("upstream down: nothing written, no throw, the row keeps the connector's values", async () => {
     const h = setup([info({ id: "tk_1", symbol: "OLD", infoStale: true })]);
     h.upstream.fail = upstreamDown();
 
@@ -286,7 +281,7 @@ describe("批量刷 stale 元信息(覆盖)", () => {
     expect(h.store.rows.get("tk_1")).toMatchObject({ symbol: "OLD", infoStale: true });
   });
 
-  it("上游回了个映射不到 token 的 ref → 丢掉,不乱写", async () => {
+  it("upstream returns a ref that maps to no token: dropped, not written", async () => {
     const h = setup([info({ id: "tk_1", symbol: "OLD", infoStale: true })]);
     h.upstream.fetchTokens = () =>
       Effect.succeed([{ ref: "src/issued:somebody-else", symbol: "ELSE", name: "Else" }]);
@@ -298,10 +293,10 @@ describe("批量刷 stale 元信息(覆盖)", () => {
   });
 });
 
-describe("边角", () => {
-  it("上游回了个映射不到 token 的 ref → 跳过,不写野行", async () => {
+describe("edge cases", () => {
+  it("upstream returns a ref that maps to no token: skipped, no stray row", async () => {
     const h = setup([info({ id: "tk_1" })]);
-    // 上游多回了一条我们没问的(或已被合并掉的)ref。
+    // Upstream returned a ref we did not ask for (or one merged away).
     h.upstream.prices.set(SRC_BTC, { unitPrice: 60000, asOf: NOW });
     h.upstream.prices.set("src/issued:stranger", { unitPrice: 1, asOf: NOW });
 
@@ -311,7 +306,7 @@ describe("边角", () => {
     expect([...h.prices.current.keys()]).toEqual(["tk_1"]);
   });
 
-  it("有价但 info 行没了(合并删过)→ 富化不出这一行", async () => {
+  it("price exists but the info row is gone (merge deleted it): enrichment yields no such row", async () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
@@ -324,10 +319,10 @@ describe("边角", () => {
   });
 });
 
-describe("历史日价(按 token_id)", () => {
+describe("historical daily prices (by token_id)", () => {
   const day = (offset: number) => (TODAY + offset) * MS_PER_DAY;
 
-  it("priceSeries 只读表:缺的过去日不在结果里,**一发都不出网**(FOL-90)", async () => {
+  it("priceSeries reads the table only: missing past days are absent, no network at all", async () => {
     const h = setup([info({ id: "tk_1" })]);
     h.upstream.series = [{ atMs: day(-2), unitPrice: 200 }];
     await h.run(
@@ -346,7 +341,7 @@ describe("历史日价(按 token_id)", () => {
     );
   });
 
-  it("今日桶读价表的现价(多旧都给),不出网、不落日价表;没有现价 → 缺", async () => {
+  it("today's bucket reads the price table's current price (however old), no egress, no daily-table write; no current price means missing", async () => {
     const h = setup([info({ id: "tk_1" }), info({ id: "tk_2" })]);
     h.upstream.series = [{ atMs: NOW, unitPrice: 999 }];
     await h.run(
@@ -363,7 +358,7 @@ describe("历史日价(按 token_id)", () => {
     );
   });
 
-  it("fillDaily:缺的过去日一发补齐落表(不含今天);重跑零出网", async () => {
+  it("fillDaily: missing past days are filled in one call and stored (not today); a rerun has zero egress", async () => {
     const h = setup([info({ id: "tk_1" })]);
     h.upstream.series = [
       { atMs: day(-3), unitPrice: 100 },
@@ -396,9 +391,9 @@ describe("历史日价(按 token_id)", () => {
     );
   });
 
-  it("fillDaily:上游那几天**就是没有点** → 记成「试过」,重跑不再为它们出网", async () => {
+  it("fillDaily: days upstream has no points for are recorded as attempted, a rerun does not refetch them", async () => {
     const h = setup([info({ id: "tk_1" })]);
-    h.upstream.series = [{ atMs: day(-1), unitPrice: 300 }]; // -3、-2 两天上游没有
+    h.upstream.series = [{ atMs: day(-1), unitPrice: 300 }]; // upstream has nothing for days -3 and -2
     await h.run(
       Effect.gen(function* () {
         const tokens = yield* TokenService;
@@ -409,7 +404,7 @@ describe("历史日价(按 token_id)", () => {
     );
   });
 
-  it("fillDaily:按预算切窗 —— 三年 = 多窗,预算用完停下、下一次接着补;第二天只补昨天", async () => {
+  it("fillDaily: windows are cut by budget; three years is several windows, a spent budget stops and the next run resumes; next day only fills yesterday", async () => {
     const h = setup([info({ id: "tk_1" })]);
     const DAYS = 3 * 365;
     h.upstream.series = Array.from({ length: DAYS }, (_, i) => ({
@@ -427,7 +422,7 @@ describe("历史日价(按 token_id)", () => {
         const buckets = Array.from({ length: DAYS }, (_, i) => TODAY - DAYS + i);
         expect((yield* h.prices.getDaily("tk_1", buckets)).size).toBe(DAYS);
 
-        // 过了一天:只有「昨天」(原来的今天)要补,一发。
+        // A day later: only "yesterday" (the old today) needs filling, one call.
         h.upstream.series.push({ atMs: day(0), unitPrice: 7 });
         yield* TestClock.adjust(Duration.days(1));
         const before = h.upstream.calls.length;
@@ -442,7 +437,7 @@ describe("历史日价(按 token_id)", () => {
     );
   });
 
-  it("fillDaily:上游失败 → `failed`、区间不推过去,下一次再试;不抛", async () => {
+  it("fillDaily: upstream failure gives `failed`, the range does not advance and is retried next run; no throw", async () => {
     const h = setup([info({ id: "tk_1" })]);
     h.upstream.fail = upstreamDown();
     await h.run(
@@ -462,7 +457,7 @@ describe("历史日价(按 token_id)", () => {
     expect(h.logs.some((l) => l.annotations.at === "tokens.fillDaily")).toBe(true);
   });
 
-  it("fillDaily:表里已有整窗(别的用户补过)→ 不出网,直接算试过", async () => {
+  it("fillDaily: the table already has the whole window (filled for another user): no egress, counted as attempted", async () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
@@ -481,7 +476,7 @@ describe("历史日价(按 token_id)", () => {
     );
   });
 
-  it("上游没认出的币 / 反向区间 → 空,不碰上游", async () => {
+  it("token upstream does not recognise / reversed range: empty, upstream untouched", async () => {
     const h = setup([info({ id: "unknown", ref: null }), info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
@@ -498,7 +493,7 @@ describe("历史日价(按 token_id)", () => {
     );
   });
 
-  it("priceAt 取该 UTC 日桶的价;那天没数据 → none", async () => {
+  it("priceAt reads the price of that UTC day bucket; no data that day gives none", async () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
@@ -510,11 +505,11 @@ describe("历史日价(按 token_id)", () => {
     );
   });
 
-  // 桶是 epoch 起算的整日,与月/年边界无关 —— 跨月那一天不该有任何特殊行为。
-  // (日历月边界曾经是这类实现的常见错处:按 `getMonth()` 分组会在月初错一格。)
-  it("priceAt 跨月/跨年的那一天照常取,桶按 epoch 整日切", async () => {
+  // Buckets are whole epoch days, independent of month / year boundaries: no special behaviour across a month end.
+  // (Grouping by `getMonth()` would be off by one at month starts.)
+  it("priceAt across a month / year boundary works as usual; buckets are cut by epoch day", async () => {
     const h = setup([info({ id: "tk_1" })]);
-    // 2023-12-31T23:00Z 与 2024-01-01T01:00Z —— 相邻两日,跨年。
+    // 2023-12-31T23:00Z and 2024-01-01T01:00Z: two adjacent days across the year.
     const lastDayOf2023 = Date.UTC(2023, 11, 31, 23, 0, 0);
     const firstDayOf2024 = Date.UTC(2024, 0, 1, 1, 0, 0);
     await h.run(
@@ -529,46 +524,46 @@ describe("历史日价(按 token_id)", () => {
         expect(yield* tokens.priceAt("tk_1", firstDayOf2024)).toEqual(Option.some(200));
       }),
     );
-    // 两个桶号确实相邻,没有因为跨年多出或少掉一格。
+    // The two bucket numbers are adjacent: no bucket gained or lost across the year.
     expect(dayBucketOf(firstDayOf2024) - dayBucketOf(lastDayOf2023)).toBe(1);
   });
 
-  it("priceAt 取的是**当日**的桶,不会把前一日的价当今天的", async () => {
+  it("priceAt reads that day's bucket, never yesterday's price as today's", async () => {
     const h = setup([info({ id: "tk_1" })]);
     await h.run(
       Effect.gen(function* () {
         const tokens = yield* TokenService;
         yield* h.prices.putDaily("tk_1", [{ dayBucket: TODAY - 3, unitPrice: 7 }]);
-        // 当日零点整(桶起点)也算当日。
+        // Midnight exactly (bucket start) counts as that day.
         expect(yield* tokens.priceAt("tk_1", day(-3))).toEqual(Option.some(7));
-        // 次日零点 → 已是下一个桶,当日无数据。
+        // Next midnight is already the next bucket: no data for that day.
         expect(yield* tokens.priceAt("tk_1", day(-2))).toEqual(Option.none());
       }),
     );
   });
 });
 
-describe("选币的取价(按 ref,不建行)", () => {
-  it("按 ref 现取 —— 库里既不多一行代币,也不多一条价缓存", async () => {
+describe("picker pricing (by ref, no row created)", () => {
+  it("fetched by ref: no token row and no price cache entry added", async () => {
     const h = setup();
     h.upstream.prices.set(SRC_BTC, { unitPrice: 60000, change24h: 1.5, asOf: NOW });
 
     expect(await h.run(Effect.flatMap(TokenService, (t) => t.priceByRef(SRC_BTC)))).toEqual(
       Option.some({ unitPrice: 60000, change24h: 1.5, asOf: NOW }),
     );
-    // 这一刻用户只是在下拉里点了一下,还没提交 —— 什么都不该落库。
+    // The user only clicked in the dropdown and has not submitted: nothing should be stored.
     expect(h.store.rows.size).toBe(0);
     expect(h.prices.current.size).toBe(0);
   });
 
-  it("上游不认识这条 ref → none(表单让用户自己填)", async () => {
+  it("upstream does not recognise the ref: none (the form lets the user fill it in)", async () => {
     const h = setup();
     expect(
       await h.run(Effect.flatMap(TokenService, (t) => t.priceByRef("src/issued:nope"))),
     ).toEqual(Option.none());
   });
 
-  it("上游挂了 → none,不抛 —— 取不到价不该把选币流程打断", async () => {
+  it("upstream down: none, no throw; a missing price must not interrupt picking", async () => {
     const h = setup();
     h.upstream.fail = upstreamDown();
     expect(await h.run(Effect.flatMap(TokenService, (t) => t.priceByRef(SRC_BTC)))).toEqual(
@@ -577,10 +572,10 @@ describe("选币的取价(按 ref,不建行)", () => {
   });
 });
 
-describe("选币下拉的批量刷价(pricesByRefs,不建行)", () => {
+describe("picker batch price refresh (pricesByRefs, no row created)", () => {
   const SRC_ETH = "src/issued:ethereum";
 
-  it("一批 ref 现取 —— 库里既不多代币行也不多价缓存", async () => {
+  it("a batch of refs fetched live: no token rows and no price cache added", async () => {
     const h = setup();
     h.upstream.prices.set(SRC_BTC, { unitPrice: 60000, change24h: 1.5, asOf: NOW });
     h.upstream.prices.set(SRC_ETH, { unitPrice: 3000, change24h: -2, asOf: NOW });
@@ -594,14 +589,14 @@ describe("选币下拉的批量刷价(pricesByRefs,不建行)", () => {
     expect(h.prices.current.size).toBe(0);
   });
 
-  it("空入参 → 空 Map,不出网", async () => {
+  it("empty input: empty Map, no network", async () => {
     const h = setup();
     const got = await h.run(Effect.flatMap(TokenService, (t) => t.pricesByRefs([])));
     expect(got.size).toBe(0);
     expect(h.upstream.calls).toEqual([]);
   });
 
-  it("上游挂了 → 空 Map,不抛 —— 刷价失败不该把下拉打断", async () => {
+  it("upstream down: empty Map, no throw; a failed refresh must not interrupt the dropdown", async () => {
     const h = setup();
     h.upstream.fail = upstreamDown();
     const got = await h.run(Effect.flatMap(TokenService, (t) => t.pricesByRefs([SRC_BTC])));
@@ -609,7 +604,7 @@ describe("选币下拉的批量刷价(pricesByRefs,不建行)", () => {
   });
 });
 
-describe("橱窗与候选", () => {
+describe("showcase and candidates", () => {
   const markets = [
     {
       ref: SRC_BTC,
@@ -625,7 +620,7 @@ describe("橱窗与候选", () => {
     },
   ];
 
-  it("排行榜走 warm(经 SWR 预热一次);候选与它同一份 rows", async () => {
+  it("the leaderboard reads warm (warmed once via SWR); candidates are the same rows", async () => {
     const h = setup();
     h.upstream.markets = markets;
     await h.run(
@@ -633,7 +628,7 @@ describe("橱窗与候选", () => {
         const tokens = yield* TokenService;
         expect((yield* tokens.topTokens(1)).map((t) => t.ref)).toEqual([SRC_BTC]);
         expect(h.upstream.calls).toEqual(["fetchMarkets:1000"]);
-        // 第二次从 blob 出,不再预热 —— 缓存里始终只有一个键。
+        // The second read comes from the blob without warming: only one key in the cache.
         expect((yield* tokens.topTokens(2)).map((t) => t.ref)).toEqual([
           SRC_BTC,
           "src/issued:tether",
@@ -644,7 +639,7 @@ describe("橱窗与候选", () => {
     );
   });
 
-  it("要的比有的多 → 给全部,不补空位", async () => {
+  it("asking for more than exists: returns all, no padding", async () => {
     const h = setup();
     h.upstream.markets = [markets[0]];
     const got = await h.run(Effect.flatMap(TokenService, (t) => t.topTokens(50)));
@@ -652,22 +647,21 @@ describe("橱窗与候选", () => {
     expect(got.every((t) => t !== undefined)).toBe(true);
   });
 
-  it("预热失败不抛,返回空让调用方降级", async () => {
+  it("warm failure does not throw: returns empty so the caller degrades", async () => {
     const h = setup();
     h.upstream.fail = upstreamDown();
     expect(await h.run(Effect.flatMap(TokenService, (t) => t.topTokens(10)))).toEqual([]);
   });
 
-  it("搜索恒回源(结果与用户无关)", async () => {
+  it("search always fetches upstream (results are user-independent)", async () => {
     const h = setup();
     h.upstream.searchResults = [{ ref: SRC_BTC, symbol: "BTC", name: "Bitcoin" }];
     expect(await h.run(Effect.flatMap(TokenService, (t) => t.search("bit")))).toHaveLength(1);
     expect(h.upstream.calls).toEqual(["searchTokens:bit"]);
   });
 
-  // **搜索是唯一把上游错误交出去的方法**:它没有本地旧值可退,吞掉只会让用户看着空列表
-  // 以为「搜不到这个币」。调用方(server fn)自己决定怎么显示。
-  it("搜索失败 → 错误交给调用方,不当成「没搜到」", async () => {
+  // Search is the only method that surfaces upstream errors: it has no local stale value, and swallowing would look like "token not found".
+  it('search failure: the error goes to the caller, not treated as "no results"', async () => {
     const h = setup();
     h.upstream.fail = upstreamDown();
     const result = await h.run(Effect.either(Effect.flatMap(TokenService, (t) => t.search("bit"))));
@@ -675,9 +669,9 @@ describe("橱窗与候选", () => {
   });
 });
 
-// 迁移前这 6 处降级是 `catch {}`,**一行日志都没有**:上游整晚限流,只有用户看到旧价。
-describe("降级要留痕", () => {
-  it("上游挂了 → 有一条 warning,带 tag / pathname / 状态码,而且不带 query", async () => {
+// Degradation must leave a trace: otherwise upstream rate-limiting overnight shows only as old prices to users.
+describe("degradation leaves a trace", () => {
+  it("upstream down: one warning with tag / pathname / status, and no query", async () => {
     const h = setup([info({ id: "tk_1" })]);
     h.upstream.fail = upstreamDown();
     await h.run(Effect.flatMap(TokenService, (t) => t.refreshStale(["tk_1"])));
@@ -690,7 +684,7 @@ describe("降级要留痕", () => {
       where: "/fake",
       status: 503,
     });
-    // 原则 #5:`where` 是 pathname,不可能带上 key / 签名 / 地址。
+    // `where` is a pathname, so no key / signature / address can appear.
     expect(JSON.stringify(warn?.annotations)).not.toContain("?");
   });
 });

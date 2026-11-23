@@ -3,34 +3,30 @@ import { RESOLUTION_DOMINANCE, RESOLUTION_TOP_RANK } from "@folio/oracle-basic";
 import { describe, expect, it } from "vitest";
 import { pickByConfidence } from "../src/tokens/mint";
 
-// symbol 那一档的判官:同一个 symbol 有多个候选时,认不认、认哪个。
-//
-// **为什么单独测。** 它在 mint 里的旁证用例本来是空转的:那些用例给的是 `contract:` 形的 ref,
-// 而 #210 的闸在到这个函数之前就把合约挡掉了 —— `candidates.bySymbol` 一次都没被调用,
-// 测试绿得没有意义。走到这里的只有原生币与场馆代号,所以下面直接喂候选、直接看判决。
-//
-// 判错的代价不对称:少认 → 多出一行「认不出的币」,总览里显眼,用户能自己改绑;
-// 多认 → 山寨币的金额并进真币,盯市凭空多一笔,且认定冻进快照永不重判。故一律偏保守。
+// The judge of the symbol tier: with several candidates for one symbol, whether to resolve and to which.
+// Tested directly because the mint-side cases never reached it (contract refs are gated out earlier).
+// Errors are asymmetric: under-resolving shows an unrecognised row the user can rebind; over-resolving merges a fake
+// token's amount into the real one, frozen in the snapshot. So bias conservative.
 
 const cand = (ref: string, marketCapRank?: number): TokenCandidate => ({ ref, marketCapRank });
 
-describe("无候选 / 独一份", () => {
-  it("没有候选 → 不认", () => {
+describe("no candidates / a sole candidate", () => {
+  it("no candidates: not resolved", () => {
     expect(pickByConfidence([])).toBeUndefined();
   });
 
-  it("只有一个候选 → 认,哪怕它连排名都没有(没有可混淆的对象)", () => {
+  it("a sole candidate: resolved, even without rank (nothing to confuse it with)", () => {
     expect(pickByConfidence([cand("src/issued:lonely")])).toBe("src/issued:lonely");
   });
 });
 
-describe(`最佳在 top-${RESOLUTION_TOP_RANK} 之内 → 认`, () => {
-  it("头部币压过任何长尾同名币", () => {
+describe(`best within top-${RESOLUTION_TOP_RANK}: resolved`, () => {
+  it("a head token beats any long-tail namesake", () => {
     const got = pickByConfidence([cand("src/issued:scam", 900), cand("src/issued:bitcoin", 1)]);
     expect(got).toBe("src/issued:bitcoin");
   });
 
-  it("恰好在门上 → 认(门是闭区间)", () => {
+  it("exactly on the threshold: resolved (closed interval)", () => {
     const got = pickByConfidence([
       cand("src/issued:edge", RESOLUTION_TOP_RANK),
       cand("src/issued:other", RESOLUTION_TOP_RANK + 1),
@@ -38,8 +34,8 @@ describe(`最佳在 top-${RESOLUTION_TOP_RANK} 之内 → 认`, () => {
     expect(got).toBe("src/issued:edge");
   });
 
-  // 差一名就得走碾压那一档:51 对 52 谁也没碾压谁 → 不认。
-  it("差一名出门 → 落到碾压判定,而 51 比 52 算不上碾压 → 不认", () => {
+  // One rank outside goes to the dominance check: 51 vs 52 dominates nothing, so not resolved.
+  it("one rank outside: falls to dominance, and 51 vs 52 is no domination: not resolved", () => {
     const got = pickByConfidence([
       cand("src/issued:a", RESOLUTION_TOP_RANK + 1),
       cand("src/issued:b", RESOLUTION_TOP_RANK + 2),
@@ -47,27 +43,27 @@ describe(`最佳在 top-${RESOLUTION_TOP_RANK} 之内 → 认`, () => {
     expect(got).toBeUndefined();
   });
 
-  it("排序不看入参顺序 —— 最佳排在后面照样认", () => {
+  it("ordering ignores input order: a best listed later is still resolved", () => {
     expect(pickByConfidence([cand("src/issued:z", 999), cand("src/issued:a", 2)])).toBe(
       "src/issued:a",
     );
   });
 });
 
-describe("只有最佳有排名 → 无歧义", () => {
-  it("次席连排名都没有(不在 warm 里)→ 认最佳,哪怕它在门外", () => {
+describe("only the best is ranked: unambiguous", () => {
+  it("runner-up has no rank (not in warm): best resolved, even outside the threshold", () => {
     const got = pickByConfidence([cand("src/issued:known", 900), cand("src/issued:nameless")]);
     expect(got).toBe("src/issued:known");
   });
 
-  it("全都没排名 → 不认(无从比较,宁可各成一行)", () => {
+  it("none ranked: not resolved (nothing to compare; separate rows preferred)", () => {
     expect(pickByConfidence([cand("src/issued:a"), cand("src/issued:b")])).toBeUndefined();
   });
 });
 
-describe(`碾压次席 ${RESOLUTION_DOMINANCE} 倍 → 认`, () => {
-  // 排名是「越小越好」,所以碾压 = 次席的名次数是最佳的若干倍。
-  it("倍数达标 → 认", () => {
+describe(`dominating the runner-up by ${RESOLUTION_DOMINANCE}x: resolved`, () => {
+  // Smaller rank is better, so dominance means the runner-up's rank is a multiple of the best's.
+  it("multiple reached: resolved", () => {
     const got = pickByConfidence([
       cand("src/issued:big", 100),
       cand("src/issued:small", 100 * RESOLUTION_DOMINANCE),
@@ -75,7 +71,7 @@ describe(`碾压次席 ${RESOLUTION_DOMINANCE} 倍 → 认`, () => {
     expect(got).toBe("src/issued:big");
   });
 
-  it("差一点就不认(比门槛低一名)", () => {
+  it("just short: not resolved (one rank below the threshold)", () => {
     const got = pickByConfidence([
       cand("src/issued:big", 100),
       cand("src/issued:small", 100 * RESOLUTION_DOMINANCE - 1),
@@ -83,7 +79,7 @@ describe(`碾压次席 ${RESOLUTION_DOMINANCE} 倍 → 认`, () => {
     expect(got).toBeUndefined();
   });
 
-  it("只看最佳与次席,第三名再远也不影响", () => {
+  it("only best and runner-up matter; a far third has no effect", () => {
     const got = pickByConfidence([
       cand("src/issued:a", 100),
       cand("src/issued:b", 120),

@@ -4,15 +4,15 @@ import { describe, expect, it } from "vitest";
 import { type DailySource, fillDaily } from "../src/daily-fill";
 import { harness, now0 } from "./fakes";
 
-// 「试过哪一段」在并发下的记账(code review #9)。同一个目标会有两条 `daily-prices` 同时在补
-// (整点 cron + 手记写完的定向补 + 重投,队列 `max_concurrency` > 1)。进度少、后写完的那条
-// 不许把区间**盖小** —— 盖小的代价正是这张区间要省掉的:上游本就没有点的窗被重新打一遍。
+// Accounting of the attempted range under concurrency: two `daily-prices` messages can fill one target at once
+// (cron, targeted fill, redelivery; queue `max_concurrency` > 1). The slower one must not shrink the range,
+// which would re-hit windows upstream has no points for.
 
 const TODAY = Math.floor(now0 / MS_PER_DAY);
 const WINDOWS = 3;
 const FROM_MS = (TODAY - WINDOWS * DAILY_FILL_DAYS_PER_CALL) * MS_PER_DAY;
 
-/** 上游对这几窗**就是没有点**(回空),而表也空 —— 只有「试过的区间」能挡住重打。 */
+/** Upstream has no points for these windows (returns empty) and the table is empty: only the attempted range prevents refetching. */
 const emptySource = (calls: [number, number][], gate?: Deferred.Deferred<void>): DailySource => ({
   callsPerWindow: 1,
   read: () => Effect.succeed(new Map()),
@@ -25,8 +25,8 @@ const emptySource = (calls: [number, number][], gate?: Deferred.Deferred<void>):
   write: () => Effect.void,
 });
 
-describe("fillDaily 的区间在并发下取并集", () => {
-  it("两条同时补:进度少的那条后写完也不把区间盖小,第三趟零出网", async () => {
+describe("fillDaily range unions under concurrency", () => {
+  it("two concurrent fills: the one with less progress finishing last does not shrink the range; third run has zero egress", async () => {
     const h = harness();
     await h.run(
       Effect.gen(function* () {
@@ -34,13 +34,13 @@ describe("fillDaily 的区间在并发下取并集", () => {
         const slowCalls: [number, number][] = [];
         const fastCalls: [number, number][] = [];
 
-        // 慢的那条:预算只够一窗,读完区间(空)就卡在回源上。
+        // The slow one: budget for one window, stuck on fetch after reading the (empty) range.
         const slow = yield* Effect.fork(
           fillDaily(h.cache, "tk_x", emptySource(slowCalls, gate), FROM_MS, 1, "test.slow"),
         );
         while (slowCalls.length === 0) yield* Effect.yieldNow();
 
-        // 快的那条从同一个空区间规划,三窗全补完、先写。
+        // The fast one plans from the same empty range, fills all three windows, writes first.
         const fast = yield* fillDaily(
           h.cache,
           "tk_x",
@@ -51,12 +51,12 @@ describe("fillDaily 的区间在并发下取并集", () => {
         );
         expect(fast).toEqual({ calls: WINDOWS, done: true, failed: false });
 
-        // 慢的那条这才写:它只推进了一窗。
+        // The slow one writes now: it only advanced one window.
         yield* Deferred.succeed(gate, undefined);
         const slowReport = yield* Fiber.join(slow);
         expect(slowReport).toEqual({ calls: 1, done: false, failed: false });
 
-        // 并集之后区间仍是整段 → 下一趟一发都不打。
+        // After the union the range is still whole: the next run makes no calls.
         const again: [number, number][] = [];
         const third = yield* fillDaily(h.cache, "tk_x", emptySource(again), FROM_MS, 10, "t3");
         expect(third).toEqual({ calls: 0, done: true, failed: false });
@@ -65,7 +65,7 @@ describe("fillDaily 的区间在并发下取并集", () => {
     );
   });
 
-  it("反过来:进度多的那条后写完,照样是整段(并集不挑谁先谁后)", async () => {
+  it("reverse: the one with more progress finishing last still yields the whole range (union is order-independent)", async () => {
     const h = harness();
     await h.run(
       Effect.gen(function* () {
