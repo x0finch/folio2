@@ -3,12 +3,8 @@ import { db } from "../_kit/db";
 import { blockOutbound } from "../_kit/outbound";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 portfolios/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("portfolios/memberships", () => {
-  // 归属的那几条**不变量**。以前经 `listPortfolioMemberships` 这个 server fn 断言,而它在 ADR 0047
-  // 里退场了(整张归属表不再下发,归属随账户行给)—— 所以这里改成夹具直读同一个域操作:
-  // 要钉的从来是「归属会不会悬空 / 会不会跟着级联」,不是那条 HTTP 口子。
+  // Membership invariants, read via the domain op directly (no server fn exposes the table).
   const USER = "h-pfs-links";
 
   const account = (userId: string, label: string) =>
@@ -22,8 +18,8 @@ describe("portfolios/memberships", () => {
 
   const memberships = () => db(USER).portfolios.listMemberships();
 
-  describe("归属不变量", () => {
-    it("三个账户分在两个 Portfolio → 归属关系对得上", async () => {
+  describe("membership invariants", () => {
+    it("three accounts across two portfolios → memberships match", async () => {
       const def = await db(USER).portfolios.ensureDefault();
       const other = await db(USER).portfolios.create({ name: "另一个" });
       const a = await account(USER, "甲");
@@ -41,23 +37,22 @@ describe("portfolios/memberships", () => {
       expect(byAccount.get(c.id)).toBe(other.id);
     });
 
-    it("一个账户都没有 → 空数组,不是 null", async () => {
+    it("no accounts → empty array, not null", async () => {
       await db(USER).portfolios.ensureDefault();
 
       expect(await memberships()).toEqual([]);
     });
 
-    it("建账户时不指定 Portfolio → 自动归到默认那个,不会缺归属", async () => {
-      // **实测纠正过一次:** 我原以为「建账户」和「建归属」是两步,缺归属会是个可达状态。
-      // 不是 —— `accounts.create` 在同一个 batch 里既落账户行也落归属行(落到 ensureDefault
-      // 拿到的那个)。所以「归属悬空的账户」压根构造不出来,这条钉住的就是这个不变量。
+    it("account created without a portfolio → joins the default, never orphaned", async () => {
+      // `accounts.create` writes the account and its membership in one batch, so an orphaned
+      // account can't be constructed.
       const def = await db(USER).portfolios.ensureDefault();
       const acc = await account(USER, "没指定的");
 
       expect(await memberships()).toEqual([{ accountId: acc.id, portfolioId: def.id }]);
     });
 
-    it("账户被删 → 它那条关系一并消失", async () => {
+    it("account deleted → its membership goes too", async () => {
       const def = await db(USER).portfolios.ensureDefault();
       const a = await account(USER, "甲");
       await db(USER).portfolios.assignAccount(a.id, def.id);
