@@ -13,17 +13,13 @@ import { asConnector } from "../../upstream";
 import { COINSTATS_API_KEY, PROVIDER_ID } from "./constants";
 import { parseBalances, type Row } from "./parse";
 
-// —— 账户级 creds(AC):地址 ——
-// 地址非空即可(solana base58 / sui 0x+64hex / cosmos bech32 格式各异,交 API 判定,与旧行为一致)。
+// Only non-empty: address formats differ per chain, so the API is the judge.
 export const coinstatsAccountCreds = [
   { key: "address", type: "public", label: "Wallet Address", validator: z.string().trim().min(1) },
 ] as const satisfies readonly CredField[];
 
-// —— provider 级 creds(PC):CoinStats API Key —— DEFAULT provider key,值由 app 从 env 注入,
-// 用户自配留后续 phase。secret(仅声明形状;本包不加密、不见 SECRETS_KEY)。
-//
-// 外加一个 base URL 覆盖(FOL-84):与 binance / okx / bybit 的 #264 同一个开关、同一条注入路。
-// **生产不设** → 直连官方;设了的只有本地 perf 压测(`scripts/perf/fake-upstream.mjs`)。
+// The API key is injected from env. The base override is unset in production; only local perf
+// tests point it at a fake upstream.
 const COINSTATS_BASE_KEY = "COINSTATS_API_BASE";
 const providerCreds = [
   {
@@ -42,9 +38,8 @@ const providerCreds = [
 
 type CoinstatsCtx = FetchContext<{ address: string }, Record<string, string>>;
 
-// client 每次调用现建(它带闸 → 要 `Scope`)。**这不影响那把 key 的额度** ——
-// 队的身份是 **key 的名字**(模块级游标),不是 client 实例:三条链、三个 connector、
-// 每次调用各建一个 client,花的仍然是同一份额度、排的仍然是同一个队。这正是要的。
+// Built per call (the gate needs a Scope). The quota queue is keyed by the key's name, not the
+// client instance, so all three chains still share one queue.
 const withClient = <A, E>(
   creds: Record<string, unknown>,
   use: (client: CoinstatsClientApi) => Effect.Effect<A, E, ProviderNeeds>,
@@ -54,8 +49,7 @@ const withClient = <A, E>(
   return Effect.scoped(Effect.flatMap(makeCoinstatsClient({ apiBase }), use));
 };
 
-// provider key 由 app 从 env 注入(非用户输入),但**仍然自查** —— 没配就是没配,
-// 归「凭据问题」(重试改变不了),不该让它变成一发打不通的请求。
+// A missing env key is a credentials problem (retrying won't help), not a request to fire.
 const apiKeyOf = (ctx: CoinstatsCtx): Effect.Effect<string, ConnectorError> => {
   const apiKey = ctx.creds[COINSTATS_API_KEY];
   return apiKey
@@ -73,13 +67,10 @@ const balanceOf = (
         asConnector(client.balance({ connectionId, address: ctx.account.creds.address, apiKey })),
       ),
     ),
-    // ⚠️ fallbackChain = connectionId(含 sui 的 "sui-wallet"):无 chain 的 coin 退化按
-    // connectionId 归链,与迁移前完全一致。
+    // Coins without a chain fall back to connectionId (including sui's "sui-wallet").
     Effect.map((coins) => parseBalances(coins, connectionId)),
   );
 
-// 工厂:为一条链绑定它的 `connectionId`,产出一个 `BalanceProvider`(三条链共享上面的实现)。
-// 三份 connector manifest(solana / sui / cosmos)各调一次。
 export function createCoinstatsProvider(
   connectionId: string,
 ): BalanceProvider<Row, typeof coinstatsAccountCreds, typeof providerCreds> {
@@ -91,9 +82,7 @@ export function createCoinstatsProvider(
     fetchBalances: (ctx) =>
       balanceOf(connectionId, ctx).pipe(Effect.map((balances) => ({ balances }))),
 
-    // 低消耗校验:打一次 wallet/balance 探活(地址已由 validateCredentials 保证非空)。
-    // **没配 key 也走这条路** —— `apiKeyOf` 报的是「凭据问题」,而这里对凭据问题的答案就是 `false`。
-    // 老那版为它单写了一个 `if (!apiKey) return false` 前置分支,那是同一件事写了两遍。
+    // A missing key also lands here: `apiKeyOf` reports it as an auth error, which means `false`.
     validateAccount: (ctx) =>
       balanceOf(connectionId, ctx).pipe(
         Effect.as(true),
