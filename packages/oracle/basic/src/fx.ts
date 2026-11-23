@@ -1,25 +1,22 @@
-// 展示币种(FX)的数据与类型。**存储恒 USD,换算只发生在展示层**(ADR 0006)——
-// 所以这一层只有「1 单位该币种值多少美元」这一个数,没有货币对、没有转换方向。
-//
-// 服务接口(`FxRates`)在 entry:本包只放契约与数据,不放服务(与 `Tokens` / `Mint` 同口径)。
+// Display currency (FX) data and types. Storage is always USD and conversion happens only in the display layer, so the one number
+// here is "how many USD one unit of this currency is worth". The service interface lives in entry; this package holds contract and data.
 
-// 展示币种描述符。`code`:fiat = ISO 4217 大写(USD/EUR),crypto = BTC/ETH(非 ISO,自用)。
-// `symbol` 只有 crypto 需要 —— fiat 的货币符号由 `Intl` 按 locale 出,写死反而会错。
+// Display currency descriptor. `code`: fiat = ISO 4217 uppercase (USD/EUR), crypto = BTC/ETH (not ISO). `symbol` only for crypto;
+// fiat symbols come from `Intl` by locale.
 export interface Currency {
   code: string;
   kind: "fiat" | "crypto";
   symbol?: string;
-  // 展示用 logo,**base64 data URI 内嵌**:自包含、离线可用、不外拉(无第三方在线/热链/隐私依赖)。
-  // fiat 取自 CoinMarketCap 128px —— **风格是 CMC 原样**:USD/EUR 为 $/€ 符号圆标,其余为国旗
-  //(经肉眼逐张核对国旗与货币对应,见 PR)。crypto(BTC/ETH)取自 CoinGecko、缩至 128px。
-  // 生成脚本一次性拉取+编码,不入库;新增币种同法补一张。
+  // Display logo as an inline base64 data URI: self-contained, offline, no third-party fetch (privacy). Fiat from CoinMarketCap
+  // 128px as is (USD/EUR currency-symbol badges, the rest flags); crypto (BTC/ETH) from CoinGecko at 128px. Fetched and encoded once
+  // by a script, not committed; add a new currency the same way.
   logo: string;
 }
 
 export const DEFAULT_CURRENCY = "USD";
 
-// 支持的展示币种(选择器用;cookie 值按此校验)。十来个主流法币 + BTC/ETH。
-// **它是白名单不是全集**:上游能给几百种,但每多一种就多一份要维护的格式化与测试。
+// Supported display currencies (picker; cookie values are validated against this): a dozen major fiats + BTC/ETH.
+// A whitelist, not the full set: each extra currency adds formatting and tests to maintain.
 export const SUPPORTED_CURRENCIES: readonly Currency[] = [
   {
     code: "USD",
