@@ -10,20 +10,15 @@ import type { AccountSafe } from "@folio/db";
 import { Duration, Effect, Fiber, type Layer, Option, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
 import { depError, type FetchOutcome, Sweep, type SyncLogger, type SyncServices } from "../src";
-// Effect 版不对外导出(公开出口只有 Promise 那套)—— 包内测试直接摸内部模块、自己 provide 服务。
 import { type FakeOptions, fakeServices } from "./fakes";
 
-// 假装配 → 可挂假时钟的 Effect。**测试直接提供 layer**(#403 片 3):`SyncDeps` 与它那层翻译
-// 一起删了,假的和真的从此都经同一条 `Tag → Layer`。
 const syncWith = (layer: Layer.Layer<SyncServices>, userId: string) =>
   Sweep.syncUser(userId).pipe(Effect.provide(layer));
 
 const runSync = (layer: Layer.Layer<SyncServices>, userId: string) =>
   Effect.runPromise(syncWith(layer, userId));
 
-// 编排层测试:provider 机制(解密/校验/取数/全局 key 收窄)已内化进注入的 fetchBalances,
-// 这里只测 sync 自己的编排 —— 重试 / 跳过(needs-credentials)/ 重估 / 失败隔离 / 日志 / 写快照。
-// 取余额一律用可控 stub 注入(不碰真 provider)。
+// Orchestration only: retry / skip / revalue / failure isolation / logging / snapshot writes. Fetches use controllable stubs.
 
 function capturingLogger() {
   const entries: Array<{ level: string; msg: string; props?: Record<string, unknown> }> = [];
@@ -66,8 +61,8 @@ const ok = (balances: Balance[]): FetchOutcome => ({
 const makeServices = (accounts: AccountSafe[], over: Omit<FakeOptions, "accounts"> = {}) =>
   fakeServices({ accounts, ...over });
 
-describe("syncUser — 取余额 → 写快照", () => {
-  it("ok outcome → 写出快照,totalUsd = 各行之和", async () => {
+describe("syncUser: fetch balances then write snapshot", () => {
+  it("ok outcome writes a snapshot with totalUsd = sum of rows", async () => {
     const { layer, writes } = makeServices([account()], {
       fetch: () => Effect.succeed(ok([bal("BTC", 32000)])),
     });
@@ -83,9 +78,8 @@ describe("syncUser — 取余额 → 写快照", () => {
     expect(writes[0].input.balances).toHaveLength(1);
   });
 
-  it("上游返回空余额列表(真清仓)→ 照样写一张空快照,总额如实归零", async () => {
-    // 「空」和「失败」必须分得开(#527):失败不写快照(见下面重试用尽那条),而空是**合法答案**
-    // —— 用户真把仓清了,不落这张空快照,总览就会一直挂着上一张的旧总额。
+  it("an empty balance list (real liquidation) still writes an empty snapshot with zero total", async () => {
+    // Empty is a legitimate answer and must be distinguishable from failure (which writes nothing).
     const { layer, writes } = makeServices([account()], {
       fetch: () => Effect.succeed(ok([])),
     });
@@ -96,7 +90,7 @@ describe("syncUser — 取余额 → 写快照", () => {
     expect(writes[0].input.balances).toHaveLength(0);
   });
 
-  it("note(note 重设计,两级):balance 级单个 note 随行透传 + account 级 Note[] 落顶层", async () => {
+  it("passes balance-level notes through per row and account-level Note[] at the top", async () => {
     const note = { title: "Locked", icon: "warning" as const, content: "held" };
     const withNote: Balance = { ...bal("BTC", 1), note };
     const accountNote = [{ title: "Unconfirmed", icon: "warning" as const, content: "pending" }];
@@ -110,14 +104,12 @@ describe("syncUser — 取余额 → 写快照", () => {
         }),
     });
     await runSync(layer, "u1");
-    // 带 note 的行透传单个 note;无 note 的行 note=undefined。
     expect(writes[0].input.balances[0]?.note).toEqual(note);
     expect(writes[0].input.balances[1]?.note).toBeUndefined();
-    // account 级 note(Note[])落 writeSnapshot 顶层。
     expect(writes[0].input.note).toEqual(accountNote);
   });
 
-  it("revalue 钩子(P7.4.2):写快照前改 value 并重算 totalUsd", async () => {
+  it("revalue hook changes values and recomputes totalUsd before the snapshot write", async () => {
     const { layer, writes } = makeServices([account()], {
       fetch: () => Effect.succeed(ok([bal("BTC", 32000)])),
       revalue: (_connectorId, balances) =>
@@ -128,7 +120,7 @@ describe("syncUser — 取余额 → 写快照", () => {
     expect(writes[0].input.totalUsd).toBe(64000);
   });
 
-  it("revalue 抛错 → best-effort 保留原值,账户仍 ok", async () => {
+  it("revalue throwing keeps the original values and the account stays ok", async () => {
     const { layer, writes } = makeServices([account()], {
       fetch: () => Effect.succeed(ok([bal("BTC", 32000)])),
       revalue: () => Effect.fail(depError("revalue", new Error("price down"))),
@@ -139,8 +131,8 @@ describe("syncUser — 取余额 → 写快照", () => {
   });
 });
 
-describe("syncUser — 缺凭据跳过 / 失败隔离", () => {
-  it("needs-credentials → ok:false skipped:true,带上「凭据没填完」这个理由,不写快照", async () => {
+describe("syncUser: missing credentials skip / failure isolation", () => {
+  it("needs-credentials gives ok:false skipped:true with the missing-credentials reason and no snapshot", async () => {
     const { layer, writes } = makeServices([account({ id: "n" })], {
       fetch: () => Effect.succeed({ status: "needs-credentials" } as const),
     });
@@ -154,7 +146,7 @@ describe("syncUser — 缺凭据跳过 / 失败隔离", () => {
     expect(writes).toHaveLength(0);
   });
 
-  it("坏账户 ok:false 不阻断好账户;syncUser 不抛;只为好账户写快照", async () => {
+  it("a bad account does not block good ones; syncUser does not throw; only good accounts get snapshots", async () => {
     const good = account({ id: "good" });
     const bad = account({ id: "bad" });
     const { layer, writes } = makeServices([good, bad], {
@@ -173,10 +165,9 @@ describe("syncUser — 缺凭据跳过 / 失败隔离", () => {
   });
 });
 
-// 队列 consumer 那条路(一条消息一个账户):不经 Stream,但必须与 `syncUser` 跑同一个
-// `syncAccount`、拿到同一份凭据 —— 这一组钉「只跑它一个」「名单外 → none」「凭据按 id 对上」。
-describe("syncOne — 只同步名单里的那一个账户", () => {
-  it("只跑指定的那个,凭据按 id 递给它;别的账户不取数、不写快照", async () => {
+// The queue-consumer path (one message per account): must run the same `syncAccount` with the same creds as `syncUser`.
+describe("syncOne: syncs only the listed account", () => {
+  it("runs only the target, hands it its creds by id; other accounts are not fetched or written", async () => {
     const seen: Array<{ id: string; stored: Record<string, string> }> = [];
     const { layer, writes } = makeServices([account({ id: "x" }), account({ id: "y" })], {
       rawCreds: [
@@ -194,7 +185,7 @@ describe("syncOne — 只同步名单里的那一个账户", () => {
     expect(writes.map((w) => w.accountId)).toEqual(["y"]);
   });
 
-  it("名单里没有它 → none,一发都不取", async () => {
+  it("an unlisted account gives none and fetches nothing", async () => {
     let fetched = 0;
     const { layer, writes } = makeServices([account({ id: "x" })], {
       fetch: () => {
@@ -209,8 +200,8 @@ describe("syncOne — 只同步名单里的那一个账户", () => {
   });
 });
 
-describe("结构化日志(级别 + 安全字段)", () => {
-  it("成功→info、缺凭据→warning、失败→error;字段只含安全键", async () => {
+describe("structured logs (level + safe fields)", () => {
+  it("success logs info, missing creds warning, failure error; fields carry only safe keys", async () => {
     const { log, entries } = capturingLogger();
     const { layer } = makeServices(
       [account({ id: "g" }), account({ id: "n" }), account({ id: "f", connectorId: "okx" })],
@@ -236,17 +227,14 @@ describe("结构化日志(级别 + 安全字段)", () => {
   });
 });
 
-// 退避重试测在 **Effect 版** 上而不是 Promise 壳 —— 假时钟(`TestClock`)与可控随机(抖动)都要
-// Effect 上下文,而壳子在包内部就把上下文 runPromise 掉了,外面挂不上。
-// Effect 版住在 `../src/sweep`,是包内模块;下一步出口改成 Effect 时它就是正式出口。
+// Backoff is tested on the Effect core: TestClock and controllable random need the Effect context.
 //
-// 套路:fork 起来 → 推进假时钟 → join。真实时钟下这几条会各等好几秒;假时钟下瞬间跑完,
-// 且能**精确**断言退避了多久(推进 199ms 不该有第二次调用,推到 200ms 才有)。
-describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
-  // 前 failTimes 次抛错、之后成功的取余额 stub。
+// Pattern: fork, advance the fake clock, join; boundaries are asserted exactly.
+describe("syncUser (Effect core): backoff retry (fetch only)", () => {
+  // Fetch stub that fails the first failTimes calls, then succeeds.
   function flaky(makeErr: () => ConnectorError, failTimes: number) {
     let calls = 0;
-    // 失败走**错误通道**,不是抛异常 —— 契约的出口已经是 Effect。
+    // Failures go through the error channel.
     const fetchBalances = (): Effect.Effect<FetchOutcome, ConnectorError> => {
       calls++;
       return calls <= failTimes ? Effect.fail(makeErr()) : Effect.succeed(ok([]));
@@ -254,8 +242,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     return { fetchBalances, calls: () => calls };
   }
 
-  // 跑一段用了假时钟的 Effect:fork → 推进 → join。推进量给足(覆盖所有退避),
-  // 不逐段推进的用例用它;要精确卡时间点的自己 fork。
+  // Runs an Effect on the fake clock: fork, advance generously, join. Cases needing exact timing fork themselves.
   const runWithClock = <A, E>(effect: Effect.Effect<A, E>, advanceMs = 100_000): Promise<A> =>
     Effect.gen(function* () {
       const fiber = yield* Effect.fork(effect);
@@ -263,7 +250,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       return yield* Fiber.join(fiber);
     }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
 
-  it("采用 Retry-After 而非自己的指数退避:1233ms 时还没重试,1234ms 后才重试", async () => {
+  it("uses Retry-After instead of exponential backoff: no retry at 1233ms, retry after 1234ms", async () => {
     const { fetchBalances, calls } = flaky(
       () => new ConnectorRateLimitError({ message: "rate limited", retryAfterMs: 1234 }),
       1,
@@ -271,44 +258,40 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     const { layer } = makeServices([account()], { fetch: fetchBalances });
     await Effect.gen(function* () {
       const fiber = yield* Effect.fork(syncWith(layer, "u1"));
-      // 指数退避的第一档是 200ms;若没采用 Retry-After,这时早该重试了。
+      // The first exponential step is 200ms; without Retry-After we'd have retried by now.
       yield* TestClock.adjust(Duration.millis(1233));
       expect(calls()).toBe(1);
-      // 抖动最多再加一个 baseMs(200ms),推够即可。
+      // Jitter adds at most baseMs (200ms).
       yield* TestClock.adjust(Duration.millis(400));
       const { results } = yield* Fiber.join(fiber);
       expect(calls()).toBe(2);
-      expect(results[0].ok).toBe(true); // 重试之后成功了
+      expect(results[0].ok).toBe(true);
     }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
   });
 
-  it("退避曲线逐档翻倍:第二档是 400ms 而不是又一个 200ms", async () => {
-    // 抖动是加性的(+0~baseMs),所以每档都是一个**区间**,断言必须卡区间边界而不是某个点位,
-    // 否则测试会随抖动大小时绿时红 —— 时序测试自己不确定就白写了。
-    //   第 2 次调用 ∈ [200, 400]   (第一档 200 + 抖动 0~200)
-    //   第 3 次调用 ∈ [600, 1000]  (第 2 次时刻 + 第二档 400 + 抖动 0~200)
-    // 「第 3 次不早于 600」正是「第二档翻倍到 400」的证据 —— 若第二档仍是 200,它最早会在 400 出现。
+  it("backoff doubles per step: the second wait is 400ms, not another 200ms", async () => {
+    // Jitter is additive (+0..baseMs), so each step is an interval; assert interval bounds, not points.
+    //   call 2 in [200, 400]; call 3 in [600, 1000]. Call 3 not before 600 proves the doubling.
     const { fetchBalances, calls } = flaky(
-      () => new ConnectorUnavailableError({ message: "5xx" }), // 无 Retry-After → 走指数退避
+      () => new ConnectorUnavailableError({ message: "5xx" }), // no Retry-After: exponential
       2,
     );
     const { layer } = makeServices([account()], { fetch: fetchBalances });
     await Effect.gen(function* () {
       const fiber = yield* Effect.fork(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(199));
-      expect(calls()).toBe(1); // 第一档最早 200ms,未到
-      yield* TestClock.adjust(Duration.millis(201)); // → t=400,第 2 次最晚也该发生了
+      expect(calls()).toBe(1); // first step is at least 200ms
+      yield* TestClock.adjust(Duration.millis(201)); // t=400: call 2 has happened
       expect(calls()).toBe(2);
-      yield* TestClock.adjust(Duration.millis(199)); // → t=599,第 3 次最早 600
+      yield* TestClock.adjust(Duration.millis(199)); // t=599: call 3 is earliest at 600
       expect(calls()).toBe(2);
-      yield* TestClock.adjust(Duration.millis(401)); // → t=1000,第 3 次最晚也该发生了
+      yield* TestClock.adjust(Duration.millis(401)); // t=1000: call 3 has happened
       yield* Fiber.join(fiber);
       expect(calls()).toBe(3);
     }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
   });
 
-  it("Retry-After 超过单次上限 → 夹到上限继续等,不放弃(clamp 语义)", async () => {
-    // 后台同步没人在等:上游说等 60s、我们上限 5s → 夹到 5s 再打,而不是直接失败。
+  it("Retry-After above the cap is clamped and still retried, not abandoned", async () => {
     const { fetchBalances, calls } = flaky(
       () => new ConnectorRateLimitError({ message: "slow down", retryAfterMs: 60_000 }),
       1,
@@ -318,14 +301,14 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
       const fiber = yield* Effect.fork(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(4999));
       expect(calls()).toBe(1);
-      yield* TestClock.adjust(Duration.millis(1201)); // 5s 上限 + 抖动上限 200ms
+      yield* TestClock.adjust(Duration.millis(1201)); // 5s cap + 200ms jitter ceiling
       const { results } = yield* Fiber.join(fiber);
-      expect(calls()).toBe(2); // 夹到 5s 后重试成功,而非等满 60s、也非放弃
+      expect(calls()).toBe(2);
       expect(results[0].ok).toBe(true);
     }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
   });
 
-  it("重试用尽 → ok:false(隔离),不写快照", async () => {
+  it("exhausted retries give ok:false (isolated) and no snapshot", async () => {
     const { fetchBalances, calls } = flaky(
       () => new ConnectorUnavailableError({ message: "5xx" }),
       99,
@@ -338,7 +321,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     expect(writes).toHaveLength(0);
   });
 
-  it("不可重试错误(AUTH_FAILED)不重试", async () => {
+  it("a non-retryable error (AUTH_FAILED) is not retried", async () => {
     const { fetchBalances, calls } = flaky(
       () => new ConnectorAuthError({ message: "bad key" }),
       99,
@@ -349,13 +332,10 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     expect(calls()).toBe(1);
   });
 
-  // attempt 由 schedule 自己数(recurs 的输出 + 1),不再靠外面一个可变计数器 —— 这条钉住那个换算。
-  // 顺带钉住:账户上下文字段是在 syncAccount 那层标注一次的,**隔着 Schedule 也照样带下来**
-  // (重试日志自己没拼过 userId/accountId)。
-  it("重试日志:attempt 从 1 递增,且带着账户上下文字段", async () => {
+  // attempt is counted by the schedule (recurs output + 1); account log fields are annotated once in syncAccount and survive the Schedule.
+  it("retry log: attempt increments from 1 and carries the account context fields", async () => {
     const { log, entries } = capturingLogger();
     const { fetchBalances } = flaky(
-      // `retryAfterMs` 只有限流那一类才有 —— 类型上就限定了,不会再有「给不该有的错误塞建议等待」。
       () => new ConnectorRateLimitError({ message: "5xx", retryAfterMs: 300 }),
       2,
     );
@@ -376,8 +356,7 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
     });
   });
 
-  // 重试用尽 / 不可重试都不该多记一条 —— 日志挂在 schedule 的 tapOutput 上就是为了这个。
-  it("重试用尽记 2 条(不是 3 条);不可重试记 0 条", async () => {
+  it("exhausted retries log 2 entries (not 3); a non-retryable error logs 0", async () => {
     const exhausted = capturingLogger();
     const { layer: l1 } = makeServices([account()], {
       log: exhausted.log,
@@ -396,8 +375,8 @@ describe("syncUser(Effect 内核)— 退避重试(仅取余额部分)", () => {
   });
 });
 
-describe("syncUser — 有界并发", () => {
-  it("同一时刻在飞账户数不超过并发上限,且全部账户都跑到", async () => {
+describe("syncUser: bounded concurrency", () => {
+  it("in-flight accounts never exceed the concurrency limit and all accounts run", async () => {
     let inFlight = 0;
     let maxInFlight = 0;
     const accounts = Array.from({ length: 10 }, (_, i) => account({ id: `a${i}` }));
@@ -406,7 +385,7 @@ describe("syncUser — 有界并发", () => {
         Effect.promise(async () => {
           inFlight++;
           maxInFlight = Math.max(maxInFlight, inFlight);
-          await new Promise((r) => setTimeout(r, 5)); // 制造重叠窗口
+          await new Promise((r) => setTimeout(r, 5)); // force overlap
           inFlight--;
           return ok([]);
         }),
@@ -415,32 +394,32 @@ describe("syncUser — 有界并发", () => {
     expect(results).toHaveLength(10);
     expect(results.every((r) => r.ok)).toBe(true);
     expect(writes).toHaveLength(10);
-    expect(maxInFlight).toBe(6); // SYNC_CONCURRENCY;10 账户 > 6 → 恰好打满池
+    expect(maxInFlight).toBe(6); // SYNC_CONCURRENCY; 10 accounts > 6 saturates the pool
   });
 });
 
-describe("syncUser(Effect 内核)— 取数超时", () => {
-  it("provider 挂住(永不 resolve)→ 超时按 retryable 重试 → 用尽后 ok:false", async () => {
+describe("syncUser (Effect core): fetch timeout", () => {
+  it("a hung provider times out, retries as retryable, then gives ok:false after exhaustion", async () => {
     let calls = 0;
     const { layer, writes } = makeServices([account()], {
       fetch: () => {
         calls++;
-        return Effect.never; // 永不 resolve —— 只有超时能结束它
+        return Effect.never; // never resolves; only the timeout ends it
       },
     });
     await Effect.gen(function* () {
       const fiber = yield* Effect.fork(syncWith(layer, "u1"));
-      // 3 次尝试 × 20s 超时 + 两次退避,推够即可。
+      // 3 attempts x 20s timeout + two backoffs; advance generously.
       yield* TestClock.adjust(Duration.millis(100_000));
       const { results } = yield* Fiber.join(fiber);
       expect(results[0].ok).toBe(false);
       expect(results[0].error).toContain("timed out");
-      expect(calls).toBe(3); // RETRY_MAX_ATTEMPTS(超时可重试)
+      expect(calls).toBe(3); // RETRY_MAX_ATTEMPTS
       expect(writes).toHaveLength(0);
     }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
   });
 
-  it("每次尝试各自计时:19.9s 时还没超时,20s 后才判超时并重试", async () => {
+  it("each attempt is timed separately: no timeout at 19.9s, timeout and retry after 20s", async () => {
     let calls = 0;
     const { layer } = makeServices([account()], {
       fetch: () => {
@@ -451,25 +430,18 @@ describe("syncUser(Effect 内核)— 取数超时", () => {
     await Effect.gen(function* () {
       const fiber = yield* Effect.fork(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(19_900));
-      expect(calls).toBe(1); // FETCH_TIMEOUT_MS 未到
-      // 20s 超时 + 第一档退避 200 + 抖动上限 200 → 第 2 次最晚在 20_400,推到 20_500 留余量。
+      expect(calls).toBe(1); // FETCH_TIMEOUT_MS not reached
+      // 20s timeout + 200 first backoff + 200 jitter ceiling = 20_400; advance to 20_500.
       yield* TestClock.adjust(Duration.millis(600));
       expect(calls).toBe(2);
-      yield* Effect.fork(Fiber.interrupt(fiber)); // 收尾,不等剩下两次
+      yield* Effect.fork(Fiber.interrupt(fiber)); // wrap up without waiting for the other two attempts
     }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
   });
 });
 
-// —— mint:认币是独立一步,跑在 revalue 之前(#202)——
-//
-// #200 当初把 mint 塞在注入的 writeSnapshot 里。那时 revalue 还在用旧参考层的读时解析,所以两者
-// 互不相干;新层的 `priceOf` 收 token_id,mint 要是留在写快照那头,revalue 就得自己再认一遍 ——
-// 同一轮同步认两次,而且中间有别的账户在并发建行,两次答案可能不一致。
-//
-// 下面钉的就是这条顺序契约:**mint 先跑、只跑一次、答案同时喂给 revalue 与写快照**。
-// 顺序错了这几条会红;换成在调用方复刻这段逻辑就测不到了。
-describe("syncAccount — mint 与 revalue 的顺序", () => {
-  it("mint 先于 revalue,且 revalue 拿到的就是 mint 的答案", async () => {
+// These pin the ordering contract: mint runs first, once, and its answer feeds both revalue and the snapshot write.
+describe("syncAccount: mint and revalue ordering", () => {
+  it("mint runs before revalue, and revalue receives mint's answer", async () => {
     const order: string[] = [];
     const { layer, writes } = makeServices([account()], {
       fetch: () => Effect.succeed(ok([bal("BTC", 100)])),
@@ -481,7 +453,6 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
       revalue: (_connectorId, balances, idByRef) =>
         Effect.sync(() => {
           order.push("revalue");
-          // 拿到的正是上一步的产物 —— 自己不解析身份。
           expect(idByRef.get("binance/issued:BTC")).toBe("tk_BTC");
           return balances;
         }),
@@ -489,11 +460,10 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
 
     await runSync(layer, "u1");
     expect(order).toEqual(["mint", "revalue"]);
-    // 同一份答案也落进了快照列。
     expect(writes[0].input.balances[0].tokenId).toBe("tk_BTC");
   });
 
-  it("一轮同步只 mint 一次(写快照不再自己认一遍)", async () => {
+  it("a round mints only once (the snapshot write does not recognise again)", async () => {
     let calls = 0;
     const { layer } = makeServices([account()], {
       fetch: () => Effect.succeed(ok([bal("BTC", 100), bal("ETH", 50)])),
@@ -505,11 +475,10 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
     });
 
     await runSync(layer, "u1");
-    expect(calls).toBe(1); // 两笔持仓、一次批量点查
+    expect(calls).toBe(1); // two holdings, one batched lookup
   });
 
-  // best-effort:认币故障不该让一轮同步丢数据。
-  it("mint 抛错 → 快照照落(token_id 留空)、价退回 provider 自带、记一条 warning", async () => {
+  it("mint throwing still writes the snapshot (token_id empty), price falls back to the provider's, one warning logged", async () => {
     const { log, entries } = capturingLogger();
     const { layer, writes } = makeServices([account()], {
       log,
@@ -517,7 +486,7 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
       mint: () => Effect.fail(depError("mint", new Error("d1 down"))),
       revalue: (_connectorId, balances, idByRef) =>
         Effect.sync(() => {
-          expect(idByRef.size).toBe(0); // 空 map,不是 undefined —— revalue 不用判空
+          expect(idByRef.size).toBe(0); // empty map, not undefined
           return balances;
         }),
     });
@@ -525,18 +494,18 @@ describe("syncAccount — mint 与 revalue 的顺序", () => {
     await runSync(layer, "u1");
     expect(writes).toHaveLength(1);
     expect(writes[0].input.balances[0].tokenId).toBeUndefined();
-    expect(writes[0].input.totalUsd).toBe(100); // 金额没丢
+    expect(writes[0].input.totalUsd).toBe(100);
     expect(entries.some((e) => e.level === "warning" && e.msg.includes("mint failed"))).toBe(true);
   });
 
-  it("认不出来的那条 ref 不进 map → 它的 token_id 留空,别的行不受影响", async () => {
+  it("a ref that can't be recognised stays out of the map: its token_id is empty, other rows unaffected", async () => {
     const { layer, writes } = makeServices([account()], {
       fetch: () => Effect.succeed(ok([bal("BTC", 100), bal("SCAM", 5)])),
       mint: () => Effect.succeed(new Map([["binance/issued:BTC", "tk_BTC"]])),
     });
 
     await runSync(layer, "u1");
-    // symbol 不再落快照(#243);按 usdValue 区分两行(BTC=100 / SCAM=5)。
+    // Rows are told apart by usdValue (BTC=100 / SCAM=5).
     const rows = writes[0].input.balances;
     expect(rows.find((r) => r.usdValue === 100)?.tokenId).toBe("tk_BTC");
     expect(rows.find((r) => r.usdValue === 5)?.tokenId).toBeUndefined();
