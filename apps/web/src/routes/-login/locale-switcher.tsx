@@ -7,8 +7,7 @@ const OPTIONS: { value: Locale; label: string }[] = [
   { value: "zh", label: "中文" },
 ];
 
-// 切语言:写 localStorage → 根上的 IntlProvider 订阅着它,当场换 locale(ADR 0049 补记)。
-// 法币选项的名字把语言放进了查询键,换语言即换键,不需要另外刷新。
+// Locale lives in localStorage; fiat option names include it in their query key, so no refetch.
 export function LocaleSwitcher() {
   const locale = useLocale();
 
