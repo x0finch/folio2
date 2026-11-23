@@ -45,41 +45,40 @@ const failing = (
 ): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
 
 describe("fetchBalances", () => {
-  // ⚠️ **这一条必须排第一。** 链映射在 client 里缓存 24 小时,而那份缓存是**模块级**的
-  // (CF Workers 上放 Scope 里等于每请求重置 —— 见 CODING.md 的 Effect 一节)。
-  // 只有还没人拉到过链清单时,拉失败才会是硬失败;之后就落到旧值了(那正是下面第二条)。
-  it("冷启 + 链清单挂了 → **整体失败**,绝不写一份含分叉标识的快照", async () => {
-    // 拿不到数字 chainId 就产不出规范的 `evm:<chainId>`,而退化成 slug 兜底形会与规范形分裂
-    // 身份、污染代币索引。失败即不产,整轮重试。
+  // This must be first: the chain mapping is cached 24h in the client at module level (on CF Workers a Scope would reset it every request).
+  // Only while nobody has fetched the chain list yet is a fetch failure a hard failure; after that it falls to the old value (the second case below).
+  it("cold start + chain list down: whole failure, never writing a snapshot with forked identifiers", async () => {
+    // Without a numeric chainId the canonical `evm:<chainId>` cannot be produced, and degrading to the slug fallback form would split identity
+    // from the canonical one and pollute the token index. Failing means nothing is produced; the whole round retries.
     const stub = upstream({ "/v1/chains": () => json({}, { status: 500 }) });
     const err = await failing(stub, zerionProvider.fetchBalances(ctx()));
     expect(err._tag).toBe("ConnectorUnavailableError");
   });
 
-  it("并发取仓位 + 链映射,输出与 golden 一致", async () => {
+  it("positions and chain mapping fetched concurrently, output matches the golden", async () => {
     const stub = upstream();
     const { balances } = await run(stub, zerionProvider.fetchBalances(ctx()));
     expect(balances).toEqual(expected);
   });
 
-  it("拉过一次之后链清单再挂 → **落回旧映射照常出余额**(缓存的三条理由之一)", async () => {
+  it("after one fetch the chain list goes down: falls back to the old mapping and balances come out as usual (one of the cache's three reasons)", async () => {
     const stub = upstream({ "/v1/chains": () => json({}, { status: 500 }) });
     const { balances } = await run(stub, zerionProvider.fetchBalances(ctx()));
-    // 链的 chainId 不可变,旧映射仍然正确 —— 比让整轮取数失败强。
+    // A chain's chainId is immutable, so the old mapping is still correct: better than failing the whole round.
     expect(balances).toEqual(expected);
   });
 
-  it("Basic 认证:key 作 username、密码空", async () => {
+  it("Basic auth: key as username, empty password", async () => {
     const stub = upstream();
     await run(stub, zerionProvider.fetchBalances(ctx()));
     const auth = stub.calls[0].request.headers.authorization;
     expect(auth).toBe(`Basic ${btoa(`${KEY}:`)}`);
-    // 声明的 key 正是这里注入、被读去签头的那一个(app 按声明从 env 注入 ctx.creds)。
-    // (备源 defaultEnabled=false 由 registry.test 钉住。)
+    // The declared key is the one injected here and read to sign the header (the app injects ctx.creds from env per the declaration).
+    // (The backup source's defaultEnabled=false is pinned by registry.test.)
     expect(zerionProvider.creds.map((f) => f.key)).toEqual(Object.keys(PROVIDER_CREDS));
   });
 
-  it("**没配 provider key → 归凭据问题,而且一发都不出网**", async () => {
+  it("no provider key configured: a credentials problem, and no request at all", async () => {
     const stub = upstream();
     const err = await failing(stub, zerionProvider.fetchBalances(ctx({})));
     expect(err._tag).toBe("ConnectorAuthError");
@@ -88,19 +87,19 @@ describe("fetchBalances", () => {
 });
 
 describe("validateAccount", () => {
-  it("200 → true(打轻量 portfolio)", async () => {
+  it("200 gives true (hits the light portfolio)", async () => {
     const stub = httpStub(() => json({}));
     expect(await run(stub, zerionProvider.validateAccount(ctx()))).toBe(true);
     expect(stub.calls[0].request.url.pathname).toContain("portfolio");
   });
 
-  it("没配 key → false,一发都不出网", async () => {
+  it("no key configured: false, and no request at all", async () => {
     const stub = httpStub(() => json({}));
     expect(await run(stub, zerionProvider.validateAccount(ctx({})))).toBe(false);
     expect(stub.calls).toHaveLength(0);
   });
 
-  it("凭据被拒(401)→ false;5xx → 走错误通道", async () => {
+  it("credentials rejected (401): false; 5xx goes through the error channel", async () => {
     const denied = httpStub(() => json({}, { status: 401 }));
     expect(await run(denied, zerionProvider.validateAccount(ctx()))).toBe(false);
     const down = httpStub(() => json({}, { status: 503 }));

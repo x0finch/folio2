@@ -3,9 +3,9 @@ import { parseClearinghouseState } from "../../../src/connectors/hyperliquid/par
 import fixture from "./fixtures/clearinghouse-state.json";
 import expected from "./fixtures/expected-balances.json";
 
-// expected-balances.json(解析后的期望值,固化逐一对比)。覆盖:权益行 kind:"perp_equity"(唯一带值)
-// + 每仓位一行 kind:"perp_position"(value=0、明细进 meta、无 role);字符串字段统一 Number();
-// szi 符号→side(long/short);liquidationPx 可为 null。expected 是对旧 golden 的手工变换(改 kind + 删 role)。
+// Two fixtures correspond one to one: the recorded clearinghouseState response, and expected-balances.json (the parsed expectation, pinned for comparison).
+// Covers: the equity row kind:"perp_equity" (the only one carrying value) + one kind:"perp_position" row per position (value=0, detail in meta, no role);
+// string fields normalised with Number(); szi sign to side (long/short); liquidationPx may be null.
 describe("parseClearinghouseState (golden: fixture in → fixture out)", () => {
   it("maps the recorded response to expected-balances (kind-split, no role)", () => {
     expect(parseClearinghouseState(fixture)).toEqual(expected);

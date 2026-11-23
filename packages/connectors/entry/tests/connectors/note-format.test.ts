@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { formatAmount, formatCents, formatWhole } from "../../src/connectors/note-format";
 
-// 这三个取代的是 parse 里各自的 `n.toLocaleString("en-US", { … })`(那个写法在每个 isolate 里第一次
-// 用就要拉起 ICU,见 note-format.ts)。note 的文案进快照、进 golden,**一个字符都不能变** —— 所以
-// 直接拿 Intl 当对照:手挑的边界(舍入的 5、进位连锁、指数形式、负零)+ 一大批确定性的伪随机数。
+// These replace the per-parse `n.toLocaleString("en-US", { … })` (which boots ICU on first use in each isolate, see note-format.ts). Note text goes into
+// snapshots and goldens and must not change by a single character, so Intl is the reference: hand-picked edges (rounding 5, carry chains,
+// exponent form, negative zero) + a large batch of deterministic pseudo-random numbers.
 const intl = (maxFrac: number) => (n: number) =>
   n.toLocaleString("en-US", { maximumFractionDigits: maxFrac });
 
@@ -47,7 +47,7 @@ const picked = [
   Number.NEGATIVE_INFINITY,
 ];
 
-// 确定性的伪随机(mulberry32):量级从 1e-12 到 1e15,带符号。
+// Deterministic pseudo-random (mulberry32): magnitude from 1e-12 to 1e15, signed.
 const randoms = (() => {
   let a = 0x9e3779b9;
   const next = () => {
@@ -65,14 +65,14 @@ const randoms = (() => {
   return out;
 })();
 
-describe("note 数字格式与 toLocaleString 逐字相同", () => {
+describe("note number format is character-identical to toLocaleString", () => {
   it.each(picked)("%s", (n) => {
     expect(formatAmount(n)).toBe(intl(8)(n));
     expect(formatCents(n)).toBe(intl(2)(n));
     expect(formatWhole(n)).toBe(intl(0)(n));
   });
 
-  it("3000 个伪随机数(1e-12 … 1e15,带符号)", () => {
+  it("3000 pseudo-random numbers (1e-12 … 1e15, signed)", () => {
     const mismatches = randoms.flatMap((n) =>
       [
         [formatAmount(n), intl(8)(n)],

@@ -16,7 +16,7 @@ const json = (body: unknown, init?: ResponseInit): Response =>
   });
 const okEmpty = () => json({ retCode: 0, result: { list: [] } });
 
-// 按 pathname + query 分派(赚币两个类目共用一条路径,靠 `category` 区分)。
+// Dispatch by pathname + query (the two earn categories share one path and differ by `category`).
 function upstream(routes: Record<string, () => Response> = {}): HttpStub {
   return httpStub((request) => {
     const { pathname, searchParams } = request.url;
@@ -51,18 +51,18 @@ const failing = (
 ): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
 
 describe("fetchBalances", () => {
-  it("并发全桶(统一 / 资金 / 赚币)→ 合并 spot;赚币按类目标 note.group", async () => {
+  it("all buckets concurrently (unified / funding / earn): merged into spot; earn gets note.group by category", async () => {
     const stub = upstream();
     const { balances } = await run(stub, bybitProvider.fetchBalances(ctx()));
 
     expect(balances.length).toBeGreaterThan(0);
     expect(balances.some((b) => b.note?.group === "funding")).toBe(true);
     expect(balances.some((b) => b.note?.group === "earn")).toBe(true);
-    // 四个桶各打一发。
+    // One request per each of the four buckets.
     expect(stub.calls).toHaveLength(4);
   });
 
-  it("X-BAPI 签名头都带上", async () => {
+  it("all X-BAPI signature headers are sent", async () => {
     const stub = upstream();
     await run(stub, bybitProvider.fetchBalances(ctx()));
     const headers = stub.calls[0].request.headers;
@@ -71,16 +71,16 @@ describe("fetchBalances", () => {
     expect(headers["x-bapi-timestamp"]).toBeTruthy();
   });
 
-  // —— FOL-31:瞬时部分失败升级 ——
-  it("**部分桶瞬时失败(资金账户 504)→ 整账户失败**进重试,不写残缺快照", async () => {
-    // 以前这里是「其余照返回 + Note」—— 那正是资产掉块的病灶:降级写出去的残缺快照会盖掉
-    // 真实资产,而下一轮本来就能拉到。
+  // A transient partial failure escalates
+  it("a transient partial bucket failure (funding account 504): the whole account fails into retry, no partial snapshot written", async () => {
+    // This used to return the rest + a Note, which was the source of assets dropping a chunk: a degraded partial snapshot overwrites
+    // real assets while the next round could fetch them.
     const stub = upstream({ "/query-account-coins-balance": () => json({}, { status: 504 }) });
     const err = await failing(stub, bybitProvider.fetchBalances(ctx()));
     expect(isRetryable(err)).toBe(true);
   });
 
-  it("瞬时错混着权限错 → 仍整账户失败(瞬时那个才是重试的理由)", async () => {
+  it("transient mixed with permission errors: still whole-account failure (the transient one is the reason to retry)", async () => {
     const stub = upstream({
       "/query-account-coins-balance": () => json({ retCode: 10005, retMsg: "permission denied" }),
       "/earn/position": () => json({}, { status: 429 }),
@@ -89,7 +89,7 @@ describe("fetchBalances", () => {
     expect(isRetryable(err)).toBe(true);
   });
 
-  it("auth 类失败(HTTP 200 + retCode 10005)→ 失败 Note 提示查权限", async () => {
+  it("an auth-class failure (HTTP 200 + retCode 10005): a failure Note prompting a permissions check", async () => {
     const stub = upstream({
       "/query-account-coins-balance": () => json({ retCode: 10005, retMsg: "permission denied" }),
     });
@@ -99,14 +99,14 @@ describe("fetchBalances", () => {
     expect(String(failNote?.content)).toContain("permissions");
   });
 
-  it("**所有桶失败(429 打光所有端点)→ 失败**,不拿空快照覆盖", async () => {
+  it("all buckets fail (429 on every endpoint): failure, no empty snapshot overwriting", async () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     expect((await failing(stub, bybitProvider.fetchBalances(ctx())))._tag).toBe(
       "ConnectorRateLimitError",
     );
   });
 
-  it("统一账户 totalPerpUPL 非零 → 挂「合约浮盈暂未纳入」兜底 Note", async () => {
+  it("unified account totalPerpUPL non-zero: attaches the fallback Note about contract unrealised profit not yet included", async () => {
     const stub = upstream({
       "/v5/account/wallet-balance": () =>
         json({ retCode: 0, result: { list: [{ coin: [], totalPerpUPL: "123.45" }] } }),
@@ -117,7 +117,7 @@ describe("fetchBalances", () => {
     expect(note?.some((n) => n.title === "Futures positions detected")).toBe(true);
   });
 
-  it("无合约浮盈(totalPerpUPL 缺失 / 0)→ 不虚报", async () => {
+  it("no contract unrealised profit (totalPerpUPL missing / 0): no false report", async () => {
     const stub = upstream({
       "/v5/account/wallet-balance": () =>
         json({ retCode: 0, result: { list: [{ coin: [], totalPerpUPL: "0" }] } }),
@@ -128,9 +128,9 @@ describe("fetchBalances", () => {
     expect(note?.some((n) => n.title === "Futures positions detected")).toBeFalsy();
   });
 
-  it("base 覆盖生效,默认 host 一个不留", async () => {
+  it("base override takes effect, no default host left", async () => {
     const overrides = { BYBIT_API_BASE: "https://px.example/bybit" };
-    // 声明的 key 正是这里注入后真生效的那一个(app 按声明从 env 注入 ctx.creds);全 public(不加密 / 不导出)。
+    // The declared key is the one that really takes effect when injected here (the app injects ctx.creds from env per the declaration); all public (not encrypted / exported).
     expect(bybitProvider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
     expect(bybitProvider.creds.every((f) => f.type === "public")).toBe(true);
 
@@ -148,19 +148,19 @@ describe("validateAccount", () => {
     expect(await run(stub, bybitProvider.validateAccount(ctx()))).toBe(true);
   });
 
-  it("凭据被拒(HTTP 200 + retCode 10003)→ false,不进错误通道", async () => {
+  it("credentials rejected (HTTP 200 + retCode 10003): false, not through the error channel", async () => {
     const stub = httpStub(() => json({ retCode: 10003, retMsg: "API key is invalid" }));
     expect(await run(stub, bybitProvider.validateAccount(ctx()))).toBe(false);
   });
 
-  it("非凭据 retCode → 走错误通道,不压成 false", async () => {
+  it("a non-credentials retCode goes through the error channel, not squashed into false", async () => {
     const stub = httpStub(() => json({ retCode: 10016, retMsg: "server error" }));
     expect((await failing(stub, bybitProvider.validateAccount(ctx())))._tag).toBe(
       "ConnectorUnavailableError",
     );
   });
 
-  it("429 → 限流(可重试)", async () => {
+  it("429 gives rate-limited (retryable)", async () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     expect((await failing(stub, bybitProvider.validateAccount(ctx())))._tag).toBe(
       "ConnectorRateLimitError",

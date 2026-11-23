@@ -14,9 +14,9 @@ import expectedUnified from "./fixtures/expected-unified-balances.json";
 import funding from "./fixtures/funding.json";
 import walletBalance from "./fixtures/wallet-balance.json";
 
-// 两份 fixture 一一对应:wallet-balance.json(录制的 /v5/account/wallet-balance UNIFIED 响应)→
-// expected-unified-balances.json。覆盖:walletBalance→amount(不含 uPnL,不用 equity)、usdValue→value
-// (自带估值)、price=usdValue/amount、跳过 walletBalance≤0(DUST)、locked→Locked note。
+// Two fixtures correspond one to one: wallet-balance.json (the recorded /v5/account/wallet-balance UNIFIED response) and expected-unified-balances.json.
+// Covers: walletBalance to amount (uPnL excluded, equity not used), usdValue to value (own valuation), price=usdValue/amount,
+// skipping walletBalance<=0 (DUST), locked to a Locked note.
 describe("parseUnified (golden: fixture in → fixture out)", () => {
   const coins = walletBalance.result.list[0].coin;
 
@@ -24,17 +24,17 @@ describe("parseUnified (golden: fixture in → fixture out)", () => {
     expect(parseUnified(coins)).toEqual(expectedUnified);
   });
 
-  it("持有量取 walletBalance 而非 equity —— 合约浮盈不混进现货(ADR 0032)", () => {
-    // BTC:walletBalance=0.05(现金),equity=0.06(含 0.01 浮盈)。取 walletBalance → amount=0.05;
-    // 误用 equity 会把没落袋的浮盈算成现货持有。
+  it("holdings take walletBalance, not equity: contract unrealised profit does not leak into spot", () => {
+    // BTC: walletBalance=0.05 (cash), equity=0.06 (including 0.01 unrealised). Taking walletBalance gives amount=0.05;
+    // wrongly using equity would count unrealised profit as spot holdings.
     const btc = parseUnified(coins).find((b) => b.symbol === "BTC");
     expect(btc).toMatchObject({ amount: 0.05, value: 3000 });
   });
 });
 
-// 资金账户(FUND)golden:funding.json(录制的 /asset/transfer/query-account-coins-balance 响应)+
-// 统一账户市价提示表 → expected-funding-balances.json。覆盖:walletBalance→amount、稳定币≈1(USDT)、
-// 统一账户市价复用(BTC)、无价的币 value 0 交 oracle(WLFI)、每条带 note.group:"funding"。
+// Funding account (FUND) golden: funding.json (the recorded /asset/transfer/query-account-coins-balance response) + the unified account's price hint
+// table to expected-funding-balances.json. Covers: walletBalance to amount, stablecoin ~1 (USDT), unified-account price reuse (BTC),
+// unpriced tokens value 0 left to the oracle (WLFI), each carrying note.group:"funding".
 describe("parseFunding (golden: fixture in → fixture out)", () => {
   it("maps recorded funding assets + price hint to expected-funding-balances", () => {
     const hint = buildPriceHint(walletBalance.result.list[0].coin);
@@ -42,15 +42,15 @@ describe("parseFunding (golden: fixture in → fixture out)", () => {
   });
 });
 
-// 赚币(earn)golden:earn-flexible/onchain.json + 统一账户市价提示表 → 期望值。覆盖:amount→amount、
-// 类目标签(Flexible / On-chain)、note.group:"earn"、价复用统一账户市价(BTC)/稳定币(USDT)、
-// 跳过 amount≤0(已赎回残值)。**不标 APY**(Bybit 持仓端点无 APR,ADR 0032)。
+// Earn golden: earn-flexible/onchain.json + the unified account's price hint table to expectation. Covers: amount to amount, category label (Flexible / On-chain),
+// note.group:"earn", price reuse from the unified account (BTC) / stablecoin (USDT), skipping amount<=0 (redeemed residue).
+// No APY is marked (Bybit's position endpoint has no APR).
 describe("parseEarn (golden: fixture in → fixture out)", () => {
   const hint = buildPriceHint(walletBalance.result.list[0].coin);
-  it("flexible: amount→amount, 类目 note content='Flexible', group earn;跳过 amount=0", () => {
+  it("flexible: amount to amount, category note content='Flexible', group earn; skips amount=0", () => {
     expect(parseEarn(earnFlexible.result.list, "Flexible", hint)).toEqual(expectedFlexible);
   });
-  it("on-chain: 类目 note content='On-chain', group earn", () => {
+  it("on-chain: category note content='On-chain', group earn", () => {
     expect(parseEarn(earnOnchain.result.list, "On-chain", hint)).toEqual(expectedOnchain);
   });
 });

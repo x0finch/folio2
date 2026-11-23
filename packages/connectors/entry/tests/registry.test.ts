@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { buildRegistry, getConnector, registry, selectProvider } from "../src/registry";
 
-// 就地造一个 spot·defi 子集的示例 connector,验 registry 组装(buildRegistry/getConnector/selectProvider)。
+// A sample connector built in place (spot + defi subset) to verify registry assembly (buildRegistry/getConnector/selectProvider).
 const address = [
   { key: "address", type: "public", validator: z.string().min(1), label: "Address" },
 ] as const satisfies readonly CredField[];
@@ -48,18 +48,18 @@ const evmLike = defineConnector({
 });
 
 describe("registry", () => {
-  it("buildRegistry 按 id 建表;重复 id 抛错", () => {
+  it("buildRegistry builds a table by id; a duplicate id throws", () => {
     const reg = buildRegistry([evmLike]);
     expect(getConnector(reg, "evm-like")?.id).toBe("evm-like");
     expect(getConnector(reg, "nope")).toBeUndefined();
     expect(() => buildRegistry([evmLike, evmLike])).toThrow(/duplicate/);
   });
 
-  it("selectProvider 取第一个 eligible(defaultEnabled !== false)", () => {
+  it("selectProvider takes the first eligible one (defaultEnabled !== false)", () => {
     const providers = evmLike.balance.providers;
     expect(selectProvider(evmLike)?.id).toBe("demo");
 
-    // 构造一个 defaultEnabled:false 在前、true 在后的 manifest,断言跳过被禁用的
+    // A manifest with defaultEnabled:false first and true later; asserts the disabled one is skipped.
     const twoProv = {
       ...evmLike,
       balance: {
@@ -74,10 +74,10 @@ describe("registry", () => {
   });
 });
 
-describe("真实 registry —— evm 的取数源", () => {
-  it("evm 默认走 rabby,zerion 在册但不参与取数", () => {
-    // 这条断言的意义:evm 的默认源换成 rabby 是一次**有意的**切换(不要 key、一次拿全链),
-    // 谁不小心把 providers 顺序改了、或把 zerion 的 defaultEnabled 删了,这里会红。
+describe("real registry: evm's data sources", () => {
+  it("evm uses rabby by default; zerion is registered but does not take part in fetching", () => {
+    // Switching evm's default source to rabby (no key, all chains at once) is deliberate; reordering providers or dropping
+    // zerion's defaultEnabled turns this red.
     const evm = getConnector(registry, "evm");
     expect(evm).toBeDefined();
     expect(selectProvider(evm!)?.id).toBe("rabby");

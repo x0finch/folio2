@@ -16,41 +16,39 @@ import funding from "./fixtures/funding.json";
 import savings from "./fixtures/savings.json";
 import staking from "./fixtures/staking.json";
 
-// 两份 fixture 一一对应:balance.json(录制的 /api/v5/account/balance 响应)→
-// expected-balances.json(解析后的期望值)。覆盖:cashBal→amount(修 #259,不含 uPnL)、
-// price=eqUsd/eq(市价)、value=amount×price、跳过零/空(DUST)。
-// JSON 无 undefined → expected 省略未定义字段(toEqual 视缺键==undefined)。
+// Two fixtures correspond one to one: balance.json (the recorded /api/v5/account/balance response) and expected-balances.json (the parsed expectation).
+// Covers: cashBal to amount (uPnL excluded), price=eqUsd/eq (market price), value=amount x price, skipping zero/empty (DUST).
+// JSON has no undefined, so expected omits undefined fields (toEqual treats a missing key as undefined).
 describe("parseBalances (golden: fixture in → fixture out)", () => {
   it("maps the recorded balance details to expected-balances", () => {
-    // per-balance note(note 重设计,单个 Note):ETH frozenBal=0.5 → 它自己那笔挂 Frozen note;其余无 note。
-    // 质押凭证币(OKSOL)躺在交易账户 details 里,只从这里算一次 —— 不被质押端点重复计(不双算)。
+    // per-balance note (single Note): ETH frozenBal=0.5 puts a Frozen note on that entry; the rest have none.
+    // Staking receipt tokens (OKSOL) sit in the trading account details and are counted only from here, not again by the staking endpoint.
     expect(parseBalances(balance.data[0].details)).toEqual(expected);
   });
 
-  it("持有量取 cashBal 而非 eq —— 合约浮盈(uPnL)不混进现货(修 #259)", () => {
-    // USDT 作合约保证金:eq=1200(含 200 浮盈),cashBal=1000(真实现金)。取 cashBal → amount=1000;
-    // 价格走 eqUsd/eq=1(与 uPnL 无关),value=1000。若误用 eq,USDT 会虚增成 1200。
+  it("holdings take cashBal, not eq: contract unrealised PnL (uPnL) does not leak into spot", () => {
+    // USDT as contract margin: eq=1200 (including 200 unrealised), cashBal=1000 (real cash). Taking cashBal gives amount=1000;
+    // the price is eqUsd/eq=1 (unrelated to uPnL), value=1000. Wrongly using eq would inflate USDT to 1200.
     const usdt = parseBalances(balance.data[0].details).find((b) => b.symbol === "USDT");
     expect(usdt).toMatchObject({ amount: 1000, price: 1, value: 1000 });
   });
 
-  // OKX 对它不报价的币给 `eqUsd: "0"`(有时连 eq 都是 0)。以前这里折成 **price 0**,而估值那步把 0
-  // 当成有效的自带价、不再去 oracle 取 —— 这个币就永远显示 $0(FOL-108)。没价就是没价:price 省略、
-  // value 记 0,和 Bybit / Binance 同口径,交 oracle 兜底。
+  // OKX gives `eqUsd: "0"` (sometimes eq too) for tokens it does not quote. Folding that into price 0 made valuation treat 0 as a valid own price and
+  // never ask the oracle, so the token showed $0 forever. No price means no price: price omitted, value 0, same as Bybit / Binance, left to the oracle.
   it.each([
-    ["eqUsd 为 0", { eq: "1000", eqUsd: "0" }],
-    ["eq 为 0", { eq: "0", eqUsd: "0" }],
-    ["eqUsd 为空串", { eq: "1000", eqUsd: "" }],
-  ])("交易所不给价(%s)→ price 省略、value 0,不冒充成一个零价", (_, px) => {
+    ["eqUsd is 0", { eq: "1000", eqUsd: "0" }],
+    ["eq is 0", { eq: "0", eqUsd: "0" }],
+    ["eqUsd is an empty string", { eq: "1000", eqUsd: "" }],
+  ])("exchange gives no price (%s): price omitted, value 0, not posing as a zero price", (_, px) => {
     const [row] = parseBalances([{ ccy: "XYZ", cashBal: "1000", frozenBal: "0", ...px }]);
     expect(row).toMatchObject({ symbol: "XYZ", amount: 1000, value: 0 });
     expect(row?.price).toBeUndefined();
   });
 });
 
-// 资金账户(funding 桶)golden:funding.json(录制的 /asset/balances 响应)+ 交易账户市价提示表
-// → expected-funding-balances.json。覆盖:bal→amount、稳定币≈1(USDT)、交易账户市价复用(BTC)、
-// 无价的币 value 0 交 oracle(PEPE)、每条带 note.group:"funding"。
+// Funding bucket golden: funding.json (the recorded /asset/balances response) + the trading account's price hint table to
+// expected-funding-balances.json. Covers: bal to amount, stablecoin ~1 (USDT), trading-account price reuse (BTC),
+// unpriced tokens value 0 left to the oracle (PEPE), each carrying note.group:"funding".
 describe("parseFunding (golden: fixture in → fixture out)", () => {
   it("maps recorded funding assets + price hint to expected-funding-balances", () => {
     const hint = buildPriceHint(balance.data[0].details);
@@ -58,8 +56,8 @@ describe("parseFunding (golden: fixture in → fixture out)", () => {
   });
 });
 
-// 赚币(earn 桶)golden:savings/staking 响应 + 市价提示表 → 期望值。覆盖:amt→amount、rate/apy→APY note、
-// note.group:"earn"、价复用交易账户市价(ETH)/稳定币(USDT)。
+// Earn bucket golden: savings/staking responses + price hint table to expectation. Covers: amt to amount, rate/apy to APY note,
+// note.group:"earn", price reuse from the trading account (ETH) / stablecoin (USDT).
 describe("parseSavings / parseStaking (golden: fixture in → fixture out)", () => {
   const hint = buildPriceHint(balance.data[0].details);
   it("savings: amt→amount, rate→'Flexible · X% APY' note, group earn", () => {
@@ -70,32 +68,32 @@ describe("parseSavings / parseStaking (golden: fixture in → fixture out)", () 
   });
 });
 
-// earn 残差 → 计进净值的合成聚合行:拉到的 earn 子项加总 vs asset-valuation 的 earn 桶。
+// Earn residual to a synthetic aggregate row counted into net worth: the fetched earn sub-items summed vs the asset-valuation earn bucket.
 describe("earnResidualRow", () => {
   const hint = buildPriceHint(balance.data[0].details);
   const earnItems = [...parseSavings(savings.data, hint), ...parseStaking(staking.data, hint)];
 
-  it("earn 桶 > 拉到的加总 → 产一条 value=残差 的合成行(计进净值),带中性 note", () => {
-    // earn 桶 12000;拉到 USDT 5000 + ETH 6000 = 11000;残差 1000。
+  it("earn bucket > fetched sum: yields one synthetic row with value=residual (counted into net worth), with a neutral note", () => {
+    // earn bucket 12000; fetched USDT 5000 + ETH 6000 = 11000; residual 1000.
     const row = earnResidualRow(12000, earnItems, hint);
     expect(row).toMatchObject({
       kind: "spot",
       value: 1000,
-      symbol: "USD", // 数字是美元估值 → 单位 USD(非某个币的枚数)
+      symbol: "USD", // the number is a USD valuation, so the unit is USD (not a token count)
       name: "OKX Earn (Uncategorized)",
       tokenRef: "okx/custom:EARN-UNCATEGORIZED",
     });
-    expect(row?.logo).toMatch(/^data:image\/svg\+xml/); // 内嵌 OKX 标(走 tokenLogoUrl data: 直挂)
+    expect(row?.logo).toMatch(/^data:image\/svg\+xml/); // inline OKX mark (attached directly as a tokenLogoUrl data: URI)
     expect(row?.note?.group).toBe("earn");
     expect(String(row?.note?.content)).toContain("$1,000");
   });
 
-  it("earn 桶 ≈ 拉到的加总(差额 ≤ 阈值)→ 不产行", () => {
+  it("earn bucket ~ fetched sum (difference <= threshold): no row", () => {
     expect(earnResidualRow(11000, earnItems, hint)).toBeUndefined();
   });
 
-  it("有 earn 子项估不出价(残差不可信)→ 不产行(不拿脏数污染净值)", () => {
-    // 追加一个无提示价、非稳定币的 earn 项 → unpriced>0 → 抑制。
+  it("an earn sub-item cannot be priced (residual untrustworthy): no row (do not pollute net worth with dirty data)", () => {
+    // Append an unpriced non-stablecoin earn item, so unpriced>0 suppresses it.
     const withUnpriced = [
       ...earnItems,
       { symbol: "XYZ", amount: 1, value: 0, kind: "spot", tokenRef: "okx/issued:XYZ" } as const,

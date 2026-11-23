@@ -8,12 +8,12 @@ import positions from "./fixtures/zerion-positions.json";
 const chainIds = parseChainIds(chains as never);
 
 describe("parsePositions (golden: fixtures in → fixture out)", () => {
-  it("positions + chains → expected-balances(evm:<id> 标准形标识;spot 无 meta、defi 带 meta)", () => {
+  it("positions + chains to expected-balances (evm:<id> canonical identifiers; spot has no meta, defi has meta)", () => {
     const balances = parsePositions(positions, chainIds);
     expect(balances).toEqual(expected);
   });
 
-  it("spot 行不含 meta 键(新 schema);defi 行带 meta", () => {
+  it("spot rows carry no meta key (new schema); defi rows carry meta", () => {
     const balances = parsePositions(positions, chainIds);
     for (const b of balances) {
       if (b.kind === "spot") expect("meta" in b).toBe(false);
@@ -21,8 +21,8 @@ describe("parsePositions (golden: fixtures in → fixture out)", () => {
     }
   });
 
-  it("链映射缺失 → 抛错(失败即不产,绝不产 slug 兜底形)", () => {
-    // chainIds 映射里没有某仓位的链 → 无法产规范 evm:<id> 标识 → 抛 UPSTREAM_ERROR(可重试)。
+  it("chain mapping missing: throws (failing means nothing is produced, never the slug fallback form)", () => {
+    // A position's chain absent from the chainIds mapping cannot yield a canonical evm:<id>, so it throws UPSTREAM_ERROR (retryable).
     expect(() => parsePositions(positions, {})).toThrow(/no chainId/);
   });
 });
