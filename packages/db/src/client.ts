@@ -1,6 +1,8 @@
 import { Effect } from "effect";
 import { type DbEnv, type Drizzle, getDb } from "./connect";
 
+type Stmt = Parameters<Drizzle["batch"]>[0][number];
+
 // The only Promise-to-Effect bridge: one place to add spans or slow-query logging.
 // `query` runs one drizzle builder (read or single write); `batch` is one D1 batch (D1 has no interactive transactions).
 // `chunk` is here because D1 caps bound parameters per statement, a hard limit like the transaction one.
