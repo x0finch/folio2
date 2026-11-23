@@ -42,8 +42,8 @@ describe("tags/detach", () => {
       const links = await call(USER, handleListAccountTags());
       expect(links.map((l) => l.tagId)).not.toContain(tag.id);
       expect((await call(USER, handleListTags())).map((t) => t.name).sort()).toEqual([
-        "Short-term",
         "Long-term",
+        "Short-term",
       ]);
     });
 

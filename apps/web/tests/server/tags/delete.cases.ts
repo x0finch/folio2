@@ -45,8 +45,8 @@ describe("tags/delete", () => {
 
       expect(await call(USER, handleListAccountTags())).toEqual([]);
       expect((await db(USER).accounts.list()).map((x) => x.label).sort()).toEqual([
-        "Beta",
         "Alpha",
+        "Beta",
       ]);
     });
 
