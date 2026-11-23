@@ -4,9 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { TagInput } from "@/components/tag-input";
 import { messages } from "@/lib/i18n/messages";
 
-// TagInput(#351):`#` 是**纯展示前缀,永不入库** —— 界面到处显 `#name`,用户顺手多敲的 `#` 在
-// commit / rename 时被吞掉,回调拿到的始终是纯名字。这层约定是这组测试要锁住的东西。
-
 function renderInput(props: Partial<React.ComponentProps<typeof TagInput>> = {}) {
   const onCreate = vi.fn();
   const onToggle = vi.fn();
@@ -28,8 +25,8 @@ function renderInput(props: Partial<React.ComponentProps<typeof TagInput>> = {})
 
 const item = (name: string) => ({ id: `id-${name}`, name, attached: false, accountCount: 0 });
 
-describe("TagInput 的 # 前缀", () => {
-  it("新建时吞掉用户多敲的前导 #,存纯名字", () => {
+describe("# prefix of TagInput", () => {
+  it("on create swallows an extra leading # typed by the user, stores the plain name", () => {
     const { container, onCreate } = renderInput();
     const input = container.querySelector("input");
     if (!input) throw new Error("no input");
@@ -38,8 +35,7 @@ describe("TagInput 的 # 前缀", () => {
     expect(onCreate).toHaveBeenCalledWith("longterm");
   });
 
-  // 粘贴常带前后空格。若先剥 `#` 再 trim,`^#+` 对 " #cold" 压根匹配不上 → `#` 跟着进库。
-  it("带空格也剥得掉:前导空格、`#` 与名字之间的空格都不留", () => {
+  it("whitespace is stripped too: leading spaces and spaces between `#` and the name are all dropped", () => {
     for (const [typed, stored] of [
       [" #cold", "cold"],
       ["#  cold ", "cold"],
@@ -54,22 +50,22 @@ describe("TagInput 的 # 前缀", () => {
     }
   });
 
-  it("输入带 # 时命中同名既有 Tag → 打上而非新建", () => {
+  it("input with # matching an existing tag of the same name: applies it instead of creating", () => {
     const { container, onCreate, onToggle } = renderInput({ items: [item("longterm")] });
     const input = container.querySelector("input");
     if (!input) throw new Error("no input");
-    fireEvent.change(input, { target: { value: "#Longterm" } }); // 大小写不敏感
+    fireEvent.change(input, { target: { value: "#Longterm" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onCreate).not.toHaveBeenCalled();
     expect(onToggle).toHaveBeenCalledWith("id-longterm", true);
   });
 
-  it("chips 显示 #name,但存的是纯名字", () => {
+  it("chips show #name, but the plain name is stored", () => {
     const { getByText } = renderInput({ items: [item("longterm")] });
     expect(getByText("#longterm")).toBeTruthy();
   });
 
-  it("改名同样吞 #;吞完与原名相同则不触发改名", () => {
+  it("rename also swallows #; if it equals the original after swallowing, no rename is triggered", () => {
     const { container, onRename } = renderInput({ items: [item("longterm")] });
     fireEvent.click(container.querySelectorAll("button")[0]); // Manage
     const rename = container.querySelector("input");
@@ -78,7 +74,7 @@ describe("TagInput 的 # 前缀", () => {
     expect(onRename).toHaveBeenCalledWith("id-longterm", "growth");
 
     onRename.mockClear();
-    fireEvent.blur(rename, { target: { value: "#longterm" } }); // 吞完 == 原名 → no-op
+    fireEvent.blur(rename, { target: { value: "#longterm" } });
     expect(onRename).not.toHaveBeenCalled();
   });
 });
