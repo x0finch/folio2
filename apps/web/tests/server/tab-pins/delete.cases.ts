@@ -6,16 +6,14 @@ import { blockOutbound } from "../_kit/outbound";
 import { call, readTabStrip } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 tab-pins/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
+// Runs inside tab-pins/index.test.ts: each vitest file re-evaluates the whole import graph in workerd (~9s/file), so cases are merged per directory.
 describe("tab-pins/delete", () => {
-  // #527 · deleteTabPin
   const USER = "h-pins-delete";
 
   const pins = (userId: string) => readTabStrip(userId, {});
 
-  // 建一个这个 connector 的账户 —— **不然那个 pin 摆不出来**(ADR 0047:视图里没有这个 connector
-  // 的账户,pin 就不该出现)。`accounts.create` 自己会把它归到默认组合。
+  // Creates an account for this connector, or the pin wouldn't show: a pin only appears if the view has an account for its connector.
+  // `accounts.create` puts it in the default portfolio itself.
   const withAccount = (userId: string, connectorId: "manual" | "bitcoin" | "binance" | "okx") =>
     db(userId).accounts.create({ connectorId, label: connectorId, creds: null });
 
@@ -26,7 +24,7 @@ describe("tab-pins/delete", () => {
   });
 
   describe("deleteTabPin", () => {
-    it("删掉一个 → 少一个,其余两个还在", async () => {
+    it("deleting one -> one fewer, the other two remain", async () => {
       for (const c of ["manual", "bitcoin", "binance"] as const) await withAccount(USER, c);
       const a = await db(USER).tabPins.create({ kind: "connector", connectorId: "manual" });
       await db(USER).tabPins.create({ kind: "connector", connectorId: "bitcoin" });
@@ -39,9 +37,8 @@ describe("tab-pins/delete", () => {
       expect(strip.pins.map((p) => p.connectorId).sort()).toEqual(["binance", "bitcoin"]);
     });
 
-    it("删一个已经删过的 → 静默幂等(与 deleteTag 同一规则),不是 NotFound", async () => {
-      // **这条是审计改过的。** 清单初稿写的是「NotFound」,但库层两个 remove 都是裸 DELETE ——
-      // 同一种形状不该有两种主张。按现状钉:静默。
+    it("deleting an already-deleted pin -> silently idempotent (same rule as deleteTag), not NotFound", async () => {
+      // Both db removes are a bare DELETE; one shape shouldn't have two behaviors, so pin the status quo: silent.
       await withAccount(USER, "manual");
       const a = await db(USER).tabPins.create({ kind: "connector", connectorId: "manual" });
 
@@ -51,7 +48,7 @@ describe("tab-pins/delete", () => {
       expect((await pins(USER)).pins).toEqual([]);
     });
 
-    it("删完立刻再建 → 能建,上限计数跟着降了", async () => {
+    it("delete then immediately recreate -> allowed, the cap count dropped too", async () => {
       for (const c of ["manual", "bitcoin", "binance", "okx"] as const) await withAccount(USER, c);
       const made = [];
       for (const c of ["manual", "bitcoin", "binance"]) {
@@ -68,7 +65,7 @@ describe("tab-pins/delete", () => {
       ]);
     });
 
-    it("删别人的 pinId → 对方那个 pin 一点没动", async () => {
+    it("deleting someone else's pinId -> their pin is untouched", async () => {
       await withAccount(otherUser(USER), "manual");
       const theirs = await db(otherUser(USER)).tabPins.create({
         kind: "connector",
@@ -80,7 +77,7 @@ describe("tab-pins/delete", () => {
       expect((await pins(otherUser(USER))).pins).toHaveLength(1);
     });
 
-    it("pinId 空串 → schema 拒", () => {
+    it("empty pinId -> rejected by schema", () => {
       expect(DeleteTabPinInput.safeParse({ pinId: "" }).success).toBe(false);
     });
   });
