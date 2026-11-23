@@ -10,7 +10,7 @@ import { valuationSettingsQuery } from "@/lib/queries/settings";
 import { tokenEnrichmentQuery } from "@/lib/queries/tokens";
 import { accountHoldingsSnapshotQueries } from "./snapshots";
 
-// 账户页持仓:原子资源在浏览器合并(FOL-54 / FOL-55)。key 用 hour-floor 锚;请求 `at` 用墙钟。
+// Keys use the hour-floored anchor; the request's `at` uses the wall clock.
 
 export function useAccountHoldingsView(
   portfolioId: string,

@@ -2,36 +2,22 @@ import { type QueryClient, QueryObserver, type QueryObserverOptions } from "@tan
 import type { dataVersionKeys } from "./keys";
 import { invalidateFor } from "./refresh";
 
-// **数据版本号驱动的刷新**(FOL-94)。
+// Instead of refetching everything on a timer (costly at 10ms CPU and 100k requests/day), poll one
+// number that a DB trigger bumps on every user-visible write, and invalidate only when it changes.
 //
-// 免费档一请求只有 10ms CPU、一天十万请求,而数据只在「有人写」的时候变(每小时一轮同步、手动改)。
-// 以前靠时间猜 —— 30 秒一过,回到页面就把挂着的十来条查询全部重拉一遍。现在只问一个数:
-// 服务端每次用户可见的写都在同一个事务里把它 +1(库里的触发器,`@folio/db` 迁移 0010),这里
-// 回到页面 / 可见时每分钟问一次,**号变了**才失效那批数据查询(`REFRESH_MAP["data.changed"]`)。
-//
-// **拿什么比**:缓存里那一份号。页面冷开时它来自 IndexedDB(`persist.ts`)—— 也就是上次关页面
-// 时看到的号 —— 所以「重开页面、数据没变」只多一发版本号;变了,就在旧数据先画出来的同时重拉。
-// 缓存里没有号(头一回打开 / 持久化被清过)时第一次读到的号只记下、不失效:那时数据本来就是刚拉的。
-// 这条「只记下」要成立,那个号就不能晚于数据(review #24)—— 否则数据读完、号读到之前的一次写
-// 会被当成基准吞掉。所以:路由鉴权在缓存里没号时**先于 loader 的数据请求**把号问出去(`_authed`);
-// 锁屏扔内存缓存时**留下号**(`lockQueryCache`),解锁后拿锁前那个号比,而不是从「没有号」重来。
-// 冷开时号来自 IndexedDB,本来就有基准。
-//
-// **本页自己的写会让它再刷一次**:mutation 成功后 `invalidateFor` 先定向刷一批,下一次问号时
-// 号也变了,于是整批再失效一次。这是有意接受的代价(一次编辑多一轮,且只刷挂着的查询):
-// 想省掉它就得分辨「这次 +1 是不是我自己写的」,而同一时刻后台同步也可能在写 —— 猜错了就是
-// 漏刷,漏刷不报错。
+// The first version seen without a cached one is recorded, not acted on, so it must not be newer
+// than the data: the auth route fetches it before the loaders when uncached, and locking keeps it.
+// Our own writes cause one extra refresh; telling them apart from a concurrent background sync is
+// unreliable, and a missed refresh fails silently.
 
-/** 版本号查询的形状。queryFn 由调用方给:它是个 server fn,这个文件得在 node 单测里 import 得动。 */
+/** The caller supplies queryFn (a server fn) so this file stays importable in node tests. */
 export type DataVersionOptions = QueryObserverOptions<{ version: number }> & {
   queryKey: typeof dataVersionKeys.all;
 };
 
 /**
- * 盯着版本号:号变了 → `invalidateFor(queryClient, "data.changed")`。返回退订函数。
- *
- * 用 `QueryObserver` 而不是组件里 `useQuery` + `useEffect` 比较:比较那一步不是渲染的事,
- * 挂在观察者回调上就不必为它攒一份 state;也让它能在没有 React 的单测里跑。
+ * Returns an unsubscribe function. A `QueryObserver` instead of `useQuery` + `useEffect`: the
+ * comparison isn't render state, and it runs in tests without React.
  */
 export function watchDataVersion(
   queryClient: QueryClient,
