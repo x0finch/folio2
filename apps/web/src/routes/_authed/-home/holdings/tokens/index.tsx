@@ -7,14 +7,13 @@ import { useHomeViewState } from "@/routes/_authed/-home/view-state";
 import { TokenRowContent } from "./token-row";
 import { TokenSheet } from "./token-sheet";
 
-// 按代币聚合的持仓列表(v2:LogoAvatar + 名称/symbol / 数量 · 价格 / 市值 · 24h;点击行 → 详情抽屉)。
-// hover 高亮由 beUI SharedLayoutBg 的移动滑块承载(行间无分隔线),小额(< DUST_THRESHOLD)折叠进 footer。
-const DUST_THRESHOLD = 1; // USD;待定阈值
-// 持仓总数 < 此值时不折叠小额:列表本就短,折叠反而多一层交互、没收益。
+// Holdings aggregated by token; rows open the detail drawer. Dust (< DUST_THRESHOLD) folds into a footer toggle.
+const DUST_THRESHOLD = 1; // USD
+// Below this holding count nothing folds: the list is already short.
 const MIN_FOLD_COUNT = 10;
 
-// 行内容:统一走 <TokenRowContent>(与账户详情抽屉现货区同组件)。多源(sources > 1)在名称右侧
-// 叠放各来源 logo,一眼看出散在哪几处;数量 = 各源汇总(多链/多源也合计,见 aggregate)。
+// Rows use <TokenRowContent> (same as the account drawer's spot section); multi-source holdings
+// stack source logos beside the name and amounts sum across sources.
 function RowContent({ h, gainPending }: { h: Holding; gainPending: boolean }) {
   return (
     <TokenRowContent
@@ -24,13 +23,12 @@ function RowContent({ h, gainPending }: { h: Holding; gainPending: boolean }) {
         symbol: h.token.symbol,
         amount: h.totalAmount,
         value: h.totalValue,
-        // 主页这条路已接 24h 盈亏(ADR 0040)—— 独立读取拼回的分段结果,不再由 change24h 倒推。
-        // 主页这条路的 holding 恒带这个字段(拼回后逐行赋值,算不出是 null),原样透传。
+        // The home path always carries gain24h (null = not computable); pass it through.
         gain24h: h.gain24h,
       }}
-      // 这个币散在哪些来源(账户×平台各占一格 —— 同一平台的两个账户是两格,见 AvatarStack 的
-      // `k` 注释)。经 buildStack 按金额降序(全站叠标同一条规则);**只排不砍**(`dust: 0`):
-      // 来源就是「这个币在哪」,一个小额来源也是来源,而且开了 dust 开关看尘埃币时砍完会一格不剩。
+      // Where this token is spread (one slot per account x platform). Sorted by value via
+      // buildStack, no dust drop (`dust: 0`): a small source is still a source, and with the dust
+      // toggle on a full-dust list would end up empty.
       sources={buildStack(
         h.sources.map((s) => ({
           logo: s.platform.logo,
@@ -45,8 +43,8 @@ function RowContent({ h, gainPending }: { h: Holding; gainPending: boolean }) {
   );
 }
 
-// 行按钮:作为 SharedLayoutBg 的直接 DOM 子元素(组件元素收不到注入的 relative/onMouseEnter,
-// 故不能包成 <HoldingRow>);onClick 保留,className 会被 cloneElement 合上 "relative"。
+// Row button: must be a direct DOM child of SharedLayoutBg (component elements don't receive its
+// injected relative/onMouseEnter), so not wrapped in <HoldingRow>; className gets "relative" merged in.
 const rowClass = "w-full rounded-xl px-3 py-3 text-left";
 
 export function TokenHoldings({
@@ -54,22 +52,20 @@ export function TokenHoldings({
   gainPending = false,
 }: {
   holdings: Holding[];
-  /** 24h 盈亏还在取 —— 市值照常,增量位走小骨架。 */
+  /** PnL still loading: value renders, the delta slot shows a small skeleton. */
   gainPending?: boolean;
 }) {
   const t = useTranslations("Overview");
   const [showDust, setShowDust] = useState(false);
-  // 抽屉开着哪个币住组件内部 state(FOL-80,反转 ADR 0043),由 `HomeViewStateProvider` 持有。
-  // 开合抽屉只是一次 setState —— 不进后退栈、不动滚动位置,原来 `replace`/`resetScroll:false` 要防的
-  // 两件事天然不发生。
+  // The open drawer's token lives in component state (HomeViewStateProvider); opening is a plain setState.
   const { token: selectedKey, setToken } = useHomeViewState();
-  // 认不出的值(切了组合后旧币不在、手写乱码)→ 找不到就是没开。回落**必须在这里**:本组件的两个
-  // 实例各拿一份 holdings(主列表 / 自定义 Tab),同一个 key 在哪份里认得出是各自的事。
+  // An unrecognized key (token gone after a portfolio switch) means closed. The fallback must live
+  // here: the two instances (main list / custom tab) each hold their own holdings.
   const selected = holdings.find((h) => h.key === selectedKey) ?? null;
-  // 少于 MIN_FOLD_COUNT 个持仓 → 全展开、不折叠;否则小额行按阈值收进 toggle。
+  // Under MIN_FOLD_COUNT holdings nothing folds; otherwise dust rows go into the toggle.
   const canFold = holdings.length >= MIN_FOLD_COUNT;
-  // 小额 = 现值小**而且**这一天没什么盈亏。卖光的币(FOL-110)现值 0,却可能刚亏了 3000 ——
-  // 收进折叠就等于把这笔盈亏藏起来了。
+  // Dust = small value and little PnL that day: a sold-out token has value 0 but may have just lost
+  // 3000, and folding it would hide that.
   const isDust = (h: Holding) =>
     h.totalValue < DUST_THRESHOLD && Math.abs(h.gain24h?.amount ?? 0) < DUST_THRESHOLD;
   const main = canFold ? holdings.filter((h) => !isDust(h)) : holdings;
@@ -85,10 +81,9 @@ export function TokenHoldings({
           </button>
         ))}
       </SharedLayoutBg>
-      {/* 小额 toggle:独立按钮(不进 SharedLayoutBg 的移动滑块)。
-          · 展开态 → 紧凑浮动 chip,sticky 居中钉在列表可视区底部(实底 + 边框 + 阴影),
-            长小额列表滚动时随时可见可收起,不必滑到全部代币的最底部。
-          · 折叠态 → 行式全宽入口,随列表流。 */}
+      {/* Dust toggle: a standalone button outside SharedLayoutBg's sliding pill. Expanded: a compact
+          floating chip, sticky at the bottom of the list viewport so long lists can be collapsed from
+          anywhere. Collapsed: a full-width row in the list flow. */}
       {dust.length > 0 &&
         (showDust ? (
           <div className="sticky bottom-3 z-20 flex justify-start">
