@@ -6,10 +6,7 @@ import { call, callExit, readOverview } from "../_kit/run";
 import { seedManualAccount } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 manual-tokens/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("manual-tokens/remove", () => {
-  // #527 · removeManualToken
   const USER = "h-mtok-remove";
 
   const detail = (userId: string, accountId: string) =>
@@ -22,7 +19,7 @@ describe("manual-tokens/remove", () => {
   });
 
   describe("removeManualToken", () => {
-    it("删掉一个币 → 明细里没了,它的活动一并消失", async () => {
+    it("removing a token → gone from detail along with its activities", async () => {
       const acc = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
         unitPrice: 50_000,
@@ -40,7 +37,7 @@ describe("manual-tokens/remove", () => {
       expect(after.activities).toEqual([]);
     });
 
-    it("删完立刻取总览 → 总额已经不含它", async () => {
+    it("overview right after removal → total excludes it", async () => {
       const acc = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
         unitPrice: 50_000,
@@ -57,11 +54,9 @@ describe("manual-tokens/remove", () => {
       expect(overview.holdings).toEqual([]);
     });
 
-    it("tokenId 属于我的另一个账户 → 成功但什么都没删,那个账户不受影响", async () => {
-      // **清单写的是「拒」,实测是「静默无操作」——** 而且这次现状是对的,理由值得记下来:
-      // 两道归属校验都过了(账户是我的、token 也是我的,`tokens` 是 per-user 的),真正的删除是
-      // `DELETE WHERE accountId = ? AND tokenId = ?` —— 那一对不匹配,于是删掉 0 行。
-      // 没有越权、没有误删,所以「静默」不是漏洞;把它写成「拒」反而要多一次查询去证明这对不匹配。
+    it("tokenId from my other account → succeeds, deletes nothing", async () => {
+      // Both ownership checks pass and the delete is `WHERE accountId = ? AND tokenId = ?`, so a
+      // mismatched pair deletes 0 rows: no leak, so a silent no-op is fine.
       const a = await seedManualAccount(USER, "甲", { symbol: "BTC", unitPrice: 1, amount: 1 });
       const b = await seedManualAccount(USER, "乙", { symbol: "ETH", unitPrice: 1, amount: 1 });
       const bDetail = await detail(USER, b.id);
@@ -72,7 +67,7 @@ describe("manual-tokens/remove", () => {
       expect((await detail(USER, a.id)).tokens).toHaveLength(1);
     });
 
-    it("别人的账户 → 拒,对方那个币还在", async () => {
+    it("someone else's account → rejected, their token remains", async () => {
       const theirs = await seedManualAccount(otherUser(USER), "他们的", {
         symbol: "BTC",
         unitPrice: 1,
@@ -89,7 +84,7 @@ describe("manual-tokens/remove", () => {
       expect((await detail(otherUser(USER), theirs.id)).tokens).toHaveLength(1);
     });
 
-    it("accountId / tokenId 空串 → schema 拒", () => {
+    it("empty accountId / tokenId → schema rejects", () => {
       expect(RemoveManualTokenInput.safeParse({ accountId: "", tokenId: "t" }).success).toBe(false);
       expect(RemoveManualTokenInput.safeParse({ accountId: "a", tokenId: "" }).success).toBe(false);
     });
