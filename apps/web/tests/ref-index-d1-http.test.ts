@@ -7,9 +7,6 @@ import {
   MAX_REQUEST_BYTES,
 } from "../scripts/ref-index/d1-http";
 
-// D1 REST 传输(FOL-85):请求长什么样、批怎么发、错误怎么报、token 绝不出现在错误里。
-// 真 Cloudflare 一次都不碰 —— fetch 是 mock 的。
-
 const TOKEN = "cf-secret-token-do-not-print";
 const CFG = { accountId: "acc-1", databaseId: "db-1", token: TOKEN };
 const URL_RAW = `${D1_API_BASE}/accounts/acc-1/d1/database/db-1/raw`;
@@ -36,7 +33,7 @@ afterEach(() => {
 const bodyOf = (call: unknown[]) => JSON.parse(String((call[1] as RequestInit).body));
 
 describe("createD1HttpSql", () => {
-  it("单条:POST /raw,Bearer token,{ sql, params } → 行是值数组", async () => {
+  it("single statement: POST /raw, Bearer token, { sql, params }: rows are value arrays", async () => {
     const fetch = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(ok([rows([["evm:1/contract:0xa"], ["evm:1/contract:0xb"]])]));
@@ -53,7 +50,7 @@ describe("createD1HttpSql", () => {
     expect(bodyOf(fetch.mock.calls[0])).toEqual({ sql: select().sql, params: ["coingecko"] });
   });
 
-  it("一批 = 一次请求,{ batch: [...] },结果与语句一一对应", async () => {
+  it("one batch = one request, { batch: [...] }, results map one-to-one to statements", async () => {
     const fetch = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(ok([rows([]), rows([]), rows([])]));
@@ -65,20 +62,20 @@ describe("createD1HttpSql", () => {
     });
   });
 
-  it("空批不发请求", async () => {
+  it("empty batch sends no request", async () => {
     const fetch = vi.spyOn(globalThis, "fetch");
     expect(await createD1HttpSql(CFG).batch([])).toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it(`一条语句绑定超过 ${MAX_BOUND_PARAMS} 个参数 → 本地就拒,一发都不出`, async () => {
+  it(`a statement binding more than ${MAX_BOUND_PARAMS} params: rejected locally, nothing sent`, async () => {
     const fetch = vi.spyOn(globalThis, "fetch");
     const big = select(Array.from({ length: MAX_BOUND_PARAMS + 1 }, (_, i) => i));
     await expect(createD1HttpSql(CFG).query(big)).rejects.toThrow(/binds 101 params/);
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("请求体超过上限 → 本地就拒", async () => {
+  it("request body over the limit: rejected locally", async () => {
     const fetch = vi.spyOn(globalThis, "fetch");
     const huge = "x".repeat(MAX_REQUEST_BYTES);
     await expect(
@@ -87,7 +84,7 @@ describe("createD1HttpSql", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("4xx → 不重试,报 Cloudflare 的 errors[];token 不在消息里", async () => {
+  it("4xx: no retry, reports Cloudflare errors[]; the token is not in the message", async () => {
     const fetch = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(
@@ -106,7 +103,7 @@ describe("createD1HttpSql", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("200 但 success:false(SQL 错)→ 同样报错", async () => {
+  it("200 with success:false (SQL error): also reports an error", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({ success: false, errors: [{ code: 7500, message: "SQLITE_ERROR" }] }),
     );
@@ -115,7 +112,7 @@ describe("createD1HttpSql", () => {
     );
   });
 
-  it("429 / 5xx / 网络断 → 退避重发,成功就返回", async () => {
+  it("429 / 5xx / network drop: retries with backoff, returns on success", async () => {
     vi.useFakeTimers();
     const fetch = vi
       .spyOn(globalThis, "fetch")
@@ -128,7 +125,7 @@ describe("createD1HttpSql", () => {
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
-  it("一直 5xx → 试满次数后报最后那次", async () => {
+  it("5xx throughout: reports the last failure after exhausting attempts", async () => {
     vi.useFakeTimers();
     const fetch = vi
       .spyOn(globalThis, "fetch")
@@ -143,7 +140,7 @@ describe("createD1HttpSql", () => {
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
-  it("结果条数与语句对不上 → 报错(不把错位的行交给上层)", async () => {
+  it("result count does not match statements: errors (misaligned rows are never handed upward)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(ok([rows([])]));
     await expect(createD1HttpSql(CFG).batch([write(1), write(2)])).rejects.toThrow(
       /1 result\(s\) for 2 statement\(s\)/,
