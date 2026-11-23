@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// 每端点的服务端 CPU:构建产物 + wrangler dev + V8 采样 profiler。
+// Server CPU per endpoint: build output + wrangler dev + V8 sampling profiler.
 //
-//   pnpm --filter @folio/web perf:cpu                          # 构建、灌数据、全部端点各 30 发
+//   pnpm --filter @folio/web perf:cpu                          # build, seed, 30 requests for every endpoint
 //   pnpm --filter @folio/web perf:cpu --no-build --only fn-getSnapshots-now,doc-root-authed
 //   pnpm --filter @folio/web perf:cpu --cold --only fn-getValuationSettings
-//   pnpm --filter @folio/web perf:cpu --list                   # 列出端点名
+//   pnpm --filter @folio/web perf:cpu --list                   # list endpoint names
 //
-// 为什么要它、怎么读输出:见 scripts/perf/README.md。
+// Why it exists and how to read the output: see scripts/perf/README.md.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -157,8 +157,7 @@ async function profileWarm(opts, workerOpts, endpoints) {
   }
 }
 
-// 冷启动:每个端点重起一次 worker。就绪探针走静态资源(不进 worker),否则探针那一发就把
-// isolate 暖了,量到的「第一发」其实是第二发。
+// Cold start: restart the worker per endpoint. The readiness probe hits a static asset (not the worker), or the probe itself would warm the isolate and the measured "first" request would really be the second.
 async function profileCold(opts, workerOpts, endpoints) {
   const rows = [];
   for (const e of endpoints) {
@@ -180,7 +179,7 @@ async function main() {
   if (opts.help) return void console.log(USAGE);
   if (opts.list) return void console.log(ENDPOINT_KEYS.join("\n"));
 
-  // 名字拼错要在构建、灌数据之前就报,而不是等一分钟之后。
+  // Report misspelled names before building and seeding, not a minute later.
   const unknown = (opts.only ?? []).filter((k) => !ENDPOINT_KEYS.includes(k));
   if (unknown.length) throw new Error(`unknown endpoint(s): ${unknown.join(", ")} — see --list`);
   checkDevVars();
@@ -196,7 +195,7 @@ async function main() {
   migrate(logFile);
   const { userId, counts } = await prepareData({ ...opts, workerOpts, log });
 
-  // 登录要 worker 活着;冷启动模式每端点都会重起,cookie 在 D1 里跨重启有效。
+  // Login needs a live worker; cold-start mode restarts per endpoint, and the cookie survives restarts in D1.
   const origin = originOf(opts.port);
   const w = await startWorker(workerOpts);
   let cookie;
@@ -237,7 +236,7 @@ async function main() {
   const wrongStatus = rows.filter((r) => r.status !== r.expect).map((r) => r.key);
   if (wrongStatus.length)
     log(`unexpected status for ${wrongStatus.join(", ")} — those numbers profile an error path`);
-  // 只看开测前的负载:测的时候 workerd 自己就占着一个核,「之后」那个数恒偏高。
+  // Only the pre-measurement load counts: during measurement workerd occupies a core itself, so the "after" number is always high.
   if (loadBefore.busy) {
     log(
       `host was busy before profiling (load ${loadBefore.load1} on ${loadBefore.cpus} cores) — CPU numbers may be inflated; check mean against proc, rerun on a quiet machine before comparing`,

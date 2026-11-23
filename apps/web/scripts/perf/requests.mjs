@@ -1,12 +1,10 @@
 #!/usr/bin/env node
-// 一次开页发多少个请求:冷开(新浏览器上下文)与「数据没变时刷新」各一次,按类数 `/_serverFn/*` 与
-// `/api/*`(logo 单列)。免费计划按请求数(每天 10 万)与每请求 CPU 计,所以请求条数本身就是一项成本。
+// Requests per page open: a cold open (fresh browser context) and a refresh with unchanged data, counted by kind (`/_serverFn/*` and `/api/*`, logos separate). The free plan bills per request (100k a day) and per-request CPU, so the request count is itself a cost.
 //
-//   node scripts/perf/requests.mjs              # 构建 → 灌数据 → 冷开 + 刷新
+//   node scripts/perf/requests.mjs              # build, seed, cold open + refresh
 //   node scripts/perf/requests.mjs --no-build
 //
-// 与 perf:cpu 同一个 worker(构建产物 + wrangler dev + 专用 perf 库 + 假上游),浏览器是 Playwright 的
-// Chromium(`PLAYWRIGHT_BROWSERS_PATH`)。数到「网络静下来」为止(networkidle 之后再等一段安静)。
+// Same worker as perf:cpu (build output + wrangler dev + dedicated perf DB + fake upstream); the browser is Playwright's Chromium (`PLAYWRIGHT_BROWSERS_PATH`). Counts until the network goes quiet (networkidle, then a further quiet period).
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -26,10 +24,10 @@ import { startFakeUpstream } from "./fake-upstream.mjs";
 import { prepareData, signIn } from "./session.mjs";
 import { build, checkDevVars, migrate, originOf, startWorker, stopAll } from "./worker.mjs";
 
-/** networkidle 之后再等这么久没有新请求,才算这一页加载完(React Query 的后续查询会晚一拍)。 */
+/** Extra quiet time after networkidle before the page counts as loaded (React Query's follow-up queries arrive a beat late). */
 const QUIET_MS = 3_000;
 const NAV_TIMEOUT_MS = 60_000;
-/** 一直有请求(轮询)也不等过这么久 —— 轮询的那几条记在 `trailing` 里。 */
+/** Upper bound even when requests keep coming (polling); the polling ones are recorded in `trailing`. */
 const MAX_SETTLE_MS = 20_000;
 const RESPONSE_WAIT_MS = 2_000;
 
@@ -47,10 +45,7 @@ function categorize(url, fnNames) {
   return { cat: "other", name: pathname };
 }
 
-/**
- * 从现在起数这一页的请求,直到网络静下来。数的是**真到了服务端的**那些:在浏览器上下文上听(页面
- * 与 service worker 自己发的都在),由 SW 缓存答的(`fromServiceWorker()`)不算 —— 它们没进 Worker。
- */
+// Counts this page's requests from now until the network is quiet: only those that really reached the server, listened to on the browser context (page and service worker traffic both); SW-cache answers (`fromServiceWorker()`) don't count since they never hit the Worker.
 async function countLoad(context, page, origin, fnNames, navigate) {
   const finished = [];
   let last = Date.now();
@@ -84,7 +79,7 @@ async function countLoad(context, page, origin, fnNames, navigate) {
   const counts = { serverFn: 0, api: 0, "api-logo": 0, other: 0, fromSwCache: 0 };
   const byName = {};
   for (const req of finished) {
-    // `response()` 偶发不回(实测卡过几分钟)—— 限时,超时按「没响应」算(即不是 SW 缓存答的)。
+    // `response()` sometimes never returns (stuck for minutes in practice): time-box it; a timeout counts as "no response" (not a SW-cache answer).
     const res = await Promise.race([req.response().catch(() => null), sleep(RESPONSE_WAIT_MS)]);
     if (res?.fromServiceWorker()) {
       counts.fromSwCache++;
@@ -98,10 +93,7 @@ async function countLoad(context, page, origin, fnNames, navigate) {
   return { url: page.url(), navigations, counts, byName, trailing };
 }
 
-/**
- * 服务端那一侧的计数:wrangler dev 给每个进来的请求打一行 `GET <path> <status>`。浏览器 HTTP 缓存 /
- * SW 缓存答掉的请求不会出现在这里,所以这是「真进了 Worker 的」条数,浏览器那边的计数只作对照。
- */
+// Server-side count: wrangler dev logs one `GET <path> <status>` per incoming request. Browser-HTTP-cache / SW-cache answers don't appear, so this is the count that truly reached the Worker; the browser-side count is only a cross-check.
 function serverSideCounts(logFile, from) {
   const text = readFileSync(logFile, "utf8").slice(from).replace(ANSI, "");
   const counts = { serverFn: 0, api: 0, "api-logo": 0 };

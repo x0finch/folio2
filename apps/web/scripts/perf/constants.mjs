@@ -1,58 +1,54 @@
-// perf:cpu 的具名默认值与固定路径。命令行参数能改的都在这里有一个默认,别在别处再写一遍数字。
+// Named defaults and fixed paths for perf:cpu; every CLI-overridable value has its default here.
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** apps/web 根目录(本文件在 scripts/perf/ 下)。 */
+/** apps/web root (this file is in scripts/perf/). */
 export const WEB_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 
-/**
- * 专用的本地持久化目录 —— **绝不是**开发库 `.wrangler/state`。`.wrangler/` 整体已在 .gitignore。
- * Miniflare 按 database_id 在它下面建 SQLite(`v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite`),
- * 所以同一个 id 换一个 persist 目录就是另一份库,开发库一行都碰不到。
- */
+/** Dedicated local persist dir, never the dev DB `.wrangler/state`: Miniflare keys the SQLite by database_id under it, so a different persist dir is a different DB. */
 export const PERF_STATE_DIR = join(WEB_ROOT, ".wrangler", "perf-state");
 
-/** D1 迁移目录(与 wrangler.jsonc 的 `migrations_dir` 同一处)。 */
+/** D1 migrations dir (same as `migrations_dir` in wrangler.jsonc). */
 export const MIGRATIONS_DIR = join(WEB_ROOT, "..", "..", "packages", "db", "drizzle");
 
-/** 构建产物:`vite build` 写出来的、`wrangler deploy` 原样发出去的那一份。 */
+/** Build output: what `vite build` wrote and `wrangler deploy` ships as-is. */
 export const DIST_SERVER_DIR = join(WEB_ROOT, "dist", "server");
 
-// 端口刻意避开 dev server 的 3000 与 wrangler 默认的 8787 / 9229,好让 perf 与 `pnpm dev` 同时开着。
+// Ports avoid the dev server's 3000 and wrangler's default 8787 / 9229, so perf can run alongside `pnpm dev`.
 export const DEFAULT_PORT = 3300;
 export const DEFAULT_INSPECTOR_PORT = 9330;
 export const HOST = "127.0.0.1";
 
-/** perf:cpu:jobs 的本机假上游端口(见 fake-upstream.mjs)。 */
+/** Local fake-upstream port for perf:cpu:jobs (see fake-upstream.mjs). */
 export const DEFAULT_FAKE_UPSTREAM_PORT = 3399;
-/** perf:cpu:jobs 每个定时任务量几次(不含第一次,那次单列成 `:first`)。整点 sweep 重,多量几次。 */
+/** Samples per job in perf:cpu:jobs (the first is reported separately as `:first`); the hourly sweep is heavy, so measure several. */
 export const DEFAULT_SWEEP_REPS = 5;
 export const DEFAULT_DAILY_REPS = 3;
 
-/** 每个端点测几发(顺序发,一次一发)。 */
+/** Requests per endpoint, sequential. */
 export const DEFAULT_REPS = 30;
-/** 正式采样前的预热发数 —— 让首调编译不混进稳态数字(冷启动另有 `--cold`)。 */
+/** Warm-up requests before sampling, so first-call compilation stays out of steady-state numbers (cold start has `--cold`). */
 export const DEFAULT_WARMUP = 5;
-/** V8 采样间隔(微秒)。 */
+/** V8 sampling interval (microseconds). */
 export const DEFAULT_SAMPLING_US = 100;
-/** Cloudflare Workers 免费档:每请求 10ms CPU。 */
+/** Cloudflare Workers free plan: 10ms CPU per request. */
 export const DEFAULT_BUDGET_MS = 10;
 
-/** 等 wrangler dev 起来的上限与轮询间隔。起的时候会去拉 `Request.cf`,断网时要等它失败。 */
+/** Cap and poll interval for wrangler dev to come up; it fetches `Request.cf` on start, so offline it waits for that to fail. */
 export const READY_TIMEOUT_MS = 90_000;
 export const READY_POLL_MS = 500;
-/** 停 worker 时 SIGTERM 之后等多久再 SIGKILL。 */
+/** Wait after SIGTERM before SIGKILL when stopping the worker. */
 export const STOP_GRACE_MS = 5_000;
 
-// ---- 数据集(见 dataset.mjs)。大小可由参数改,这里是默认。 ----
+// Dataset defaults (see dataset.mjs); sizes can be overridden by arguments.
 export const DEFAULT_ACCOUNTS = 8;
 export const DEFAULT_TOKENS = 60;
 export const DEFAULT_DAYS = 30;
-/** 有日价的代币数与天数(长区间曲线要用)。 */
+/** Tokens with daily prices and how many days (for long-range curves). */
 export const DAILY_PRICE_TOKENS = 20;
 export const DAILY_PRICE_DAYS = 365;
 
-/** 压测用户。只存在于上面那个专用库里;密码不是秘密,它守的是一个本地、随时可删的库。 */
+/** Perf user. Exists only in the dedicated DB above; the password isn't a secret, it guards a local disposable DB. */
 export const PERF_USER = {
   email: "perf@folio.test",
   password: "perf-password-1234",

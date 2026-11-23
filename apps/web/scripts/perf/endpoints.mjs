@@ -1,19 +1,12 @@
-// 被测端点清单:文档 GET + 按 handler 名点的 server fn。
+// Endpoints under test: document GETs plus server fns picked by handler name.
 //
-// server fn 的 URL 是 `/_serverFn/<64 位 hex id>`,id 是构建产物,每次构建可能变 —— 从构建出的
-// resolver manifest 里按函数名反查,不写死。请求形状照抄 @tanstack/start-client-core 的
-// serverFnFetcher(GET:`?payload=<seroval JSON>`),并带 `Sec-Fetch-Site: same-origin`
-// —— Start 的 CSRF 中间件不见它(或同源 Origin)就回 403。
+// Server fn URLs are `/_serverFn/<64-hex id>`; the id is a build artefact that may change per build, so it's looked up by function name in the built resolver manifest, not hardcoded. Request shape follows @tanstack/start-client-core's serverFnFetcher (GET `?payload=<seroval JSON>`) with `Sec-Fetch-Site: same-origin`: Start's CSRF middleware 403s without it (or a same-origin Origin).
 import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { DAY_MS, DIST_SERVER_DIR, HOUR_MS, WEB_ROOT } from "./constants.mjs";
 
-/**
- * payload 用 seroval 编 —— 必须是**构建里那一份** seroval,两边版本不同就可能解不开。
- * 沿依赖链取(react-start → start-client-core → seroval),而不是在 @folio/web 里另装一份:
- * 另装的那份会跟着自己的版本号走,迟早和服务端的对不上。
- */
+// The payload must be encoded with the build's own seroval (other versions may not decode). Resolved down the dependency chain (react-start, start-client-core, seroval) instead of installing a separate copy in @folio/web, which would drift from the server's version.
 function loadSeroval() {
   const fromWeb = createRequire(join(WEB_ROOT, "package.json"));
   const fromStart = createRequire(fromWeb.resolve("@tanstack/react-start/package.json"));
@@ -28,7 +21,7 @@ const RESOLVER_PREFIX = "__23tanstack-start-server-fn-resolver-";
 const MANIFEST_ENTRY =
   /"([0-9a-f]{64})":\s*\{\s*functionName: "([A-Za-z0-9_$]+)_createServerFn_handler"/g;
 
-/** 构建产物里的 handler 名 → server fn id。 */
+/** Handler name in the build to server fn id. */
 export function serverFnIds() {
   const file = readdirSync(ASSETS_DIR).find((f) => f.startsWith(RESOLVER_PREFIX));
   if (!file) throw new Error(`no server-fn resolver manifest in ${ASSETS_DIR} — build first`);
@@ -36,18 +29,14 @@ export function serverFnIds() {
   return new Map([...src.matchAll(MANIFEST_ENTRY)].map((m) => [m[2], m[1]]));
 }
 
-// 24h 盈亏的「上一窗口」取数参数,与 core/portfolio 同口径。
+// Params for the 24h-gain "previous window" read, same convention as core/portfolio.
 const GAIN_WINDOW_MS = DAY_MS;
 const GAIN_START_FLOOR_MS = 7 * DAY_MS;
 const floorToHour = (t) => Math.floor(t / HOUR_MS) * HOUR_MS;
 
-/**
- * 端点定义。`fn` = 按 handler 名点 server fn(只列 GET 的读路径);`path` = 文档 / 普通路由。
- * `authed` 默认真。`expect` = 应答状态,对不上就在报表里标出来 —— 一个 401 的 profile 量的是
- * 报错路径,不是这个端点。
- */
+/** Endpoint definition. `fn` = a server fn by handler name (GET read paths only); `path` = a document / plain route. `authed` defaults to true. `expect` = response status; a mismatch is flagged in the report, since a 401 profile measures the error path, not the endpoint. */
 const ENDPOINTS = [
-  // 壳化(ADR 0049 补记)之后文档是静态资源,导航不进 Worker:这两行是「应为 0 CPU」的对照组。
+  // After shelling, documents are static assets and navigation doesn't enter the Worker: these two rows are the "should be 0 CPU" control.
   { key: "doc-root-authed", label: "GET / (static shell, authed)", path: "/", doc: true },
   {
     key: "doc-root-anon",
@@ -107,7 +96,7 @@ const ENDPOINTS = [
     fn: "listAccountTags",
     data: ({ portfolioId }) => ({ portfolioId }),
   },
-  // 对照组:静态资源不进 worker(run_worker_first 不含它),profiler 应该报 ≈0。不是 0 就是量法坏了。
+  // Control: static assets don't enter the worker (run_worker_first excludes them), so the profiler should report ~0; anything else means the measurement is broken.
   {
     key: "static-favicon",
     label: "GET /favicon.ico (control)",
@@ -118,10 +107,7 @@ const ENDPOINTS = [
 
 export const ENDPOINT_KEYS = ENDPOINTS.map((e) => e.key);
 
-/**
- * 把清单实例化成可发的请求。ctx = { origin, cookie, portfolioId, platforms, now }。
- * `only` 给了就只要那几个(名字由 cpu.mjs 在开工前校验过)。
- */
+/** Instantiates the list into sendable requests. ctx = { origin, cookie, portfolioId, platforms, now }. `only`, when given, keeps just those names (validated by cpu.mjs before work starts). */
 export async function buildEndpoints(ctx, only) {
   const picked = only ? ENDPOINTS.filter((e) => only.includes(e.key)) : ENDPOINTS;
   const ids = serverFnIds();
