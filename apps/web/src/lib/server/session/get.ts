@@ -1,9 +1,8 @@
 import { getRequestHeaders } from "@tanstack/react-start/server";
 import { getSessionAuth } from "./session-auth";
 
-// 公开 handler(非 authed):返回当前 user 或 null,不抛。
-// 仅供路由守卫(_authed.tsx beforeLoad)做 UX 级重定向;真正的数据安全边界是
-// 各 authedServerFn(无 session 抛 401)。
+// Public (non-authed): returns the user or null. Only for route-guard UX; the security boundary is each
+// authed server fn throwing 401.
 export async function handleGetSession() {
   const result = await getSessionAuth().api.getSession({ headers: getRequestHeaders() });
   return result ? { user: result.user } : null;
