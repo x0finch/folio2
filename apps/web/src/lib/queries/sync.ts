@@ -7,11 +7,11 @@ import { deriveSyncStatus } from "@/lib/core/sync-summary";
 import { accountListQuery } from "./accounts";
 import { accountHoldingsSnapshotQueries } from "./snapshots";
 
-// 页头同步摘要(FOL-58):accounts + snapshots 在浏览器派生,不再走独立 server fn。
+// Header sync summary: derived in the browser from accounts + snapshots.
 
 export type { SyncStatusSummary } from "@/lib/core/sync-status";
 
-/** 外壳 loader 预取摘要原料 —— 与 `useSyncStatus` 读同一份原子 query。 */
+/** Shell loader prefetch; reads the same atom queries as `useSyncStatus`. */
 export async function prefetchSyncStatusAtoms(
   queryClient: QueryClient,
   portfolioId: string,
@@ -24,7 +24,7 @@ export async function prefetchSyncStatusAtoms(
   ]);
 }
 
-/** 页头同步胶囊:accounts + 当下快照 → `summarizeSync`(FOL-58)。 */
+/** Header sync pill: accounts + current snapshot into `summarizeSync`. */
 export function useSyncStatus(portfolioId: string): SyncStatusSummary {
   const now = floorToHour(Date.now());
   const { now: snapshotsNow } = accountHoldingsSnapshotQueries(portfolioId, now);

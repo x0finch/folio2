@@ -3,14 +3,13 @@ import { listAccountTags, listTags } from "@/lib/server/tags";
 import { STALE_TIME } from "./constants";
 import { tagKeys } from "./keys";
 
-// 标签域的读取入口 —— 与 `lib/server/tags` 的两个读取型 server fn 对应。
-// 这个域的读写在同一片里迁完(#415),所以 `staleTime` 当场就开。
+// Tag-domain reads; reads and writes migrated together, so `staleTime` is on.
 
-/** 一份 Tag 定义 / 一份账户→Tag 关联。**从 server fn 推导**,同 `accounts.ts` 那两条。 */
+/** Tag definitions / account-tag links, inferred from the server fn (like `accounts.ts`). */
 export type TagList = Awaited<ReturnType<typeof listTags>>;
 export type AccountTagLinks = Awaited<ReturnType<typeof listAccountTags>>;
 
-// 两条都按组合各一份(ADR 0047):Tag 本来就归属 Portfolio,关联也只回当前组合的账户那些。
+// Both are per portfolio: tags belong to a portfolio and links return only the current portfolio's accounts.
 export const tagListQuery = (portfolioId: string) =>
   queryOptions({
     queryKey: tagKeys.list(portfolioId),
