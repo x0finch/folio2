@@ -2,26 +2,15 @@ import { Database, type DbRequest } from "@folio/db";
 import { PLATFORM_TTL_MS } from "@folio/oracle-basic";
 import { Effect, Option, Schema } from "effect";
 
-// DeFi 协议 logo 的名址:protocol → 上游图 URL。**住在 app,不在参考层**。
-//
-// 为什么:参考层管的是外面世界的公开知识(币 / 链 / 汇率),而这份数据来自**用户自己同步下来的
-// 余额 meta** —— 没有上游、不出网,只是同步时塞进 `user_cache`、图片端点再读出来。它当初挂在
-// oracle 上是照着 platform logo 顺手挂的(#126),而边界其实早就写在类型里:那个服务的 `R` 里
-// 一个上游都没有。
-//
-// 键仍是 `defi-logo:<协议>`(同一张 per-user 表,数据不用搬)。TTL 复用平台那档长的:近静态,
-// 过期不删(`user_cache` 语义),值照读,下次同步重写刷新 TTL。
-//
-// 缓存从 `Database` 那张票上取(`db.cache`)。以前它是参考层的一个端口,app 要用就得让参考层的
-// 装配把那个端口漏出来一个 —— 借道。现在那片 KV 就在 db 自己的门票上,这里不必再经过参考层。
-//
-// **写那个动词叫 `record` 不叫 `warm`。** 「预热」的意思是「去把外面的数据取回来」;这里的数据是
-// 调用方递进来的,一次网络都不发 —— 以前叫 `warm` 是为了跟 fx / platform 对齐,但对齐的只是名字。
+// DeFi protocol -> logo URL. Lives in the app, not the oracle: the data comes from the user's own synced
+// balance meta (no upstream, no network), stored in `user_cache` under `defi-logo:<protocol>`.
+// TTL reuses the long platform tier; expired rows are still read and refreshed on the next sync.
+// Writing is `record`, not `warm`: the caller supplies the data and nothing is fetched.
 const key = (protocol: string) => `defi-logo:${protocol}`;
 
 const decodeUrl = Schema.decodeUnknownOption(Schema.String);
 
-// 单个协议的图 URL(缓存命中且是个字符串 → URL;否则 `none` → 调用方走首字母兜底)。
+// `none` when missing or not a string, so the caller falls back to initials.
 export const readDefiLogo = (
   protocol: string,
 ): Effect.Effect<Option.Option<string>, never, Database | DbRequest> =>
@@ -31,8 +20,8 @@ export const readDefiLogo = (
     ),
   );
 
-// 同步后记账:把 (protocol, logo) 对写回缓存。同协议取首个带图者;**一个批次**(与 platform 同理:
-// 逐键往返会把一次 D1 变成 N 次)。没图就不写 —— 这里**没有否定缓存**,读不到就是没有。
+// Batch write-back (per-key round trips would turn one D1 call into N); the first logo per protocol wins.
+// No negative caching: a miss means none.
 export const recordDefiLogos = (
   entries: readonly { protocol: string; logo: string }[],
 ): Effect.Effect<void, never, Database | DbRequest> =>
