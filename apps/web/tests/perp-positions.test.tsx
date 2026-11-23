@@ -11,7 +11,7 @@ import {
   type PerpSectionItem,
 } from "@/routes/_authed/-home/holdings/perp";
 
-// The beUI hover Popover renders its details in the DOM even when closed, so detail text is assertable.
+// The beUI hover Popover keeps details in the DOM when closed, so they are assertable.
 
 afterEach(cleanup);
 

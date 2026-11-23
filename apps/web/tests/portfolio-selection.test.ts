@@ -1,30 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { pickSelectedPortfolio, portfolioSwitchSearch } from "@/lib/hooks/use-portfolio";
 
-// 选中的 Portfolio 进 URL(ADR 0046)。八条决定里有六条能在这一层断言:
-// 默认不写、非默认写、未知 id 回默认、别人的 id 回默认、旧参数被丢干净、组合参数自身留下。
+// The selected Portfolio lives in the URL.
 
 const DEFAULT = "pf-default";
 const WATCH = "pf-watch";
 const LIST = [{ id: DEFAULT }, { id: WATCH }];
 
 describe("pickSelectedPortfolio", () => {
-  it("地址里写着谁就选谁", () => {
+  it("selects whatever the URL names", () => {
     expect(pickSelectedPortfolio(WATCH, LIST, DEFAULT)).toBe(WATCH);
   });
 
-  it("没带这个参数 → 默认那个", () => {
+  it("param absent -> the default one", () => {
     expect(pickSelectedPortfolio(undefined, LIST, DEFAULT)).toBe(DEFAULT);
   });
 
-  // 别人的 id 在这一层就是「认不出的 id」(列表只有本人的组合)—— 同一个结果,越权探测无回应差异。
-  it("认不出的 id(含别人的)→ 安静回默认(过期的收藏链接不该给空视图)", () => {
+  // Someone else's id is just an unknown id here (only the user's own are listed): no probe signal.
+  it("unknown id (including someone else's) -> quietly falls back to default (stale bookmarks get a view)", () => {
     expect(pickSelectedPortfolio("pf-deleted", LIST, DEFAULT)).toBe(DEFAULT);
   });
 
-  // 这几种进不来 route 的校验器(那边 `.catch(undefined)` 兜住了),但 `_authed` 的 loader 读的是
-  // 原始解析结果 —— 手改地址栏就能造出来。
-  it("形状本身不对(空串 / 重复参数 / 数字)→ 当没带", () => {
+  // The route validator rejects these (`.catch(undefined)`), but the `_authed` loader reads the
+  // raw parse, so a hand-edited URL can produce them.
+  it("malformed (empty / repeated param / number) -> treated as absent", () => {
     expect(pickSelectedPortfolio("", LIST, DEFAULT)).toBe(DEFAULT);
     expect(pickSelectedPortfolio([WATCH, DEFAULT], LIST, DEFAULT)).toBe(DEFAULT);
     expect(pickSelectedPortfolio(123, LIST, DEFAULT)).toBe(DEFAULT);
@@ -33,20 +32,19 @@ describe("pickSelectedPortfolio", () => {
 });
 
 describe("portfolioSwitchSearch", () => {
-  it("非默认组合写进地址", () => {
+  it("non-default portfolio is written to the URL", () => {
     expect(portfolioSwitchSearch(WATCH, DEFAULT)).toEqual({ portfolio: WATCH });
   });
 
-  it("默认组合不写进地址(值是 undefined,键仍在)", () => {
+  it("default portfolio is not written (value undefined, key still present)", () => {
     const next = portfolioSwitchSearch(DEFAULT, DEFAULT);
     expect(next.portfolio).toBeUndefined();
-    // 键必须在:`retainSearchParams` 只在「新 search 里没有这个键」时补旧值,键不写参数就消不掉。
+    // The key must be present: `retainSearchParams` only restores old values for absent keys.
     expect("portfolio" in next).toBe(true);
   });
 
-  it("旧组合里的那些参数一个都不带(整份新的,不是改一个键)", () => {
-    // 断言键集合而不是逐个 `toBeUndefined`:这条规则的要点是「只有这一个键」——
-    // 将来新增一个页内参数,忘了它也不会漏进来。
+  it("drops every param from the old portfolio (a fresh search, not one key changed)", () => {
+    // Assert the key set, not each `toBeUndefined`, so a future in-page param cannot leak in.
     expect(Object.keys(portfolioSwitchSearch(WATCH, DEFAULT))).toEqual(["portfolio"]);
   });
 });

@@ -5,13 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HomeTabStripView } from "@/lib/core/portfolio";
 import { messages } from "@/lib/i18n/messages";
 
-// 首页的装配(Overview):三个岛各有自己的挂起 / 失败边界,外壳(同步条)不跟着塌。
-//   · 同步条恒在,且首页打开「数据过期自动补一轮」
-//   · 组合里没有账户 → tab 条那格换成「No accounts yet. Add one.」,链接去账户页
-//   · 有账户 → 渲染 tab 条
-//   · 某个岛在取数 → 只有那一格是骨架;某个岛失败 → 只有那一格写「Couldn't load this.」
-//   · 页内 tab / 代币抽屉状态的 Provider 挂在这一层(岛里能读到)
-// 三个岛、同步条、路由 Link 都换成替身:这里只看这一层怎么排、怎么兜。
+// Home assembly: each of the three islands has its own suspense / error boundary; the shell (sync bar)
+// never collapses with them. Islands, sync bar and router Link are stubbed.
 
 const h = vi.hoisted(() => ({
   strip: { hasAccounts: true, hasPerps: false, hasDefi: false, pins: [] } as HomeTabStripView,
@@ -42,7 +37,7 @@ vi.mock("@/routes/_authed/-home/holdings", () => ({
 vi.mock("@/routes/_authed/-home/tab", async () => {
   const { useHomeViewState } = await import("@/routes/_authed/-home/view-state");
   return {
-    // 读一下页内状态:Provider 没挂在这层的话这里会抛。
+    // Reads view state: throws if the Provider isn't mounted at this layer.
     TabStripIsland: () => <>TABS:{useHomeViewState().tab}</>,
   };
 });
@@ -69,14 +64,14 @@ function mount() {
   );
 }
 
-describe("首页装配", () => {
-  it("有账户 → 同步条 + hero + tab 条 + 持仓;首页打开过期自动补同步", () => {
+describe("home assembly", () => {
+  it("with accounts → sync bar + hero + tab strip + holdings; home enables auto-sync when stale", () => {
     const { container } = mount();
     expect(container.textContent).toBe("SYNCHEROTABS:tokensHOLDINGS");
     expect(h.headerSyncProps.at(-1)).toEqual({ autoSyncWhenStale: true });
   });
 
-  it("没有账户 → tab 条那格换成「No accounts yet. Add one.」,链接去账户页", () => {
+  it("no accounts → the tab strip slot becomes 'No accounts yet. Add one.', linking to accounts", () => {
     h.strip = { ...h.strip, hasAccounts: false };
     mount();
     expect(screen.queryByText(/TABS/)).toBeNull();
@@ -85,7 +80,7 @@ describe("首页装配", () => {
     expect(h.linkProps.at(-1)).toEqual({ to: "/{-$page}", params: { page: "accounts" } });
   });
 
-  it("某个岛还在取数 → 只有那一格是骨架,其它照常", () => {
+  it("an island still loading → only that slot is a skeleton, others normal", () => {
     h.hero.current = () => {
       throw new Promise(() => {});
     };
@@ -94,7 +89,7 @@ describe("首页装配", () => {
     expect(container.querySelector("[data-slot=skeleton]")).toBeTruthy();
   });
 
-  it("持仓岛在取数 → 骨架行,hero 与 tab 条不受影响", () => {
+  it("holdings island loading → skeleton rows; hero and tab strip unaffected", () => {
     h.holdings.current = () => {
       throw new Promise(() => {});
     };
@@ -103,7 +98,7 @@ describe("首页装配", () => {
     expect(container.querySelectorAll("[data-slot=skeleton]").length).toBeGreaterThan(1);
   });
 
-  it("某个岛失败 → 只有那一格写「Couldn't load this.」,同步条与其它岛不塌", () => {
+  it("an island fails → only that slot says 'Couldn't load this.'; sync bar and other islands stay", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     h.holdings.current = () => {
       throw new Error("boom");
@@ -113,7 +108,7 @@ describe("首页装配", () => {
     expect(container.textContent).toContain("SYNCHEROTABS:tokens");
   });
 
-  it("hero 失败 → 那一格写「Couldn't load this.」,tab 条与持仓照常", () => {
+  it("hero fails → that slot says 'Couldn't load this.'; tab strip and holdings normal", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     h.hero.current = () => {
       throw new Error("boom");

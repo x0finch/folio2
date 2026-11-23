@@ -5,12 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PortfolioSummary } from "@/lib/hooks/use-portfolio";
 import { messages } from "@/lib/i18n/messages";
 
-// 页头的全局 Portfolio 选择器(ADR 0033)。钉住:
-// ① 渐进式显示 —— 只有一个组合时整个不渲染(和没有这个功能时一模一样);
-// ② 徽标显示当前选中的组合名;
-// ③ 点菜单里的组合 → 调 select(id)(选中态的事实源是 URL,由 usePortfolio 负责);
-// ④ 「管理组合」→ 打开管理弹窗。
-// usePortfolio 打桩:真实实现读路由 search,这里只关心选择器怎么用它。
+// Global Portfolio selector in the header. Hidden with a single portfolio; the URL is the source of
+// truth for selection (usePortfolio), stubbed here since it reads route search.
 const { portfolioState, select } = vi.hoisted(() => ({
   portfolioState: { portfolios: [] as PortfolioSummary[], selectedId: "", defaultId: "" },
   select: vi.fn(),
@@ -50,7 +46,7 @@ function mount(portfolios: PortfolioSummary[], selectedId: string) {
   );
   const trigger = () =>
     utils.container.querySelector(`button[aria-label="${tp.selectorLabel}"]`) as HTMLElement | null;
-  // hover 弹层:聚焦触发器同样会打开(键盘可达那条路径)。
+  // Hover popover: focusing the trigger opens it too (keyboard path).
   const openMenu = () => fireEvent.focus(trigger() as HTMLElement);
   const menuButton = (text: string) =>
     [...document.querySelectorAll("button")].find(
@@ -64,17 +60,17 @@ beforeEach(() => {
 });
 
 describe("PortfolioSelector", () => {
-  it("只有一个组合 → 不渲染", () => {
+  it("single portfolio -> renders nothing", () => {
     const { container } = mount([P("p1", "Main", true)], "p1");
     expect(container.innerHTML).toBe("");
   });
 
-  it("≥2 个 → 徽标显示当前选中的组合名", () => {
+  it("two or more -> badge shows the selected portfolio name", () => {
     const { trigger } = mount([P("p1", "Main", true), P("p2", "Degen")], "p2");
     expect(trigger()?.textContent).toContain("Degen");
   });
 
-  it("点菜单里的组合 → select(该 id)", async () => {
+  it("clicking a portfolio in the menu -> select(that id)", async () => {
     const { openMenu, menuButton } = mount([P("p1", "Main", true), P("p2", "Degen")], "p1");
     openMenu();
     await waitFor(() => expect(menuButton("Degen")).toBeTruthy());
@@ -82,7 +78,7 @@ describe("PortfolioSelector", () => {
     expect(select).toHaveBeenCalledWith("p2");
   });
 
-  it("「管理组合」→ 打开管理弹窗", async () => {
+  it("'Manage portfolios' -> opens the manage modal", async () => {
     const { openMenu, menuButton } = mount([P("p1", "Main", true), P("p2", "Degen")], "p1");
     expect(document.body.querySelector("h2")).toBeNull();
     openMenu();

@@ -3,7 +3,7 @@ import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 // The beUI popover panel's background was painted only by the goo SVG-filter layer, which WebKit
-// renders translucent (Chromium-only e2e misses it). The content layer now carries bg-popover itself;
+// renders translucent (Chromium-only e2e misses it). The content layer carries bg-popover itself;
 // this pins it so a re-pull of the frozen fork from the registry cannot silently drop it.
 describe("beUI popover panel has its own opaque background", () => {
   it("PopoverContent renders a panel with solid bg-popover", () => {

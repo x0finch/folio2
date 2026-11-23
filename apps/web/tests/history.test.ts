@@ -12,7 +12,7 @@ const DAY = 86_400_000;
 
 describe("buildPortfolioHistory", () => {
   it("steps the portfolio total as each account is (re)synced at different times", () => {
-    // a1@1000=10 → a2@1500=5(总额 15)→ a1@2000=20(总额 25:a1 更新、a2 保留)
+    // a1@1000=10 → a2@1500=5 (total 15) → a1@2000=20 (total 25: a1 updated, a2 held)
     const series = buildPortfolioHistory([
       { accountId: "a1", takenAt: 1000, totalUsd: 10 },
       { accountId: "a2", takenAt: 1500, totalUsd: 5 },
@@ -42,12 +42,10 @@ describe("buildPortfolioHistory", () => {
     expect(series.map((p) => p.total)).toEqual([10, 20]);
   });
 
-  // 归档 = 封存(ADR 0039):账户在归档那一刻之后不再贡献,之前的点原样保留。
-  //
-  // 这组测的是阶梯重建那个「最后一个值一直保持下去」的性质在归档面前的行为 —— 不截断的话,
-  // 归档账户冻住的值会跟着曲线走到今天,而当下点(实时覆写)只算活跃账户,两边就对不上。
-  describe("归档成员的贡献止于归档时刻", () => {
-    it("归档之后的点不再含它,归档之前的点不变", () => {
+  // An archived account stops contributing after its archive time; earlier points stay. Without the cut, its
+  // frozen value would be carried to today while the live point counts only active accounts.
+  describe("archived members contribute only until their archive time", () => {
+    it("points after archiving exclude it; points before are unchanged", () => {
       const series = buildPortfolioHistory(
         [
           { accountId: "a1", takenAt: 1000, totalUsd: 10 },
@@ -57,12 +55,12 @@ describe("buildPortfolioHistory", () => {
         new Map([["a2", 2000]]),
       );
       expect(series).toEqual([
-        { t: 1000, total: 15 }, // 归档前:两个都算
-        { t: 3000, total: 20 }, // 归档后:a2 的 5 不再被保持下去
+        { t: 1000, total: 15 }, // before archiving: both count
+        { t: 3000, total: 20 }, // after archiving: a2's 5 is no longer carried
       ]);
     });
 
-    it("恰好落在归档时刻的点已经不算它", () => {
+    it("a point exactly at the archive time already excludes it", () => {
       const series = buildPortfolioHistory(
         [
           { accountId: "a1", takenAt: 1000, totalUsd: 10 },
@@ -74,8 +72,8 @@ describe("buildPortfolioHistory", () => {
       expect(series[1]).toEqual({ t: 2000, total: 10 });
     });
 
-    // 归档账户自己那条快照落在归档之前 → 它在自己的时刻仍然算数,只是之后不再被保持。
-    it("归档账户在归档前的自有快照照常成点", () => {
+    // The archived account's own snapshot before archiving still counts at its own time.
+    it("an archived account's own pre-archive snapshots still produce points", () => {
       const series = buildPortfolioHistory(
         [
           { accountId: "a1", takenAt: 1000, totalUsd: 10 },
@@ -91,7 +89,7 @@ describe("buildPortfolioHistory", () => {
       ]);
     });
 
-    it("不传归档表 = 旧行为,一个字节都不变", () => {
+    it("no archive map = unchanged behaviour, byte for byte", () => {
       const rows = [
         { accountId: "a1", takenAt: 1000, totalUsd: 10 },
         { accountId: "a2", takenAt: 1500, totalUsd: 5 },
@@ -100,7 +98,7 @@ describe("buildPortfolioHistory", () => {
       expect(buildPortfolioHistory(rows)).toEqual(buildPortfolioHistory(rows, new Map()));
     });
 
-    it("全员归档之后是 0,不是把最后的值挂在那儿", () => {
+    it("after everyone is archived the total is 0, not the last value held", () => {
       const series = buildPortfolioHistory(
         [
           { accountId: "a1", takenAt: 1000, totalUsd: 10 },
@@ -130,28 +128,28 @@ describe("downsampleSeries", () => {
   const p = (t: number, total: number): HistoryPoint => ({ t, total });
 
   it("uses hourly buckets when the span is ~1 day", () => {
-    // 一天里每 10 分钟一个点(144 个,含日内 spam)→ 应压成小时级(≤24 点),每小时留最后一个。
+    // A point every 10 min for a day (144, with intraday spam) → hourly (≤24 points), last per hour kept.
     const dense = Array.from({ length: 144 }, (_, i) => p(i * 10 * 60_000, 100 + i));
     const out = downsampleSeries(dense);
     expect(out.length).toBeLessThanOrEqual(24);
-    // 第 0 小时的最后一个点 = 第 5 个(t=50min, total=105)。
+    // Hour 0's last point = the 6th (t=50min, total=105).
     expect(out[0]).toEqual(p(50 * 60_000, 105));
-    expect(out.at(-1)).toEqual(dense.at(-1)); // live 末点保留
+    expect(out.at(-1)).toEqual(dense.at(-1)); // live last point kept
   });
 
   it("uses daily buckets when the span is ~30 days", () => {
-    // 30 天、每天 4 个点 → 应压成日级(≤40 点 → 落到 1 天桶),每天留最后一个。
+    // 30 days, 4 points a day → daily (≤40 points → 1-day buckets), last per day kept.
     const rows: HistoryPoint[] = [];
     for (let d = 0; d < 30; d++)
       for (let k = 0; k < 4; k++) rows.push(p(d * DAY + k * 6 * HOUR, d * 10 + k));
     const out = downsampleSeries(rows);
     expect(out).toHaveLength(30);
-    expect(out[0]).toEqual(p(18 * HOUR, 3)); // day 0 的最后一个(k=3)
+    expect(out[0]).toEqual(p(18 * HOUR, 3)); // day 0's last (k=3)
     expect(out.at(-1)).toEqual(rows.at(-1));
   });
 
   it("collapses an hour of manual-refresh spam to a single point", () => {
-    const spam = Array.from({ length: 12 }, (_, i) => p(i * 5 * 60_000, 100 + i)); // 同一小时 12 次
+    const spam = Array.from({ length: 12 }, (_, i) => p(i * 5 * 60_000, 100 + i)); // 12 times in one hour
     const out = downsampleSeries(spam);
     expect(out).toHaveLength(1);
     expect(out[0]).toEqual(p(11 * 5 * 60_000, 111));
@@ -163,16 +161,15 @@ describe("downsampleSeries", () => {
   });
 
   it("honours a bucket floor, so a short span can't fall below it", () => {
-    // 6 天跨度 + 末日多次同步:自适应会挑 4 小时桶(6d/4h=36 ≤ 40),末日就散成好几个点。
+    // 6-day span with several syncs on the last day: adaptive picks 4h buckets (6d/4h=36 ≤ 40), splitting that day.
     const rows = [p(0, 10), p(2 * DAY, 20), p(4 * DAY, 30)];
     for (let k = 0; k < 4; k++) rows.push(p(6 * DAY + k * 5 * HOUR, 40 + k));
-    expect(downsampleSeries(rows).length).toBeGreaterThan(4); // 无下限 → 末日拆开
-    expect(downsampleSeries(rows, 40, DAY)).toHaveLength(4); // 有下限 → 每天一个
+    expect(downsampleSeries(rows).length).toBeGreaterThan(4); // no floor → last day split
+    expect(downsampleSeries(rows, 40, DAY)).toHaveLength(4); // floor → one per day
   });
 });
 
-// Insights 的 X 轴只标到「日」。粒度细于一天时,同一天的多个点会各占一个刻度,
-// 于是轴上连着印出同一个日期 —— 实际见过 7 个 "Jul 28"。
+// The Insights X axis labels days only; sub-daily points repeat the same date label (seen: 7 × "Jul 28").
 describe("toDailySeries", () => {
   const p = (t: number, total: number): HistoryPoint => ({ t, total });
 
@@ -181,7 +178,7 @@ describe("toDailySeries", () => {
       p(0, 10), // day 0
       p(2 * DAY, 20), // day 2
       p(4 * DAY, 30), // day 4
-      p(6 * DAY + 1 * HOUR, 40), // day 6,同日四次同步
+      p(6 * DAY + 1 * HOUR, 40), // day 6, four syncs that day
       p(6 * DAY + 7 * HOUR, 41),
       p(6 * DAY + 13 * HOUR, 42),
       p(6 * DAY + 19 * HOUR, 43),
@@ -189,9 +186,9 @@ describe("toDailySeries", () => {
     const out = toDailySeries(rows);
 
     const days = out.map((x) => Math.floor(x.t / DAY));
-    expect(new Set(days).size).toBe(days.length); // 没有重复的日期刻度
+    expect(new Set(days).size).toBe(days.length); // no duplicate date ticks
     expect(out).toHaveLength(4);
-    expect(out.at(-1)).toEqual(p(6 * DAY + 19 * HOUR, 43)); // 当天收盘值,与主页总额同源
+    expect(out.at(-1)).toEqual(p(6 * DAY + 19 * HOUR, 43)); // that day's close, same source as the home total
   });
 
   it("leaves an already-daily series alone", () => {
@@ -200,7 +197,7 @@ describe("toDailySeries", () => {
   });
 });
 
-// 接口发的原料 → 首页/洞察页那条曲线(FOL-38)。以前这一段在服务端,现在在浏览器里跑。
+// API raw data → the home/insights curve, computed in the browser.
 describe("toPortfolioCurve", () => {
   const rows = [
     { accountId: "a1", takenAt: 1000, totalUsd: 10 },
@@ -212,54 +209,53 @@ describe("toPortfolioCurve", () => {
     accountTotals: pairs.map(([id, totalUsd]) => ({ account: { id }, totalUsd })),
   });
 
-  it("末点换成实时净值(总览按账户那张表加起来),其余点原样", () => {
+  it("last point becomes the live net worth (sum of the overview's per-account totals); others unchanged", () => {
     const curve = toPortfolioCurve(live("a1", "a2"), totals(["a1", 900], ["a2", 99]));
 
     expect(curve).toEqual([
       { t: 1000, total: 10 },
       { t: 1500, total: 15 },
-      { t: 2000, total: 999 }, // 冻结值是 25,被实时净值顶替
+      { t: 2000, total: 999 }, // frozen value 25, replaced by live net worth
     ]);
   });
 
-  // 曲线不按自定义 Tab 的 pin 收窄,而总览可以是收窄过的 —— 那份表里少几个账户。
-  // 少一个就不换末点:显示一个「慢一拍的冻结值」,好过显示一个「凭空矮一截的实时值」。
-  it("总览没覆盖曲线的每个活跃账户 → 末点保持冻结值,不画一个错的数", () => {
+  // The curve ignores tab pins but the overview may be narrowed and miss accounts. If any is missing keep
+  // the last point frozen: a slightly stale value beats a live value that is mysteriously too low.
+  it("overview missing an active account of the curve → last point stays frozen, no wrong number", () => {
     const curve = toPortfolioCurve(live("a1", "a2"), totals(["a1", 900]));
 
-    expect(curve.at(-1)).toEqual({ t: 2000, total: 25 }); // 冻结值,不是 900
-    // 前面的点一个字不变 —— 这条分支只影响末点。
+    expect(curve.at(-1)).toEqual({ t: 2000, total: 25 }); // frozen value, not 900
+    // Earlier points unchanged — this branch only affects the last point.
     expect(curve.slice(0, -1)).toEqual([
       { t: 1000, total: 10 },
       { t: 1500, total: 15 },
     ]);
   });
 
-  it("总览多几个账户不算数 —— 末点只加曲线自己那几个", () => {
-    const curve = toPortfolioCurve(live("a1"), totals(["a1", 900], ["别人的", 1_000_000]));
+  it("extra accounts in the overview don't count — last point sums only the curve's own", () => {
+    const curve = toPortfolioCurve(live("a1"), totals(["a1", 900], ["someone-else", 1_000_000]));
 
     expect(curve.at(-1)).toEqual({ t: 2000, total: 900 });
   });
 
-  it("全员归档(一个活跃账户都没有)→ 末点是 0,不是把冻结值挂在那儿", () => {
+  it("everyone archived (no active accounts) → last point is 0, not the frozen value", () => {
     const curve = toPortfolioCurve(live(), totals());
 
     expect(curve.at(-1)).toEqual({ t: 2000, total: 0 });
   });
 
-  it("归档时刻表照样管用(过了 JSON 那一趟仍是 pair 数组)", () => {
+  it("archive map still works (still a pair array after the JSON trip)", () => {
     const raw = { rows, archivedAt: [["a2", 1800] as [string, number]], liveAccountIds: ["a1"] };
     expect(toPortfolioCurve(raw, totals(["a1", 7])).map((p) => p.total)).toEqual([10, 15, 7]);
-    // 中间那个点在 a2 归档之前,仍含它的 5;这条钉住 pair 数组真的被读成了归档表 ——
-    // 读丢的话它会变成 15 之后一路带着 a2 的幽灵值。
+    // The middle point precedes a2's archiving so still has its 5; if the pairs weren't read as an archive
+    // map it would be 15 and carry a2's ghost value onward.
     const earlier = { ...raw, archivedAt: [["a2", 1200] as [string, number]] };
     expect(toPortfolioCurve(earlier, totals(["a1", 7])).map((p) => p.total)).toEqual([10, 10, 7]);
   });
 
-  // 不变量(固定种子随机原料):末点 = Σ 曲线自己那几个活跃账户的实时净值(总览覆盖不全时 = 冻结值);
-  // 末点时刻 = 最后一行快照的时刻;其余点(不降采样时)与阶梯重建逐点相同;严格升序,没有 NaN。
-  // 原料随机:乱序行、同刻多账户、归档、没有快照的活跃账户、总览多 / 少账户、长窗 sampled。
-  it("随机原料:末点就是实时净值、时刻升序、无 NaN", () => {
+  // Invariants over seeded random data: last point = Σ live values of the curve's active accounts (frozen if
+  // the overview is incomplete) at the last snapshot's time; other points match step rebuild; ascending, no NaN.
+  it("random data: last point is live net worth, times ascending, no NaN", () => {
     let seed = 99;
     const rand = () => {
       seed = (seed * 1103515245 + 12345) % 2 ** 31;
@@ -272,19 +268,19 @@ describe("toPortfolioCurve", () => {
       const ids = Array.from({ length: int(1, 5) }, (_, i) => `a${i}`);
       const rows = Array.from({ length: int(1, 200) }, () => ({
         accountId: ids[int(0, ids.length - 1)],
-        takenAt: int(0, 300) * HOUR, // 时刻粗 → 同刻多账户常见
+        takenAt: int(0, 300) * HOUR, // coarse times → many accounts share a time
         totalUsd: int(0, 1_000_000) / 100,
       }));
       const archivedAt: [string, number][] = ids
         .filter(() => rand() < 0.25)
         .map((id) => [id, int(0, 300) * HOUR]);
       const archived = new Set(archivedAt.map(([id]) => id));
-      // 活跃账户 = 没归档的那些,外加偶尔一个还没快照的新账户。
+      // Active = unarchived, plus occasionally a new account with no snapshot yet.
       const liveAccountIds = [
         ...ids.filter((id) => !archived.has(id)),
         ...(rand() < 0.2 ? ["fresh"] : []),
       ];
-      const pool = [...liveAccountIds, ...(rand() < 0.3 ? ["别人的"] : [])];
+      const pool = [...liveAccountIds, ...(rand() < 0.3 ? ["someone-else"] : [])];
       const dropOne = liveAccountIds.length > 0 && rand() < 0.2;
       const covered = dropOne ? pool.filter((id) => id !== liveAccountIds[0]) : pool;
       const accountTotals = covered.map((id) => ({
@@ -317,7 +313,7 @@ describe("toPortfolioCurve", () => {
     expect(frozen).toBeGreaterThan(30);
   });
 
-  it("一个点都没有 → 空曲线,不凭空造一个当下点", () => {
+  it("no points → empty curve, no invented live point", () => {
     expect(
       toPortfolioCurve({ rows: [], archivedAt: [], liveAccountIds: ["a1"] }, totals(["a1", 1234])),
     ).toEqual([]);

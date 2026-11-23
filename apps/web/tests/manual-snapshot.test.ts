@@ -87,7 +87,7 @@ describe("manualUnitPrices", () => {
         { id, price: { unitPrice, asOf: 0, stale: false } } as unknown as TokenRecord,
       ]),
     );
-  // Fake fxResolve: USD always 1 (like the real FxRates.resolve); others from the table, else undefined.
+  // Fake fxResolve: USD always 1 (like FxRates.resolve); others from the table, else undefined.
   const fakeFx = (rates: Record<string, number> = {}) => {
     const asked: string[] = [];
     const resolve = (code: string) =>
@@ -242,7 +242,7 @@ describe("manualUnitPrices", () => {
   });
 });
 
-// Synthesized rows flow through the existing assembly: selfPrice=null marks to the live source price,
+// Synthesized rows flow through the existing assembly: selfPrice=null marks to the live price,
 // falling back to the baked usdValue only when the source price is missing.
 describe("synthesized manual rows mark to market via deriveLiveAccountTotals", () => {
   const account = () =>

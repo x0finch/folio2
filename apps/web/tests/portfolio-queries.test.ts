@@ -2,12 +2,8 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { account, resetWorld, server, tag, world } from "./helpers/fake-portfolio-server";
 
-// 账户域 / 组合域的读取入口(queryOptions)+ 非 hook 的快照原料组装:
-// · 请求按组合分份、历史窗口进 key 而起点不进 key(否则每帧一条新缓存);
-// · 外壳赖以存在的两条读(账户清单、组合清单)在浏览器里永不放弃重试(FOL-58 回归);
-// · pin 写后刷 tab 条时 pins / 标签必须真重拉,不能吃缓存里的旧值;
-// · 快照原料只算活跃账户、key 用整点锚(同一小时内复用缓存)。
-// 只替换 server fn 这层取数,其余走真代码。
+// Account/portfolio read entry points (queryOptions) and non-hook snapshot-input assembly.
+// Only the server-fn fetch layer is replaced; everything else runs for real.
 
 vi.mock("@/lib/server/accounts", () =>
   import("./helpers/fake-portfolio-server").then((m) => m.modules.accounts),
@@ -48,7 +44,7 @@ const { fetchPortfolioSnapshotAtoms } = await import("@/lib/queries/portfolio-ov
 const { tagListQuery } = await import("@/lib/queries/tags");
 
 const HOUR = 3_600_000;
-const T0 = Date.UTC(2026, 9, 4, 10, 5); // 10:05 —— 整点锚是 10:00
+const T0 = Date.UTC(2026, 9, 4, 10, 5); // 10:05; the hour anchor is 10:00
 
 let qc: QueryClient;
 
@@ -66,7 +62,7 @@ afterEach(() => {
 });
 
 describe("accountListQuery", () => {
-  it("按组合各取一份,解回 JSON 行", async () => {
+  it("fetches one per portfolio, decodes JSON rows", async () => {
     world.accounts = { p1: [account({ id: "a1" })], p2: [account({ id: "b1" })] };
     const p1 = await qc.fetchQuery(accountListQuery("p1"));
     const p2 = await qc.fetchQuery(accountListQuery("p2"));
@@ -75,7 +71,7 @@ describe("accountListQuery", () => {
     expect(server.listAccounts).toHaveBeenCalledWith({ data: { portfolioId: "p1" } });
   });
 
-  it("浏览器里失败不认命:超过默认 5 次仍继续重试,直到拿到", async () => {
+  it("in the browser failures keep retrying past the default 5 until success", async () => {
     vi.stubGlobal("window", {});
     let calls = 0;
     server.listAccounts.mockImplementation(async () => {
@@ -90,7 +86,7 @@ describe("accountListQuery", () => {
 });
 
 describe("accountHistoryQuery / holdingHistoryQuery", () => {
-  it("窗口档位进 key,现算的起点不进:同档位换起点仍命中同一份缓存", async () => {
+  it("window tier is in the key, the computed start is not: a new start with the same tier hits the same cache", async () => {
     const base = { accountId: "a1", range: "30d" as const, connectorId: "binance" as const };
     await qc.fetchQuery(accountHistoryQuery({ ...base, since: 1000 }));
     await qc.fetchQuery(accountHistoryQuery({ ...base, since: 2000 }));
@@ -99,7 +95,7 @@ describe("accountHistoryQuery / holdingHistoryQuery", () => {
     expect(server.getAccountHistory).toHaveBeenCalledTimes(2);
   });
 
-  it("请求带上起点、窗口与 connectorId(服务端据此分流)", async () => {
+  it("request carries start, window and connectorId (the server routes on them)", async () => {
     const out = await qc.fetchQuery(
       accountHistoryQuery({ accountId: "a1", range: "7d", since: 42, connectorId: "manual" }),
     );
@@ -109,7 +105,7 @@ describe("accountHistoryQuery / holdingHistoryQuery", () => {
     expect(out).toEqual({ points: [] });
   });
 
-  it("单个持仓的历史:按 holdingKey 请求,同样只按窗口进 key", async () => {
+  it("single-holding history: requested by holdingKey, keyed by window only", async () => {
     await qc.fetchQuery(holdingHistoryQuery({ holdingKey: "tok:eth", range: "1y", since: 5 }));
     await qc.fetchQuery(holdingHistoryQuery({ holdingKey: "tok:eth", range: "1y", since: 9 }));
     expect(server.getTokenValueHistory).toHaveBeenCalledTimes(1);
@@ -118,14 +114,14 @@ describe("accountHistoryQuery / holdingHistoryQuery", () => {
     });
   });
 
-  it("手记账户明细按 accountId 请求", async () => {
+  it("manual account details requested by accountId", async () => {
     await qc.fetchQuery(manualAccountQuery("m1"));
     expect(server.getManualAccount).toHaveBeenCalledWith({ data: { accountId: "m1" } });
   });
 });
 
-describe("组合域读取", () => {
-  it("组合清单在浏览器里同样永不放弃重试", async () => {
+describe("Portfolio reads", () => {
+  it("the portfolio list also retries forever in the browser", async () => {
     vi.stubGlobal("window", {});
     let calls = 0;
     server.listPortfolios.mockImplementation(async () => {
@@ -137,7 +133,7 @@ describe("组合域读取", () => {
     expect(calls).toBe(7);
   });
 
-  it("走势缺省是 30 天窗口", async () => {
+  it("trend defaults to a 30-day window", async () => {
     await qc.fetchQuery(portfolioHistoryQuery("p1"));
     expect(server.getPortfolioHistory).toHaveBeenCalledWith({
       data: { portfolioId: "p1", range: "30d" },
@@ -145,20 +141,20 @@ describe("组合域读取", () => {
     expect(qc.getQueryData(portfolioHistoryQuery("p1", "30d").queryKey)).toEqual({ points: [] });
   });
 
-  it("tab 条 pin 原料按组合请求", async () => {
+  it("tab strip pin inputs requested per portfolio", async () => {
     await qc.fetchQuery(portfolioTabPinsQuery("p1"));
     expect(server.getPortfolioTabPins).toHaveBeenCalledWith({ data: { portfolioId: "p1" } });
   });
 });
 
-describe("fetchHomeTabStrip —— pin 写后刷 tab 条", () => {
-  it("pins 与标签无视缓存重拉:新钉的 tag pin 带着最新的标签名出现", async () => {
+describe("fetchHomeTabStrip — refreshing the tab strip after a pin write", () => {
+  it("pins and tags refetch past the cache: a new tag pin shows the latest tag name", async () => {
     world.accounts = { p1: [account({ id: "a1" })] };
     world.accountTags = [{ accountId: "a1", tagId: "t1" }];
-    // 缓存里是写之前的样子:还没有 pin,标签叫旧名字(且仍在 staleTime 内)。
+    // Cache holds the pre-write state: no pin yet, tag has the old name (still within staleTime).
     qc.setQueryData(portfolioTabPinsQuery("p1").queryKey, { pins: [], connectorMeta: [] });
     qc.setQueryData(tagListQuery("p1").queryKey, [tag("t1", "Old")]);
-    // 服务端已是写之后的样子。
+    // The server already has the post-write state.
     world.tabPins = {
       pins: [{ id: "pin-1", kind: "tag", tagId: "t1", connectorId: null, accountId: null }],
       connectorMeta: [],
@@ -172,7 +168,7 @@ describe("fetchHomeTabStrip —— pin 写后刷 tab 条", () => {
     ]);
   });
 
-  it("指向已不在本组合的账户的 pin 不出现;只有归档账户 → 视为没有账户", async () => {
+  it("pins pointing at accounts no longer in this portfolio are dropped; only archived accounts -> no accounts", async () => {
     world.accounts = { p1: [account({ id: "a1", archivedAt: 1 })] };
     world.tabPins = {
       pins: [{ id: "pin-a", kind: "account", accountId: "a1", tagId: null, connectorId: null }],
@@ -184,7 +180,7 @@ describe("fetchHomeTabStrip —— pin 写后刷 tab 条", () => {
   });
 });
 
-describe("fetchPortfolioSnapshotAtoms —— 非 hook 路径的快照原料", () => {
+describe("fetchPortfolioSnapshotAtoms — snapshot inputs via the non-hook path", () => {
   beforeEach(() => {
     world.accounts = {
       p1: [
@@ -220,7 +216,7 @@ describe("fetchPortfolioSnapshotAtoms —— 非 hook 路径的快照原料", ()
     ];
   });
 
-  it("只收活跃账户;口径 / 法币参考 / 平台元数据随原料带出", async () => {
+  it("only active accounts; basis / fiat refs / platform meta carried along", async () => {
     const raw = await fetchPortfolioSnapshotAtoms(qc, "p1");
     expect(raw.accounts.map((a) => a.id)).toEqual(["a1", "a2"]);
     expect(raw.snapshots.map(([id]) => id)).toEqual(["a1", "a2"]);
@@ -230,22 +226,22 @@ describe("fetchPortfolioSnapshotAtoms —— 非 hook 路径的快照原料", ()
     expect(raw.now).toBe(Math.floor(T0 / HOUR) * HOUR);
   });
 
-  it("场馆展示名只取在用的(目录里多余的、归档账户的不带);链键交给 platformMeta 去解析", async () => {
+  it("venue display names only for venues in use; chain keys are left to platformMeta", async () => {
     const raw = await fetchPortfolioSnapshotAtoms(qc, "p1");
     expect(raw.connectorMeta).toEqual([["binance", { name: "Binance", logo: "/b.png" }]]);
     expect(server.resolvePlatformMeta).toHaveBeenCalledWith({ data: { chainIds: ["arbitrum"] } });
   });
 
-  it("富化字典瘦身成展示要的字段", async () => {
+  it("enrichment map slimmed to the fields the view needs", async () => {
     const raw = await fetchPortfolioSnapshotAtoms(qc, "p1");
     expect(raw.enriched).toEqual([
       ["eth", { id: "eth", symbol: "ETH", name: "Ether", price: 25, hasLogo: true }],
     ]);
   });
 
-  it("快照 key 用整点锚:同一小时内再取复用缓存,跨过整点才重拉", async () => {
+  it("snapshot key uses the hour anchor: reuse cache within the hour, refetch after it", async () => {
     await fetchPortfolioSnapshotAtoms(qc, "p1");
-    expect(server.getSnapshots).toHaveBeenCalledTimes(2); // 当下 + 24h 前
+    expect(server.getSnapshots).toHaveBeenCalledTimes(2); // now + 24h ago
     vi.setSystemTime(T0 + 10 * 60_000); // 10:15
     await fetchPortfolioSnapshotAtoms(qc, "p1");
     expect(server.getSnapshots).toHaveBeenCalledTimes(2);

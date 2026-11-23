@@ -117,7 +117,7 @@ describe("buildOverview", () => {
       [
         "a2",
         snap("a2", 50, [
-          // Manual: the ref's namer is a data source, but the platform is manual (only the provider knows).
+          // Manual: the ref's namer is a data source, but the platform is manual.
           bal({
             kind: "manual",
             platform: "manual",
@@ -182,8 +182,8 @@ describe("buildOverview", () => {
     const src = view.holdings[0].sources[0];
     expect(src.platform.id).toBe("binance");
     expect(src.platform.name).toBe("Binance"); // from the connector, not "NAME:binance"
-    expect(src.platform.logo).toBe("/api/logo/platform/binance"); // proxy URL (no `:` -> no encoding needed)
-    expect(asked).not.toContain("binance"); // not sent to platforms.resolve -> no CoinGecko round-trip
+    expect(src.platform.logo).toBe("/api/logo/platform/binance"); // proxy URL, no `:` to encode
+    expect(asked).not.toContain("binance"); // no CoinGecko round-trip
   });
 
   it("non-eligible (defi) goes to secondary sections, not Holdings", async () => {
@@ -459,7 +459,7 @@ describe("buildOverview — 24h gain wiring (difference of two endpoints)", () =
       ["a2", snap("a2", 0, [bal({ tokenId: "eth", symbol: "ETH", amount: 2, usdValue: 60 })])],
     ]);
     const view = await runWithOracle(stub, overviewEffect(two, snaps, { prevByAccount: prevMap }));
-    // Rows: +10% (100->110) and +3.33% (60->62); portfolio start 160 -> 12/160 = 7.5%, not the mean 6.67%.
+    // Rows: +10% (100->110) and +3.33% (60->62); portfolio start 160 -> 12/160 = 7.5%, not 6.67%.
     const avg = view.holdings.reduce((s, h) => s + (h.gain24h?.pct ?? 0), 0) / view.holdings.length;
     expect(view.gain24h?.pct).toBeCloseTo(7.5, 4);
     expect(view.gain24h?.pct).not.toBeCloseTo(avg, 2);
@@ -467,7 +467,7 @@ describe("buildOverview — 24h gain wiring (difference of two endpoints)", () =
 });
 
 // Rows must sum to the headline. Holdings only include nonzero current value, so a sold-out token
-// would drop its gain from the rows (1 ETH -> 3000 USDC shows only "USDC +3000" against a 0 headline).
+// would drop its gain from the rows (1 ETH -> 3000 USDC shows "USDC +3000" vs a 0 headline).
 // Sold-out tokens keep a row: current value 0, gain = 0 - value 24h ago.
 describe("buildOverview — sold-out tokens", () => {
   const accounts = [account("a1", "Arb")];
@@ -496,7 +496,7 @@ describe("buildOverview — sold-out tokens", () => {
       overviewEffect(accounts, now, { prevByAccount: prevMap }),
     );
     const eth = view.holdings.find((h) => h.token.id === "eth");
-    expect(eth?.token).toMatchObject({ id: "eth", name: "USD Coin" }); // the stub enriches every id to the USDC row
+    expect(eth?.token).toMatchObject({ id: "eth", name: "USD Coin" }); // stub enriches every id as USDC
     expect(eth?.token.logo).toBeDefined();
   });
 
@@ -545,7 +545,7 @@ describe("buildOverview — sold-out tokens", () => {
         if (rand() < 0.8) prevMap.set(a.id, snap(a.id, 0, held(0.5)));
       }
       const view = await runWithOracle(stub, overviewEffect(accs, now, { prevByAccount: prevMap }));
-      if (view.gain24h == null) continue; // no account with a baseline -> headline `—`, nothing to compare
+      if (view.gain24h == null) continue; // no baseline anywhere -> headline `—`
       const sum = view.holdings.reduce((s, h) => s + (h.gain24h?.amount ?? 0), 0);
       expect(sum).toBeCloseTo(view.gain24h.amount, 6);
     }
@@ -600,7 +600,7 @@ describe("buildOverview — DeFi protocol row 24h gain (difference of two endpoi
     const gain = view.sections[0].defi[0].gain24h;
     expect(gain?.amount).toBeCloseTo(10_000, 6); // net 20k - 10k
     expect(gain?.pct).toBeCloseTo(100, 4); // denominator = start net value 10k
-    expect(gain?.start).toBeCloseTo(10_000, 6); // start net value is carried along (the merge side needs it)
+    expect(gain?.start).toBeCloseTo(10_000, 6); // carried for the merge side
   });
 
   it("empty start group -> null, UI renders `—`", async () => {

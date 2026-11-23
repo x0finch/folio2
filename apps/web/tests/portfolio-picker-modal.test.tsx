@@ -6,14 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PortfolioSummary } from "@/lib/hooks/use-portfolio";
 import { messages } from "@/lib/i18n/messages";
 
-// Portfolio 弹窗的两种用法(ADR 0033):
-// · manage:改名 / 设默认 / 删除(删除走二层确认页)—— 默认组合不给设默认、不给删;
-// · move:把账户归到某个组合,当前所在那个点了不发请求;左下角进二层新建组合。
-// 钉住的是「每个动作调哪个 server fn、带什么参数、成功 / 失败之后界面落在哪」:
-// 成功回到列表(或关窗),失败报一句且不关、不丢用户正在做的事。
-//
-// AnimatePresence 换成直通:页与页之间的 morph 是 MorphingModal 的事;这里要的是「现在显示哪一页」,
-// 而 jsdom 里退场动画不一定走完,旧页会赖在 DOM 里让「回到列表」这种断言恒真。
+// Portfolio modal in manage mode (rename / set default / delete) and move mode (assign an account).
+// AnimatePresence is a pass-through: exit animations may not finish in jsdom, so an old page would
+// linger and make "back to the list" assertions vacuous.
 const fns = vi.hoisted(() => ({
   createPortfolio: vi.fn(),
   deletePortfolio: vi.fn(),
@@ -75,7 +70,7 @@ function mount(props: { mode: "manage" | "move"; open?: boolean; currentPortfoli
     </QueryClientProvider>,
   );
   const buttons = () => [...document.body.querySelectorAll("button")];
-  // 按可见文字找「普通」按钮:滑动操作钮也带同样的文字,但它们有 aria-label,排除掉。
+  // Find "plain" buttons by visible text; swipe action buttons share the text but have aria-label.
   const byText = (text: string) =>
     buttons().find(
       (b) => b.textContent?.trim() === text && !b.hasAttribute("aria-label"),
@@ -91,15 +86,15 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("PortfolioPickerModal — 关着", () => {
-  it("open=false → 什么都不渲染", () => {
+describe("PortfolioPickerModal — closed", () => {
+  it("open=false -> renders nothing", () => {
     const { heading } = mount({ mode: "manage", open: false });
     expect(heading()).toEqual([]);
   });
 });
 
 describe("PortfolioPickerModal — manage", () => {
-  it("列出全部组合,默认那个带 Default 徽标;只有非默认的有「设默认 / 删除」", () => {
+  it("lists all portfolios, the default one has a Default badge; only non-defaults offer set default / delete", () => {
     const { heading, text, byLabel } = mount({ mode: "manage" });
     expect(heading()).toEqual([tp.manageTitle]);
     for (const p of PORTFOLIOS) expect(text()).toContain(p.name);
@@ -108,23 +103,23 @@ describe("PortfolioPickerModal — manage", () => {
     expect(byLabel(tc.delete)).toHaveLength(2);
   });
 
-  it("设为默认 → setDefaultPortfolio(该组合)", async () => {
+  it("set as default -> setDefaultPortfolio(that portfolio)", async () => {
     fns.setDefaultPortfolio.mockResolvedValue(undefined);
     const { byLabel } = mount({ mode: "manage" });
-    fireEvent.click(byLabel(tp.setDefault)[0]); // 第一个非默认:p2
+    fireEvent.click(byLabel(tp.setDefault)[0]); // first non-default: p2
     await waitFor(() =>
       expect(fns.setDefaultPortfolio).toHaveBeenCalledWith({ data: { portfolioId: "p2" } }),
     );
   });
 
-  it("设默认失败 → 报错", async () => {
+  it("set default fails -> error shown", async () => {
     fns.setDefaultPortfolio.mockRejectedValue(new Error("boom"));
     const { byLabel } = mount({ mode: "manage" });
     fireEvent.click(byLabel(tp.setDefault)[0]);
     await waitFor(() => expect(fns.toastError).toHaveBeenCalledWith(tp.manageFailed));
   });
 
-  it("改名 → renamePortfolio(id, 新名),成功后退出编辑", async () => {
+  it("rename -> renamePortfolio(id, new name), exits edit mode on success", async () => {
     fns.renamePortfolio.mockResolvedValue(undefined);
     const { byText } = mount({ mode: "manage" });
     fireEvent.click(byText("Degen"));
@@ -139,7 +134,7 @@ describe("PortfolioPickerModal — manage", () => {
     await waitFor(() => expect(document.body.querySelector("input")).toBeNull());
   });
 
-  it("改名失败 → 报错,留在编辑态", async () => {
+  it("rename fails -> error shown, stays in edit mode", async () => {
     fns.renamePortfolio.mockRejectedValue(new Error("boom"));
     const { byText } = mount({ mode: "manage" });
     fireEvent.click(byText("Degen"));
@@ -151,7 +146,7 @@ describe("PortfolioPickerModal — manage", () => {
     expect((document.body.querySelector("input") as HTMLInputElement).value).toBe("Moon");
   });
 
-  it("删除 → 进确认页;取消回列表,不删", async () => {
+  it("delete -> confirm page; cancel returns to the list without deleting", async () => {
     const { byLabel, byText, heading, text } = mount({ mode: "manage" });
     fireEvent.click(byLabel(tc.delete)[1]); // p3
     await waitFor(() => expect(heading()).toEqual([tp.deleteTitle]));
@@ -162,7 +157,7 @@ describe("PortfolioPickerModal — manage", () => {
     expect(fns.deletePortfolio).not.toHaveBeenCalled();
   });
 
-  it("确认删除 → deletePortfolio(该组合),成功提示并回到列表", async () => {
+  it("confirm delete -> deletePortfolio(that portfolio), success toast and back to the list", async () => {
     fns.deletePortfolio.mockResolvedValue(undefined);
     const { byLabel, byText, heading } = mount({ mode: "manage" });
     fireEvent.click(byLabel(tc.delete)[1]);
@@ -176,7 +171,7 @@ describe("PortfolioPickerModal — manage", () => {
     await waitFor(() => expect(heading()).toEqual([tp.manageTitle]));
   });
 
-  it("删除失败 → 报错,留在确认页", async () => {
+  it("delete fails -> error shown, stays on the confirm page", async () => {
     fns.deletePortfolio.mockRejectedValue(new Error("boom"));
     const { byLabel, byText, heading } = mount({ mode: "manage" });
     fireEvent.click(byLabel(tc.delete)[1]);
@@ -186,7 +181,7 @@ describe("PortfolioPickerModal — manage", () => {
     expect(heading()).toEqual([tp.deleteTitle]);
   });
 
-  it("右上角叉叉 / 一层遮罩 → onClose", () => {
+  it("top-right close / first-level backdrop -> onClose", () => {
     const { byLabel, onClose } = mount({ mode: "manage" });
     fireEvent.click(byLabel(tc.close)[0]);
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -194,7 +189,7 @@ describe("PortfolioPickerModal — manage", () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  it("二层(删除确认)点遮罩 → 只退回列表,不关整个弹窗", async () => {
+  it("second level (delete confirm) backdrop -> only back to the list, modal stays open", async () => {
     const { byLabel, heading, onClose } = mount({ mode: "manage" });
     fireEvent.click(byLabel(tc.delete)[0]);
     await waitFor(() => expect(heading()).toEqual([tp.deleteTitle]));
@@ -205,7 +200,7 @@ describe("PortfolioPickerModal — manage", () => {
 });
 
 describe("PortfolioPickerModal — move", () => {
-  it("当前所在的组合标成 current;点它不发请求", async () => {
+  it("current portfolio is marked current; clicking it sends nothing", async () => {
     const { byText } = mount({ mode: "move", currentPortfolioId: "p2" });
     const current = byText("Degen");
     expect(current.getAttribute("aria-current")).toBe("true");
@@ -215,7 +210,7 @@ describe("PortfolioPickerModal — move", () => {
     expect(fns.moveAccountToPortfolio).not.toHaveBeenCalled();
   });
 
-  it("点另一个 → moveAccountToPortfolio(账户, 目标),成功后关窗并提示", async () => {
+  it("clicking another -> moveAccountToPortfolio(account, target), closes with a toast on success", async () => {
     fns.moveAccountToPortfolio.mockResolvedValue(undefined);
     const { byText, onClose } = mount({ mode: "move", currentPortfolioId: "p2" });
     fireEvent.click(byText("Cold"));
@@ -228,7 +223,7 @@ describe("PortfolioPickerModal — move", () => {
     await waitFor(() => expect(fns.toastSuccess).toHaveBeenCalledWith(tp.moved));
   });
 
-  it("移动失败 → 报错,不关窗", async () => {
+  it("move fails -> error shown, modal stays open", async () => {
     fns.moveAccountToPortfolio.mockRejectedValue(new Error("boom"));
     const { byText, onClose } = mount({ mode: "move", currentPortfolioId: "p2" });
     fireEvent.click(byText("Cold"));
@@ -236,7 +231,7 @@ describe("PortfolioPickerModal — move", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("新建组合:名字为空时不可提交;填了 → createPortfolio(去空白的名字),建完回列表", async () => {
+  it("new portfolio: cannot submit when empty; filled -> createPortfolio(trimmed name), back to the list", async () => {
     fns.createPortfolio.mockResolvedValue({ id: "p4", name: "New" });
     const { byText, heading } = mount({ mode: "move", currentPortfolioId: "p1" });
     fireEvent.click(byText(tp.createBadge));
@@ -254,7 +249,7 @@ describe("PortfolioPickerModal — move", () => {
     await waitFor(() => expect(heading()).toEqual([tp.moveToTitle]));
   });
 
-  it("新建失败 → 报错,留在新建页", async () => {
+  it("create fails -> error shown, stays on the create page", async () => {
     fns.createPortfolio.mockRejectedValue(new Error("boom"));
     const { byText, heading } = mount({ mode: "move", currentPortfolioId: "p1" });
     fireEvent.click(byText(tp.createBadge));
@@ -267,7 +262,7 @@ describe("PortfolioPickerModal — move", () => {
     expect(heading()).toEqual([tp.createTitle]);
   });
 
-  it("新建页取消 → 回列表,不建", async () => {
+  it("cancel on the create page -> back to the list, nothing created", async () => {
     const { byText, heading } = mount({ mode: "move", currentPortfolioId: "p1" });
     fireEvent.click(byText(tp.createBadge));
     await waitFor(() => expect(heading()).toEqual([tp.createTitle]));

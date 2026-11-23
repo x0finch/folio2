@@ -221,7 +221,7 @@ describe("liqRisk — safety buffer d = |mark - liq| / mark, plus three states",
     expect(r?.distance).toBeCloseTo(0.031, 3);
   });
   it("mark past liquidation (underwater / dirty snapshot) -> d clamps to 0 -> danger, not falsely safe", () => {
-    // long: liq 80, mark 60 (underwater); a direction-blind distance would be positive (false safe).
+    // long: liq 80, mark 60 (underwater); a direction-blind distance would read safe.
     const r = liqRisk(pos({ size: 1, entryPx: 100, positionValue: 60, liquidationPx: 80 }));
     expect(r?.state).toBe("danger");
     expect(r?.distance).toBe(0);

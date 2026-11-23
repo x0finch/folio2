@@ -101,7 +101,7 @@ describe("planManualBatch", () => {
     const plan = planManualBatch([], [draft({ amount: 3 })]);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
-    // The declaration carries only symbol; the price lives on the activity side (the ledger is its only source).
+    // The declaration carries only symbol; price lives on the activity (the ledger is its only source).
     expect(plan.declare).toEqual([{ id: "tk_btc", symbol: "BTC" }]);
     expect(plan.activities[0].tokenId).toBe("tk_btc");
   });
@@ -153,7 +153,7 @@ describe("planManualBatch", () => {
         activities: [{ kind: "set", amount: 1, occurredAt: 10, createdAt: 1 }],
       }),
     ];
-    // Appending reduce 1 at occurredAt=10 sorts after the existing set 1 -> running holding 0, valid.
+    // Appending reduce 1 at occurredAt=10 sorts after the existing set 1 -> holding 0, valid.
     const plan = planManualBatch(existing, [draft({ kind: "reduce", amount: 1, occurredAt: 10 })]);
     expect(plan.ok).toBe(true);
   });

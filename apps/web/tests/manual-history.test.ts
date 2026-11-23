@@ -9,7 +9,7 @@ import {
   tokenQuantityAt,
 } from "@/lib/core/manual";
 
-// Ledger is the source of truth: value@T = quantity@T x price@T, recomputed on read (no stale points).
+// Ledger is the source of truth: value@T = quantity@T x price@T, recomputed on read.
 const DAY = 86_400_000;
 const T1 = 1 * DAY;
 const T2 = 2 * DAY;
@@ -85,7 +85,7 @@ describe("tokenPriceAt fallback chain", () => {
 });
 
 // Fiat cash: historical price is that day's FX rate, injected via priceAt by the server. The pure
-// layer only sees the recognized+priceAt path, so the curve must follow the rate, not the ledger price.
+// layer only sees the recognized+priceAt path, so the curve must follow the rate, not the ledger.
 describe("fiat cash: historical price uses the injected daily rate (path 1)", () => {
   const eur: HistoryToken = {
     id: "eur",
@@ -176,15 +176,15 @@ describe("buildManualAccountSeries(grid, ADR 0019)", () => {
       recognized: true,
       activities: [act("set", 1, T1, 60000)],
     };
-    // priceAt prices per day bucket (1000 x bucket) -> uses oracle price, not ledger 60000; curve rises.
+    // priceAt prices per day bucket (1000 x bucket) -> oracle price, not ledger 60000.
     const priceAt = (id: string, t: number) =>
       id === "tk" ? 1000 * Math.floor(t / DAY) : undefined;
     const series = buildManualAccountSeries("acc", [btc], T3, priceAt);
-    expect(series[0]).toEqual({ accountId: "acc", takenAt: T1, totalUsd: 1000 }); // bucket 1 -> 1000
-    expect(last(series)).toEqual({ accountId: "acc", takenAt: T3, totalUsd: 3000 }); // bucket 3 -> 3000
+    expect(series[0]).toEqual({ accountId: "acc", takenAt: T1, totalUsd: 1000 }); // bucket 1
+    expect(last(series)).toEqual({ accountId: "acc", takenAt: T3, totalUsd: 3000 }); // bucket 3
     expect(series.length).toBeGreaterThan(2); // intermediate day points reflect price moves
     const totals = series.map((p) => p.totalUsd);
-    expect(totals).toEqual([...totals].sort((a, b) => a - b)); // quantity fixed at 1 -> monotone with price
+    expect(totals).toEqual([...totals].sort((a, b) => a - b)); // quantity 1 -> monotone
   });
 
   it("holding outside the window: first activity long before now, curve runs to now with folded holdings", () => {
@@ -210,7 +210,7 @@ describe("buildManualAccountSeries(grid, ADR 0019)", () => {
       unitPrice: 100,
       activities: [act("set", 1, T2, 50000)],
     };
-    expect(buildManualAccountSeries("acc", [before], T3)[0].takenAt).toBe(T2); // start = the only activity
+    expect(buildManualAccountSeries("acc", [before], T3)[0].takenAt).toBe(T2); // the only activity
 
     // Backdate "bought 0.5 at T1" -> start moves to T1; at T3 the set still resets to 1.
     const after: HistoryToken = {
@@ -219,8 +219,8 @@ describe("buildManualAccountSeries(grid, ADR 0019)", () => {
       activities: [act("add", 0.5, T1, 40000), act("set", 1, T2, 50000)],
     };
     const series = buildManualAccountSeries("acc", [after], T3);
-    expect(series[0]).toEqual({ accountId: "acc", takenAt: T1, totalUsd: 0.5 * 40000 }); // new start
-    expect(last(series)).toEqual({ accountId: "acc", takenAt: T3, totalUsd: 1 * 50000 }); // set resets to 1
+    expect(series[0]).toEqual({ accountId: "acc", takenAt: T1, totalUsd: 0.5 * 40000 });
+    expect(last(series)).toEqual({ accountId: "acc", takenAt: T3, totalUsd: 1 * 50000 }); // set resets
   });
 
   it("deleting a past activity -> full recompute, no stale values", () => {
