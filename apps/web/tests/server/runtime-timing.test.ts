@@ -4,8 +4,8 @@ import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { runEffect } from "@/lib/server/runtime";
 
-// server fn 在 Workers 日志里路径是 REDACTED —— 靠 runEffect 这一行 info 排快慢。
-// 只钉 handler + durationMs(+ forUser 挂上的 userId),不碰入参(P6.7)。
+// server fn paths are REDACTED in Workers logs, so the runEffect info line is the only timing signal.
+// Pins handler + durationMs (+ userId from forUser) and nothing from the input.
 
 const captured: LogRecord[] = [];
 
@@ -38,7 +38,7 @@ const expectSafeTiming = (timing: LogRecord | undefined, handler: string) => {
 };
 
 describe("server fn timing", () => {
-  it("成功也打 handler + durationMs", async () => {
+  it("also logs handler + durationMs on success", async () => {
     await captureLogs();
     const handleNoop = Effect.fn("noopTiming")(function* () {
       return yield* Effect.succeed(null);
@@ -48,7 +48,7 @@ describe("server fn timing", () => {
     expectSafeTiming(timingOf(), "noopTiming");
   });
 
-  it("失败也打 handler + durationMs", async () => {
+  it("also logs handler + durationMs on failure", async () => {
     await captureLogs();
     const handleFail = Effect.fn("failTiming")(function* () {
       return yield* Effect.fail(new InvalidInput({ what: "test", why: "nope" }));
@@ -60,7 +60,7 @@ describe("server fn timing", () => {
     expectSafeTiming(timingOf(), "failTiming");
   });
 
-  it("durationMs 反映 handler 真实耗时(而非描述构建期的 ~0)", async () => {
+  it("durationMs reflects real handler time (not the ~0 of building the description)", async () => {
     await captureLogs();
     const handleSlow = Effect.fn("slowTiming")(function* () {
       yield* Effect.sleep("50 millis");
@@ -70,8 +70,7 @@ describe("server fn timing", () => {
 
     const timing = timingOf();
     expectSafeTiming(timing, "slowTiming");
-    // 修 bug 前计时测的是「描述构建」,两次 performance.now() 只差几微秒 → durationMs 恒 ~0,
-    // 这条会红。修后计时落在真正的执行区间 → 应 ≳ 睡眠时长。阈值放宽到 20 避免调度抖动。
+    // Timing must span execution, not effect construction; 20ms threshold absorbs scheduler jitter.
     expect(timing?.properties?.durationMs as number).toBeGreaterThanOrEqual(20);
   });
 });

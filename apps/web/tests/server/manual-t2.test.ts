@@ -5,8 +5,7 @@ import { dbFor } from "./db-effect";
 import { createManualAccount, injectManualSnapshots, manualBalancesForWarm } from "./manual-fns";
 import { ticketOf } from "./ticket";
 
-// T2(ADR 0018)服务端集成:manual 退出 snapshot、当下值由 creds 现造。真实 D1(Miniflare)。
-// 不隔离每测存储 → beforeEach 重置。
+// Server-side integration: manual accounts write no snapshots and their current value is synthesized from creds. Real D1 (Miniflare); storage is not isolated per test, so beforeEach resets.
 const USER = "user-manual-t2";
 
 async function resetUser(): Promise<void> {
@@ -21,8 +20,7 @@ async function resetUser(): Promise<void> {
 
 beforeEach(resetUser);
 
-// 合成余额不再带 symbol / tokenRef(#243:都住 Token 那一行)。「这条余额认成了哪个上游币」
-// 改由它的 token_id 反查 token_refs 的 coingecko 那一档 —— 选了币 → `issued:<coinId>`,没选 → null。
+// Which upstream coin a synthesized balance maps to is read back via its token_id from token_refs' coingecko namer: `issued:<coinId>` if a coin was picked, else null.
 async function coingeckoRefOf(tokenId: string | null | undefined): Promise<string | null> {
   if (!tokenId) return null;
   const row = await env.DB.prepare(
@@ -34,7 +32,7 @@ async function coingeckoRefOf(tokenId: string | null | undefined): Promise<strin
 }
 
 describe("injectManualSnapshots (D1 round-trip)", () => {
-  it("为 manual 账户注入合成当下项(cache 冷 → 回退 unitPrice)", async () => {
+  it("injects a synthesized current item for a manual account (cold cache -> falls back to unitPrice)", async () => {
     const account = await createManualAccount(
       USER,
       "My BTC",
@@ -49,16 +47,15 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
     const synth = byAccount.get(account.id);
     expect(synth).toBeDefined();
     expect(synth?.balances.map((b) => b.amount)).toEqual([0.5]);
-    // 测试环境 token 缓存空 → enrich 无价 → 回退 amount × unitPrice = 0.5 × 64000。
+    // Token cache is empty in tests -> enrich has no price -> falls back to amount x unitPrice = 0.5 x 64000.
     expect(synth?.snapshot.totalUsd).toBe(32000);
     expect(synth?.balances[0].selfPrice).toBeNull();
-    // 选了 bitcoin → 该行的 token 认成 coingecko 的 bitcoin(身份住 Token,#243)。
+    // Bitcoin was picked -> the row's token resolves to coingecko's bitcoin (identity lives on the Token).
     expect(await coingeckoRefOf(synth?.balances[0].tokenId)).toBe("issued:bitcoin");
   });
 
-  // 给已 mint 的 per-user token(coingecko ref = `issued:<coinId>`)灌一个市价 —— 模拟同步的
-  // 队列 `prices` 活 / 手动同步收尾刷过价之后、缓存里有价的状态。新参考层价 facet 就在
-  // 该用户 `tokens` 行上(#199),读路径 enrich 从这里取(cache-only,零网络)。
+  // Seeds a market price for an already-minted per-user token (coingecko ref `issued:<coinId>`), as after a
+  // sync's `prices` job; the read path's enrich takes it from the user's `tokens` row (cache-only, no network).
   async function warmUserPrice(coinId: string, unitPrice: number): Promise<void> {
     const row = await env.DB.prepare(
       "SELECT token_id FROM token_refs WHERE user_id = ? AND namer = 'coingecko' AND local_name = ?",
@@ -73,11 +70,10 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
       .run();
   }
 
-  // **#223 / #227:手敲的 symbol 不许拿别人的价。**
-  // 没选币的手记币其 token 行 `ref` 为空、从不链 CGK —— enrich 按 token_id 只看它自己那行,
-  // 结构上就够不到任何真币的价(哪怕同用户库里另有一个有市价的真 USDC)。故自填价恒赢。
-  it("没选币 → 用他填的单价,哪怕库里另有个有市价的真 USDC", async () => {
-    // 同用户库里先摆一个真 USDC(选了币 + 有市价)——证明隔离靠的是 token_id,不是没币可拿。
+  // A hand-typed symbol must never pick up someone else's price: a token with no picked coin has an empty
+  // `ref` and never links to CoinGecko, so enrich cannot reach any real coin's price. The own price always wins.
+  it("no coin picked -> uses their unit price, even if a real USDC with a market price exists", async () => {
+    // A real USDC (picked + priced) in the same user's DB proves isolation comes from token_id, not from nothing to fetch.
     await createManualAccount(
       USER,
       "Picked USDC",
@@ -96,13 +92,13 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
     await injectManualSnapshots(USER, accounts, byAccount, 1_700_000_000_000);
 
     const synth = byAccount.get(account.id);
-    // 没选币 → token 没有 coingecko 那一档(它自己命名 manual/custom:USDC),故够不到真 USDC 的价。
+    // No coin picked -> the token has no coingecko namer (it is named manual/custom:USDC), so it can't reach the real USDC price.
     expect(await coingeckoRefOf(synth?.balances[0].tokenId)).toBeNull();
-    expect(synth?.snapshot.totalUsd).toBe(7770); // 10 × 777,不是 10 × 1
+    expect(synth?.snapshot.totalUsd).toBe(7770); // 10 x 777, not 10 x 1
   });
 
-  // 对照:选了币、缓存里有价就该拿市价 —— 否则上面那条用「一律不问价」也能绿,等于没测。
-  it("选了币 + 缓存有价 → 拿市价,不是他填的单价", async () => {
+  // Control: with a coin picked and a cached price the market price must win, else the case above passes trivially.
+  it("coin picked + cached price -> uses the market price, not their unit price", async () => {
     const account = await createManualAccount(
       USER,
       "Picked USDC",
@@ -110,7 +106,7 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
         { symbol: "USDC", unitPrice: "777", amount: "10", ticket: ticketOf("usd-coin") },
       ]),
     );
-    await warmUserPrice("usd-coin", 1); // mint 之后灌价(新层价 facet 在 per-user token 行上)
+    await warmUserPrice("usd-coin", 1); // seed the price after mint (price facet is on the per-user token row)
     const accounts = await dbFor(USER).accounts.list();
     const byAccount = new Map<string, SnapshotWithBalances>();
     await injectManualSnapshots(USER, accounts, byAccount, 1_700_000_000_000);
@@ -120,7 +116,7 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
     expect(synth?.snapshot.totalUsd).toBe(10); // 10 × 1
   });
 
-  it("非 manual 账户不注入", async () => {
+  it("non-manual accounts are not injected", async () => {
     const btc = await dbFor(USER).accounts.create({
       connectorId: "bitcoin",
       label: "BTC wallet",
@@ -133,9 +129,9 @@ describe("injectManualSnapshots (D1 round-trip)", () => {
   });
 });
 
-// 刷价用的合成余额收集器(`prices/job.ts` 的 heldTokenIdsOf,与 injector enrich 门同源)。
+// Synthesized-balance collector for price refresh (heldTokenIdsOf in `prices/job.ts`, same source as the injector's enrich gate).
 describe("manualBalancesForWarm", () => {
-  it("返回活跃 manual 账户的合成余额,排除归档", async () => {
+  it("returns synthesized balances of active manual accounts, excluding archived", async () => {
     await createManualAccount(
       USER,
       "Active",
@@ -152,9 +148,9 @@ describe("manualBalancesForWarm", () => {
     );
     await dbFor(USER).accounts.setArchived(archived.id, true);
 
-    const accounts = await dbFor(USER).accounts.list(); // 含归档
+    const accounts = await dbFor(USER).accounts.list(); // includes archived
     const balances = await manualBalancesForWarm(USER, accounts);
-    // 只应含活跃账户的币(BTC),不含归档账户的币(ETH)。身份走 token_id(#243:无 symbol/tokenRef)。
+    // Only active accounts' coins (BTC), not the archived account's (ETH). Identity goes by token_id.
     expect(balances).toHaveLength(1);
     expect(await coingeckoRefOf(balances[0].tokenId)).toBe("issued:bitcoin");
   });

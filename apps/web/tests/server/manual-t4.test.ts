@@ -12,8 +12,8 @@ import {
 } from "./manual-fns";
 import { ticketOf } from "./ticket";
 
-// T4(#156)服务端支撑:抽屉读路径 loadManualAccountDetail(token 定义 + 折叠 amount + 全部活动)+ fee 落库 round-trip。
-// 真实 D1(Miniflare);不隔离每测存储 → beforeEach 重置。开仓 set = Date.now(),后续活动用远未来 LATER 排其后。
+// Drawer read path loadManualAccountDetail (token definitions + folded amount + all activities) and fee persistence round-trip.
+// Real D1 (Miniflare); storage not isolated per test, so beforeEach resets. The opening set uses Date.now(); later activities use a far-future LATER to sort after it.
 const USER = "user-manual-t4";
 const LATER = 4_000_000_000_000;
 
@@ -39,7 +39,7 @@ async function seedAccount() {
 }
 
 describe("loadManualAccountDetail", () => {
-  it("返回 token(带 DB id + 折叠 amount)+ 全部活动(带 tokenId)", async () => {
+  it("returns the token (with DB id + folded amount) + all activities (with tokenId)", async () => {
     const account = await seedAccount();
     await addManualActivities(USER, account.id, [
       {
@@ -55,15 +55,15 @@ describe("loadManualAccountDetail", () => {
     const [btc] = detail.tokens;
     expect(btc.symbol).toBe("BTC");
     expect(btc.ticket).toBe(ticketOf("bitcoin"));
-    expect(btc.amount).toBe(1.5); // 开仓 set 1 + add 0.5
+    expect(btc.amount).toBe(1.5); // opening set 1 + add 0.5
     expect(typeof btc.id).toBe("string");
 
-    // 活动:开仓 set + add,均挂在该 token 上。
+    // Activities: opening set + add, both on this token.
     expect(detail.activities.map((a) => a.kind).sort()).toEqual(["add", "set"]);
     expect(detail.activities.every((a) => a.tokenId === btc.id)).toBe(true);
   });
 
-  it("空账户(无 token)→ 空 detail", async () => {
+  it("empty account (no tokens) -> empty detail", async () => {
     const account = await dbFor(USER).accounts.create({
       connectorId: "manual",
       label: "empty",
@@ -73,9 +73,9 @@ describe("loadManualAccountDetail", () => {
     expect(detail).toEqual({ tokens: [], activities: [] });
   });
 
-  // 法币持仓的票走 **fiat 命名者**(coingecko 那档恒空)—— 不给的话前端拿不到票:预填/再选会掉进
-  // 「手动输入」→ mint 成自定义币而非原法币,还被 ownedOptions 的「有票才收」滤掉(用户报的两个 bug)。
-  it("法币持仓:ticket 走 fiat ref,可解回同一条法币身份", async () => {
+  // Fiat holdings' tickets use the fiat namer (coingecko's is always empty); without one the frontend can't
+  // get a ticket, so prefill/reselect would mint a custom token instead of the fiat one and ownedOptions would filter it out.
+  it("fiat holding: ticket uses the fiat ref and decodes back to the same fiat identity", async () => {
     const eurTicket = tokenTicket.encode(tokenRef.issued(FIAT_NAMER, "EUR"));
     const account = await createManualAccount(
       USER,
@@ -87,38 +87,38 @@ describe("loadManualAccountDetail", () => {
     expect(detail.tokens).toHaveLength(1);
     const [eur] = detail.tokens;
     expect(eur.symbol).toBe("EUR");
-    // 有票(非 null)且解回 fiat/issued:EUR —— 再选它 mint 回同一条(不是 custom)。
+    // Has a ticket (non-null) that decodes to fiat/issued:EUR; reselecting it mints the same token (not custom).
     expect(eur.ticket).not.toBeNull();
     expect(tokenTicket.decode(eur.ticket ?? "", FIAT_NAMER)).toBe("fiat/issued:EUR");
   });
 
-  // #269 端到端:侧边栏「加 activity」的「已有代币」组数据 = loadManualAccountDetail → buildOwnedOptions。
-  // 钉住(1)有票的都收(2)**已清仓(0 余额)的旧持仓仍在**(刻意不看余额)(3)自定义(无票)排除。
-  it("已有代币组:含已清仓(0 余额)的有票持仓,排除自定义(无票)", async () => {
-    const account = await seedAccount(); // BTC 开仓 set 1(ticket=bitcoin)
+  // End to end: the sidebar "add activity" owned-tokens group = loadManualAccountDetail -> buildOwnedOptions.
+  // Pins: (1) anything with a ticket is included (2) sold-out (0 balance) old holdings remain (balance is deliberately ignored) (3) custom (no ticket) excluded.
+  it("owned-tokens group: includes sold-out (0 balance) holdings with a ticket, excludes custom (no ticket)", async () => {
+    const account = await seedAccount(); // BTC opening set 1 (ticket=bitcoin)
     await addManualActivities(USER, account.id, [
-      // BTC 全部卖出 → 余额 0,但仍是账户里的持仓(有 activity + 票)。
+      // BTC fully sold -> balance 0, but still a holding of the account (has activity + ticket).
       {
         token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
         kind: "reduce",
         amount: 1,
         occurredAt: LATER + 1,
       },
-      // 手敲的自定义币(没选币 → 无票)。
+      // Hand-typed custom token (no coin picked -> no ticket).
       { token: { symbol: "PRIV", unitPrice: 5 }, kind: "add", amount: 3, occurredAt: LATER + 2 },
     ]);
     const detail = await loadManualAccountDetail(USER, account.id);
-    expect(detail.tokens.find((t) => t.symbol === "BTC")?.amount).toBe(0); // 已清仓
-    expect(detail.tokens.find((t) => t.symbol === "PRIV")?.ticket).toBeNull(); // 自定义无票
+    expect(detail.tokens.find((t) => t.symbol === "BTC")?.amount).toBe(0); // sold out
+    expect(detail.tokens.find((t) => t.symbol === "PRIV")?.ticket).toBeNull(); // custom, no ticket
 
     const owned = buildOwnedOptions(detail.tokens, new Map());
-    // BTC(0 余额、有票)在;PRIV(无票)不在。
+    // BTC (0 balance, has ticket) is present; PRIV (no ticket) is not.
     expect(owned.map((o) => o.symbol)).toEqual(["BTC"]);
   });
 });
 
-describe("fee 落库 round-trip", () => {
-  it("批量加活动带 fee → 存库可读回", async () => {
+describe("fee persistence round-trip", () => {
+  it("batch-adding activities with fee -> readable after storing", async () => {
     const account = await seedAccount();
     await addManualActivities(USER, account.id, [
       {
@@ -136,7 +136,7 @@ describe("fee 落库 round-trip", () => {
     expect(added?.price).toBe(60000);
   });
 
-  it("编辑活动可改 fee(含清空为 null)", async () => {
+  it("editing an activity can change fee (including clearing to null)", async () => {
     const account = await seedAccount();
     await addManualActivities(USER, account.id, [
       {
@@ -152,7 +152,7 @@ describe("fee 落库 round-trip", () => {
     );
     if (!added) throw new Error("add missing");
 
-    // 改 fee 5 → 20
+    // fee 5 -> 20
     let res = await editManualActivity(USER, added.id, { fee: 20 });
     expect(res.ok).toBe(true);
     expect(
@@ -160,7 +160,7 @@ describe("fee 落库 round-trip", () => {
         ?.fee,
     ).toBe(20);
 
-    // 清空 fee → null
+    // clear fee -> null
     res = await editManualActivity(USER, added.id, { fee: null });
     expect(res.ok).toBe(true);
     expect(

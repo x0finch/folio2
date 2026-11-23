@@ -1,4 +1,4 @@
-// workers-pool 测试环境绑定:DB(Miniflare D1)+ 注入的迁移数组。
+// workers-pool test bindings: DB (Miniflare D1) plus the injected migrations array.
 declare namespace Cloudflare {
   interface Env {
     DB: D1Database;

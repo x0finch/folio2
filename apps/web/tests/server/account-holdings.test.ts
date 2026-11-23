@@ -5,17 +5,10 @@ import { readAccountHoldingsView } from "./_kit/run";
 import { dbFor } from "./db-effect";
 import { addManualActivities } from "./manual-fns";
 
-// 归档 = 封存(ADR 0039):账户页的按账户明细**要包含归档账户**,显示的是封存那一刻的数。
-//
-// 为什么这条测试非落在真 D1 不可:它跨了账户、快照、manual 合成注入、富化四层,而「归档账户在不在
-// 里面」正是跨层才看得出来的事 —— 隔壁 `scenarios.test.ts` 记着同一个教训(边界两侧各测一遍,
-// 挡不住跨边界传错值)。
-//
-// 出网一律打桩成抛错:这条路径按设计不出网(价格取自快照与本地参考层),任何一次外呼都得看得见。
-// **#527 后续件 4:五条同层同保真度的用例摘去了新家** —— 「归档在列表里且值停封存」「默认路径
-// 不算盈亏」「归档拿 undefined(账户级与现货行)」「没基准给 null」现在住 `portfolio/
-// account-holdings.test.ts` 与 `portfolio/gain.test.ts`(同一个 runForUser + 真 D1,断言相同)。
-// 留在这里的都是那边没有的:跨链盈亏摊分、manual 与同步账户共用 token_id。
+// Archiving seals: the per-account breakdown must include archived accounts, showing the sealed-moment value. Needs real D1 because it
+// spans accounts, snapshots, manual synthetic injection and enrichment, which only shows across layers. Outbound is stubbed to throw
+// (prices come from snapshots and the local reference layer). Same-fidelity cases live in `portfolio/account-holdings.test.ts` and
+// `portfolio/gain.test.ts`; what stays here is cross-chain gain apportionment and manual/synced accounts sharing a token_id.
 const USER = "user-account-holdings";
 
 let outbound: string[] = [];
@@ -31,7 +24,7 @@ beforeEach(async () => {
   outbound = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     outbound.push(String(input));
-    throw new Error(`本用例不该出网,却请求了 ${String(input)}`);
+    throw new Error(`this case must not go outbound, but requested ${String(input)}`);
   });
 });
 
@@ -45,9 +38,8 @@ const evmAccount = (label: string, address: string) =>
     creds: JSON.stringify({ address }),
   });
 
-// 盈亏(两端相减,ADR 0050)+ 现价重算(FOL-44)现在都在浏览器 `accountRowsFromRaw` 里做,
-// 服务端只发原子原料。这里走 `readAccountHoldingsView` 把两段接起来跑,断言的是「原子发料 + 浏览器算」
-// 走完的最终视图 —— 与生产读路径(`useAccountHoldingsView`)逐值一致。
+// Gain (end-to-end subtraction) and live repricing now run in the browser's `accountRowsFromRaw`; the server ships only raw atoms.
+// `readAccountHoldingsView` wires the two halves together, so assertions see the final view, value for value as the production read path.
 const rowsByLabel = async () => {
   const view = await readAccountHoldingsView(USER);
   return {
@@ -56,8 +48,8 @@ const rowsByLabel = async () => {
   };
 };
 
-describe("按账户明细与归档", () => {
-  it("归档账户没有快照(从没同步过就归档了)→ 退成空,但那一行仍在", async () => {
+describe("per-account breakdown and archiving", () => {
+  it("archived account has no snapshot (archived before ever syncing) -> falls back to empty, but its row remains", async () => {
     const never = await evmAccount("NeverSynced", "0xnever");
     await dbFor(USER).accounts.setArchived(never.id, true);
 
@@ -69,36 +61,35 @@ describe("按账户明细与归档", () => {
   });
 });
 
-describe("现价重算:账户页与首页同一口径(FOL-44)", () => {
-  // 浏览器实测发现的口径 bug:账户页(列表 + 抽屉)以前直接取快照冻结的 totalUsd / usdValue,
-  // 于是显示的是上次同步那一刻的旧价、24h 涨跌恒 $0 —— 与首页 / 单币那边的实时值打架。
-  // 修法:活跃账户逐行走 `liveValue`(与首页 `deriveLiveAccountTotals` 同口径),盯市行取参考层现价。
+describe("live repricing: account page and home use the same basis", () => {
+  // Account page (list + drawer) used to take the snapshot-frozen totalUsd / usdValue, showing stale prices and a flat $0 24h change.
+  // Active accounts now go row by row through `liveValue` (same basis as home's `deriveLiveAccountTotals`); marked-to-market rows use the reference layer's live price.
   const seedPrice = (tokenId: string, unitPrice: number) =>
     env.DB.prepare("UPDATE tokens SET unit_price = ?, price_as_of = ? WHERE id = ?")
       .bind(unitPrice, Date.now(), tokenId)
       .run();
 
-  it("活跃账户按参考层现价重算,不再显示上次同步的冻结值", async () => {
+  it("active accounts reprice from the reference layer's live price, not the last sync's frozen value", async () => {
     const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
       { namer: "coingecko", localName: "issued:bitcoin" },
     ]);
     const acc = await evmAccount("Repriced", "0xreprice");
-    // 快照冻结在 $100(1 BTC × 同步那刻的价);盯市行不写 selfPrice → 读时恒用源价。
+    // Snapshot frozen at $100 (1 BTC x the price at sync); marked-to-market rows write no selfPrice -> read time always uses the source price.
     await dbFor(USER).snapshots.write(acc.id, {
       takenAt: Date.now(),
       totalUsd: 100,
       balances: [{ amount: 1, usdValue: 100, kind: "spot", platform: "evm:1", tokenId: btc }],
     });
-    await seedPrice(btc, 150); // 参考层现价涨到 $150
+    await seedPrice(btc, 150); // reference layer live price rises to $150
 
     const { of } = await rowsByLabel();
     const row = of("Repriced");
-    // 旧代码:100(取快照冻结 totalUsd)。修好后按现价 $150 重算 —— 账户级与那行都是。
+    // Frozen totalUsd would give 100; repricing gives $150 at both account level and row level.
     expect(row?.totalUsd).toBeCloseTo(150, 4);
     expect(row?.balances[0]?.usdValue).toBeCloseTo(150, 4);
   });
 
-  it("归档账户不现推,仍显示封存那一刻的冻结值(ADR 0039)", async () => {
+  it("archived accounts are not repriced: still show the frozen value from the sealing moment", async () => {
     const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
       { namer: "coingecko", localName: "issued:bitcoin-sealed" },
     ]);
@@ -112,19 +103,19 @@ describe("现价重算:账户页与首页同一口径(FOL-44)", () => {
     await dbFor(USER).accounts.setArchived(acc.id, true);
 
     const { of } = await rowsByLabel();
-    // 现价 150 摆着也不动它:封存 = 显示快照那一刻的数,不现推。
+    // The live price 150 doesn't move it: sealed = the snapshot-moment value, not repriced.
     expect(of("Sealed")?.totalUsd).toBeCloseTo(100, 4);
     expect(of("Sealed")?.balances[0]?.usdValue).toBeCloseTo(100, 4);
   });
 
-  it("24h 涨跌当前端用现价(不再是冻结值 = 起点 → 恒 $0)", async () => {
+  it("24h change uses live prices on the frontend (not frozen value = start point -> always $0)", async () => {
     const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
       { namer: "coingecko", localName: "issued:bitcoin-gain" },
     ]);
     const acc = await evmAccount("LiveGain", "0xlivegain");
     const DAY = 24 * 60 * 60 * 1000;
     const now = floorToHour(Date.now());
-    // 24h 前与当下**两张快照冻结值相同**($100)—— 旧代码两端相减恒得 $0。
+    // The two snapshots' frozen values are equal ($100) 24h ago and now, so subtracting the two ends would always give $0.
     for (const t of [now - DAY, now] as const) {
       await dbFor(USER).snapshots.write(acc.id, {
         takenAt: t,
@@ -132,17 +123,16 @@ describe("现价重算:账户页与首页同一口径(FOL-44)", () => {
         balances: [{ amount: 1, usdValue: 100, kind: "spot", platform: "evm:1", tokenId: btc }],
       });
     }
-    await seedPrice(btc, 150); // 现价 $150 → 现值 150 − 起点 100 = +50
+    await seedPrice(btc, 150); // live price $150 -> current 150 - start 100 = +50
 
     const { of } = await rowsByLabel();
     expect(of("LiveGain")?.gain24h?.amount).toBeCloseTo(50, 4);
   });
 });
 
-describe("账户行的 24h 盈亏(ADR 0040)", () => {
-  // 与代币行同一套装配,只是**线按账户攒**而不是按币。这组打真 D1 是因为跨了账户、快照历史、
-  // 富化三层 —— 尤其「归档账户拿到的是 undefined(不该有)而不是 null(算不出)」这个区分,
-  // 只有走完整条链才看得出来。
+describe("account row 24h gain", () => {
+  // Same assembly as token rows, but lines accumulate per account rather than per coin. Real D1 since it spans accounts, snapshot
+  // history and enrichment; in particular "archived accounts get undefined (shouldn't have one), not null (can't compute)" only shows end to end.
 
   const withHistory = async (label: string, address: string, then: number, nowValue: number) => {
     const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
@@ -156,13 +146,13 @@ describe("账户行的 24h 盈亏(ADR 0040)", () => {
     });
     const now = floorToHour(Date.now());
     const DAY = 24 * 60 * 60 * 1000;
-    // 24 小时前那张(基准)
+    // Snapshot 24 hours ago (baseline)
     await dbFor(USER).snapshots.write(acc.id, {
       takenAt: now - DAY,
       totalUsd: then,
       balances: [{ amount: 1, usdValue: then, kind: "spot", platform: "evm:1", tokenId: btc }],
     });
-    // 最新那张(当下)
+    // Latest snapshot (now)
     await dbFor(USER).snapshots.write(acc.id, {
       takenAt: now,
       totalUsd: nowValue,
@@ -171,17 +161,17 @@ describe("账户行的 24h 盈亏(ADR 0040)", () => {
     return acc;
   };
 
-  it("整条路径不出网", async () => {
+  it("whole path makes no outbound calls", async () => {
     await withHistory("Quiet", "0xd", 100, 110);
     await rowsByLabel();
     expect(outbound).toEqual([]);
   });
 });
 
-describe("抽屉现货行的逐币盈亏(ADR 0040)", () => {
+describe("drawer spot rows' per-coin gain", () => {
   const DAY = 24 * 60 * 60 * 1000;
 
-  it("同一个币散在多条链 —— 各行加起来等于这个币的总盈亏,不是每行都认领全部", async () => {
+  it("one coin spread across several chains -- rows sum to the coin's total gain, not each row claiming all of it", async () => {
     const usdc = await dbFor(USER).transfer.importToken({ symbol: "USDC", name: "USD Coin" }, [
       { namer: "coingecko", localName: "issued:usd-coin" },
     ]);
@@ -191,8 +181,8 @@ describe("抽屉现货行的逐币盈亏(ADR 0040)", () => {
       label: "Multi",
       creds: JSON.stringify({ address: "0xmulti" }),
     });
-    // **数量固定,只有市值变** —— 数量也跟着变的话这就成了「加仓」,按剔除资金进出的口径
-    // 盈亏正是 0(算法没错,是夹具会写错的地方)。
+    // Quantity fixed, only market value changes: a changing quantity would be an "add position" whose gain is 0 under the
+    // flow-excluding basis (the algorithm is right; the fixture is what could be wrong).
     const legs = (a: number, b: number) => [
       { amount: 60, usdValue: a, kind: "spot" as const, platform: "evm:1", tokenId: usdc },
       { amount: 40, usdValue: b, kind: "spot" as const, platform: "evm:8453", tokenId: usdc },
@@ -213,21 +203,21 @@ describe("抽屉现货行的逐币盈亏(ADR 0040)", () => {
     const rows = of("Multi")?.balances ?? [];
     expect(rows).toHaveLength(2);
     const amounts = rows.map((b) => b.gain24h?.amount ?? 0);
-    // 该币一共赚了 10;两行按 66/110 与 44/110 摊分 → 6 与 4
+    // The coin earned 10 in total; two rows split 66/110 and 44/110 -> 6 and 4
     expect(amounts.reduce((s, x) => s + x, 0)).toBeCloseTo(10, 4);
     expect(Math.max(...amounts)).toBeCloseTo(6, 4);
-    // 每行都认领全部的话,两行都会是 10、加起来 20
+    // If every row claimed all of it, both would be 10, summing to 20
     expect(Math.max(...amounts)).not.toBeCloseTo(10, 2);
   });
 });
 
-describe("manual 账户的抽屉现货行", () => {
-  // 浏览器实测发现:抽屉头显示 −$1,524.85,而它下面唯一那行 BTC 却是 `—` —— 同一个账户同一个币,
-  // 两个数打架。账户级和逐币级用的是同一份原料、同一个装配,不该有一个算得出、另一个算不出。
+describe("manual account drawer spot rows", () => {
+  // The drawer header showed -$1,524.85 while its only BTC row below showed `—`: same account, same coin, two numbers fighting.
+  // Account-level and per-coin use the same raw input and assembly, so one shouldn't compute while the other doesn't.
   const DAY = 24 * 60 * 60 * 1000;
   const localBtc = { symbol: "BTC", unitPrice: 100 };
 
-  it("账户头算得出时,它下面那行也算得出 —— 两者同源", async () => {
+  it("when the account header computes, the row below it computes too -- same source", async () => {
     const acc = await dbFor(USER).accounts.create({
       connectorId: "manual",
       label: "M1",
@@ -240,28 +230,26 @@ describe("manual 账户的抽屉现货行", () => {
     const { of } = await rowsByLabel();
     const row = of("M1");
     expect(row?.gain24h).not.toBeUndefined();
-    expect(row?.gain24h).not.toBeNull(); // 账户头算得出
+    expect(row?.gain24h).not.toBeNull(); // account header computes
     expect(row?.balances).toHaveLength(1);
-    // 这一条就是浏览器里看到的那个矛盾
+    // This is the contradiction seen in the browser
     expect(row?.balances[0].gain24h).not.toBeNull();
   });
 });
 
-describe("复刻真实数据的形状:manual 与同步账户混在一起", () => {
-  // 浏览器实测里那个矛盾(抽屉头有数、其下现货行 `—`)在前面两条简化用例上复现不出来。
-  // 真实环境比它们多三样东西,这里一次全给上:
-  //   ① 一堆**带快照**的同步账户,而且其中一个持有同一个币(用户级 token_id,ADR 0021 → 同一个 id)
-  //   ② 那些快照的时刻在 24 小时前后各一张(29.9h / 17.5h)—— 两端相减(ADR 0050)拿 29.9h 那张
-  //      当起点(仍在 7 天窗口内),同步账户照样算得出
-  //   ③ manual 账户的账本活动也在窗口之外(128h 前),只能靠账本在窗口起点折算的那张合成起点
+describe("replicating real-data shape: manual and synced accounts mixed together", () => {
+  // The header-has-a-number / spot-row-shows-`—` contradiction didn't reproduce in the simpler cases. Real data adds three things, all given here:
+  //   1. several synced accounts with snapshots, one holding the same coin (user-level token_id -> the same id)
+  //   2. snapshots at 29.9h / 17.5h; the end-to-end subtraction takes the 29.9h one as the start (still within the 7d window)
+  //   3. manual ledger activity outside the window (128h ago), so only the synthetic start folded from the ledger at the window start works
   const DAY = 24 * 60 * 60 * 1000;
   const HOUR = 3600_000;
   const localBtc = { symbol: "BTC", unitPrice: 63921 };
 
-  // 两个 manual 共用同一个 token_id 也在这条里:各自的行互不串,都算得出。
-  it("同步账户用窗口内最近的起点(29.9h)算,manual 账户头与其现货行**同时**算得出", async () => {
+  // Two manual accounts sharing one token_id are covered too: each row stays separate and computes.
+  it("synced accounts use the nearest in-window start (29.9h); manual account header and spot row both compute", async () => {
     const now = Date.now();
-    // ① 同步账户:两张快照,29.9h(起点)与 17.5h(当下)
+    // 1. synced accounts: two snapshots, 29.9h (start) and 17.5h (now)
     const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
       { namer: "coingecko", localName: "issued:bitcoin" },
     ]);
@@ -277,7 +265,7 @@ describe("复刻真实数据的形状:manual 与同步账户混在一起", () =>
       });
     }
 
-    // ② 两个 manual 账户,活动都在 128 小时前,持有同一个币
+    // 2. two manual accounts, activity 128h ago, holding the same coin
     const manuals: string[] = [];
     for (const label of ["xxx", "a"]) {
       const m = await dbFor(USER).accounts.create({
@@ -293,22 +281,22 @@ describe("复刻真实数据的形状:manual 与同步账户混在一起", () =>
 
     const { of } = await rowsByLabel();
 
-    // 同步账户:起点 = 29.9h 那张(900k),当下 = 17.5h 那张(958k)→ 两端相减 +58k。
+    // Synced account: start = the 29.9h one (900k), now = the 17.5h one (958k) -> subtracting the two ends gives +58k.
     expect(of("Synced")?.gain24h?.amount).toBeCloseTo(58_000, 4);
 
     for (const label of manuals) {
       const row = of(label);
-      // 抽屉头这个数
-      expect(row?.gain24h, `${label} 账户头`).not.toBeNull();
-      expect(row?.gain24h, `${label} 账户头`).not.toBeUndefined();
-      // 它下面那一行 —— 浏览器里就是这里显示的 `—`
-      expect(row?.balances, `${label} 有持仓行`).toHaveLength(1);
-      expect(row?.balances[0]?.gain24h, `${label} 现货行`).not.toBeNull();
-      expect(row?.balances[0]?.gain24h, `${label} 现货行`).not.toBeUndefined();
+      // the drawer header's number
+      expect(row?.gain24h, `${label} account header`).not.toBeNull();
+      expect(row?.gain24h, `${label} account header`).not.toBeUndefined();
+      // the row below it -- the `—` shown in the browser
+      expect(row?.balances, `${label} has a holding row`).toHaveLength(1);
+      expect(row?.balances[0]?.gain24h, `${label} spot row`).not.toBeNull();
+      expect(row?.balances[0]?.gain24h, `${label} spot row`).not.toBeUndefined();
     }
   });
 
-  it("manual 与同步账户持有同一个 token_id —— 两边的线不串", async () => {
+  it("manual and synced accounts hold the same token_id -- the two sides' lines don't mix", async () => {
     const now = floorToHour(Date.now());
     const btc = await dbFor(USER).transfer.importToken({ symbol: "BTC", name: "Bitcoin" }, [
       { namer: "coingecko", localName: "issued:bitcoin" },
@@ -334,7 +322,7 @@ describe("复刻真实数据的形状:manual 与同步账户混在一起", () =>
     ]);
 
     const { of } = await rowsByLabel();
-    // 同步账户那条有真基准(正好 24h)→ 算得出;manual 那条走账本 → 也算得出。互不影响。
+    // A synced account's line has a real baseline (exactly 24h) -> computes; the manual one goes through the ledger -> computes too. Independent.
     expect(of("S2")?.balances[0]?.gain24h).not.toBeNull();
     expect(of("M9")?.balances[0]?.gain24h).not.toBeNull();
   });

@@ -5,12 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dbFor, globalDb, oracleDbFor } from "./db-effect";
 import { refreshCatalogueFor, syncOne, syncRound } from "./sync-fns";
 
-// 写路径切到 mint 的端到端测试(#200):喂 provider 余额 → 落库 → 快照行带正确的 token_id。
-//
-// 走**真 D1**,不是内存假实现 —— 这一片的全部风险都在真表的约束上(`token_refs` 的主键、
-// 并发下的 upsert-then-read)。内存 fake 用 Map,这些都测不出来。
-//
-// 上游一律**打桩到抛错**:mint 按设计全程不碰网络。任何一次外呼都会让用例红,这正是断言之一。
+// End to end for the mint write path: provider balances in -> persisted -> snapshot rows carry the right token_id.
+// Real D1, not an in-memory fake: the risk is real table constraints (`token_refs` primary key, upsert-then-read under concurrency).
+// The upstream is stubbed to throw: mint never touches the network.
 
 const USER = "user-sync-mint";
 const NAMER = "coingecko";
@@ -29,9 +26,7 @@ async function resetUser(): Promise<void> {
     .run();
 }
 
-// 外呼**计数**,不是抛错。原来这里打桩成抛错、注释写着「任何一次外呼都会让用例红」——
-// 那是假的:SWR 把 fetch 的抛错当「上游没有」吞掉,所以真出网了用例照样绿(#216 顺手修)。
-// 现在既抛错(让意外的外呼有个响动)又记账,断言看的是记账。
+// Counts outbound calls as well as throwing: SWR swallows a throw as "upstream has none", so a throw alone wouldn't fail a case.
 let outbound: string[] = [];
 
 beforeEach(async () => {
@@ -39,13 +34,13 @@ beforeEach(async () => {
   outbound = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     outbound.push(String(input));
-    throw new Error(`写路径不该碰网络,却请求了 ${String(input)}`);
+    throw new Error(`write path must not touch the network, but requested ${String(input)}`);
   });
 });
 
 afterEach(() => vi.restoreAllMocks());
 
-// 预热缓存里放一份 warm 集,让 symbol 那一档在本地就有候选可判(否则它会想回源)。
+// Seeds a warm set in the warm cache so the symbol tier has local candidates (else it would try to go back to source).
 async function seedWarm(
   rows: { id: string; symbol: string; rank: number }[],
   asOf = Date.now(),
@@ -63,13 +58,12 @@ async function seedWarm(
   );
 }
 
-// 那个 Token 被上游认出来了没 —— 读 `token_refs` 里当前命名者那一行(端口回 `Option`,
-// 用例只关心里面那一行,所以在这儿摘掉包装)。
+// Whether the upstream recognized that Token: reads the current namer's row in `token_refs` (the port returns an `Option`, unwrapped here).
 const tokenInfo = async (tokenId: string) =>
   Option.getOrUndefined(await oracleDbFor(USER).tokens.getById(tokenId));
 
 async function seedRefIndex(rows: { ref: string; localName: string }[]): Promise<void> {
-  // chainRef → 整条 upstream ref(#228:表存整条,不是裸 id)。
+  // chainRef -> the whole upstream ref (the table stores the whole ref, not a bare id).
   await globalDb.refIndex.putAll(
     rows.map((r) => ({ chainRef: r.ref, upstreamRef: `${NAMER}/issued:${r.localName}` })),
     Date.now(),
@@ -85,7 +79,7 @@ async function makeAccount(label = "w"): Promise<string> {
   return account.id;
 }
 
-// provider 报的一笔余额(`Balance` 形状 —— 这是编排器收到的东西)。
+// A balance as the provider reports it (`Balance` shape, what the orchestrator receives).
 const bal = (tokenRef: string, symbol: string, over: Record<string, unknown> = {}): Balance =>
   ({
     symbol,
@@ -96,9 +90,8 @@ const bal = (tokenRef: string, symbol: string, over: Record<string, unknown> = {
     ...over,
   }) as Balance;
 
-// **走真编排器**(#202 之后 mint 是编排里独立的一步,跑在 revalue 之前)。
-// 只把取数那一步打桩,mint / revalue / 写快照全用真实现 —— 顺序与 best-effort 语义因此都被覆盖,
-// 不必在测试里复刻编排逻辑(复刻的话,编排顺序一改测试还是绿的,那就白测了)。
+// Runs the real orchestrator (mint is its own step before revalue). Only fetching is stubbed, so mint / revalue /
+// snapshot writes are real and ordering and best-effort semantics are covered without re-implementing orchestration here.
 async function syncWith(balances: Balance[], accountId: string): Promise<string> {
   const accounts = await dbFor(USER).accounts.list();
   const account = accounts.find((a) => a.id === accountId);
@@ -109,7 +102,7 @@ async function syncWith(balances: Balance[], accountId: string): Promise<string>
 }
 
 async function balancesOf(snapshotId: string) {
-  // symbol / token_ref 不再落快照(#243):身份只剩 token_id,上游叫法反查走 store.getById().ref。
+  // symbol / token_ref no longer live on snapshots: identity is only token_id; the upstream naming is looked up via store.getById().ref.
   const { results } = await env.DB.prepare(
     "SELECT token_id as tokenId FROM snapshot_balances WHERE snapshot_id = ?",
   )
@@ -118,8 +111,8 @@ async function balancesOf(snapshotId: string) {
   return results;
 }
 
-describe("落库后快照行带 token_id", () => {
-  it("映射表认得的合约 → 认出上游币,快照行带 token_id", async () => {
+describe("snapshot rows carry token_id after persisting", () => {
+  it("contract known to the mapping table -> upstream coin recognized, snapshot row has token_id", async () => {
     await seedRefIndex([{ ref: USDC_ETH, localName: "usd-coin" }]);
     const accountId = await makeAccount();
 
@@ -129,22 +122,22 @@ describe("落库后快照行带 token_id", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].tokenId).toBeTruthy();
 
-    // 那个 Token 确实被上游认出来了(有 coingecko 那一档的 ref 行)。
+    // That Token really was recognized upstream (has a ref row under the coingecko namer).
     const info = await tokenInfo(rows[0].tokenId as string);
     expect(info?.ref).toBe("coingecko/issued:usd-coin");
   });
 
-  it("映射表没有的合约 → 也建行、快照照写,只是上游没认出来", async () => {
+  it("contract absent from the mapping table -> row still created, snapshot still written, just not recognized upstream", async () => {
     const accountId = await makeAccount();
     const snapshotId = await syncWith([bal("evm:1/contract:0xdeadbeef", "SCAM")], accountId);
 
     const rows = await balancesOf(snapshotId);
-    expect(rows[0].tokenId).toBeTruthy(); // 认不出来也有 token_id,快照不卡在上游上
+    expect(rows[0].tokenId).toBeTruthy(); // has a token_id even unrecognized; the snapshot doesn't block on upstream
     const info = await tokenInfo(rows[0].tokenId as string);
     expect(info?.ref).toBeNull();
   });
 
-  it("原生币走 symbol 那一档(它按设计不进映射表)", async () => {
+  it("native coin goes through the symbol tier (by design it isn't in the mapping table)", async () => {
     await seedWarm([{ id: "ethereum", symbol: "ETH", rank: 2 }]);
     const accountId = await makeAccount();
 
@@ -154,8 +147,8 @@ describe("落库后快照行带 token_id", () => {
     expect((await tokenInfo(rows[0].tokenId as string))?.ref).toBe("coingecko/issued:ethereum");
   });
 
-  // 合约的 symbol 是部署者随手填的 —— 地址查不到就该老实认不出来(#210 的闸)。
-  it("山寨合约的 symbol 写着 USDC 也不许并进真 USDC", async () => {
+  // A contract's symbol is whatever the deployer typed: an address lookup miss must honestly stay unrecognized.
+  it("a lookalike contract with symbol USDC must not merge into the real USDC", async () => {
     await seedRefIndex([{ ref: USDC_ETH, localName: "usd-coin" }]);
     await seedWarm([{ id: "usd-coin", symbol: "USDC", rank: 6 }]);
     const accountId = await makeAccount();
@@ -167,14 +160,13 @@ describe("落库后快照行带 token_id", () => {
 
     const rows = await balancesOf(snapshotId);
     expect(rows).toHaveLength(2);
-    expect(rows[0].tokenId).not.toBe(rows[1].tokenId); // 各占一行
+    expect(rows[0].tokenId).not.toBe(rows[1].tokenId); // one row each
   });
 
-  // **这条曾经只在内存假实现里测过,于是漏掉了一个真 bug**:`coingecko/<id>` 形的 ref 本身
-  // 就是上游的命名(手记里用户选了币),它已经是锚 —— 缺了短路的话会把 [ref, upstreamRef]
-  // 两条相同的 ref 塞进同一批,真表上 `token_refs` 的主键会冲突、**整个账户的快照写失败**。
-  // 内存 fake 用 Map,静静吞掉了这个约束。所以这一支必须在真 D1 上跑。
-  it("上游命名形的 ref(手记选了币)→ 自己就是锚,只出一条 ref 行", async () => {
+  // A `coingecko/<id>` ref is already the upstream's own naming (the user picked a coin manually), so it is the anchor.
+  // Without the short-circuit the same ref ends up twice in one batch and the real table's `token_refs` primary key clashes,
+  // failing the whole account's snapshot write; an in-memory Map fake swallows that, so this must run on real D1.
+  it("upstream-named ref (coin picked manually) -> is its own anchor, yields one ref row", async () => {
     const accountId = await makeAccount();
     const snapshotId = await syncWith([bal("coingecko/issued:usd-coin", "USDC")], accountId);
 
@@ -183,7 +175,7 @@ describe("落库后快照行带 token_id", () => {
 
     const info = await tokenInfo(rows[0].tokenId as string);
     expect(info?.ref).toBe("coingecko/issued:usd-coin");
-    // 只有一条 ref 行 —— 去重生效(不然主键就撞了)。
+    // Only one ref row: dedupe worked (else the primary key would clash).
     const { results } = await env.DB.prepare(
       "SELECT count(*) as n FROM token_refs WHERE user_id = ? AND token_id = ?",
     )
@@ -192,9 +184,9 @@ describe("落库后快照行带 token_id", () => {
     expect(results[0].n).toBe(1);
   });
 
-  // 六个来源的 USDC 落一个 Token(含多链同币:一个 Token + 多条 ref)—— 这一组在内存里测过(mint.test.ts),这里验它在真表上也成立:
-  // 六条 ref 行、一个 token,而且 `token_refs` 的主键不会在任何一步撞上。
-  it("六个来源的 USDC → 一个 Token、六条 ref 行", async () => {
+  // USDC from six sources lands on one Token (multi-chain same coin: one Token + several refs); covered in memory by mint.test.ts,
+  // this checks it holds on the real table: six ref rows, one token, and the `token_refs` primary key never clashes.
+  it("USDC from six sources -> one Token, six ref rows", async () => {
     await seedRefIndex([
       { ref: USDC_ETH, localName: "usd-coin" },
       { ref: USDC_ARB, localName: "usd-coin" },
@@ -216,25 +208,25 @@ describe("落库后快照行带 token_id", () => {
     );
 
     const rows = await balancesOf(snapshotId);
-    expect(new Set(rows.map((r) => r.tokenId)).size).toBe(1); // 全落一个 Token
+    expect(new Set(rows.map((r) => r.tokenId)).size).toBe(1); // all land on one Token
     const { results } = await env.DB.prepare(
       "SELECT count(*) as n FROM token_refs WHERE user_id = ? AND token_id = ?",
     )
       .bind(USER, rows[0].tokenId)
       .all<{ n: number }>();
-    expect(results[0].n).toBe(6); // 六条来源各一行
+    expect(results[0].n).toBe(6); // one row per source
   });
 });
 
-describe("perp 两类行都有 token_id", () => {
-  it("权益行与单仓位行都拿到 token_id", async () => {
+describe("perp rows both have token_id", () => {
+  it("equity row and single-position row both get token_id", async () => {
     await seedWarm([{ id: "usd-coin", symbol: "USDC", rank: 6 }]);
     const accountId = await makeAccount("perp");
 
     const snapshotId = await syncWith(
       [
         bal("hyperliquid/issued:USDC", "USDC", { kind: "perp_equity" }),
-        // 单仓位行金额为零、不进聚合,但也该有身份。
+        // The single-position row has zero amount and isn't aggregated, but should still have an identity.
         bal("hyperliquid/issued:BTC", "BTC", { kind: "perp_position", usdValue: 0 }),
       ],
       accountId,
@@ -246,17 +238,16 @@ describe("perp 两类行都有 token_id", () => {
   });
 });
 
-describe("每账户独立落库的性质保住", () => {
-  it("一个账户失败不影响另一个账户落库", async () => {
+describe("per-account independent persistence still holds", () => {
+  it("one account failing doesn't stop the other from persisting", async () => {
     await seedRefIndex([{ ref: USDC_ETH, localName: "usd-coin" }]);
     const bad = await makeAccount("bad");
     const good = await makeAccount("good");
     const accounts = await dbFor(USER).accounts.list();
     const of = (id: string) => accounts.find((a) => a.id === id) as never;
 
-    // **同一轮**里两个账户:坏的取数直接失败(错误通道上给一个 `ConnectorError`)→ syncAccount
-    // 收成 ok:false、不落库、不向上抛;好的照样落库、照样带 token_id。
-    // 「共用一份 deps」在片 3 之后的形状就是「共用一次装配」—— seed 收集器与估值模式活在这一轮里。
+    // Two accounts in the same round: the bad one's fetch fails (a `ConnectorError` on the error channel) -> syncAccount
+    // settles it as ok:false, writes nothing, doesn't throw; the good one still persists with its token_id.
     const [badRes, goodRes] = await syncRound(USER, [
       { account: of(bad), fail: new ConnectorFailure({ message: "provider down" }) },
       { account: of(good), balances: [bal(USDC_ETH, "USDC")] },
@@ -266,13 +257,13 @@ describe("每账户独立落库的性质保住", () => {
     expect((await balancesOf(goodRes.snapshotId as string))[0].tokenId).toBeTruthy();
   });
 
-  // 账户并发跑,同一条 ref 会被同时 mint。靠 store 的 upsert-then-read 幂等收敛,不加 barrier。
-  it("两个账户并发落同一个币 → 只出一个 Token 行", async () => {
+  // Accounts run concurrently, so the same ref is minted at once; the store's upsert-then-read converges idempotently, no barrier.
+  it("two accounts concurrently persist the same coin -> only one Token row", async () => {
     await seedRefIndex([{ ref: USDC_ETH, localName: "usd-coin" }]);
     const a = await makeAccount("a");
     const b = await makeAccount("b");
 
-    // 各起一轮、同时跑 —— 这正是两个请求同时进来时的样子(片 3 之后一轮 = 一次装配)。
+    // One round each, run at the same time -- the shape of two requests arriving together.
     const [s1, s2] = await Promise.all([
       syncWith([bal(USDC_ETH, "USDC")], a),
       syncWith([bal(USDC_ETH, "USDC")], b),
@@ -287,28 +278,26 @@ describe("每账户独立落库的性质保住", () => {
   });
 });
 
-describe("provider 报的元信息进代币行", () => {
-  // 名字与图在编排里会被丢掉(快照不落它们),所以是在取到余额那一刻收的 seed。
-  it("建行用 provider 报的 name / logo(图落备用槽)", async () => {
+describe("provider-reported metadata goes into the token row", () => {
+  // Name and image are dropped by orchestration (snapshots don't store them), so they're a seed captured when balances are fetched.
+  it("row creation uses the provider's name / logo (image goes to the fallback slot)", async () => {
     const accountId = await makeAccount();
-    // seed 是在 `fetchViaConnector` 里收的;本测试把取余额那一层整个换掉、绕开了它,
-    // 所以这里没有 seed —— 正好验「没有 seed 时退回 symbol 一项」这条兜底。
+    // The seed is captured in `fetchViaConnector`; this test swaps the whole balance-fetch layer, bypassing it,
+    // so there is no seed here, which exercises the "fall back to symbol alone without a seed" path.
     const snapshotId = await syncWith([bal("evm:1/contract:0xnoseed", "FOO")], accountId);
     const rows = await balancesOf(snapshotId);
     const info = await tokenInfo(rows[0].tokenId as string);
-    // 没有 seed 时退回 symbol 一项 —— 名字等于 symbol,不是空。
+    // Without a seed it falls back to symbol alone: name equals symbol, not empty.
     expect(info).toMatchObject({ symbol: "FOO", name: "FOO" });
   });
 });
 
-// #216:写路径不为目录新鲜度出网。
-//
-// **symbol 用 LINK 而不是 ETH** —— 主流币都在策展表(OVERRIDES)里,策展查在候选源之前,
-// 用 ETH 的话候选源根本不会被问到,断言就空转了(第一版正是这么写的,两条都没验到东西)。
-describe("写路径不为目录新鲜度出网(#216)", () => {
+// The write path doesn't go outbound for catalogue freshness. Symbol is LINK, not ETH: mainstream coins are in the
+// curated table (OVERRIDES), which is consulted before candidate sources, so ETH would never query them and the assertion would spin idle.
+describe("write path doesn't go outbound for catalogue freshness", () => {
   const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
-  it("目录是一年前的 → symbol 那一档照样认出来,而且零外呼", async () => {
+  it("catalogue is a year old -> the symbol tier still recognizes it, zero outbound calls", async () => {
     await seedWarm([{ id: "chainlink", symbol: "LINK", rank: 15 }], Date.now() - YEAR_MS);
     const accountId = await makeAccount();
 
@@ -316,25 +305,25 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
 
     const rows = await balancesOf(snapshotId);
     expect((await tokenInfo(rows[0].tokenId as string))?.ref).toBe("coingecko/issued:chainlink");
-    expect(outbound).toEqual([]); // ← 本条的重点
+    expect(outbound).toEqual([]); // <- the point of this case
   });
 
-  it("目录里没有这个 symbol → 认不出来,快照照落(不卡在上游上)", async () => {
+  it("symbol absent from the catalogue -> not recognized, snapshot still written (not blocked on upstream)", async () => {
     await seedWarm([{ id: "chainlink", symbol: "LINK", rank: 15 }], Date.now() - YEAR_MS);
     const accountId = await makeAccount();
 
     const snapshotId = await syncWith([bal("binance/issued:ZZZ", "ZZZ")], accountId);
 
     const rows = await balancesOf(snapshotId);
-    expect(rows[0].tokenId).toBeTruthy(); // 有身份
-    expect((await tokenInfo(rows[0].tokenId as string))?.ref).toBeNull(); // 但上游没认出
-    expect(outbound).toEqual([]); // 认不出来也不去问上游
+    expect(rows[0].tokenId).toBeTruthy(); // has an identity
+    expect((await tokenInfo(rows[0].tokenId as string))?.ref).toBeNull(); // but upstream didn't recognize it
+    expect(outbound).toEqual([]); // unrecognized, and upstream isn't asked either
   });
 });
 
-// 目录唯一主动跟进的那条路。**断言看 blob 有没有被换掉**,不看网络调用数 ——
-// 按 URL 数数会把别的 `/coins/markets` 调用也算进来,分不清是谁打的。
-describe("同步后的预热把目录刷上(#216)", () => {
+// The catalogue's only active follow-up path. Asserts whether the blob was replaced, not network call counts:
+// counting by URL would include other `/coins/markets` calls and can't tell who made them.
+describe("post-sync warming refreshes the catalogue", () => {
   const blobAsOf = async (): Promise<number | undefined> => {
     const hit = await dbFor(USER).cache.get("warm");
     return (Option.getOrUndefined(hit)?.value as { asOf: number } | undefined)?.asOf;
@@ -344,8 +333,8 @@ describe("同步后的预热把目录刷上(#216)", () => {
   const LINK = [{ id: "chainlink", symbol: "LINK", rank: 15 }];
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-  // **差分**,不是绝对数:两次跑只有目录的 asOf 不同 → 差出来的那几次就是它。
-  it("目录旧了会去刷,还新就不刷", async () => {
+  // Differential, not absolute: the two runs differ only in the catalogue's asOf, so the extra calls are its.
+  it("stale catalogue triggers a refresh, a fresh one doesn't", async () => {
     await seedWarm(LINK, Date.now());
     await refreshCatalogueFor(USER);
     const fresh = marketsCalls();
@@ -358,7 +347,7 @@ describe("同步后的预热把目录刷上(#216)", () => {
     expect(stale).toBeGreaterThan(fresh);
   });
 
-  it("还新的那份一个字都没被动过", async () => {
+  it("a fresh one is left completely untouched", async () => {
     const fresh = Date.now();
     await seedWarm(LINK, fresh);
 
@@ -367,19 +356,19 @@ describe("同步后的预热把目录刷上(#216)", () => {
     expect(await blobAsOf()).toBe(fresh);
   });
 
-  it("预热去刷但上游挂了 → 旧目录保住,这条活不抛(它是尽力而为的预热)", async () => {
+  it("warming tries to refresh but upstream is down -> old catalogue is kept, the job doesn't throw (best-effort warming)", async () => {
     const stale = Date.now() - WEEK_MS - 1;
     await seedWarm(LINK, stale);
 
     await expect(refreshCatalogueFor(USER)).resolves.toBeUndefined();
 
-    expect(await blobAsOf()).toBe(stale); // 上游被打桩成抛错 → SWR 保留旧值、不写回
+    expect(await blobAsOf()).toBe(stale); // upstream stubbed to throw -> SWR keeps the old value, nothing written back
   });
 });
 
-describe("多行同批不撞 D1 的参数上限", () => {
-  // snapshot_balances 现在 12 列 → 每批 8 行。给 25 行跨 4 批。
-  it("25 笔持仓一次落库,全部带 token_id", async () => {
+describe("multi-row batches stay within D1's parameter limit", () => {
+  // snapshot_balances now has 12 columns -> 8 rows per batch. Seeded with 25 rows across 4 batches.
+  it("25 rows persisted at once, all with token_id", async () => {
     const accountId = await makeAccount();
     const balances = Array.from({ length: 25 }, (_, i) =>
       bal(`evm:1/contract:0x${(i + 1).toString(16).padStart(40, "0")}`, `T${i}`),

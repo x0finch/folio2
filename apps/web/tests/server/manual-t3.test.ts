@@ -13,13 +13,11 @@ import {
 } from "./manual-fns";
 import { ticketOf } from "./ticket";
 
-// T3(#155)服务端写路径集成:持仓 CRUD + 批量活动(原子)+ 删/改活动,全落库。真实 D1(Miniflare)。
-// 不隔离每测存储 → beforeEach 重置。
-// #203 起**没有物化那一步了** —— 断言直接读「持仓定义 + 账本折叠」(compute-on-read),
-// 不再比对 creds.tokens 那个投影(它连同 manual provider 一起删了)。
+// Server write-path integration: holding CRUD + batch activities (atomic) + delete/edit activities, all persisted. Real D1 (Miniflare);
+// storage not isolated per test, so beforeEach resets. Assertions read holding definitions + ledger fold (compute-on-read).
 const USER = "user-manual-t3";
-// seedAccount 的开仓 set 活动 occurredAt = Date.now()(≈1.7e12);后续活动须发生在其**之后**,
-// 否则 set 会重置基线覆盖它们。用一段远未来的时间戳(仍是合法 epoch-ms)确保排序在 set 之后。
+// seedAccount's opening set has occurredAt = Date.now(); later activities must come after it or the set resets the baseline.
+// A far-future (still valid epoch-ms) timestamp guarantees the ordering.
 const LATER = 4_000_000_000_000;
 
 async function resetUser(): Promise<void> {
@@ -34,8 +32,7 @@ async function resetUser(): Promise<void> {
 
 beforeEach(resetUser);
 
-// 某 manual 账户已物化的 creds.tokens(投影)。
-// 该账户的持仓:定义 + 账本折叠出的数量(compute-on-read;#203 之后没有 creds.tokens 那个投影了)。
+// The account's holdings: definitions + quantities folded from the ledger (compute-on-read).
 async function readTokens(accountId: string) {
   const rows = await dbFor(USER).manual.listHoldings(accountId, NAMER);
   return Promise.all(
@@ -48,7 +45,7 @@ async function readTokens(accountId: string) {
   );
 }
 
-// 建一个仅一 token 的 manual 账户(BTC，初始 amount 1）。
+// A manual account with a single token (BTC, initial amount 1).
 async function seedAccount() {
   const account = await createManualAccount(
     USER,
@@ -61,7 +58,7 @@ async function seedAccount() {
 }
 
 describe("createToken", () => {
-  it("建 token + 开仓 set 活动 → creds.tokens 出现该 token,amount === 初始", async () => {
+  it("create token + opening set activity -> token appears, amount === initial", async () => {
     const account = await seedAccount();
     await createToken(USER, {
       accountId: account.id,
@@ -80,7 +77,7 @@ describe("createToken", () => {
 });
 
 describe("updateToken", () => {
-  it("改单价/标识即时反映;改目标 amount → 追加 set 对齐,derived === 新值", async () => {
+  it("price/identity edits reflect immediately; changing the target amount appends an aligning set, derived === new value", async () => {
     const account = await seedAccount();
     const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     await updateToken(USER, {
@@ -88,19 +85,19 @@ describe("updateToken", () => {
       tokenId: btc.id,
       symbol: "BTC",
       unitPrice: 65000,
-      amount: 3, // 从 1 → 3
+      amount: 3, // from 1 to 3
     });
     const tokens = await readTokens(account.id);
     expect(tokens[0].amount).toBe(3);
-    // 应追加了一条对齐 set(原开仓 set + 对齐 set = 2 条),**而改的价落在那一笔上** ——
-    // 价只有账本一个来源,所以「改单价」这件事必须在账本里有落点。
+    // An aligning set is appended (opening set + aligning set = 2), and the price edit lands on that entry:
+    // the ledger is the only source of price, so a price edit needs a place in it.
     const activities = await dbFor(USER).manual.listActivityByToken(account.id, btc.id);
     const sets = activities.filter((a) => a.kind === "set");
     expect(sets).toHaveLength(2);
     expect(sets.at(-1)?.price).toBe(65000);
   });
 
-  it("目标 amount 不变 → 不追加活动", async () => {
+  it("target amount unchanged -> no activity appended", async () => {
     const account = await seedAccount();
     const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     await updateToken(USER, {
@@ -108,14 +105,14 @@ describe("updateToken", () => {
       tokenId: btc.id,
       symbol: "BTC",
       unitPrice: 61000,
-      amount: 1, // 不变
+      amount: 1, // unchanged
     });
     expect(await dbFor(USER).manual.listActivityByToken(account.id, btc.id)).toHaveLength(1);
   });
 });
 
 describe("deleteToken", () => {
-  it("删 token → 从 creds.tokens 消失(活动级联清)", async () => {
+  it("delete token -> gone from holdings (activities cascade)", async () => {
     const account = await seedAccount();
     await createToken(USER, {
       accountId: account.id,
@@ -134,7 +131,7 @@ describe("deleteToken", () => {
 });
 
 describe("addManualActivities", () => {
-  it("草稿指向未持有 token → 现建持仓 + 记活动(原子)", async () => {
+  it("draft points at an unheld token -> creates the holding + records the activity (atomic)", async () => {
     const account = await seedAccount();
     const res = await addManualActivities(USER, account.id, [
       {
@@ -150,11 +147,11 @@ describe("addManualActivities", () => {
     expect(tokens.find((t) => t.symbol === "SOL")?.amount).toBe(10);
   });
 
-  it("整批拒:任一 reduce 在其时点超支 → {ok:false},且什么都不写(原子)", async () => {
+  it("whole batch rejected: any reduce overspending at its point in time -> {ok:false}, nothing written (atomic)", async () => {
     const account = await seedAccount();
     const before = await readTokens(account.id);
     const res = await addManualActivities(USER, account.id, [
-      // 既有 BTC 持有 1;这批同时对既有加 0.5(合法)+ 对新 token DOGE reduce 100(基线 0，超支)。
+      // Existing BTC holding is 1; the batch adds 0.5 to it (valid) + reduces new token DOGE by 100 (baseline 0, overspend).
       {
         token: { symbol: "BTC", unitPrice: 60000, ticket: ticketOf("bitcoin") },
         kind: "add",
@@ -171,7 +168,7 @@ describe("addManualActivities", () => {
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.symbol).toBe("DOGE");
-    // 原子:BTC 未变、DOGE 未建。
+    // Atomic: BTC unchanged, DOGE not created.
     expect(await readTokens(account.id)).toEqual(before);
     expect((await dbFor(USER).manual.listHoldings(account.id, NAMER)).map((t) => t.symbol)).toEqual(
       ["BTC"],
@@ -179,9 +176,9 @@ describe("addManualActivities", () => {
   });
 });
 
-// 越权负路径:验 T3 新增 db ops 的归属守卫(userId-scoped assert + commitManualBatch 的 tokenId∈账户 校验)。
-// 每条守卫失败即抛,从 API 形状上杜绝跨用户/跨账户写。
-describe("越权防御(跨用户 / 跨账户)", () => {
+// Ownership negative paths: guards on the new db ops (userId-scoped assert + commitManualBatch's tokenId-in-account check);
+// each failed guard throws, so cross-user / cross-account writes are ruled out by API shape.
+describe("authorization defense (cross-user / cross-account)", () => {
   const OTHER = "user-manual-t3-other";
   async function ensureOther(): Promise<void> {
     await env.DB.prepare("DELETE FROM user WHERE id = ?").bind(OTHER).run();
@@ -193,9 +190,9 @@ describe("越权防御(跨用户 / 跨账户)", () => {
       .run();
   }
 
-  it("跨用户改持仓 → 抛(token 归属校验)", async () => {
+  it("cross-user edit of a holding -> throws (token ownership check)", async () => {
     await ensureOther();
-    const account = await seedAccount(); // USER 拥有
+    const account = await seedAccount(); // owned by USER
     const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     await expect(
       updateToken(OTHER, {
@@ -208,14 +205,14 @@ describe("越权防御(跨用户 / 跨账户)", () => {
     ).rejects.toThrow();
   });
 
-  it("跨用户清空持仓 → 抛", async () => {
+  it("cross-user clearing of a holding -> throws", async () => {
     await ensureOther();
     const account = await seedAccount();
     const [btc] = await dbFor(USER).manual.listHoldings(account.id, NAMER);
     await expect(deleteToken(OTHER, account.id, btc.id)).rejects.toThrow();
   });
 
-  it("跨用户往他人账户加活动 → 抛(commitManualBatch assertAccountOwned)", async () => {
+  it("cross-user adding an activity to someone else's account -> throws (commitManualBatch assertAccountOwned)", async () => {
     await ensureOther();
     const account = await seedAccount();
     await expect(
@@ -228,21 +225,21 @@ describe("越权防御(跨用户 / 跨账户)", () => {
         },
       ]),
     ).rejects.toThrow();
-    // 未写:USER 的 BTC 仍是 1(OTHER 的操作被挡在 assert,零副作用)。
+    // Not written: USER's BTC is still 1 (OTHER's op was stopped at the assert, zero side effects).
     expect((await readTokens(account.id))[0].amount).toBe(1);
   });
 
-  it("跨用户编辑他人活动 → 抛(getManualActivityOwner)", async () => {
+  it("cross-user edit of someone else's activity -> throws (getManualActivityOwner)", async () => {
     await ensureOther();
     const account = await seedAccount();
     const set = (await dbFor(USER).manual.listActivityByAccount(account.id))[0];
     await expect(editManualActivity(OTHER, set.id, { amount: 2 })).rejects.toThrow();
   });
 
-  // 闸口从「∈ 该账户既有 token」改成了「∈ 本人的 token」(#203)。前者现在会循环:
-  // 账户与币的关系**由活动本身承载**,一条刚声明的持仓在活动插进去之前不属于任何账户。
-  it("同一用户的两个手记账户可以持有同一个币(不再按账户设闸)", async () => {
-    const a = await seedAccount(); // 有 BTC
+  // The guard is "token in own tokens", not "token already in this account": the account-coin relation is
+  // carried by activities themselves, so a just-declared holding belongs to no account before its activity is inserted.
+  it("two manual accounts of one user can hold the same coin (no per-account guard)", async () => {
+    const a = await seedAccount(); // has BTC
     const b = await createManualAccount(
       USER,
       "B",
@@ -256,14 +253,14 @@ describe("越权防御(跨用户 / 跨账户)", () => {
       activities: [{ tokenId: btcTok.id, kind: "add", amount: 1, occurredAt: LATER + 1 }],
     });
 
-    // b 现在也持有它,数量各自独立(a 仍是 1)。
+    // b now holds it too, quantities independent (a is still 1).
     expect((await readTokens(b.id)).find((t) => t.symbol === "BTC")?.amount).toBe(1);
     expect((await readTokens(a.id))[0].amount).toBe(1);
   });
 
-  it("commitManualBatch 拒绝引用别人的 tokenId(纵深防御)", async () => {
+  it("commitManualBatch rejects referencing someone else's tokenId (defense in depth)", async () => {
     await ensureOther();
-    const a = await seedAccount(); // USER 的
+    const a = await seedAccount(); // USER's
     const [btcTok] = await dbFor(USER).manual.listHoldings(a.id, NAMER);
     const other = await createManualAccount(
       OTHER,

@@ -14,9 +14,9 @@ import {
 import { createImporter, type ImportDeps, parseImportLine } from "@/lib/server/io/import";
 import { dbFor } from "./db-effect";
 
-// #204 的核心验收:**导出的文件能单独导进一个空库,总资产与历史曲线跟原库一致**。
-// 走真 wire 路径:导出 → ndjsonLine 串成文本 → parseImportLine 解回 → 单遍导入到一个全新用户。
-// 真 D1(Miniflare)。不隔离每测存储 → beforeEach 重置两个用户。
+// Core acceptance: an exported file imports alone into an empty DB with total assets and history curves matching the source.
+// Real wire path: export -> ndjsonLine text -> parseImportLine -> single-pass import into a fresh user. Real D1 (Miniflare);
+// storage not isolated per test, so beforeEach resets both users.
 
 const SRC = "user-export-src";
 const DST = "user-import-dst";
@@ -36,7 +36,7 @@ beforeEach(async () => {
   await resetUser(DST);
 });
 
-// 复刻 route 的导出流(#204):meta → token → account → snapshot → activity。
+// Re-implements the route's export stream: meta -> token -> account -> snapshot -> activity.
 async function exportRecords(userId: string): Promise<unknown[]> {
   const recs: unknown[] = [metaRecord(1_700_000_000_000)];
   for (const t of await dbFor(userId).transfer.listTokensForExport()) recs.push(tokenRecord(t));
@@ -57,14 +57,13 @@ async function exportRecords(userId: string): Promise<unknown[]> {
   return recs;
 }
 
-// route 的导入 deps,绑到 DST 用户。全走 import*(按内容自然键 find-or-create,幂等/可合并)。
+// The route's import deps bound to the DST user; all go through import* (find-or-create by content natural key, idempotent and mergeable).
 const dstDeps: ImportDeps = {
   categorize: (connectorId) =>
     connectorId === "evm"
       ? { publicKeys: ["address"], semiKeys: [], secretKeys: [] }
       : { publicKeys: [], semiKeys: [], secretKeys: [] },
-  // deps 现在收 Effect(#394 T7),而夹具手上只有门面那套 Promise —— `Effect.promise` 包一层即可:
-  // 这里是**测试的边缘**,不是生产路径上的中途转换。
+  // deps take Effects while the fixture only has the facade's Promises; wrapping in `Effect.promise` is a test-edge adapter.
   importToken: (t, refs) =>
     Effect.promise(async () => ({ id: await dbFor(DST).transfer.importToken(t, refs) })),
   importAccount: (input) =>
@@ -93,7 +92,7 @@ async function importInto(records: unknown[]): Promise<void> {
   }
 }
 
-// —— 造源库数据 ——
+// -- seed the source DB --
 async function seedSource() {
   const accW = await dbFor(SRC).accounts.create({
     connectorId: "evm",
@@ -107,7 +106,7 @@ async function seedSource() {
     label: "Manual",
     creds: JSON.stringify({}),
   });
-  // 一个归档账户(无快照):验证归档态随导出/导入保真,不会变回活跃(#204 review 发现)。
+  // An archived account (no snapshots): archived state must survive export/import and not turn active again.
   const accArch = await dbFor(SRC).accounts.create({
     connectorId: "evm",
     platform: "evm:1",
@@ -126,7 +125,7 @@ async function seedSource() {
   const my = await dbFor(SRC).transfer.importToken({ symbol: "MYCOIN", name: "My Coin" }, [
     { namer: "manual", localName: "custom:MYCOIN" },
   ]);
-  // evm 账户两份快照(历史曲线两点)。
+  // evm account with two snapshots (two history points).
   await dbFor(SRC).snapshots.write(accW.id, {
     takenAt: 1000,
     totalUsd: 100,
@@ -138,7 +137,7 @@ async function seedSource() {
   await dbFor(SRC).snapshots.write(accW.id, {
     takenAt: 2000,
     totalUsd: 150,
-    // 账户级 note(整钱包)
+    // account-level note (whole wallet)
     note: [{ title: "Wallet note", content: "hi" }],
     balances: [
       {
@@ -147,14 +146,14 @@ async function seedSource() {
         usdValue: 90,
         kind: "spot",
         platform: "evm:1",
-        selfPrice: 90000, // 估值原料
-        meta: { foo: "bar" }, // typed meta(perp coin 也走这条)
-        note: { title: "Locked", content: "x" }, // balance 级 note
+        selfPrice: 90000, // valuation input
+        meta: { foo: "bar" }, // typed meta (perp coin takes this path too)
+        note: { title: "Locked", content: "x" }, // balance-level note
       },
       { tokenId: eth, amount: 0.02, usdValue: 60, kind: "spot", platform: "evm:1" },
     ],
   });
-  // manual 账户不写快照(ADR 0018),只有账本。
+  // manual accounts write no snapshots, only a ledger.
   await dbFor(SRC).manual.recordActivity(accM.id, my, {
     kind: "add",
     amount: 10,
@@ -176,8 +175,8 @@ const normTokens = (
     }))
     .sort((a, b) => a.symbol.localeCompare(b.symbol));
 
-// 把一份导出记录归一成可比较的形状:去掉 exportedAt,把所有 id(token/account)换成内容键
-// (导入侧 id 全新,直接比会不等)。用来验「导入后再导出 ≡ 原导出」这个不动点。
+// Normalizes an export to a comparable shape: drops exportedAt and replaces all ids (token/account) with content keys
+// (import-side ids are fresh), to verify the "import then export == original export" fixed point.
 type Rec = Record<string, unknown>;
 function normalizeExport(records: unknown[]): Rec[] {
   const recs = records as Rec[];
@@ -196,7 +195,7 @@ function normalizeExport(records: unknown[]): Rec[] {
       }
       if (r.type === "token") return { ...r, id: t(r.id) };
       if (r.type === "account")
-        // archivedAt 的精确时间戳有意不保真(导入用 now 重归档);只比归档**状态**。
+        // archivedAt's exact timestamp isn't preserved (import re-archives with now); only the archived state is compared.
         return { ...r, id: a(r.id), archivedAt: r.archivedAt === undefined ? undefined : true };
       if (r.type === "snapshot")
         return {
@@ -211,21 +210,21 @@ function normalizeExport(records: unknown[]): Rec[] {
     .sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y)));
 }
 
-describe("export → import v3 往返(空库重建)", () => {
-  // 逐 Token 比 ref 集合 —— 多链归一(ETH 的 coingecko + evm:1 两条 ref 仍挂同一个 Token)也在这里钉住。
-  it("Token(含 ref)完整复现,id 是新的、不跟源库撞", async () => {
+describe("export -> import v3 roundtrip (rebuild into an empty DB)", () => {
+  // Compare ref sets per Token; multi-chain normalization (ETH's coingecko + evm:1 refs on one Token) is pinned here too.
+  it("Token (with refs) fully reproduced, ids are new and don't collide with the source", async () => {
     await seedSource();
     await importInto(await exportRecords(SRC));
 
     const src = await dbFor(SRC).transfer.listTokensForExport();
     const dst = await dbFor(DST).transfer.listTokensForExport();
     expect(normTokens(dst)).toEqual(normTokens(src));
-    // id 重映射:两边 id 集合无交集。
+    // id remap: the two sides' id sets are disjoint.
     const srcIds = new Set(src.map((t) => t.id));
     expect(dst.every((t) => !srcIds.has(t.id))).toBe(true);
   });
 
-  it("账户 + creds(public)复现", async () => {
+  it("accounts + creds (public) reproduced", async () => {
     await seedSource();
     await importInto(await exportRecords(SRC));
 
@@ -243,33 +242,33 @@ describe("export → import v3 往返(空库重建)", () => {
     expect(JSON.parse((await dbFor(DST).accounts.getRawCreds(wallet.id))!)).toEqual({
       address: "0xabc",
     });
-    // 归档态保真:归档账户导入后仍归档,活跃账户仍活跃(#204 review 修复)。
+    // Archived state preserved: archived accounts stay archived after import, active ones stay active.
     expect(dstAccts.find((a) => a.label === "Archived")!.archivedAt).toBeGreaterThan(0);
     expect(wallet.archivedAt).toBeNull();
   });
 
-  it("估值原料 / meta / balance note / 账户级 note 端到端保真", async () => {
+  it("valuation inputs / meta / balance note / account-level note preserved end to end", async () => {
     await seedSource();
     await importInto(await exportRecords(SRC));
 
     const dstTokens = await dbFor(DST).transfer.listTokensForExport();
     const btcId = dstTokens.find((t) => t.symbol === "BTC")!.id;
     const latest = (await dbFor(DST).snapshots.latest())[0]!;
-    expect(latest.note).toEqual([{ title: "Wallet note", content: "hi" }]); // 账户级 note
+    expect(latest.note).toEqual([{ title: "Wallet note", content: "hi" }]); // account-level note
     const btcBal = latest.balances.find((b) => b.tokenId === btcId)!;
     expect(btcBal.selfPrice).toBe(90000);
     expect(JSON.parse(btcBal.metaJson ?? "{}")).toEqual({ foo: "bar" });
     expect(btcBal.note).toEqual({ title: "Locked", content: "x" });
   });
 
-  it("历史曲线逐点一致(总资产同源)", async () => {
+  it("history curve matches point by point (same total-assets source)", async () => {
     await seedSource();
     await importInto(await exportRecords(SRC));
 
     const srcHist = buildPortfolioHistory(await dbFor(SRC).snapshots.listTotals());
     const dstHist = buildPortfolioHistory(await dbFor(DST).snapshots.listTotals());
     expect(dstHist).toEqual(srcHist);
-    // 冻结总资产(各账户最新快照之和)一致。
+    // Frozen total assets (sum of each account's latest snapshot) match.
     const total = (snaps: { snapshot: { totalUsd: number } }[]) =>
       snaps.reduce((s, x) => s + x.snapshot.totalUsd, 0);
     expect(total(await dbFor(DST).snapshots.latest())).toBe(
@@ -277,24 +276,24 @@ describe("export → import v3 往返(空库重建)", () => {
     );
   });
 
-  it("快照余额的 token_id 重映射到 DST 的 Token,金额/价值不变", async () => {
+  it("snapshot balances' token_id remapped to DST's Token, amount/value unchanged", async () => {
     await seedSource();
     await importInto(await exportRecords(SRC));
 
     const dstTokens = await dbFor(DST).transfer.listTokensForExport();
     const symById = new Map(dstTokens.map((t) => [t.id, t.symbol]));
     const latest = await dbFor(DST).snapshots.latest();
-    expect(latest).toHaveLength(1); // 只有 evm 账户有快照
+    expect(latest).toHaveLength(1); // only the evm account has snapshots
     const bals = latest[0]!.balances;
     expect(bals).toHaveLength(2);
-    // 每条余额的 token_id 都指向 DST 的 Token(不是源库 id)。
+    // Each balance's token_id points at DST's Token (not the source id).
     const bySym = new Map(bals.map((b) => [symById.get(b.tokenId ?? ""), b]));
     expect(bySym.get("BTC")?.usdValue).toBe(90);
     expect(bySym.get("ETH")?.usdValue).toBe(60);
     expect(bySym.get("BTC")?.amount).toBe(0.001);
   });
 
-  it("手记账本复现(kind/amount/price/occurredAt/createdAt 保留),挂到 DST 的 MYCOIN", async () => {
+  it("manual ledger reproduced (kind/amount/price/occurredAt/createdAt kept), attached to DST's MYCOIN", async () => {
     await seedSource();
     await importInto(await exportRecords(SRC));
 
@@ -307,13 +306,13 @@ describe("export → import v3 往返(空库重建)", () => {
       occurredAt: 500,
       createdAt: 100,
     });
-    // tokenId 指向 DST 的 MYCOIN。
+    // tokenId points at DST's MYCOIN.
     const dstTokens = await dbFor(DST).transfer.listTokensForExport();
     const mycoin = dstTokens.find((t) => t.symbol === "MYCOIN")!;
     expect(dstAct[0]!.tokenId).toBe(mycoin.id);
   });
 
-  it("导入后再导出 ≡ 原导出(格式是不动点:归一掉 id/时间戳后逐条相等)", async () => {
+  it("import then export == original export (format is a fixed point: equal entry by entry after normalizing id/timestamps)", async () => {
     await seedSource();
     const srcExport = await exportRecords(SRC);
     await importInto(srcExport);
@@ -321,31 +320,31 @@ describe("export → import v3 往返(空库重建)", () => {
     expect(normalizeExport(dstExport)).toEqual(normalizeExport(srcExport));
   });
 
-  it("幂等:同一文件导 3 次,库内数据不翻倍;且再导出 ≡ 原导出(A 方案不动点)", async () => {
+  it("idempotent: importing the same file 3 times doesn't double the data; re-export == original export", async () => {
     await seedSource();
     const file = await exportRecords(SRC);
     const srcNorm = normalizeExport(file);
 
-    for (let i = 0; i < 3; i++) await importInto(file); // 反复导入同一文件
+    for (let i = 0; i < 3; i++) await importInto(file); // repeatedly import the same file
 
-    // 各类实体计数不随导入次数增长(按内容自然键去重)。
+    // Entity counts don't grow with import count (deduped by content natural key).
     expect(await dbFor(DST).accounts.list()).toHaveLength(3);
     expect(await dbFor(DST).transfer.listTokensForExport()).toHaveLength(3);
     expect(await dbFor(DST).manual.listAllActivity()).toHaveLength(1);
     const snapCount = (await dbFor(DST).snapshots.listPage(1000, 0)).length;
-    expect(snapCount).toBe(2); // evm 账户两份快照,不重复
-    // 手记不折叠翻倍:数量还是 10(不是 30)。
+    expect(snapCount).toBe(2); // evm account, two snapshots, no duplicates
+    // Manual doesn't fold-double: quantity is still 10 (not 30).
     expect((await dbFor(DST).manual.listAllActivity())[0]!.amount).toBe(10);
 
-    // 反复导入后再导出,归一后仍逐条等于原导出。
+    // After repeated imports, re-export normalizes to exactly the original export.
     expect(normalizeExport(await exportRecords(DST))).toEqual(srcNorm);
   });
 
-  it("合并:两份不同来源的文件能并进同一库,各自数据都在", async () => {
+  it("merge: files from two different sources merge into one DB, each one's data kept", async () => {
     await seedSource();
     const fileA = await exportRecords(SRC);
 
-    // 造第二份来源:一个新账户 + 新币 + 一笔账本,导出成 fileB。
+    // Build a second source: a new account + new coin + a ledger entry, exported as fileB.
     const OTHER = "user-export-other";
     await resetUser(OTHER);
     const accB = await dbFor(OTHER).accounts.create({
@@ -378,7 +377,7 @@ describe("export → import v3 往返(空库重建)", () => {
     await importInto(fileA);
     await importInto(fileB);
 
-    // A(3 账户)+ B(1 账户)= 4;币 3 + 1 = 4;账本 1 + 1 = 2。
+    // A (3 accounts) + B (1 account) = 4; coins 3 + 1 = 4; ledger 1 + 1 = 2.
     expect(await dbFor(DST).accounts.list()).toHaveLength(4);
     const dstTokens = await dbFor(DST).transfer.listTokensForExport();
     expect(dstTokens.map((t) => t.symbol).sort()).toEqual(["BTC", "ETH", "MYCOIN", "SOL"]);

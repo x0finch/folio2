@@ -24,21 +24,11 @@ import {
 import { syncOne } from "./sync-fns";
 import { ticketOf } from "./ticket";
 
-// **按用户情景走一遍,每个情景查三处:入库 / 库里的数据对不对 / 屏幕上是什么。**
-//
-// 为什么要有这个文件:#223 / #227 里连着两个关键路径的 bug,现有测试一个都没抓到,而两次
-// 漏掉的原因是同一个 —— **每个函数各自有测试,但没有一条测试从头走到尾**:
-//
-//   · 自定义币借了真币的价 —— `manual-t2` 测过 injectManualSnapshots,但夹具是**空缓存**,
-//     于是「我们没去问」和「问了但没查到」这两件事在断言里长得一样,断言是空的。
-//   · 选币的币没有 logo —— `manual-snapshot` 测过 buildManualSnapshot 的输出形状,却从不断言
-//     `tokenId`;而没有任何测试看过**屏幕上那一行**长什么样。合成余额把 tokenId 传成 null,
-//     两边各自的用例都绿。
-//
-// 结论:边界两侧各测一遍,挡不住「跨边界传错值」。所以这里一律**驱动真链路**:真 D1、
-// 真 mint、真 `buildOverview`(= `getPortfolioOverview` 的组装),只把「取数」和「出网」打桩。
-//
-// 上游一律打桩成记账 + 抛错:这些路径按设计不出网,任何一次外呼都得看得见(断言之一)。
+// User scenarios, each checked in three places: what was stored, its values, and what the screen row shows.
+// Every function has its own tests but nothing walked the whole path (a custom coin borrowing a real coin's price; a
+// picked coin missing its logo), and per-side tests can't catch a wrong value crossing a boundary. So this drives the real
+// chain (real D1, real mint, real `buildOverview`) and stubs only fetching and outbound. Upstream is stubbed to record + throw:
+// these paths never go outbound, so any call must be visible.
 
 const USER = "user-scenarios";
 const USDC_ID = "usd-coin";
@@ -60,16 +50,15 @@ beforeEach(async () => {
   outbound = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     outbound.push(String(input));
-    throw new Error(`本情景不该出网,却请求了 ${String(input)}`);
+    throw new Error(`scenario must not go outbound, but requested ${String(input)}`);
   });
 });
 
 afterEach(() => vi.restoreAllMocks());
 
-// —— 查处 ③:屏幕上那一行 ——
-// `getPortfolioOverview` 那个 server fn 的组装照抄一遍(它只有这几行:读账户/快照/设置 →
-// 注入手记合成项 → buildOverview)。**不复刻业务逻辑**,所以顺序或依赖一改,这里会跟着红。
-// 生产那条路的把手 —— 底下就是 server fn / 路由用的那个内核(#504 T13)。
+// -- check 3: the screen row --
+// Mirrors the `getPortfolioOverview` server fn's assembly (read accounts/snapshots/settings -> inject manual synthesized items ->
+// buildOverview) without re-implementing business logic, so order or dependency changes turn it red. Runs via the production kernel.
 const run = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
@@ -86,13 +75,13 @@ async function overview() {
     snapshots.map((s) => [s.snapshot.accountId, s]),
   );
   await injectManualSnapshots(USER, accounts, byAccount);
-  // **真参考层**(真 D1 store + 真 CoinGecko adapter,出网被桩住)—— 与原子总览装配同路:
-  // 一次装配供上聚合 `Oracle`,备好 buildOverview 要的三份字典 + 刷价集合,再当纯函数调。
+  // Real reference layer (real D1 store + real CoinGecko adapter, outbound stubbed), assembled like the overview:
+  // one assembly feeds the aggregate `Oracle`, builds buildOverview's three dictionaries + refresh set, then called as a pure function.
   return run(
     USER,
     Effect.gen(function* () {
       const { tokens, platforms } = yield* Oracle;
-      // 与生产总览装配同款:完整行经 `toTokenView` 收窄再喂 buildOverview。
+      // Same as the production overview: full rows are narrowed via `toTokenView` before buildOverview.
       const enrichedRecords = yield* tokens.enrich(overviewEnrichIds(accounts, byAccount));
       const enriched = new Map(
         [...enrichedRecords].map(([id, r]) => [id, toTokenView(r)] as const),
@@ -120,7 +109,7 @@ async function overview() {
 const holdingOf = (view: Awaited<ReturnType<typeof overview>>, symbol: string) =>
   view.holdings.find((h) => h.token.symbol === symbol);
 
-// —— 查处 ①/②:库里的行 ——
+// -- checks 1/2: stored rows --
 async function tokenRows() {
   const { results } = await env.DB.prepare(
     "SELECT id, symbol, name, logo, unit_price AS unitPrice, self_price AS selfPrice FROM tokens WHERE user_id = ? ORDER BY symbol",
@@ -146,14 +135,9 @@ async function refRows(tokenId: string) {
   return results;
 }
 
-// 让参考层「刷过一轮」。**驱动真的刷新路径**(`refreshStale` 的价与元信息两半),
-// 只把 CoinGecko 的 HTTP 响应打桩 —— 不手写 `putInfo` 直塞。
-//
-// 这一条是有代价换来的:第一版就是手写直塞,结果把 `refreshStaleInfo` 整个绕开了,
-// 「上游给的小写 symbol 有没有被归一」这件事在情景里根本没被碰到(实测:把归一删掉,12 条全绿)。
-// 夹具绕过被测代码,断言就是空的 —— 与下面 `seedOldLayerUsdc` 那条注释同一个教训。
-//
-// 桩里的 symbol **故意是小写**(`usdc`),那就是 CoinGecko 真实的返回。
+// Runs one refresh round on the reference layer through the real refresh path (`refreshStale`'s price and metadata halves),
+// stubbing only CoinGecko's HTTP response; hand-writing `putInfo` would bypass `refreshStaleInfo` and leave symbol normalization untested.
+// The stubbed symbol is deliberately lowercase (`usdc`), as CoinGecko really returns it.
 async function upstreamRefreshed(tokenId: string): Promise<void> {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = new URL(String(input));
@@ -162,7 +146,7 @@ async function upstreamRefreshed(tokenId: string): Promise<void> {
       ? [
           {
             id: USDC_ID,
-            symbol: "usdc", // ← 上游给小写
+            symbol: "usdc", // upstream gives lowercase
             name: "USDC",
             image: "https://cgk/usdc.png",
             current_price: MARKET_PRICE,
@@ -174,7 +158,7 @@ async function upstreamRefreshed(tokenId: string): Promise<void> {
       : url.pathname.includes("/simple/price")
         ? { [USDC_ID]: { usd: MARKET_PRICE, usd_24h_change: 0.01 } }
         : (() => {
-            throw new Error(`桩没覆盖这个端点: ${url.pathname}`);
+            throw new Error(`stub does not cover this endpoint: ${url.pathname}`);
           })();
     return new Response(JSON.stringify(body), {
       status: 200,
@@ -185,16 +169,16 @@ async function upstreamRefreshed(tokenId: string): Promise<void> {
     USER,
     Effect.flatMap(Oracle, (o) => o.tokens.refreshStale([tokenId])),
   );
-  // 刷完把桩换回「出网就抛」—— 后面的展示断言仍然要求零外呼。
+  // After refreshing, restore the throw-on-outbound stub: display assertions still require zero outbound calls.
   outbound = [];
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     outbound.push(String(input));
-    throw new Error(`本情景不该出网,却请求了 ${String(input)}`);
+    throw new Error(`scenario must not go outbound, but requested ${String(input)}`);
   });
 }
 
-// —— 情景一:在下拉里选了币 ——
-describe("情景:手动加币,在下拉里选了 USDC", () => {
+// -- scenario 1: a coin picked in the dropdown --
+describe("scenario: add a coin manually, picked USDC in the dropdown", () => {
   const add = () =>
     createManualAccount(
       USER,
@@ -204,22 +188,22 @@ describe("情景:手动加币,在下拉里选了 USDC", () => {
       ]),
     );
 
-  it("① 入库:一行代币,且**只挂上游那条 ref**", async () => {
+  it("1 stored: one token row, with **only the upstream ref** attached", async () => {
     await add();
     const rows = await tokenRows();
     expect(rows).toHaveLength(1);
-    // 选了币时 provider ref 与上游 ref 是同一个串 → 去重后只有一条(不然会撞主键)。
+    // When a coin is picked, the provider ref and the upstream ref are the same string, so it dedupes to one (else a PK clash).
     expect(await refRows(rows[0].id)).toEqual([{ namer: NAMER, localName: `issued:${USDC_ID}` }]);
-    expect(outbound).toEqual([]); // 写路径不出网
+    expect(outbound).toEqual([]); // the write path goes nowhere
   });
 
-  // 价**不落 tokens 那一列** —— 表单里填的开仓价进的是账本的第一笔(价只有账本一个来源)。
-  it("② 数据:symbol 归一大写;开仓价落在账本上,tokens 那两列都空着", async () => {
+  // Price is not stored in a tokens column: the opening price entered in the form becomes the ledger's first entry (the ledger is the only price source).
+  it("2 data: symbol normalized to uppercase; opening price on the ledger, both tokens columns empty", async () => {
     await add();
     const [row] = await tokenRows();
-    expect(row.symbol).toBe("USDC"); // 不是票里那个小写的 coin id
+    expect(row.symbol).toBe("USDC"); // not the lowercase coin id from the ticket
     expect(row.selfPrice).toBeNull();
-    expect(row.unitPrice).toBeNull(); // 上游还没刷过
+    expect(row.unitPrice).toBeNull(); // upstream hasn't refreshed yet
     const { results } = await env.DB.prepare(
       "SELECT kind, price FROM manual_activity WHERE token_id = ?",
     )
@@ -228,30 +212,30 @@ describe("情景:手动加币,在下拉里选了 USDC", () => {
     expect(results).toEqual([{ kind: "set", price: 777 }]);
   });
 
-  it("③ 展示:上游刷过之后,用**市价**和上游的名字/图", async () => {
+  it("3 display: after the upstream refresh, uses the market price and the upstream name/image", async () => {
     await add();
     const [row] = await tokenRows();
     await upstreamRefreshed(row.id);
 
     const h = holdingOf(await overview(), "USDC");
-    expect(h?.token.id).toBe(row.id); // 有身份 → 进了富化门
-    // 图走**代理端点**,不是上游那个 URL(ADR 0008:不让浏览器去 CGK 的 CDN 拿图、泄露持仓)。
+    expect(h?.token.id).toBe(row.id); // has an identity -> went through the enrich gate
+    // The image goes through the proxy endpoint, not the upstream URL (browsers must not hit CGK's CDN, which would leak holdings).
     expect(h?.token.logo).toBe(`/api/logo/token/${row.id}`);
-    expect(h?.totalValue).toBeCloseTo(10 * MARKET_PRICE, 6); // 不是 10 × 777
-    expect(outbound).toEqual([]); // 展示是 cache-only
+    expect(h?.totalValue).toBeCloseTo(10 * MARKET_PRICE, 6); // not 10 x 777
+    expect(outbound).toEqual([]); // display is cache-only
   });
 
-  // 两层缓存都没有这个币的价(全新用户、还没刷过任何一轮)→ 先用用户填的单价兜住,
-  // 而不是显示 $0。刷过之后就该换成市价 —— 上一条钉的是那一档。
-  it("③ 展示:两层都还没价 → 先用用户填的单价兜住,不显示 $0", async () => {
+  // No price in either cache layer (fresh user, never refreshed): fall back to the user's unit price rather than $0;
+  // after a refresh the market price takes over, pinned by the previous case.
+  it("3 display: neither layer has a price yet -> falls back to the user's unit price, not $0", async () => {
     await add();
     const h = holdingOf(await overview(), "USDC");
     expect(h?.totalValue).toBe(10 * 777);
   });
 });
 
-// —— 情景二:没选币,自己敲了一个同名的 ——
-describe("情景:手动加币,不选、自己敲 USDC", () => {
+// -- scenario 2: no coin picked, typed a same-named one --
+describe("scenario: add a coin manually, not picked, typed USDC", () => {
   const add = () =>
     createManualAccount(
       USER,
@@ -259,14 +243,14 @@ describe("情景:手动加币,不选、自己敲 USDC", () => {
       JSON.stringify([{ symbol: "USDC", unitPrice: "777", amount: "10" }]),
     );
 
-  it("① 入库:一行代币,只挂 `manual/custom:` 那条,**没有**上游那条", async () => {
+  it("1 stored: one token row, only the `manual/custom:` ref, **not** the upstream one", async () => {
     await add();
     const rows = await tokenRows();
     expect(rows).toHaveLength(1);
     expect(await refRows(rows[0].id)).toEqual([{ namer: "manual", localName: "custom:USDC" }]);
   });
 
-  it("② 数据:开仓价在账本上,market 价永远空(没有上游可问)", async () => {
+  it("2 data: opening price on the ledger, market price always empty (no upstream to ask)", async () => {
     await add();
     const [row] = await tokenRows();
     expect(row.selfPrice).toBeNull();
@@ -277,16 +261,16 @@ describe("情景:手动加币,不选、自己敲 USDC", () => {
     expect(results).toEqual([{ price: 777 }]);
   });
 
-  // #223 的核心承诺,而且是从**屏幕**这一侧验的 —— 上一版只在写路径上成立,显示照旧按市价盯。
-  it("③ 展示:用他填的价、没有 logo —— 哪怕参考层里摆着一个同名的真 USDC", async () => {
+  // Verified from the screen side: display must use the own price, not mark to market.
+  it("3 display: uses their price, no logo -- even with a real same-named USDC in the reference layer", async () => {
     await add();
-    // 另开一个账户选真 USDC,让参考层里确实有一个刷过的、同名的、有价有图的币。
+    // Another account picks the real USDC so the reference layer holds a refreshed, same-named coin with price and image.
     await createManualAccount(
       USER,
       "Picked",
       JSON.stringify([{ symbol: "USDC", unitPrice: "1", amount: "1", ticket: ticketOf(USDC_ID) }]),
     );
-    // 把「选出来的那一行」刷成有价有图 —— 两行都叫 USDC,靠 ref 行分辨谁是谁。
+    // Refresh the picked row to have price and image; both rows are named USDC, told apart by their ref row.
     let pickedId: string | undefined;
     let customId: string | undefined;
     for (const r of await tokenRows()) {
@@ -300,29 +284,24 @@ describe("情景:手动加币,不选、自己敲 USDC", () => {
 
     const view = await overview();
     const custom = view.holdings.find((h) => h.token.id === customId);
-    expect(custom?.totalValue).toBe(10 * 777); // 自己填的价
-    expect(custom?.token.logo).toBeUndefined(); // 没借真 USDC 那张图
-    // 对照:同一屏上那个真的确实有图有市价 —— 否则本条用「什么都没刷」也能绿。
+    expect(custom?.totalValue).toBe(10 * 777); // their own price
+    expect(custom?.token.logo).toBeUndefined(); // didn't borrow the real USDC's image
+    // Control: the real one on the same screen does have image and market price, else this passes even with nothing refreshed.
     const picked = view.holdings.find((h) => h.token.id === pickedId);
     expect(picked?.token.logo).toBe(`/api/logo/token/${pickedId}`);
     expect(picked?.totalValue).toBeCloseTo(MARKET_PRICE, 6);
-    // 两个都叫 USDC,但不聚合 —— 屏幕上是两行。
+    // Both are named USDC but don't aggregate: two rows on screen.
     expect(view.holdings.filter((h) => h.token.symbol === "USDC")).toHaveLength(2);
     expect(outbound).toEqual([]);
   });
 });
 
-// —— 情景二·下半:同一件事的**另一条写路径** ——
-//
-// 加币有三个入口,而上面只走了「新建手记账户」那一个:
-//   ① createManualAccount —— 建账户时的首个币(表单有独立的「单价」字段)
-//   ② createToken —— 抽屉里「加一个币」(也有单价字段)
-//   ③ addManualActivities —— 抽屉里「记一笔活动」,顺带现建这个币(**没有**单价字段)
-//
-// ③ 是实际会踩坑的那条:表单里只有「成交价」,而单价靠选币之后异步回填市价 —— 手敲的币没有票,
-// 那次回填不跑,unitPrice 恒 0。于是用户填了 888、列表里那一行却没有价(实测 SSGS)。
-// 一条路测过不代表另两条也对,所以三条都要有。
-describe("情景:手动加币的另两条写路径", () => {
+// -- scenario 2, second half: the other write paths --
+// Three entry points add a coin: (1) createManualAccount (first coin when creating; form has a unit-price field), (2) createToken
+// (drawer "add a coin"; has a unit-price field), (3) addManualActivities (drawer "log an activity", mints the coin; no unit-price field).
+// (3) is the risky one: the form only has the trade price and the unit price is backfilled asynchronously after picking a coin; a typed
+// coin has no ticket so the backfill never runs and unitPrice stays 0. Every path needs a test.
+describe("scenario: the other two write paths for adding a coin manually", () => {
   async function manualAccount() {
     const a = await createManualAccount(
       USER,
@@ -332,7 +311,7 @@ describe("情景:手动加币的另两条写路径", () => {
     return a.id;
   }
 
-  it("② 抽屉里加币(createToken):自己敲名字 + 填单价 → 列表按那个价算", async () => {
+  it("2 adding a coin in the drawer (createToken): typed name + unit price -> list uses that price", async () => {
     const accountId = await manualAccount();
     await createToken(USER, { accountId, symbol: "SSGS", unitPrice: 888, amount: 22 });
 
@@ -340,32 +319,31 @@ describe("情景:手动加币的另两条写路径", () => {
     expect(h?.totalValue).toBe(22 * 888);
   });
 
-  // **本轮的 bug**:这条路的表单没有单价字段,只有成交价。
-  // 注意查处 ② 的期望:`self_price` **保持 NULL** —— 不把成交价抄进去(抄进去就成了存派生值,
-  // 第一笔抄了个 0 之后谁都治不好它)。价是展示时按链算出来的。
-  it("③ 记一笔活动顺带现建币:库里不存价,屏幕上按成交价算", async () => {
+  // This path's form has no unit-price field, only the trade price. Check 2 expects `self_price` to stay NULL:
+  // copying the trade price in would store a derived value; the price is computed at display time from the ledger.
+  it("3 logging an activity also mints the coin: no price stored, screen uses the trade price", async () => {
     const accountId = await manualAccount();
     const res = await addManualActivities(USER, accountId, [
       {
-        // 手敲的币:没有 ticket,所以前端那次「回填市价」压根不跑,unitPrice 只能是 0。
+        // Typed coin: no ticket, so the frontend's "backfill market price" never runs and unitPrice can only be 0.
         token: { symbol: "SSGS", unitPrice: 0 },
         kind: "add",
         amount: 22,
         occurredAt: Date.now(),
-        price: 888, // 用户唯一给出的数字
+        price: 888, // the only number the user gave
       },
     ]);
     expect(res.ok).toBe(true);
 
     const [row] = (await tokenRows()).filter((r) => r.symbol === "SSGS");
-    expect(row.selfPrice).toBeNull(); // ② 库里:没声明过就是 NULL,不抄成交价进去
+    expect(row.selfPrice).toBeNull(); // 2 stored: never declared, so NULL; the trade price isn't copied in
     const h = holdingOf(await overview(), "SSGS");
-    expect(h?.totalValue).toBe(22 * 888); // ③ 屏幕:22 × 888,不是 $0
-    expect(h?.token.logo).toBeUndefined(); // 手敲的币没有图
+    expect(h?.totalValue).toBe(22 * 888); // 3 screen: 22 x 888, not $0
+    expect(h?.token.logo).toBeUndefined(); // typed coins have no image
   });
 
-  // 用户第二次加币的情形:再记一笔更新的成交价 → 当下值跟着走(以前它卡在 0 上治不好)。
-  it("③ 再记一笔更新的成交价 → 当下值跟着最近那一笔", async () => {
+  // A user adding a coin a second time: logging a newer trade price makes the current value follow it.
+  it("3 logging a newer trade price -> current value follows the latest entry", async () => {
     const accountId = await manualAccount();
     const base = Date.now();
     await addManualActivities(USER, accountId, [
@@ -389,10 +367,8 @@ describe("情景:手动加币的另两条写路径", () => {
     expect(holdingOf(await overview(), "SSGS")?.totalValue).toBe(23 * 999);
   });
 
-  // **价只有账本一个来源**,所以「最新那笔」永远说话 —— 哪怕它比开仓价低得多。
-  // 这条替掉了先前那版「声明价优先、不被成交价盖掉」的用例:那时开仓价存在 `tokens.self_price`,
-  // 于是同一件事两处存;现在开仓价就是账本的第一笔,后面的成交价是后面几笔,答案恒取最新。
-  it("③ 开仓价也只是账本的一笔 —— 后来的成交价照样接管", async () => {
+  // The ledger is the only price source, so the latest entry always wins, even if far below the opening price.
+  it("3 the opening price is just one ledger entry -- a later trade price takes over", async () => {
     const accountId = await manualAccount();
     await createToken(USER, { accountId, symbol: "SSGS", unitPrice: 888, amount: 10 });
     await addManualActivities(USER, accountId, [
@@ -405,13 +381,13 @@ describe("情景:手动加币的另两条写路径", () => {
       },
     ]);
     const [row] = (await tokenRows()).filter((r) => r.symbol === "SSGS");
-    expect(row.selfPrice).toBeNull(); // 库里那一列没人写了
+    expect(row.selfPrice).toBeNull(); // nobody writes that column any more
     expect(holdingOf(await overview(), "SSGS")?.totalValue).toBe(11 * 1);
   });
 });
 
-// —— 情景三:链上钱包同步 ——
-describe("情景:链上钱包同步到一笔 USDC", () => {
+// -- scenario 3: on-chain wallet sync --
+describe("scenario: an on-chain wallet syncs one USDC", () => {
   const onchainBalance = {
     symbol: "USDC",
     amount: 5,
@@ -421,12 +397,12 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
   };
 
   async function syncOnchain(): Promise<string> {
-    // 全局映射表收录了这个合约 → mint 按**地址**认出来(不靠 symbol)。
+    // The global mapping table includes this contract -> mint identifies it by address (not symbol).
     await globalDb.refIndex.putAll(
       [{ chainRef: USDC_ETH, upstreamRef: USDC_UPSTREAM }],
       Date.now(),
     );
-    // warm 集给 symbol 那一档留个本地候选,免得它想回源(本情景不该出网)。
+    // The warm set leaves a local candidate for the symbol tier so it doesn't try to go back to source (no outbound in this scenario).
     await dbFor(USER).cache.put(
       "warm",
       {
@@ -453,7 +429,7 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
     return res.snapshotId;
   }
 
-  it("① 入库:一行代币,挂**两条** ref —— 链上那条 + 上游那条", async () => {
+  it("1 stored: one token row, **two** refs attached -- the on-chain one + the upstream one", async () => {
     await syncOnchain();
     const rows = await tokenRows();
     expect(rows).toHaveLength(1);
@@ -463,10 +439,10 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
     ]);
   });
 
-  it("② 数据:快照行的 token_id 指向那一行(身份写时定死)", async () => {
+  it("2 data: the snapshot row's token_id points at that row (identity fixed at write time)", async () => {
     const snapshotId = await syncOnchain();
     const [row] = await tokenRows();
-    // symbol / token_ref 不再落快照(#243):身份只剩 token_id,反查上游叫法走 token_refs。
+    // symbol / token_ref no longer live on snapshots: identity is only token_id; the upstream naming is looked up via token_refs.
     const { results } = await env.DB.prepare(
       "SELECT token_id AS tokenId FROM snapshot_balances WHERE snapshot_id = ?",
     )
@@ -475,7 +451,7 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
     expect(results).toEqual([{ tokenId: row.id }]);
   });
 
-  it("③ 展示:刷过之后有上游的名字与图", async () => {
+  it("3 display: after a refresh, has the upstream's name and image", async () => {
     await syncOnchain();
     const [row] = await tokenRows();
     await upstreamRefreshed(row.id);
@@ -485,8 +461,8 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
     expect(h?.totalAmount).toBe(5);
   });
 
-  // canonical 聚合的核心承诺:同一个币,链上的和手记选的,**并成一行**。
-  it("③ 展示:与手记里选的同一个 USDC 聚合成一行,数量相加", async () => {
+  // Canonical aggregation: the same coin from on-chain and from the manual pick merges into one row.
+  it("3 display: aggregates with the same USDC picked manually into one row, quantities added", async () => {
     await syncOnchain();
     await createManualAccount(
       USER,
@@ -494,13 +470,13 @@ describe("情景:链上钱包同步到一笔 USDC", () => {
       JSON.stringify([{ symbol: "USDC", unitPrice: "1", amount: "10", ticket: ticketOf(USDC_ID) }]),
     );
     const rows = await tokenRows();
-    expect(rows).toHaveLength(1); // 同一个上游 ref → 同一行,没建第二个
+    // Same upstream ref -> same row, no second one created.
     await upstreamRefreshed(rows[0].id);
 
     const view = await overview();
     const usdc = view.holdings.filter((h) => h.token.symbol === "USDC");
     expect(usdc).toHaveLength(1);
-    expect(usdc[0].totalAmount).toBe(15); // 5 链上 + 10 手记
-    expect(usdc[0].sources).toHaveLength(2); // 两个来源各自可见
+    expect(usdc[0].totalAmount).toBe(15); // 5 on-chain + 10 manual
+    expect(usdc[0].sources).toHaveLength(2); // two sources, each visible
   });
 });
