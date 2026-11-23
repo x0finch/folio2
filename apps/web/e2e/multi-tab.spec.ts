@@ -9,7 +9,7 @@ import {
 } from "./fixtures/app";
 import { expect, test } from "./fixtures/test";
 
-/** 查询缓存那个 IndexedDB 库里按用户存的记录键(`user:<id>`,见 lib/queries/persist.ts)。 */
+/** Per-user record keys (`user:<id>`) in the query-cache IndexedDB store. */
 const persistedUserKeys = (page: import("@playwright/test").Page) =>
   page.evaluate(
     () =>
@@ -29,12 +29,10 @@ const persistedUserKeys = (page: import("@playwright/test").Page) =>
       }),
   );
 
-// 同一个人开着好几个标签 —— 这块之前一条测试都没有,而它正是「换个标签就绕过了」最可能藏身的地方。
-//
-// 同一个 browser context 里的两个 page 共享 cookie 和 localStorage,storage 事件也跨 page 触发,
-// 所以这里能真实地测到跨标签同步(而不是模拟)。
-test.describe("多个标签页", () => {
-  test("一个标签锁上了 → 另一个标签也锁上", async ({ page, addAuth }) => {
+// Pages in one browser context share cookies and localStorage, and storage events cross pages,
+// so cross-tab sync is exercised for real here.
+test.describe("multiple tabs", () => {
+  test("one tab locks → the other tab locks too", async ({ page, addAuth }) => {
     await addAuth();
     await enableLock(page);
 
@@ -42,32 +40,30 @@ test.describe("多个标签页", () => {
     await gotoHydrated(other, "/settings");
     await expect(other.getByRole("switch", { name: /auto-lock/i })).toBeVisible();
 
-    // 第一个标签闲置到锁上。
     await page.goto("/");
     await lockNow(page);
 
-    // 另一个标签必须跟着锁 —— 否则换个标签就等于绕过。它靠 storage 事件收到「已锁」这个变化。
+    // Otherwise switching tabs would be a bypass; the other tab learns via the storage event.
     await expect(other.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
     await other.close();
   });
 
-  test("锁着的时候新开一个标签直接进 → 也是锁的", async ({ page, addAuth }) => {
+  test("opening a new tab while locked → also locked", async ({ page, addAuth }) => {
     await addAuth();
     await enableLock(page);
     await page.goto("/");
     await lockNow(page);
 
-    // 新标签挂载时会比对时间戳,不该因为「刚打开」就放行。
+    // A fresh tab compares the timestamp on mount rather than trusting "just opened".
     const fresh = await page.context().newPage();
     await fresh.goto("/");
     await expect(fresh.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
     await fresh.close();
   });
 
-  // 方向是**不对称的,而且是刻意的**(use-idle-lock.ts 里写明):锁要同步 —— 否则「一个标签锁了、
-  // 复制网址新开一个就没锁」就是现成的旁路;解锁不同步 —— 每个已锁的标签各自要求一次在场证明,
-  // 比一处解锁全场放行更保守。这条测试钉住这个不对称,免得日后有人当 bug「顺手修掉」。
-  test("在一个标签解锁 → 另一个标签仍然锁着(刻意不同步解锁)", async ({ page, addAuth }) => {
+  // Deliberately asymmetric: locking syncs across tabs, unlocking doesn't — each locked tab needs
+  // its own proof of presence. Don't "fix" this.
+  test("unlocking one tab → the other stays locked (by design)", async ({ page, addAuth }) => {
     await addAuth();
     await enableLock(page);
 
@@ -81,17 +77,15 @@ test.describe("多个标签页", () => {
     await page.getByRole("button", { name: /unlock with passkey/i }).click();
     await expect(page.getByRole("switch", { name: /auto-lock/i })).toBeVisible();
 
-    // 另一个标签还挡着 —— 它也得自己验一次。
     await expect(other.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
-    // 共享的锁标志已被第一个标签清掉,所以这不是「被别人锁死」,只是它自己还没验。
+    // The shared flag is cleared; the other tab simply hasn't verified yet.
     expect((await readLockState(other)).locked).toBeNull();
 
-    // 「它自己点一下也能解开」这半**在这个环境里验不了**:CDP 虚拟认证器绑在单个页面的 target 上,
-    // 新标签没有认证器,也没法把凭据共享过去。真机上是同一个系统钥匙串,不存在这个问题。
+    // Can't verify the other tab unlocking itself: the CDP virtual authenticator is bound to one page.
     await other.close();
   });
 
-  test("锁屏摆着,在另一个标签登出 → 不会卡在解不开也退不出的锁屏", async ({ page, addAuth }) => {
+  test("locked, sign out in another tab → not stuck on the lock", async ({ page, addAuth }) => {
     const auth = await addAuth();
     await enableLock(page);
     await page.goto("/");
@@ -99,21 +93,14 @@ test.describe("多个标签页", () => {
 
     const other = await page.context().newPage();
     await other.goto("/settings");
-    // 另一个标签此刻也是锁屏(上一条测过)。**先等锁屏真的出现**再点登出:设置页自己也有一个同名的
-    // 登出按钮(用户卡里那个),服务端就渲染出来了 —— 不等的话可能点在那一个上,而它要弹二次确认。
+    // Wait for the lock screen first: settings has its own "Sign out" button that asks for confirmation.
     await expect(other.getByRole("button", { name: /unlock with passkey/i })).toBeVisible();
-    // 登出之后两个标签都会落到登录页,而登录页挂着 passkey 的 autofill(conditional UI)——
-    // 虚拟认证器「自动按下」,会把它当场批掉、又登回去(CI 上抓到过:登出 150ms 后第一个标签
-    // 就拿到了新会话,于是停在 `/`)。真人不会替自己按这一下,所以先把凭据清掉:这条测的是「走得掉」,
-    // 不是「autofill 会不会自动登录」。
+    // The virtual authenticator would auto-answer /login's conditional-UI autofill and sign back in.
     await auth.clearCredentials();
     await other.getByRole("button", { name: /sign out/i }).click();
     await expect(other).toHaveURL(/\/login/);
 
-    // 第一个标签:会话没了。它可能还显示着锁屏,但**必须能走掉** —— 点登出要落到登录页,
-    // 而不是卡在一个既解不开(没会话)又退不出的界面上。
-    // 两条路都算通过:路由守卫发现没会话就直接送去登录页,或者它还停在锁屏、那就得能从锁屏走掉。
-    // 用 toPass 是因为不知道会走哪条,而不是为了等一段时间 —— 条件一满足立刻返回。
+    // Either the route guard redirects to /login, or the lock screen still shows and its sign-out works.
     await page.reload();
     await expect(async () => {
       if (!page.url().includes("/login")) {
@@ -125,30 +112,25 @@ test.describe("多个标签页", () => {
     await other.close();
   });
 
-  // review #3:以前登出只停了**本页**的写盘。另一个标签页手里还有整份数据,它的版本号轮询 / 聚焦重拉
-  // 一触发缓存事件,就把 `user:<id>` 原样写回刚清空的库 —— 登出了,组合还躺在盘上。
-  test("一个标签登出 → 另一个标签不再把查询缓存写回 IndexedDB", async ({ page }) => {
+  // Another tab still holds the data; a refetch-triggered cache event must not persist it after sign-out.
+  test("sign out in one tab → the other stops persisting the cache", async ({ page }) => {
     await signUpAndLogin(page);
     await dismissPasskeyPrompt(page);
     const other = await page.context().newPage();
     await gotoHydrated(other, "/settings");
     await gotoHydrated(page, "/settings");
-    // 两边都在写:库里有这个用户的那条记录。
     await expect.poll(() => persistedUserKeys(page)).toHaveLength(1);
 
     await page.getByRole("button", { name: /sign out/i }).click();
     await page.locator("button.bg-destructive").click();
     await expect(page).toHaveURL(/\/login/);
 
-    // 另一个标签:回到前台 → 版本号重问、缓存事件照来。写盘节流 1 秒,等到它被送回登录页后再多等
-    // 一个节流窗,确认没有哪次写落下来。
-    //
-    // 它的请求**挂住不回**:会话没了之后重拉会失败,失败状态里带着一个结构化克隆不了的跳转对象,
-    // 那次写盘本来就会失败 —— 验的就成了巧合,不是守卫。挂住时缓存里是「成功 + 正在重拉」,写得进去
-    // (没修之前这里就会留下 `user:<id>`)。
+    // Persistence is throttled to 1s, so wait one extra window after the redirect.
+    // Hang the requests: a failed refetch carries an uncloneable redirect, so the write would fail by
+    // coincidence rather than by the guard.
     await other.route("**/_serverFn/**", () => {});
     await other.bringToFront();
-    // react-query 的聚焦监听挂在 window 上;手造的事件不冒泡,所以直接发给 window。
+    // react-query listens on window, and a synthetic event doesn't bubble there.
     await other.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
     await expect(other).toHaveURL(/\/login/);
     await other.waitForTimeout(1_500);
@@ -157,7 +139,7 @@ test.describe("多个标签页", () => {
     await other.close();
   });
 
-  test("一个标签开着锁,另一个标签把那条凭据删了 → 标记两边都清,锁两边都还在", async ({
+  test("one tab has the lock, the other deletes its credential → record cleared, lock kept", async ({
     page,
     addAuth,
   }) => {
@@ -166,7 +148,6 @@ test.describe("多个标签页", () => {
     const before = await readLockState(page);
     expect(before.deviceCredential).toBeTruthy();
 
-    // 另一个标签走 UI 删掉本机那条。
     const other = await page.context().newPage();
     await other.goto("/settings");
     await other
@@ -180,11 +161,9 @@ test.describe("多个标签页", () => {
     await other.locator("button.bg-destructive").click();
     await expect(other.getByText(/passkey removed/i)).toBeVisible();
 
-    // 删除那一侧立刻清标记(同一 context 共享 storage,所以第一个标签也看得到)。
     await expect.poll(async () => (await readLockState(other)).deviceCredential).toBeNull();
 
-    // 第一个标签重新进设置页:锁**照旧开着** —— 删一条凭据不代表用户要撤掉锁,而且解锁看的是
-    // 系统钥匙串而不是这个标记。同时给出「怎么重新登记」那句提示。
+    // Deleting a credential is not disabling the lock; unlock goes through the OS keychain anyway.
     await page.reload();
     await expect(page.getByRole("switch", { name: /auto-lock/i })).toHaveAttribute(
       "aria-checked",
@@ -195,8 +174,8 @@ test.describe("多个标签页", () => {
   });
 });
 
-test.describe("手快、网慢", () => {
-  test("飞快连点开关两下 → 只跑一次流程,只建一条凭据", async ({ page, addAuth }) => {
+test.describe("fast hands, slow network", () => {
+  test("double-clicking the toggle → one ceremony, one credential", async ({ page, addAuth }) => {
     const authenticator = await addAuth();
     await page.goto("/login");
     await dismissPasskeyPrompt(page);
@@ -206,31 +185,27 @@ test.describe("手快、网慢", () => {
     await gotoHydrated(page, "/settings");
 
     const toggle = page.getByRole("switch", { name: /auto-lock/i });
-    // 两下之间不给任何等待:第二下要么被 disabled 挡住,要么落在 busy 置上之前那个窗口里。
+    // No wait between clicks: the second hits either the disabled state or the pre-busy window.
     await toggle.click();
     await toggle.click({ force: true, noWaitAfter: true }).catch(() => {});
 
     await expect(toggle).toHaveAttribute("aria-checked", "true");
-    // 无论如何都不该攒出第二条凭据。
     expect(await authenticator.credentials()).toHaveLength(1);
   });
 
-  test("验证过了但紧接着刷新列表失败 → 开关与本地记录不打架", async ({ page, addAuth }) => {
+  test("verified but list refresh fails → toggle and record agree", async ({ page, addAuth }) => {
     await addAuth();
     await enableLock(page);
     const enabled = await readLockState(page);
 
-    // 关掉,然后把列表接口打断,再重新开启。
     const toggle = page.getByRole("switch", { name: /auto-lock/i });
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
 
     await page.route("**/passkey/list-user-passkeys", (route) => route.abort("failed"));
-    // 等两件**确定会发生的事**,而不是等一个拍脑袋的时长:
-    // ① 列表拉不动 → 代码退到注册 → `generate-register-options` 必然发出。
-    //    (别等 `verify-registration`:这台认证器上已经有一条凭据了,服务端下发的 excludeCredentials
-    //    会让浏览器当场拒掉,压根走不到 verify —— 我一开始就等错了这个,15 秒超时。)
-    // ② 收尾时 finally 里 setBusy(false),开关从 ceremony 期间的 disabled 变回可用 = 流程真跑完了。
+    // Wait on events that must happen: the fallback to register sends generate-register-options
+    // (not verify-registration — excludeCredentials rejects this authenticator first), and the
+    // toggle re-enables when the flow's finally runs.
     const registerStarted = page.waitForResponse((r) =>
       r.url().includes("passkey/generate-register-options"),
     );
@@ -238,8 +213,7 @@ test.describe("手快、网慢", () => {
     await registerStarted;
     await expect(toggle).toBeEnabled();
 
-    // 列表拉不动时:要么老老实实没开(报错),要么开了 —— 但**不能**出现「开关开着却没有凭据记录」
-    // 这种自相矛盾的状态,那正是「显示受保护实际没有」的来源。
+    // Never "switch on but no credential record": that shows protection that isn't there.
     const after = await readLockState(page);
     const switchOn = await toggle.getAttribute("aria-checked");
     if (switchOn === "true") {
@@ -247,20 +221,19 @@ test.describe("手快、网慢", () => {
     } else {
       expect(after.enabled).toBeNull();
     }
-    // 而且原来那条凭据记录不该被这次失败清掉。
     expect(after.deviceCredential ?? enabled.deviceCredential).toBeTruthy();
     await page.unroute("**/passkey/list-user-passkeys");
   });
 });
 
-test.describe("本地记录被改坏 / 存不进去", () => {
-  test("本地存储写不进去(隐私模式)→ 不崩,且不假装开成功", async ({ page, addAuth }) => {
+test.describe("local record corrupted or unwritable", () => {
+  test("localStorage unwritable → no crash, no false success", async ({ page, addAuth }) => {
     await addAuth();
     const { signUpAndLogin } = await import("./fixtures/app");
     await signUpAndLogin(page);
     await dismissPasskeyPrompt(page);
 
-    // 让 setItem 一律抛错(隐私模式 / 配额写满都是这个表现),但读取仍可用。
+    // setItem throws (private mode / quota exceeded) while reads still work.
     await page.addInitScript(() => {
       const proto = Object.getPrototypeOf(localStorage);
       proto.setItem = () => {
@@ -270,8 +243,6 @@ test.describe("本地记录被改坏 / 存不进去", () => {
     await gotoHydrated(page, "/settings");
 
     const toggle = page.getByRole("switch", { name: /auto-lock/i });
-    // 同上:等注册真的开始 + 等 busy 清掉,不等固定时长。写不进 localStorage 不影响 ceremony 本身,
-    // 所以这两个信号照样会到。
     const registerStarted = page.waitForResponse((r) =>
       r.url().includes("passkey/generate-register-options"),
     );
@@ -279,38 +250,36 @@ test.describe("本地记录被改坏 / 存不进去", () => {
     await registerStarted;
     await expect(toggle).toBeEnabled();
 
-    // 关键是别把页面搞崩、也别显示成「已开启」——写不进去就等于下次打开还得重来,那就别谎报。
+    // An unpersisted lock would be gone next visit, so don't report it as on.
     await expect(page.getByRole("switch", { name: /auto-lock/i })).toBeVisible();
     await expect(toggle).toHaveAttribute("aria-checked", "false");
   });
 
-  test("把本机记录改成账户里另一条真实凭据 → 自纠不清它,但标记会挂错行", async ({
+  test("local record points at another real credential → kept, badge on the wrong row", async ({
     page,
     addAuth,
   }) => {
     await addAuth();
     await enableLock(page);
 
-    // 再用加号(不限认证器)从一个 USB 钥匙加一条,凑出两行。
+    // Add a second passkey from a USB key so there are two rows.
     const usb = await addAuth({ transport: "usb", hasResidentKey: false });
     await page.getByRole("button", { name: /add passkey/i }).click();
     await expect(page.getByText(/passkey added/i)).toBeVisible();
     const usbCred = (await usb.credentials())[0]?.credentialId;
     expect(usbCred).toBeTruthy();
 
-    // 把本机标记指向那条 USB 凭据(它确实在账户列表里,所以自纠找不出问题)。
     await page.evaluate(({ keys, id }) => localStorage.setItem(keys.deviceCredential, id), {
       keys: KEYS,
       id: usbCred as string,
     });
     await page.reload();
 
-    // 自纠只管「这条还在不在账户里」,不管「它是不是真的在本机」——所以标记留着,badge 挂到了 USB 那行。
-    // 这只是显示不准,不会把人锁在门外:解锁走的是系统的凭据选择,不看这个标记。
+    // Self-repair only checks the credential still exists on the account, so the badge is wrong.
+    // Display-only: unlock uses the OS credential picker, not this record.
     expect((await readLockState(page)).deviceCredential).toBe(usbCred);
     await expect(page.getByText(/^this device$/i)).toHaveCount(1);
 
-    // 兜底确认锁仍然解得开(平台认证器那条凭据还在)。
     await page.goto("/");
     await lockNow(page);
     await page.getByRole("button", { name: /unlock with passkey/i }).click();
