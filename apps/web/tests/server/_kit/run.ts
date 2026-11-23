@@ -29,36 +29,20 @@ import { handleListTags } from "@/lib/server/tags/list";
 import { handleGetTokenEnrichment } from "@/lib/server/tokens/enrichment";
 import { realRegistry } from "./fakes";
 
-// **被测的是 handler,发动走生产那个内核。**
-//
-// `runForUser` 就是 server fn 装配点用的那一个(`runEffect` 在它外面只多套一层 `toError`),
-// 所以这里跑的接线与线上逐字相同:同一份 per-user layer、同一个 D1 句柄、同一套参考层。
-// 我们不自己拼 layer —— 那会造出第二条只有测试走的路,而它一旦跟生产走散,绿的测试就没有意义了。
+// Handlers run through the production `runForUser` (no test-only layer), so wiring matches prod.
 
-/** 跑一个 handler,期望它成功。失败会抛(Cause 由 `runForUser` 的兜底日志打出来)。 */
 export const call = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
 ): Promise<A> => runForUser(userId, effect);
 
-/**
- * 跑一个 handler,把成败原样拿回来。
- *
- * **失败面的用例必须用这个,不能用 `expect(...).rejects`** —— 后者只能看到 `FiberFailure`
- * 的字符串,断言不到「失败的是 NotFound 还是 InvalidInput」。而这套清单里大量用例的要点
- * 恰恰是「拒得对不对」,不是「拒了没有」。
- */
+/** Use for failure cases instead of `.rejects`, which only sees a `FiberFailure` string, not the tag. */
 export const callExit = <A, E extends AppError, R extends UserServices>(
   userId: string,
   effect: Effect.Effect<A, E, R>,
 ): Promise<Exit.Exit<A, E>> => runForUser(userId, Effect.exit(effect)) as Promise<Exit.Exit<A, E>>;
 
-/**
- * 换掉 connector 门票再跑。
- *
- * 为什么可以这样换:`runForUser` 是在 effect **外面** provide,而这里先在里面 provide 了同一个
- * Tag —— 内层赢。于是「探活失败会怎样」这类用例不必真的去打上游,也不必改生产代码留测试钩子。
- */
+/** Inner provide wins over the one `runForUser` applies outside, so the fake connector takes effect. */
 export const callWithRegistry = <A, E extends AppError, R extends UserServices>(
   userId: string,
   registry: ConnectorRegistry,
@@ -76,26 +60,14 @@ export const callWithRegistryExit = <A, E extends AppError, R extends UserServic
     Effect.exit(Effect.provide(effect, Layer.succeed(ConnectorRegistry, registry))),
   ) as Promise<Exit.Exit<A, E>>;
 
-/**
- * 从 Exit 里取出那个**类型化错误**。
- *
- * 失败面的用例几乎都要它:「拒了」不够,要断言「拒的方式对不对」—— `NotFound` 是资源不存在或
- * 越权,`InvalidInput` 是调用方拼错了参数、该收到一句人话。`undefined` 表示这次不是类型化失败
- * (成功,或者是 defect —— 后者用 `Cause.isDie` 单独断言)。
- */
+/** The typed failure, or `undefined` on success or defect (assert defects with `Cause.isDie`). */
 export const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
   Exit.isFailure(exit) ? Option.getOrUndefined(Cause.failureOption(exit.cause)) : undefined;
 
-// —— 读模型捷径(照抄前端 select / compose,不复刻业务逻辑)——
-
-/**
- * `getSnapshots` + 浏览器那一步解码(FOL-92:接口发原样元组,`snapshotsFromWire` 在 queryFn 里解)。
- * 读模型的用例断言的是解出来的那份 —— 与页面拿到的同一个形状。
- */
+/** `getSnapshots` plus the client-side wire decode, so assertions see what the page sees. */
 export const getSnapshotsDecoded = (data: Parameters<typeof handleGetSnapshots>[0]) =>
   Effect.map(handleGetSnapshots(data), snapshotsFromWire);
 
-/** 快照原料 —— 原子读 + `assemblePortfolioSnapshotData`,与首页 `usePortfolioOverview` 同源。 */
 export const readSnapshotData = async (userId: string, data: PortfolioScope = {}) => {
   const anchor = floorToHour(Date.now());
   const portfolioId = data.portfolioId;
@@ -168,12 +140,7 @@ export const readSnapshotData = async (userId: string, data: PortfolioScope = {}
   });
 };
 
-/**
- * 读总览 —— 改完数据之后想看「屏幕上是什么」就用它。
- *
- * **走的是首页那条真链路**(FOL-54):原子原料在浏览器算成总览;测试侧用 `overviewFromSnapshotData`
- * 照抄前端合并那一行(不复刻业务逻辑),所以总额 / 持仓 / 小计与屏幕上完全同源。
- */
+/** Overview as the home page computes it client-side (mirrors the frontend compose step). */
 export const readOverview = async (userId: string, data: PortfolioScope = {}) =>
   overviewFromSnapshotData(await readSnapshotData(userId, data));
 
@@ -202,13 +169,11 @@ const readAccountHoldingsRaw = async (userId: string, data: { portfolioId?: stri
   });
 };
 
-/** 按账户持仓视图 —— 原子 snapshots + enrichment 合并,与 `useAccountHoldingsView` 同源。 */
 export const readAccountHoldingsView = async (
   userId: string,
   data: { portfolioId?: string } = {},
 ) => accountRowsFromRaw(await readAccountHoldingsRaw(userId, data));
 
-/** tab 条 —— 快照原料 + tabPins + 标签,浏览器现算(FOL-49)。 */
 export const readTabStrip = async (userId: string, data: { portfolioId?: string } = {}) => {
   const [snapshot, tabPins, tags] = await Promise.all([
     readSnapshotData(userId, { portfolioId: data.portfolioId }),
