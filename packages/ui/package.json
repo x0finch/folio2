@@ -10,6 +10,8 @@
     ".": "./src/index.ts",
     "./globals.css": "./src/styles/globals.css",
     "./components/*": "./src/components/*.tsx",
+    "./lib/i18n": "./src/lib/i18n.tsx",
+    "./lib/presence-gate": "./src/lib/presence-gate.tsx",
     "./lib/*": "./src/lib/*.ts"
   },
   "scripts": {
@@ -20,6 +22,7 @@
     "react": "^19.0.0"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.8.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "catalog:",

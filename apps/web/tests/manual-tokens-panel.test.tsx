@@ -12,6 +12,7 @@ import type {
 } from "@/components/manual-activity-modal";
 import type { OverviewBalance } from "@/lib/core/account-view";
 import { messages } from "@/lib/i18n/messages";
+import { tabLabel, tabPanel } from "./helpers/tabs";
 
 // 手记账户抽屉的 Tokens | Activity 面板。它本身不录入,只做**编排**:
 // · 读:账本 token + 活动 → 两张列表(token 名 / 市值优先用实时 balances,缺则 数量 × 单价;活动新→旧);
@@ -135,14 +136,9 @@ function mount(detail: unknown = DETAIL) {
   );
   const body = () => document.body;
   const tab = (label: string) =>
-    [...body().querySelectorAll('[role="tab"]')].find(
-      (x) => x.textContent?.trim() === label,
-    ) as HTMLElement;
-  // Tabs 根下:[页头(tab 列表 + 加号), Tokens 面板, Activity 面板]。
-  const panel = (which: "tokens" | "activity") => {
-    const root = utils.container.querySelector('[role="tablist"]')?.parentElement?.parentElement;
-    return root?.children[which === "tokens" ? 1 : 2] as HTMLElement;
-  };
+    [...body().querySelectorAll('[role="tab"]')].find((x) => tabLabel(x) === label) as HTMLElement;
+  const panel = (which: "tokens" | "activity") =>
+    tabPanel(body().querySelectorAll('[role="tab"]')[which === "tokens" ? 0 : 1]);
   // 某一行(按行内文字认)上的滑动操作钮:从那段文字往上找,第一个带这个操作钮的祖先就是这一行。
   const action = (rowText: string, label: string) => {
     const leaf = [...utils.container.querySelectorAll("span, div")].find(

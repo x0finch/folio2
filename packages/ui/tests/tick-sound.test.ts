@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 class FakeSource {
   buffer: unknown = null;
+  playbackRate = { value: 1 };
   onended: (() => void) | null = null;
   stopped = false;
   connect() {}
@@ -29,7 +30,7 @@ class FakeContext {
     instances.push(this);
   }
   createGain() {
-    return { gain: { value: 1 }, connect() {} };
+    return { gain: { value: 1 }, context: this, connect() {} };
   }
   createBuffer(_channels: number, length: number) {
     const data = new Float32Array(length);

@@ -1,21 +1,34 @@
 "use client";
 // beui.dev/components/blocks/swipeable-list — @/ 别名已改写为 @folio/ui/*。
 
+import { Ellipsis } from "lucide-react";
 import {
   animate,
   motion,
+  type PanInfo,
   useMotionValue,
   useReducedMotion,
-  type PanInfo,
 } from "motion/react";
 import {
+  type KeyboardEvent,
+  type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
+import { useMessages } from "@folio/ui/lib/i18n";
+import { TOUCH_GESTURE_CONTENT_CLASS } from "@folio/ui/lib/touch";
 import { cn } from "@folio/ui/lib/utils";
+
+/** English defaults. Override per instance with `labels`, or app-wide with `LocaleProvider`. */
+export const swipeableListMessages = {
+  actionsFor: "Actions for {title}",
+  showActions: "Show actions",
+};
+
+export type SwipeableListMessages = typeof swipeableListMessages;
 
 export type SwipeSide = "left" | "right";
 
@@ -81,6 +94,8 @@ export interface SwipeableListProps {
   className?: string;
   classNames?: SwipeableListClassNames;
   renderItem?: (item: SwipeableListItem) => ReactNode;
+  /** Override any built-in string. */
+  labels?: Partial<SwipeableListMessages>;
 }
 
 // Distance-based release spring keeps short rebounds and full reveals feeling
@@ -119,7 +134,7 @@ function useControllableSwipeValue({
 }) {
   const [internalValue, setInternalValue] = useState(defaultValue ?? null);
   const isControlled = value !== undefined;
-  const currentValue = value ?? internalValue;
+  const currentValue = isControlled ? value : internalValue;
 
   const setValue = useCallback(
     (next: SwipeableListValue | null) => {
@@ -199,6 +214,7 @@ function SwipeableListRow({
   onAction,
   classNames,
   renderItem,
+  labels,
 }: {
   item: SwipeableListItem;
   actionWidth: number;
@@ -209,8 +225,16 @@ function SwipeableListRow({
   onAction?: SwipeableListProps["onAction"];
   classNames?: SwipeableListClassNames;
   renderItem?: (item: SwipeableListItem) => ReactNode;
+  labels?: Partial<SwipeableListMessages>;
 }) {
+  const t = useMessages("swipeableList", swipeableListMessages, labels);
   const reduce = useReducedMotion();
+  const railId = useId();
+  const railRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  // Set when the keyboard opens a side, so focus follows into its actions once
+  // the rail stops being inert.
+  const focusActions = useRef(false);
   const x = useMotionValue(0);
   const animationRef = useRef<{ stop: () => void } | null>(null);
   const commandedTargetRef = useRef(0);
@@ -350,11 +374,55 @@ function SwipeableListRow({
       onAction?.({ item, action, side });
 
       if (closeOnAction) {
+        // The rail turns inert as the row closes; keep focus on the row.
+        if (railRef.current?.contains(document.activeElement))
+          toggleRef.current?.focus();
         snapTo(null);
       }
     },
     [closeOnAction, item, onAction, snapTo],
   );
+
+  useEffect(() => {
+    if (!openSide || !focusActions.current) return;
+    focusActions.current = false;
+    railRef.current
+      ?.querySelector<HTMLButtonElement>(
+        `[data-side="${openSide}"] button:not(:disabled)`,
+      )
+      ?.focus();
+  }, [openSide]);
+
+  const hasActions = leftWidth > 0 || rightWidth > 0;
+  const openFromKeyboard = (side: SwipeSide) => {
+    if ((side === "left" ? leftWidth : rightWidth) === 0) return;
+    focusActions.current = true;
+    snapTo(side);
+  };
+
+  // Keyboard stand-in for the swipe: the arrow keys move the row the way a
+  // swipe would, Enter or Space opens the trailing actions, and Escape closes.
+  const onToggleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      if (openSide === "left") snapTo(null);
+      else openFromKeyboard("right");
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      if (openSide === "right") snapTo(null);
+      else openFromKeyboard("left");
+    } else if (event.key === "Escape" && openSide) {
+      event.preventDefault();
+      snapTo(null);
+    }
+  };
+
+  const onRailKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    toggleRef.current?.focus();
+    snapTo(null);
+  };
 
   const defaultContent = (
     <div className="flex min-w-0 items-center gap-3">
@@ -407,14 +475,20 @@ function SwipeableListRow({
       )}
     >
       <div
+        ref={railRef}
+        id={railId}
         aria-hidden={!openSide}
         inert={!openSide}
+        onKeyDown={onRailKeyDown}
         className={cn(
           "absolute inset-0 z-0 flex overflow-hidden rounded-2xl",
           classNames?.rail,
         )}
       >
-        <div className="flex h-full overflow-hidden rounded-l-2xl">
+        <div
+          data-side="left"
+          className="flex h-full overflow-hidden rounded-l-2xl"
+        >
           {leftActions.map((action) => (
             <SwipeActionButton
               key={action.id}
@@ -427,7 +501,10 @@ function SwipeableListRow({
             />
           ))}
         </div>
-        <div className="ml-auto flex h-full overflow-hidden rounded-r-2xl">
+        <div
+          data-side="right"
+          className="ml-auto flex h-full overflow-hidden rounded-r-2xl"
+        >
           {rightActions.map((action) => (
             <SwipeActionButton
               key={action.id}
@@ -451,11 +528,43 @@ function SwipeableListRow({
         onDragEnd={onDragEnd}
         style={{ x }}
         className={cn(
-          "relative z-10 min-h-[72px] cursor-grab touch-pan-y select-none rounded-2xl border border-border bg-card px-4 py-3 shadow-sm active:cursor-grabbing",
+          // `touch-pan-y`, not `touch-none`: the row owns the horizontal
+          // swipe, the page keeps the vertical scroll through it.
+          "relative z-10 min-h-[72px] cursor-grab touch-pan-y rounded-2xl border border-border bg-card px-4 py-3 shadow-sm active:cursor-grabbing",
+          // The swipe is the row's, but what it carries is the consumer's:
+          // selection is only suppressed where the platform runs its own press
+          // gestures, so a mouse can still select and copy the row's text.
+          TOUCH_GESTURE_CONTENT_CLASS,
           classNames?.surface,
         )}
       >
         {renderItem ? renderItem(item) : item.content ?? defaultContent}
+        {hasActions && !item.disabled ? (
+          // Only visible while focused from the keyboard; pointers swipe.
+          <button
+            ref={toggleRef}
+            type="button"
+            aria-label={
+              typeof item.title === "string"
+                ? t("actionsFor", { title: item.title })
+                : t("showActions")
+            }
+            aria-expanded={openSide !== null}
+            aria-controls={railId}
+            onClick={() =>
+              openSide
+                ? snapTo(null)
+                : openFromKeyboard(rightWidth > 0 ? "right" : "left")
+            }
+            onKeyDown={onToggleKeyDown}
+            className={cn(
+              "sr-only grid place-items-center rounded-full bg-muted text-muted-foreground outline-none",
+              "focus-visible:not-sr-only focus-visible:absolute focus-visible:right-3 focus-visible:top-1/2 focus-visible:h-8 focus-visible:w-8 focus-visible:-translate-y-1/2 focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+          >
+            <Ellipsis aria-hidden className="h-4 w-4" />
+          </button>
+        ) : null}
       </motion.div>
     </div>
   );
@@ -473,6 +582,7 @@ export function SwipeableList({
   className,
   classNames,
   renderItem,
+  labels,
 }: SwipeableListProps) {
   const [openValue, setOpenValue] = useControllableSwipeValue({
     value,
@@ -494,6 +604,7 @@ export function SwipeableList({
           onAction={onAction}
           classNames={classNames}
           renderItem={renderItem}
+          labels={labels}
         />
       ))}
     </div>

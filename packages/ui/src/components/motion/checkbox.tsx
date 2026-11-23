@@ -4,7 +4,16 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useId } from "react";
 import { EASE_OUT, SPRING_PRESS } from "@folio/ui/lib/ease";
+import { useMessages } from "@folio/ui/lib/i18n";
 import { cn } from "@folio/ui/lib/utils";
+
+/** English defaults. Override per instance with `labels`, or app-wide with `LocaleProvider`. */
+export const checkboxMessages = {
+  checked: "Selected",
+  indeterminate: "Partially selected",
+};
+
+export type CheckboxMessages = typeof checkboxMessages;
 
 const CHECK_PATH = "M5 13l4 4L19 7";
 const INDETERMINATE_PATH = "M6 12h12";
@@ -15,9 +24,15 @@ export interface CheckboxProps {
   disabled?: boolean;
   indeterminate?: boolean;
   label?: string;
+  /** Supporting text under the label, announced as the description rather than the name. */
+  description?: string;
   className?: string;
   id?: string;
   "aria-label"?: string;
+  /** Associates an external message (e.g. a form error) with the control. */
+  "aria-describedby"?: string;
+  /** Override any built-in string. */
+  labels?: Partial<CheckboxMessages>;
 }
 
 export function Checkbox({
@@ -26,21 +41,31 @@ export function Checkbox({
   disabled,
   indeterminate,
   label,
+  description,
   className,
   id: idProp,
   "aria-label": ariaLabel,
+  "aria-describedby": ariaDescribedBy,
+  labels,
 }: CheckboxProps) {
+  const t = useMessages("checkbox", checkboxMessages, labels);
   const autoId = useId();
   const id = idProp ?? autoId;
   const reduce = useReducedMotion();
   const showMark = checked || indeterminate;
   const path = indeterminate ? INDETERMINATE_PATH : CHECK_PATH;
+  const descriptionId = description ? `${id}-description` : undefined;
+  // The wrapping <label> would fold the description into the name, so name from the label text alone.
+  const labelId = description && label && !ariaLabel ? `${id}-label` : undefined;
+  const describedBy =
+    [ariaDescribedBy, descriptionId].filter(Boolean).join(" ") || undefined;
 
   return (
     <label
       htmlFor={id}
       className={cn(
-        "inline-flex items-center gap-3",
+        "inline-flex gap-3",
+        description ? "items-start" : "items-center",
         disabled ? "cursor-not-allowed" : "cursor-pointer",
         className,
       )}
@@ -51,6 +76,8 @@ export function Checkbox({
         role="checkbox"
         aria-checked={indeterminate ? "mixed" : checked}
         aria-label={ariaLabel}
+        aria-labelledby={labelId}
+        aria-describedby={describedBy}
         disabled={disabled}
         onClick={() => !disabled && onCheckedChange(!checked)}
         whileTap={reduce || disabled ? undefined : { scale: 0.92 }}
@@ -91,7 +118,7 @@ export function Checkbox({
               }
               aria-hidden
             >
-              <title>{indeterminate ? "Partially selected" : "Selected"}</title>
+              <title>{t(indeterminate ? "indeterminate" : "checked")}</title>
               <motion.path
                 d={path}
                 initial={reduce ? { pathLength: 1 } : { pathLength: 0 }}
@@ -110,9 +137,22 @@ export function Checkbox({
           ) : null}
         </AnimatePresence>
       </motion.button>
-      {label ? (
-        <span className={cn("select-none text-sm text-foreground", disabled && "opacity-60")}>
-          {label}
+      {label || description ? (
+        <span className={cn("flex min-w-0 flex-col gap-0.5 select-none", disabled && "opacity-60")}>
+          {label ? (
+            <span
+              id={labelId}
+              // Geist sits low in a 20px line; a 16px line lifts the text onto the control.
+              className={cn("text-sm text-foreground", description && "leading-4")}
+            >
+              {label}
+            </span>
+          ) : null}
+          {description ? (
+            <span id={descriptionId} className="text-xs text-muted-foreground">
+              {description}
+            </span>
+          ) : null}
         </span>
       ) : null}
     </label>

@@ -8,6 +8,7 @@ import { BalancePrivacyProvider } from "@/lib/hooks/use-balance-privacy";
 import { messages } from "@/lib/i18n/messages";
 import type { PinScopeKey } from "@/lib/queries/keys";
 import type { PortfolioOverview } from "@/lib/queries/portfolio";
+import { tabLabel } from "./helpers/tabs";
 
 // 首页 tab 条(视角 tab + 自定义 Tab + ＋ 加钮 + 右侧合计)从用户这一侧看:
 //   · 视角 tab:Tokens 恒在;Perps / DeFi 只在组合里真有时才出;pin 以 `#名` / `@名` 显示
@@ -146,9 +147,11 @@ function mount(opts: { hide?: boolean } = {}) {
   );
 }
 
-const tabNames = () => screen.getAllByRole("tab").map((t) => t.textContent);
+const tabNames = () => screen.getAllByRole("tab").map(tabLabel);
 const selectedTab = () =>
-  screen.getAllByRole("tab").find((t) => t.getAttribute("aria-selected") === "true")?.textContent;
+  tabLabel(
+    screen.getAllByRole("tab").find((t) => t.getAttribute("aria-selected") === "true") as Element,
+  );
 const tab = (name: string) => screen.getByRole("tab", { name });
 // 右侧合计:tab 条之外、紧挨着它的那一格。
 const total = (container: HTMLElement) =>

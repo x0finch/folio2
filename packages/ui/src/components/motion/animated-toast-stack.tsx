@@ -7,26 +7,27 @@ import {
   Check,
   Info,
   LoaderCircle,
-  X,
   type LucideIcon,
+  X,
 } from "lucide-react";
 import {
   AnimatePresence,
   motion,
-  useReducedMotion,
   type Transition,
+  useReducedMotion,
 } from "motion/react";
 import {
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { EASE_OUT } from "@folio/ui/lib/ease";
+import { useMessages } from "@folio/ui/lib/i18n";
 import { cn } from "@folio/ui/lib/utils";
 
 export type ToastStatus = "neutral" | "info" | "loading" | "success" | "error";
@@ -72,6 +73,13 @@ export type ToastClassNames = {
   progress?: string;
 };
 
+/** English defaults. Override per instance with `labels`, or app-wide with `LocaleProvider`. */
+export const animatedToastStackMessages = {
+  dismiss: "Dismiss toast",
+};
+
+export type AnimatedToastStackMessages = typeof animatedToastStackMessages;
+
 export interface AnimatedToastStackProps {
   toasts: AnimatedToast[];
   onDismiss?: (id: string) => void;
@@ -85,6 +93,8 @@ export interface AnimatedToastStackProps {
   classNames?: ToastClassNames;
   icons?: Partial<Record<ToastStatus, ReactNode>>;
   renderToast?: (toast: AnimatedToast) => ReactNode;
+  /** Override any built-in string. */
+  labels?: Partial<AnimatedToastStackMessages>;
 }
 
 export interface UseAnimatedToastStackOptions {
@@ -114,9 +124,9 @@ const STATUS_ICON: Record<ToastStatus, LucideIcon> = {
 };
 
 const STATUS_CLASS: Record<ToastStatus, string> = {
-  neutral: "text-muted-foreground bg-primary/[0.05]",
-  info: "text-primary bg-primary/10",
-  loading: "text-primary bg-primary/10",
+  neutral: "text-muted-foreground bg-muted/60",
+  info: "text-primary bg-muted",
+  loading: "text-primary bg-muted",
   success: "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400",
   error: "text-destructive bg-destructive/10",
 };
@@ -268,7 +278,9 @@ export function AnimatedToastStack({
   classNames,
   icons,
   renderToast,
+  labels,
 }: AnimatedToastStackProps) {
+  const t = useMessages("animatedToastStack", animatedToastStackMessages, labels);
   const [portalTarget, setPortalTarget] = useState<Element | null>(null);
   const visibleToasts = toasts.slice(-maxVisible);
   const isBottom = position.startsWith("bottom");
@@ -303,6 +315,7 @@ export function AnimatedToastStack({
             classNames={classNames}
             icons={icons}
             renderToast={renderToast}
+            dismissLabel={t("dismiss")}
           />
         ))}
       </AnimatePresence>
@@ -327,6 +340,7 @@ const ToastItem = memo(function ToastItem({
   classNames,
   icons,
   renderToast,
+  dismissLabel,
 }: {
   toast: AnimatedToast;
   index: number;
@@ -334,12 +348,14 @@ const ToastItem = memo(function ToastItem({
   classNames?: ToastClassNames;
   icons?: Partial<Record<ToastStatus, ReactNode>>;
   renderToast?: (toast: AnimatedToast) => ReactNode;
+  dismissLabel: string;
 }) {
   const reduce = useReducedMotion();
   const status = toast.status ?? "neutral";
   const Icon = STATUS_ICON[status];
   const iconNode = icons?.[status] ?? toast.icon ?? <Icon className="h-3.5 w-3.5" />;
   const canDismiss = toast.dismissible !== false && Boolean(onDismiss);
+  const hasDetails = Boolean(toast.description || toast.action);
 
   return (
     <motion.li
@@ -387,11 +403,12 @@ const ToastItem = memo(function ToastItem({
         {renderToast ? (
           renderToast(toast)
         ) : (
-          <div className="flex items-start gap-3">
+          <div className={cn("flex gap-3", hasDetails ? "items-start" : "items-center")}>
             <motion.span
               layout
               className={cn(
-                "mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                hasDetails && "mt-0.5",
                 STATUS_CLASS[status],
                 classNames?.iconWrap,
               )}
@@ -473,7 +490,7 @@ const ToastItem = memo(function ToastItem({
                   type="button"
                   onClick={() => toast.action?.onClick(toast)}
                   className={cn(
-                    "mt-2 inline-flex h-7 items-center rounded-full bg-primary/[0.06] px-3 text-xs font-medium text-foreground transition-colors hover:bg-primary/[0.1]",
+                    "mt-2 inline-flex h-7 items-center rounded-full bg-muted/80 px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted",
                     classNames?.action,
                   )}
                 >
@@ -486,9 +503,9 @@ const ToastItem = memo(function ToastItem({
               <button
                 type="button"
                 onClick={() => onDismiss?.(toast.id)}
-                aria-label="Dismiss toast"
+                aria-label={dismissLabel}
                 className={cn(
-                  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-primary/[0.06] hover:text-foreground",
+                  "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground",
                   classNames?.close,
                 )}
               >
