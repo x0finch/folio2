@@ -1,49 +1,38 @@
 name: PR Preview
 
-# **按需**部署 preview:只有打了 `preview` 标签的 PR 才部署,URL 贴回 PR 评论。
-# 打标签 = 「我要这个 PR 的 preview」;标上之后该 PR 每次 push 自动更新;撕掉标签就不再部署。
-# (需要仓库里存在一个名为 `preview` 的 label —— 在 PR 的 Labels 里现建一个即可。)
+# On-demand preview: only PRs labelled `preview` deploy, and the URL is posted back to the PR. Removing the label stops deploys. (A label named `preview` must exist.)
 #
-# 部署到一个**独立的** Worker `folio-preview`(见 apps/web/wrangler.jsonc 的 env.preview)——
-# 生产 Worker `folio` 完全不受影响。每个打标签的 PR 经 `wrangler versions upload --preview-alias pr-<N>`
-# 拿到一个**独立的** workers.dev 预览 URL(`pr-<N>-folio-preview.<子域>.workers.dev`),**多个 PR 互不
-# 覆盖、可同时在线**;它们**共用**这一个 preview Worker + 一个 `folio-preview` 远程 D1(方案 B:常驻累积)。
-# 库平时不清、保留数据;destructive 迁移把某个 preview 弄崩时,手动跑 preview-reset.yml 重建一次。
-# 登录:auth 在 preview 放行了这些别名域(env.preview 的 PREVIEW_TRUSTED_ORIGINS),用邮箱/密码登录;
-# passkey 绑固定域、换别名域不通(预览用密码即可)。
+# Deploys to a separate Worker `folio-preview` (env.preview in apps/web/wrangler.jsonc); production `folio` is untouched. Each labelled PR gets its own workers.dev preview URL via `wrangler versions upload --preview-alias pr-<N>`; PRs don't overwrite each other and share one preview Worker and one persistent `folio-preview` remote D1. Reset it manually with preview-reset.yml if a destructive migration breaks it.
+# Login: preview allows the alias domains (PREVIEW_TRUSTED_ORIGINS); use email/password, since passkeys are bound to a fixed domain.
 #
-# 正确性四闸由 ci.yml 在同一个 commit 上并行跑;这里不重复,只管「把它跑起来给人看」。
-# 复用生产那把 `CLOUDFLARE_API_TOKEN`(Workers Scripts:Edit + D1:Edit),无需新 token。
+# The correctness gates run in ci.yml on the same commit; this only runs the preview. Reuses the production CLOUDFLARE_API_TOKEN.
 #
-# 触发事件:labeled(标上那刻)/ synchronize(带标签的 PR 后续 push)/ reopened(带标签重开)。
-# 刻意没有 opened —— 开 PR 不自动部署,得你显式打标签。
+# Triggers: labeled, synchronize, reopened. Deliberately not opened: opening a PR doesn't deploy.
 on:
   pull_request:
     types: [labeled, synchronize, reopened]
 
-# 所有 PR 共用同一个 preview Worker + 库,并发部署会互相踩 → 全局串行。
-# cancel-in-progress: false —— 部署/迁移进行中不打断,免得留下半迁移的库。
+# All PRs share one preview Worker + DB, so deploys are serialised globally; in-flight deploys/migrations aren't cancelled, to avoid a half-migrated DB.
 concurrency:
   group: pr-preview
   cancel-in-progress: false
 
 jobs:
   preview:
-    # 只部署带 `preview` 标签的 PR(synchronize/reopened 时若标签已撕掉 → 跳过)。
-    # fork 来的 PR 拿不到仓库 secret(且不该拿)→ 一并跳过,否则必然在缺 token 处红。
+    # Only PRs labelled `preview` (skipped if the label was removed). Fork PRs get no repo secrets, so they're skipped too.
     if: >-
       contains(github.event.pull_request.labels.*.name, 'preview')
       && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write # 贴/更新 preview URL 评论
+      pull-requests: write # post/update the preview URL comment
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # 拉全历史 + tag,让 vite 的 git describe 得到真实版本号(设置页页脚)
+          fetch-depth: 0 # full history + tags so vite's git describe yields the real version
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -51,13 +40,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # 先迁移 preview 远程库(和生产同样的 fail-stop 顺序:迁移失败 → 不部署 → 不会「代码上了
-      # 但 schema 没迁」)。这里的迁移是**累积**打到共享库上的,不重置 —— 见 workflow 顶部说明。
+      # Migrate the preview remote DB first (fail-stop, same as production). Migrations accumulate on the shared DB and are never reset.
       - name: Apply D1 migrations (preview)
         run: pnpm --filter @folio/web run db:migrate:preview
 
-      # 上传一个**版本**并挂 per-PR 预览别名 `pr-<N>`(不 promote 到固定域 → 不覆盖别的 PR)。
-      # 从 wrangler 输出里抓那条别名预览 URL。
+      # Upload a version with a per-PR alias `pr-<N>` (not promoted to the fixed domain, so other PRs are untouched); the alias preview URL is scraped from wrangler's output.
       - name: Build & upload preview version
         id: deploy
         env:
@@ -68,14 +55,13 @@ jobs:
           url="$(grep -oiE 'https://pr-[0-9]+-folio-preview[a-z0-9.-]*\.workers\.dev' /tmp/wrangler.log | head -1)"
           if [ -z "$url" ]; then echo "::error::could not parse preview URL from wrangler output"; exit 1; fi
           echo "url=$url" >> "$GITHUB_OUTPUT"
-          # 完整构建版本(与设置页底部页脚同款:git describe 原样、带 -g<hash>)。评论里没有它时,预览
-          # URL 是固定别名、`commit` 又是临时合并 sha,看着「每次都没变」—— 放个每次 push 都会变的版本号进去。
+          # Full build version (as in the settings footer). The alias URL is fixed and `commit` is a temporary merge sha, so the comment would look unchanged; this changes on every push.
           version="$(git describe --tags --always --dirty 2>/dev/null || echo unknown)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          # 本次部署更新时间(到秒,UTC)—— 让每次 push 的评论有个一眼可辨的「刚更新过」的戳。
+          # Deploy time (to the second, UTC): a visible "just updated" stamp per push.
           echo "deployed_at=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
 
-      # 单条「粘性」评论:每次 push 更新同一条,不刷屏。用第一方 github-script,不引第三方 action。
+      # One sticky comment, updated on every push. Uses first-party github-script, no third-party action.
       - name: Upsert preview URL comment
         uses: actions/github-script@v7
         with:
@@ -83,15 +69,15 @@ jobs:
             const url = "${{ steps.deploy.outputs.url }}";
             const version = "${{ steps.deploy.outputs.version }}";
             const deployedAt = "${{ steps.deploy.outputs.deployed_at }}";
-            // pull_request 事件里 context.sha 是临时合并 commit,不是 push 的那个 → 用 head sha。
+            // In pull_request events context.sha is a temporary merge commit, so use the head sha.
             const sha = context.payload.pull_request.head.sha.slice(0, 7);
             const marker = "<!-- pr-preview-url -->";
-            const body = `${marker}\n🚀 **Preview 已部署**: ${url}\n\n` +
-              `- 本 PR 专属预览 URL(\`pr-<N>\` 别名),不覆盖其它 PR,可同时在线。\n` +
-              `- 独立 Worker \`folio-preview\`,不影响生产;所有 PR 共用一个 preview 库,数据保留、不每次清。\n` +
-              `- 登录用**邮箱/密码**(passkey 换别名域不通);详见 DEPLOY.md「PR preview」。\n` +
-              `- commit \`${sha}\` · 版本 \`${version}\`\n` +
-              `- 更新于 \`${deployedAt}\``;
+            const body = `${marker}\n🚀 **Preview deployed**: ${url}\n\n` +
+              `- This PR's own preview URL (\`pr-<N>\` alias); doesn't overwrite other PRs and can be live alongside them.\n` +
+              `- Separate Worker \`folio-preview\`, production unaffected; all PRs share one preview DB, data is kept and never cleared per run.\n` +
+              `- Log in with **email/password** (passkeys don't work on alias domains); see DEPLOY.md "PR preview".\n` +
+              `- commit \`${sha}\` · version \`${version}\`\n` +
+              `- updated \`${deployedAt}\``;
             const { owner, repo } = context.repo;
             const issue_number = context.issue.number;
             const comments = await github.rest.issues.listComments({ owner, repo, issue_number });
