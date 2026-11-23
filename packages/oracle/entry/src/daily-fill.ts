@@ -4,52 +4,37 @@ import { DAILY_FILL_DAYS_PER_CALL, dayBucketOf } from "@folio/oracle-basic";
 import { Clock, Effect, Either, Option, Schema } from "effect";
 import { logDegraded } from "./tokens/swr";
 
-// **补历史日价的那一处**(FOL-90)—— 代币的 `tokens.fillDaily` 与法币的 `fx.fillDaily` 共用。
-//
-// 以前历史日价在**读**的时候补:`priceSeries` / `rateSeries` 看到缺的过去日(以及永远「缺」的今天)
-// 就当场回源,于是每看一次图表就是一发(法币两发)CoinGecko。现在读那一侧只读表,补的活由队列的
-// `daily-prices` 消息在这里做,一条消息一份出网预算(`maxCalls`)。
-//
-// **只补过去日**:今天那一格读的时候取现价(代币价表 / 汇率缓存 —— 每小时的 `prices` / `fx` 活
-// 在刷它们)。落一个今天的日中价进 `token_daily_prices`,明天它就成了一个「不可变的过去日」,
-// 而那其实是某个钟点的价,不是那天的价。
-//
-// **「试过哪一段」记在 per-user 缓存里**(`daily-cover:<目标>` → `{ lo, hi }` 两个日桶,闭区间)。
-// 不能只看表里缺不缺:上游对某些日子**就是没有点**(币还没上线、中间断档),只看表的话这些日子
-// 永远算「缺」,每小时都要为它们白打一发。有了这段「试过」,补完之后重跑是一次缓存读、零出网。
-// 区间恒连续:往后(`hi` 之后到昨天)按升序补,往前(`lo` 之前到首笔活动那天)按降序补,
-// 每补完一窗就把那一端推过去 —— 预算用完 / 某一窗失败时停在哪儿,下一次就从哪儿接着补。
-// 表里已经有整窗的(别的用户、或 FOL-90 之前读路径落过的)→ 直接算「试过」,不出网。
-//
-// **同一个目标可能有两条消息同时在补**(code review #9):整点 cron 的那条、手记写完的定向补、
-// 接力的后续消息、队列的至少一次重投 —— 队列 `max_concurrency` > 1,它们并不串行。数据写本身
-// 无害(upsert,已有的桶不再写),危险的是「试过的区间」被后写完、进度少的那条**盖小**。所以收尾
-// 那一写是**并集**:写之前再读一次当下存的区间,与自己这趟的相接 / 相交就合成一段(`mergeCoverage`)。
-// 读与写之间仍有一个很窄的窗(没有 compare-and-set);落进去的代价只是下一趟重规划几窗 ——
-// 表里已有数据的窗不出网,只有「上游本就没有点」的窗会白打一发。
-//
-// 某一窗**失败** → 这个目标这一趟停在那儿、区间不推过去,下一次再试(日志里有一行)。
-// 永久失败的那一窗(上游不给那么老的数据)因此每次都会再白打一发 —— 往后的那一段先补,
-// 所以它挡不住「昨天」进表。
+// Backfills historical daily prices; shared by token `fillDaily` and fiat `fx.fillDaily`. One queue message gets one egress budget (`maxCalls`).
+// Only past days are filled: today is read from the live price caches, and persisting an intraday price
+// into `token_daily_prices` would freeze it as an "immutable past day".
+// The attempted range is stored in the per-user cache (`daily-cover:<target>` as `{ lo, hi }` day buckets, closed interval),
+// because upstream may have no point for some days and checking the table alone would refetch them hourly. The range
+// stays contiguous: forward (after `hi` to yesterday) ascending, backward (before `lo` to first activity) descending,
+// advancing that end after each window, so a spent budget or failed window resumes where it stopped.
+// Windows already fully in the table (other users) count as attempted without egress.
+// Concurrent messages for one target are possible (queue `max_concurrency` > 1, at-least-once redelivery); the final write
+// is a union (`mergeCoverage`) of the freshly re-read stored range and this run's, so a slower writer cannot shrink it.
+// The remaining read-write gap only costs a few re-planned windows. A failed window stops this run for that target and
+// does not advance the range; a permanently failing window is retried each run, but the forward part is filled first so it never blocks yesterday.
 
-/** 一次补的结果,给调用方记账(出网预算)与决定要不要投后续消息。 */
+/** Outcome of one fill, for budget accounting and deciding on follow-up messages. */
 export interface DailyFillReport {
-  /** 这一趟**按最坏情形**记下的上游请求数(不含 adapter 自己的重试)。 */
+  /** Upstream requests spent this run, counted worst case (excludes adapter retries). */
   readonly calls: number;
-  /** 从首笔活动那天到昨天都试过了 —— 下一趟零出网。 */
+  /** Everything from first activity to yesterday was attempted; next run needs no egress. */
   readonly done: boolean;
-  /** 某一窗回源失败,这一趟停在那儿(下一次再试)。 */
+  /** A window failed upstream; this run stopped there. */
   readonly failed: boolean;
 }
 
-/** 一个要补的目标:按日桶读表 / 按窗回源 / 写表。**收已解析好的端口**,`R` 里只有 `DbRequest`。 */
+/** One fill target: reads the table by day bucket, fetches by window, writes. Takes resolved ports, so `R` is only `DbRequest`. */
 export interface DailySource {
-  /** 这一窗最坏打几发上游(代币 1;法币 2 —— BTC 该币 + BTC 美元两条腿)。 */
+  /** Worst-case upstream calls per window (token 1; fiat 2: BTC in that currency + BTC in USD). */
   readonly callsPerWindow: number;
   readonly read: (
     buckets: readonly number[],
   ) => Effect.Effect<Map<number, number>, never, DbRequest>;
-  /** 闭区间 `[fromB, toB]` 的日桶 → 价。多给的桶由调用方丢掉。 */
+  /** Day buckets in closed `[fromB, toB]` to price; extras are dropped by the caller. */
   readonly fetch: (
     fromB: number,
     toB: number,
@@ -59,10 +44,10 @@ export interface DailySource {
   ) => Effect.Effect<void, never, DbRequest>;
 }
 
-/** 「试过的区间」住的缓存键。一个目标一个。 */
+/** Cache key of the attempted range, one per target. */
 const coverageKey = (target: string): string => `daily-cover:${target}`;
 
-// 这个值没有「过期」一说(过去日不可变);缓存表要一个 TTL,读的时候也不看 stale。
+// Never expires (past days are immutable); the cache table needs a TTL and reads ignore stale.
 const COVERAGE_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 
 const Coverage = Schema.Struct({ lo: Schema.Number, hi: Schema.Number });
@@ -72,15 +57,14 @@ const decodeCoverage = Schema.decodeUnknownOption(Coverage);
 interface FillWindow {
   readonly fromB: number;
   readonly toB: number;
-  /** 补完之后推哪一端:`up` 推 `hi`、`down` 推 `lo`。 */
+  /** Which end to advance after filling: `up` moves `hi`, `down` moves `lo`. */
   readonly dir: "up" | "down";
 }
 
 /**
- * 纯规划:`[wantFromB, throughB]` 减去已试过的 `cover`,切成每窗 ≤ `days` 天。
- * 先往后(升序,离今天近的先补 —— 图表最常看的就是最近那一段),再往前(降序)。
- * `cover` 与想要的区间不相接(首笔活动被改到了很久之后)→ 当它不存在,从头规划。
- * 回的 `base` 是补之前的区间(空区间记成 `{ lo: throughB + 1, hi: throughB }`),每补完一窗推一端。
+ * Pure plan: `[wantFromB, throughB]` minus the attempted `cover`, cut into windows of <= `days`.
+ * Forward ascending first (recent days are viewed most), then backward descending. A `cover` not adjacent to
+ * the wanted range is ignored. `base` is the range before filling (empty is `{ lo: throughB + 1, hi: throughB }`).
  */
 const planFillWindows = (
   wantFromB: number,
@@ -106,8 +90,7 @@ const planFillWindows = (
 };
 
 /**
- * 两段「试过的区间」合成一段:相交或首尾相接 → 并集;不相接(首笔活动被改过,旧的那段已不可用)
- * → 取这一趟的 `mine`。空区间(`lo > hi`)不参与合并。
+ * Union of two attempted ranges: overlapping or adjacent merge; disjoint takes `mine`. Empty ranges (`lo > hi`) do not merge.
  */
 const mergeCoverage = (mine: Coverage, other: Coverage | undefined): Coverage => {
   if (other === undefined || other.lo > other.hi) return mine;
@@ -123,8 +106,8 @@ const bucketsOf = (fromB: number, toB: number): number[] => {
 };
 
 /**
- * 把一个目标从 `fromMs` 那天补到昨天,至多花 `maxCalls` 发(按 `callsPerWindow` 的最坏情形记账)。
- * 永不失败:回源失败记一行、停在那一窗(`failed`)。`at` 只进日志。
+ * Fills one target from `fromMs` to yesterday, spending at most `maxCalls` (worst case per `callsPerWindow`).
+ * Never fails: a failed fetch is logged and stops at that window (`failed`). `at` only goes to logs.
  */
 export const fillDaily = (
   cache: CacheStore,
@@ -135,7 +118,7 @@ export const fillDaily = (
   at: string,
 ): Effect.Effect<DailyFillReport, never, DbRequest> =>
   Effect.gen(function* () {
-    const throughB = dayBucketOf(yield* Clock.currentTimeMillis) - 1; // 昨天
+    const throughB = dayBucketOf(yield* Clock.currentTimeMillis) - 1; // yesterday
     const wantFromB = dayBucketOf(fromMs);
     if (wantFromB > throughB) return { calls: 0, done: true, failed: false };
     const key = coverageKey(target);
@@ -172,7 +155,7 @@ export const fillDaily = (
       doneWindows++;
     }
     if (doneWindows > 0) {
-      // 并集写回:另一条同时在补这个目标的消息可能已经推得更远(见文件头)。
+      // Union write-back: a concurrent message may have advanced further (see file header).
       const latest = Option.flatMap(yield* cache.get(key), (e) => decodeCoverage(e.value));
       const merged = mergeCoverage(cover, Option.getOrUndefined(latest));
       yield* cache.put(key, merged, COVERAGE_TTL_MS);

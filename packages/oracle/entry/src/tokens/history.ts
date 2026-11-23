@@ -5,25 +5,20 @@ import type { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Clock, Effect, Option } from "effect";
 import { type DailyFillReport, fillDaily } from "../daily-fill";
 
-// 历史日价(#148 / ADR 0019)。与 `./price` 的现价分开成一片,因为**判据不同**:
-// 过去日不可变(落库一次,永久命中),今日桶可变。
-//
-// **读与补分开了(FOL-90)。** 以前 `priceSeries` 是 SWR:缺的过去日与「今天」当场回源 —— 手记账户
-// 的每一次图表读都是一发 CoinGecko。现在:
-//   `priceSeries` / `priceAt`  **只读**:过去日读 `token_daily_prices`,今天读价表的现价
-//                              (每小时的 `prices` 活在刷它)。缺的日子就不在结果里,由调用方降级。
-//   `fillDaily`                **唯一回源处**:队列的 `daily-prices` 活按预算把首笔活动那天到昨天补齐
-//                              (`../daily-fill`)。
+// Historical daily prices, separate from `./price` because the criterion differs: past days are immutable (stored once),
+// today's bucket is mutable.
+//   `priceSeries` / `priceAt`  read-only: past days from `token_daily_prices`, today from the price table's current price; missing days are absent and the caller degrades.
+//   `fillDaily`                the only upstream path: the queue's `daily-prices` job fills first-activity day to yesterday within budget (`../daily-fill`).
 export interface TokenHistory {
-  // 历史日价序列,**零网络**:过去日只给表里有的;今日桶给价表里的现价(多旧都给,没有就缺)。
+  // Daily price series, zero network: past days only if in the table; today's bucket is the current price (however old; absent if none).
   priceSeries(
     tokenId: string,
     fromMs: number,
     toMs: number,
   ): Effect.Effect<readonly TokenPricePoint[], never, DbRequest>;
-  // 某时刻的历史价:atMs 所属 UTC 日桶的价;该日无数据 → `none`(调用方降级)。零网络。
+  // Price at a moment: the UTC day bucket containing atMs; `none` if that day has no data (caller degrades). Zero network.
   priceAt(tokenId: string, atMs: number): Effect.Effect<Option.Option<number>, never, DbRequest>;
-  // 把 `fromMs` 那天到昨天的日价补进表,至多 `maxCalls` 发上游(FOL-90)。上游没认出来的币 → 无事可做。
+  // Backfills daily prices from `fromMs` to yesterday, at most `maxCalls` upstream calls; no-op if upstream does not recognise the token.
   fillDaily(
     tokenId: string,
     fromMs: number,
@@ -44,14 +39,14 @@ export const makeHistory = (
   ): Effect.Effect<readonly TokenPricePoint[], never, DbRequest> =>
     Effect.gen(function* () {
       const info = yield* store.getById(tokenId);
-      // 上游还没认出它 → 没有历史价(本源只认自己给的名字)。
+      // Upstream does not recognise it yet: no history (this upstream only knows names it issued).
       const ref = Option.flatMap(info, (i) => Option.fromNullable(i.ref));
       if (Option.isNone(ref) || fromMs > toMs) return [];
 
       const todayB = dayBucketOf(yield* Clock.currentTimeMillis);
       const fromB = dayBucketOf(fromMs);
       const toB = dayBucketOf(toMs);
-      const daily: number[] = []; // 除今天以外的桶都读日价表(过去日;未来的桶表里本就没有)
+      const daily: number[] = []; // every bucket except today reads the daily table (past days; future buckets have no rows)
       for (let b = fromB; b <= toB; b++) if (b !== todayB) daily.push(b);
       const withToday = fromB <= todayB && todayB <= toB;
 
@@ -68,7 +63,7 @@ export const makeHistory = (
   return {
     priceSeries,
 
-    // 只要那一天的最后一点 —— 复用 `priceSeries`,别再开一条取数路。
+    // Only the last point of that day; reuse `priceSeries` rather than add another fetch path.
     priceAt: (tokenId, atMs) =>
       Effect.map(
         Effect.suspend(() => priceSeries(tokenId, dayBucketOf(atMs) * MS_PER_DAY, atMs)),
@@ -95,7 +90,7 @@ export const makeHistory = (
                 ),
                 (points) => {
                   const byDay = new Map<number, number>();
-                  // 升序 → 当日最后一点胜出
+                  // ascending: last point of the day wins
                   for (const pt of points) byDay.set(dayBucketOf(pt.atMs), pt.unitPrice);
                   return byDay;
                 },

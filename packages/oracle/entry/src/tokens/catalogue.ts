@@ -6,34 +6,23 @@ import type { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Clock, Effect, Option } from "effect";
 import { WARM_KEY, type WarmRow, warmBlob } from "./warm";
 
-// 币目录 —— 用户**选币**时看到的东西:默认那一列(市值前 N)与搜索结果。
-//
-// 与 `./price` 的分界是「问的是谁」:那片问「**我的**这个币怎么样」(per-user 的行),
-// 本片问「**世上**有哪些币」(与用户无关的公开目录,住 warm blob)。所以本片一个 store 都不碰,
-// 只要 `CacheStore` + 上游。
-//
-// **`search` 是全服务唯一把上游错误交出去的方法。** 其余能力都有本地旧值可退,上游挂了就降级;
-// 而搜索没有任何旧值,吞掉它只会让用户看着一个空列表以为「搜不到这个币」—— 那一档必须让
-// 调用方知道(它自己决定怎么显示)。
+// Token catalogue: what a user sees when choosing a token (default top-N by market cap, and search). Public and user-independent,
+// lives in the warm blob, so this slice touches no store, only `CacheStore` + upstream.
+// `search` is the only method that surfaces upstream errors: it has no stale value to fall back to, and swallowing
+// would show an empty list that reads as "token not found".
 export interface TokenCatalogue {
-  // 选币橱窗:市值 top-N,走 warm blob(冷则预热一次;价旧了也刷 —— 用户在看)。
+  // Picker showcase: top-N by market cap from the warm blob (warms when cold; refreshes stale prices since the user is looking).
   topTokens(limit: number): Effect.Effect<UpstreamToken[], never, DbRequest>;
-  // 按关键词搜币(用户选币)。恒回源 —— 结果与用户无关,边缘缓存管它。
-  // **唯一会把上游错误交出去的方法**(见本接口开头那段)。
+  // Search by keyword; always fetched from upstream (results are user-independent, edge cache handles it). Surfaces upstream errors.
   search(query: string): Effect.Effect<UpstreamToken[], UpstreamError>;
-  // 后台预热:目录超过 WARM_TTL_MS(一周)就整份刷一次,否则零请求。返回目录条数。
-  // **唯一主动让目录跟上的那条路** —— 写路径按设计永不刷,橱窗只在用户打开下拉时才跑。
-  // 调用方须把它放在 best-effort 的位置(同步后 `waitUntil`),别挂在任何人的关键路径上。
+  // Background warm: refreshes the whole catalogue when older than WARM_TTL_MS (one week), otherwise zero requests; returns the entry count.
+  // The only path that proactively refreshes the catalogue; call it best-effort (post-sync `waitUntil`).
   refreshCatalogue(): Effect.Effect<number, never, DbRequest>;
 }
 
-// —— warm blob 的两个读者(第三个是候选源,在 ./candidates)——
-// 三条判据为什么不同、为什么都落在 blob 自己的 `asOf` 上,见 ./warm 的开头。
+// The warm blob's two readers (third is the candidate source in ./candidates); see ./warm for why the criteria differ.
 
-/**
- * 橱窗读者(选币下拉的默认列)。**价旧了就刷** —— 用户正看着这些数字,而且是他自己点开的,
- * 这一趟网络他等得起。
- */
+/** Showcase reader: refreshes stale prices, since the user opened the picker and can afford the round trip. */
 export const warmMarkets = (
   cache: CacheStore,
   upstream: TokenMetaUpstream,
@@ -41,14 +30,7 @@ export const warmMarkets = (
 ): Effect.Effect<readonly WarmRow[], never, DbRequest> =>
   warmBlob(cache, upstream, topN, (blob, now) => now - blob.asOf > PRICE_TTL_MS);
 
-/**
- * 预热读者(同步之后在后台跑)。**目录旧了就整份刷一次** —— 这是唯一一条「主动让目录跟上」的路。
- *
- * 为什么不能指望另外两个:候选源按设计永不刷(它在写路径上),橱窗只在用户打开选币下拉时才跑
- * —— 从不开下拉的用户,候选集会冻在第一次同步那一刻,此后新进前 1000 的币永远认不出来。
- *
- * 跑在同步后的 best-effort 预热里(`waitUntil`,吞错),所以这 4 次请求不在任何人的关键路径上。
- */
+/** Warm reader (post-sync, background): refreshes the whole catalogue when stale; the only proactive path, since the other readers never refresh or only run when the picker opens. */
 export const refreshWarmCatalogue = (
   cache: CacheStore,
   upstream: TokenMetaUpstream,
@@ -56,18 +38,7 @@ export const refreshWarmCatalogue = (
 ): Effect.Effect<readonly WarmRow[], never, DbRequest> =>
   warmBlob(cache, upstream, topN, (blob, now) => now - blob.asOf > WARM_TTL_MS);
 
-/**
- * 预热那条路先问一句「够新吗」,**只看 blob 自己的 `asOf`,不解码整份目录**(FOL-83 第二轮)。
- *
- * 一周里 167 次答案都是「够新」,而为了这一个数把 1000 行逐字段过一遍 Schema,本机实测约 9ms
- * 解码 + 7ms 回收 —— 每天那条 `catalogue` 消息的一大半(免费计划一次调用 10ms)。判据与
- * `refreshWarmCatalogue` 同一个(`now - asOf > WARM_TTL_MS` 才算旧);不够新 / 没有 / 形状不对
- * (`asOf` 不是数、`rows` 不是数组)→ `none`,走原来那条完整的路(解码、回源、写回)。
- *
- * **与原来唯一的差别**:一份 `asOf` 够新、但某几行形状坏了的 blob,原来会被这一趟当 miss 重拉,
- * 现在留到它过期为止。它照样自愈 —— 真要读行的三个读者(mint 的候选源、选币下拉)每次都完整
- * 解码,解不动就当 miss 回源重写。返回的条数按 ref 去重,与 `dedupeByRef` 之后的长度同一个口径。
- */
+/** Cheap freshness check on the blob's own `asOf` without decoding the 1000 rows (decode cost ~16ms of the 10ms budget). Same criterion as `refreshWarmCatalogue`; not fresh / missing / malformed gives `none` and takes the full path. A blob with fresh `asOf` but bad rows lingers until expiry; row readers decode fully and heal. Count is deduped by ref. */
 const freshCatalogueSize = (
   cache: CacheStore,
   now: number,
@@ -83,15 +54,14 @@ const freshCatalogueSize = (
     }),
   );
 
-// 市值升序取前 limit(无 rank 者垫底)。
+// Top `limit` by market cap ascending rank (unranked last).
 export function topByRank(rows: readonly WarmRow[], limit: number): readonly WarmRow[] {
   const rank = (r: WarmRow) => r.price.marketCapRank ?? Number.POSITIVE_INFINITY;
   return [...rows].sort((a, b) => rank(a) - rank(b)).slice(0, limit);
 }
 
 export const makeCatalogue = (cache: CacheStore, upstream: TokenUpstream): TokenCatalogue => {
-  // 橱窗读者:价旧了就刷(用户点开下拉、正看着这些数字)。**候选源不走这条** ——
-  // 它在写路径上,判据不同,见 ./candidates(#216)。
+  // Showcase reader: refresh stale prices (the user is looking). The candidate source does not take this path; see ./candidates.
   const rows = warmMarkets(cache, upstream, DEFAULT_TOP_N);
 
   return {

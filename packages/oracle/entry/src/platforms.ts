@@ -6,32 +6,23 @@ import { PlatformUpstream } from "@folio/oracle-basic/ports";
 import { Effect, Option, Schema } from "effect";
 import { degradeTo } from "./tokens/swr";
 
-// 平台(链 ∪ 场馆)的名与图。与汇率同款两个动词、同款判据:`resolve` 读(零网络、软过期),
-// `warm` 写(过期才拉)。
-//
-// **「一个平台显示成什么」整个归本模块所有**(ADR 0005/0006 的收口):没缓存、上游没收录、
-// 缓存过期 —— 三种情况调用方都不需要区分,`resolve` 一律给一个能上屏的名字。
-//
-// 读写都走缓存的**批量**那两个口:一个用户的链就那么几条,但展示时每条都要,逐键点查等于
-// 把总览的一次 D1 往返变成 N 次(见 `CacheStore` 的注释)。
+// Platform (chain + venue) names and logos. `resolve` reads (zero network, soft expiry); `warm` writes (fetch only when expired).
+// This module owns "what a platform displays as": `resolve` always returns a displayable name, whether uncached,
+// unlisted upstream, or expired. Reads and writes use the cache's batch ops to avoid N D1 round trips.
 const cap = (s: string): string => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
-// 未收录 / 未预热的平台的兜底展示名(纯由 key 推)。
-// `evm:<id>` 没有 slug 可用 → 原样显示;其余取冒号后一段首字母大写(`manual` → "Manual")。
+// Fallback display name from the key alone: `evm:<id>` as is; otherwise the part after the colon capitalised (`manual` becomes "Manual").
 function fallbackName(key: string): string {
   if (key.startsWith("evm:")) return key;
   const slug = key.slice(key.indexOf(":") + 1);
   return cap(slug || key);
 }
 
-// —— 缓存那一侧:键、形状、两个读写口 ——
-// 平台住 per-user 缓存表的 `platform:<键>` 键上(另两种键见 warm.ts / fx.ts)。
+// Cache side: keys `platform:<key>` in the per-user cache table (shape decoded via Schema, not `as`; unreadable heals by refetch).
 
 export const platformKey = (key: string): string => `platform:${key}`;
 
-// **`name: null` = 否定缓存** —— 问过上游、它的链表里没有这个键。与「这条压根没有」必须分开:
-// 后者会让每一次预热都为了这一个键重拉整张链表。
-// 形状走 Schema **解码**不是 `as` 断言:解不动(旧形状 / 手改过库)当 miss,回源重写一份,自愈。
+// `name: null` is a negative cache entry (asked upstream, no such key); it must differ from "absent" or every warm refetches the whole chain table.
 const PlatformEntryShape = Schema.Struct({
   name: Schema.NullOr(Schema.String),
   logo: Schema.optional(Schema.String),
@@ -39,8 +30,7 @@ const PlatformEntryShape = Schema.Struct({
 export type PlatformEntry = Schema.Schema.Type<typeof PlatformEntryShape>;
 const decodePlatform = Schema.decodeUnknownOption(PlatformEntryShape);
 
-// 读一批。**返回 `{name: null}` 与「键不在结果里」是两件事**:前者是「问过、上游没有」,
-// 后者是「没问过」。`stale` 一并给出来 —— 预热据它决定要不要重拉,展示则一律用旧的。
+// Read a batch. `{name: null}` (asked, upstream has none) differs from absent (never asked); `stale` lets warm decide to refetch while display always uses the old value.
 export const readPlatforms = (
   cache: CacheStore,
   keys: readonly string[],
@@ -57,7 +47,7 @@ export const readPlatforms = (
     return out;
   });
 
-// 一次批量写。命中写长 TTL(名与图近静态),否定写短 TTL(新链随时可能被收录)。
+// One batched write: hits get a long TTL (near-static), negatives a short one (new chains may be listed anytime).
 export const writePlatforms = (
   cache: CacheStore,
   entries: readonly { key: string; entry: PlatformEntry }[],
@@ -70,15 +60,14 @@ export const writePlatforms = (
     })),
   );
 
-// 服务的形状从下面这段 `effect` 的返回值推导,`.Default` 就是它的 layer —— 不再手写
-// interface + Tag + layer 三件套(#501)。
+// Service shape is derived from the `effect` return value; `.Default` is its layer.
 export class PlatformService extends Effect.Service<PlatformService>()("oracle/PlatformService", {
   effect: Effect.gen(function* () {
     const { cache } = yield* DatabaseForOracle;
     const upstream = yield* PlatformUpstream;
 
     return {
-      // 每个 key 都给一份展示。命中真名就用真名,否则按 key 推一个兜底名。**不出网、一次读。**
+      // Every key gets a display: real name on hit, else a key-derived fallback. No network, one read.
       resolve: (
         keys: readonly string[],
       ): Effect.Effect<Map<string, PlatformMeta>, never, DbRequest> =>
@@ -87,10 +76,10 @@ export class PlatformService extends Effect.Service<PlatformService>()("oracle/P
           const out = new Map<string, PlatformMeta>();
           if (unique.length === 0) return out;
 
-          const hits = yield* readPlatforms(cache, unique); // 一次读
+          const hits = yield* readPlatforms(cache, unique); // one read
           for (const key of unique) {
             const entry = hits.get(key)?.entry;
-            // `name === null`(否定缓存)与没缓存走同一条兜底路 —— 对展示来说是同一件事。
+            // A null name (negative cache) takes the same fallback path as uncached.
             out.set(
               key,
               entry?.name != null
@@ -101,7 +90,7 @@ export class PlatformService extends Effect.Service<PlatformService>()("oracle/P
           return out;
         }),
 
-      // 同步后预热:这些 key 里有缺的或过期的 → 拉一次整张链表 → **一个批次写回这几个 key**。
+      // After sync: if any key is missing or expired, fetch the whole chain table once and write just these keys in one batch.
       warm: (keys: readonly string[]): Effect.Effect<void, never, DbRequest> =>
         Effect.gen(function* () {
           const unique = [...new Set(keys)];
@@ -114,11 +103,9 @@ export class PlatformService extends Effect.Service<PlatformService>()("oracle/P
           });
           if (missing.length === 0) return;
 
-          // 一次拉全 —— 上游那个端点本来就是整张表,按 key 单查这回事在它那儿不存在。
-          //
-          // 降级到 **`none` 而不是空表**:这两件事在这里不一样 —— 「上游说它没有这条链」要写否定
-          // 缓存(短 TTL,免得每次预热都重拉整张表),而「上游挂了」**绝不能**写:那会把一条真实
-          // 存在的链按「不存在」记上一天。给 `[]` 就把两者抹平了。
+          // One fetch for everything (the upstream endpoint is the whole table).
+          // Degrade to `none`, not an empty table: "upstream says none" must write a short negative cache, while
+          // "upstream down" must never write, or a real chain would be recorded as nonexistent for a day.
           const chains = yield* upstream
             .fetchChains()
             .pipe(
@@ -128,9 +115,8 @@ export class PlatformService extends Effect.Service<PlatformService>()("oracle/P
           if (Option.isNone(chains)) return;
           const byKey = new Map(chains.value.map((c) => [c.key, c]));
 
-          // **只写我们被问到的那几个键**,不是整张两百行的表:这张缓存是 per-user 的,
-          // 把所有链都塞进每个用户的缓存里毫无意义 —— 他持仓就在那么几条链上。
-          // 表里没有的写否定缓存(短 TTL),否则这个键会让此后每一次预热都重拉整张表。
+          // Write only the keys asked for (the cache is per-user, the whole table is pointless there); keys missing
+          // from the table get a short negative entry so they do not force a refetch on every warm.
           yield* writePlatforms(
             cache,
             missing.map((key) => {
