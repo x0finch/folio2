@@ -1,7 +1,6 @@
 import { defineConfig } from "drizzle-kit";
 
-// generate 只用 schema/dialect/out;dbCredentials 仅 remote push/studio 时需要。
-// 落地流程:drizzle-kit generate → wrangler d1 migrations apply(见 package.json 脚本)。
+// generate uses only schema/dialect/out; dbCredentials is needed only for remote push/studio.
 export default defineConfig({
   schema: "./src/schema/index.ts",
   out: "./drizzle",
