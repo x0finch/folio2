@@ -1,28 +1,24 @@
 import { type APIRequestContext, expect, type Page } from "@playwright/test";
 
-// 同步链路 e2e 的共用件:操控假上游、加一个能同步成功的账户、读回落库的快照。
-//
-// 为什么另起一份而不塞进 app.ts:那份装的是闲置锁 / passkey 那套的现场道具(localStorage 键、
-// 虚拟认证器),和这里没有交集。
+// Shared pieces for the sync-path e2e: steering the fake upstream, adding an account that can sync successfully, reading back persisted snapshots.
+// Separate from app.ts because that one holds the idle-lock / passkey setup props (localStorage keys, virtual authenticator), which don't overlap.
 
 export const FAKE_BINANCE_URL = "http://localhost:3099";
 
 interface UpstreamState {
-  /** 每个请求人为拖多久 —— 把同步拖慢到能在中途关标签页。 */
+  /** How long each request is artificially delayed -- slows sync enough to close the tab midway. */
   delayMs: number;
-  /** 现货那条 BTC 持仓的数量(字符串,原样进快照)。 */
+  /** Quantity of the spot BTC holding (a string, goes into the snapshot as is). */
   spotBtc: string;
-  /** BTCUSDT 报价。 */
+  /** BTCUSDT price. */
   btcPrice: string;
-  /** 假 server 累计收到的请求数(只增;可置 0)。 */
+  /** Cumulative requests the fake server has received (increase-only; can be reset to 0). */
   hits: number;
 }
 
 /**
- * 改假上游的行为,返回改完之后的完整状态。
- *
- * 走 `request` fixture 而不是 `page.request`:它不绑 baseURL,也不随页面关闭失效 ——
- * 「关标签页」那条在页面没了之后还要接着操控上游。
+ * Changes the fake upstream's behavior and returns the full state afterwards.
+ * Uses the `request` fixture rather than `page.request`: it isn't bound to baseURL and doesn't die with the page; the "close the tab" case keeps steering the upstream after the page is gone.
  */
 export async function setUpstream(
   request: APIRequestContext,
@@ -40,36 +36,23 @@ export async function upstream(request: APIRequestContext): Promise<UpstreamStat
 }
 
 /**
- * 走 UI 加一个 Binance 账户(假 key,打本地假 server)。
- *
- * 为什么走 UI 而不直接调 server function:server fn 的调用地址是编译期产物(带 id 散列),从测试里
- * 拼它等于把一个随构建变的内部细节钉进测试。而「加账户」本身就是个有 UI 的用户动作,点一遍顺带把
- * 创建流覆盖了。
- *
- * **注意**:创建成功后 add-account-modal 会自己在后台补一次 `syncAccount`(见其 handleDone)——
- * FOL-89 起它只把账户排进一轮、投一件后台活,真同步由本地(Miniflare)的运行器 DO 跑,
- * 所以本函数返回之后账户随时可能出一张快照。要量「点下去这一轮」的测试必须先把那次等掉。
+ * Adds a Binance account through the UI (fake key, hits the local fake server).
+ * Through the UI rather than calling the server function directly: the server fn's call address is a compile-time artifact (with a hash id), so building it in a test would pin a build-dependent internal detail; "add account" is a user action with a UI anyway, so clicking through also covers the create flow.
+ * Note: after creation add-account-modal runs a background `syncAccount` itself (its handleDone); it only queues the account into a round and enqueues a background job, with the real sync run by the local (Miniflare) runner DO,
+ * so an account may get a snapshot at any time after this returns. Tests measuring "the round started by this click" must wait that one out first.
  */
 export async function addBinanceAccount(page: Page, label: string) {
-  // 点到 modal 真开为止。**不是为了等一段时间** —— 账户页刚 goto 完时 React 可能还没挂上 handler,
-  // 那一下点击会被**静静吞掉**(不报错、不生效),失败要到十几秒后才以「找不到 Binance」的形式出现
-  // (app.ts 的 gotoHydrated 注释里记了这个现象;账户页没有「只可能由客户端发出」的请求可等,
-  // 所以这里改成重试点击)。
-  //
-  // 开着的时候**绝不再点**:modal 的遮罩就是一个覆盖全屏的「关闭」按钮,再点会被它截住,
-  // 于是整个重试循环卡在「点击被拦」上直到超时(第一版就是这样挂的)。
-  //
-  // 名字用 /Binance$/i 而不是精确 "Binance",两头都有理由:格子的可读名是「首字母 + 名字」
-  // (LogoAvatar 兜底首字母那个 span 一直在 DOM 里),实测 `B Binance`,所以不能精确匹配;
-  // 而裸子串会连账户页上已有的 Binance 账户行一起命中(它的名字是「标签 Binance 上次同步 …」),
-  // strict mode 直接报两个元素 —— 所以锚在结尾。忽略大小写顺带兼容 connector 目录还没到位、
-  // 名字暂时是小写 id 的那一瞬。
+  // Click until the modal really opens. Not to wait out a duration: right after goto the accounts page may not have attached handlers and the click is silently swallowed (no error, no effect),
+  // surfacing only seconds later as "Binance not found" (see gotoHydrated's comment in app.ts; the accounts page has no client-only request to wait on, hence the retry click).
+  // Never click again while open: the modal's scrim is a full-screen "close" button that would intercept the click and stall the retry loop until timeout.
+  // Name /Binance$/i rather than exact "Binance": the grid cell's accessible name is "initial + name" (the LogoAvatar fallback initial span stays in the DOM), seen as `B Binance`, so exact fails;
+  // a bare substring would also hit an existing Binance account row on the accounts page ("label Binance last synced ..."), and strict mode reports two elements, so anchor at the end.
+  // Case-insensitive also tolerates the moment the connector catalogue isn't ready and the name is the lowercase id.
   const grid = page.getByRole("button", { name: /Binance$/i });
   const scrim = page.getByRole("button", { name: "Close modal" });
 
-  // 上一次的 modal 得先彻底退场。它是带退场动画的 MorphingModal:遮罩还挂着的那几百毫秒里,
-  // 下面的循环会以为「已经开着了」而不去点开,然后在等一个不存在的网格 —— 连着加八个账户时
-  // 这一下真的会撞上(第一版就是加到第五个开始挂)。
+  // The previous modal must fully exit first. It's a MorphingModal with an exit animation: during the few hundred ms the scrim is still mounted the loop below thinks it is "already open"
+  // and doesn't click, then waits for a grid that doesn't exist; adding eight accounts in a row really hits this.
   await expect(scrim).toHaveCount(0, { timeout: 10_000 });
 
   await expect(async () => {
@@ -85,50 +68,36 @@ export async function addBinanceAccount(page: Page, label: string) {
   await page.locator("#add-secret").fill("e2e-fake-api-secret");
 
   const form = page.locator("form").filter({ has: page.locator("#add-label") });
-  const failure = form.locator("p.text-destructive"); // AccountForm 的 mutation.isError 那行红字
+  const failure = form.locator("p.text-destructive"); // the red line for AccountForm's mutation.isError
 
-  // **回车提交,不点那个按钮。** modal 的遮罩是一个覆盖全屏的「关闭」按钮,而网格→表单是个 morph
-  // 动画:点击的命中测试通过之后、真正的鼠标事件落下之前,布局还在动,那一下会被遮罩接走 ——
-  // 表现是 modal 关了、账户没建、连报错都没有(连着加八个时稳定复现,第 5 到第 8 个之间某一个中招)。
-  // 回车走的是表单的 onSubmit,不经过坐标命中,而且它本身也是真实的用户动作。
+  // Submit with Enter, not the button: the modal's scrim is a full-screen "close" button and grid -> form is a morph animation; after the click's hit test passes and before the real mouse event
+  // lands the layout is still moving and the scrim catches it, so the modal closes with no account created and no error (reproducible when adding eight in a row).
+  // Enter goes through the form's onSubmit, no coordinate hit test, and is a real user action too.
   await page.locator("#add-secret").press("Enter");
 
-  // 创建会**真的**打一次假 server 校验凭据(validateAccount)—— 所以这一步顺带证明了 worker 确实
-  // 指着假 server。
-  //
-  // 认**含这个标签的那个按钮**(账户行),不认「页面上任何一处这个标签」:同步面板的「未同步」
-  // 清单里也写着同一个标签,裸文本匹配会命中两个元素(那清单不在按钮里,所以按按钮筛就干净了)。
-  //
-  // 不按可读名匹配:行的可读名是一长串拼接(标签 + Binance + 上次同步 + 金额 + 涨跌),
-  // 账户一多它的开头就不一定是标签,`^标签` 会莫名匹配不上(实测第七个账户开始中招)。
-  // 「这个按钮里有这段文字」是稳的。
-  //
-  // 同时盯那行红字:被拒时直接把上游给的理由抛出来。不然失败只表现成「账户行没出现」,
-  // 真正的原因(比如没指向假 server → binance auth failed)藏在一行没人看的字里。
+  // Creation really hits the fake server to validate credentials (validateAccount), which also proves the worker points at the fake server.
+  // Match the button containing this label (the account row), not any occurrence of the label on the page: the sync panel's "not synced" list also shows it and bare text matching hits two elements
+  // (that list isn't in a button, so filtering by button is clean). Don't match on accessible name: the row's name is a long concatenation (label + Binance + last sync + amount + change) and with many
+  // accounts the label may not come first, so `^label` mysteriously fails (from the seventh account on); "this button contains this text" is stable.
+  // Also watch the red line: when rejected, throw the upstream's reason directly, or the failure shows only as "account row didn't appear" with the real cause (e.g. not pointed at the fake server -> binance auth failed) hidden in a line nobody reads.
   const row = page.getByRole("button").filter({ has: page.getByText(label, { exact: true }) });
   await expect(async () => {
-    // 先 count() 再取文字。**别直接 textContent()**:匹配不到元素时它会一直等到 actionTimeout
-    // (本仓配的是 15 秒)才抛,而「没有红字」恰恰是常态 —— 于是每加一个账户白烧 15 秒,
-    // 八个账户那条一路涨到两分多钟。count() 是立刻返回的。
+    // count() first, then read the text. Don't call textContent() directly: with no match it waits until actionTimeout (15s in this repo) before throwing, while "no red line" is the normal case,
+    // so each added account would burn 15s and eight accounts climb past two minutes. count() returns at once.
     const rejected = (await failure.count()) > 0 ? await failure.first().textContent() : null;
     expect(
       rejected,
-      `加账户被拒:${rejected} —— 若是 binance auth failed,说明 app 没指向假 server,起服务要带 CLOUDFLARE_ENV=test(见 playwright.config.ts)`,
+      `account creation rejected: ${rejected} -- if it's binance auth failed, the app isn't pointed at the fake server; start the server with CLOUDFLARE_ENV=test (see playwright.config.ts)`,
     ).toBeNull();
     await expect(row).toHaveCount(1, { timeout: 1_000 });
   }).toPass({ timeout: 25_000 });
 }
 
 /**
- * 屏蔽「创建账户之后那次后台同步」——只在一次性造很多账户时用。
- *
- * 为什么要屏蔽:`add-account-modal` 的 handleDone 会 `void syncAccount(...)`。FOL-89 起那个 server fn
- * 只排队、即返,但每一次仍往运行器里投一件 `sync-account` 外加价 / 汇率 / 平台那几件 —— 而**运行器是
- * 串行的**(一个 DO、一次 alarm 一件),连着造八个账户时这几十件活会排在被测那一轮前面。造账户不是被测对象,没必要为它付这个钱;
- * 而且屏蔽之后这些账户在被测那一轮之前**一张快照都没有**,断言反而更干净。
- *
- * 按请求体分辨而不是按 URL:server fn 的地址带编译期散列,认不出是哪一个。而 `syncAccount` 的入参
- * 只有 accountId,`createAccount` 带的是 connectorId/label/values —— 这就够分了。
+ * Blocks the background sync after account creation, only for creating many accounts at once.
+ * Why: add-account-modal's handleDone does `void syncAccount(...)`; that server fn only queues and returns, but each call still enqueues a `sync-account` plus price / rate / platform jobs to the runner, and the runner is serial (one DO, one alarm per job),
+ * so eight accounts in a row put dozens of jobs ahead of the round under test. Creating accounts isn't under test, and blocking leaves these accounts with no snapshot before the round under test, so assertions are cleaner.
+ * Distinguished by request body, not URL (the server fn address carries a compile-time hash): `syncAccount`'s input is only accountId while `createAccount` carries connectorId/label/values.
  */
 export async function blockPostCreateSync(page: Page) {
   await page.route("**/_serverFn/**", async (route) => {
@@ -142,18 +111,14 @@ export async function unblockPostCreateSync(page: Page) {
   await page.unroute("**/_serverFn/**");
 }
 
-// 悬停页头那枚胶囊,开同步面板(FOL-32 后桌面 popover 走 hover)。
-//
-// 「开着」认触发器的 `aria-expanded="true"`(beUI PopoverTrigger 挂的,见 popover.tsx),
-// **不认面板文字可见**:vendored Popover 闭合时内容不卸载 —— clipPath 裁没 + inert,
-// 而 Playwright 的 toBeVisible 这三样一个都不认,等「Sync status 出现」是个恒真的假信号。
+// Hover the header pill to open the sync panel (the desktop popover opens on hover).
+// "Open" is judged by the trigger's `aria-expanded="true"` (set by beUI PopoverTrigger, see popover.tsx), not by the panel text being visible: the vendored Popover keeps its content mounted when closed (clipped by clipPath + inert),
+// and Playwright's toBeVisible recognizes none of those, so waiting for "Sync status appears" is an always-true false signal.
 export async function hoverSyncPill(page: Page) {
   const pill = page.getByRole("button", { name: /^(Synced|Needs attention|Syncing…)$/ });
   await expect(async () => {
-    // **先把光标挪开再 hover。** 这些用例多半是「点完同步再看面板」,而点击之后光标就停在胶囊
-    // 正中 —— 再 `hover()` 一次目标坐标没变,浏览器不会补发 mouseenter,于是 hover 触发的弹层
-    // 永远开不了(实测:点同步之后直接 hover,拿到的稳定是 `aria-expanded="false"`,
-    // 15 秒里重试 33 次一次都没变过)。挪开一步,这一次 hover 才是真的「移进来」。
+    // Move the cursor away first, then hover. These cases mostly click sync and then look at the panel, leaving the cursor centered on the pill; hovering again keeps the same target coordinates, the browser
+    // doesn't re-emit mouseenter, and the hover-triggered popover never opens (seen: hovering right after clicking sync always gave `aria-expanded="false"`, unchanged over 33 retries in 15s). Moving away makes this hover a real "move in".
     await page.mouse.move(0, 0);
     await pill.hover();
     await expect(pill).toHaveAttribute("aria-expanded", "true", { timeout: 2_000 });
@@ -161,27 +126,18 @@ export async function hoverSyncPill(page: Page) {
 }
 
 /**
- * 点页头那枚同步胶囊 = 跑整轮同步(见 sync-status.tsx 的 StatusSegment onClick),
- * 返回时 `POST /api/sync` 已经发出。
- *
- * 重复点不会多跑一轮 —— `useSyncRound` 的 `sync()` 在 disabled 时直接 return,而**开轮本身也是
- * 幂等的**(ADR 0048):真发出去两次,第二次拿回的是同一轮。
- *
- * **只等请求发出,不等响应体**:这条请求开轮、投完活即返(FOL-89),「回包到手」只说明轮开了、
- * 活投出去了,不说明 consumer 已经在打上游。要判断它真的在干活,问假上游收到请求没有
- * (setUpstream hits)。
+ * Clicks the header sync pill = runs a whole round (see sync-status.tsx's StatusSegment onClick); `POST /api/sync` has been sent by the time it returns.
+ * Repeated clicks don't run an extra round: `useSyncRound`'s `sync()` returns when disabled, and opening a round is itself idempotent, so two real sends get the same round back the second time.
+ * Waits only for the request to be sent, not the response body: the request opens the round and enqueues, so the response only means the round opened and jobs were enqueued, not that the consumer is already hitting the upstream;
+ * to judge that it is really working, ask the fake upstream whether it got a request (setUpstream hits).
  */
 export async function clickSyncPill(page: Page) {
   const pill = page.getByRole("button", { name: /^(Synced|Needs attention|Syncing…)$/ });
-  // 为什么不是「点一下,3 秒内等 POST」(旧写法,挂过):那 3 秒是在**点之前**起算的,而 reload 之后
-  // 胶囊要等客户端渲染完才出现(壳是零数据的,见 check-shell-is-zero-data)—— dev server 上实测
-  // 2.6s 起步,开了 page.route 的用例更慢。超过 3 秒时 waitForRequest 在 click 还挂着的时候就 reject 了,
-  // 没人接 → unhandled rejection 直接判死整条测试,外面那层 toPass 根本没机会重试。
-  //
-  // 以前这里还要先 hover、等弹层开完再点:开场那一帧面板内容盖在胶囊上,「移进来立刻点」会被吞掉。
-  // FOL-96 让胶囊压在弹层内容之上(sync-status.tsx),直接点就行;那条行为由 e2e/sync-pill.spec.ts 钉着。
+  // Why not "click once, wait 3s for the POST": the 3s starts before the click, and after reload the pill appears only once the client has rendered (the shell is zero-data); on the dev server that takes
+  // 2.6s at least and longer for cases with page.route. Past 3s, waitForRequest rejects while the click is still pending with nobody catching it, and the unhandled rejection kills the whole test so the outer toPass never retries.
+  // The pill sits above the popover content (sync-status.tsx), so a direct click works; that behavior is pinned by e2e/sync-pill.spec.ts.
   await expect(async () => {
-    // Promise.all 同时挂上两边:任何一边先失败都由这里接住、交给 toPass 重试,不留悬空的 promise。
+    // Promise.all attaches both sides at once: a failure on either side is caught here and handed to toPass for retry, leaving no dangling promise.
     await Promise.all([
       page.waitForRequest((r) => r.url().includes("/api/sync") && r.method() === "POST", {
         timeout: 3_000,
@@ -192,17 +148,16 @@ export async function clickSyncPill(page: Page) {
 }
 
 /**
- * 运行器是串行的(一个 DO、一次 alarm 一件),同步那件前面可能排着刷价 / 汇率任务;
- * 它们打的是假 CoinGecko,回得飞快,但 CoinGecko client 自带的限速闸(没 key 时每分钟只放几发)
- * 照样把每发隔开约 6 秒 —— 一轮下来同步那件要等十几秒才轮到。
+ * The runner is serial (one DO, one alarm per job) and the sync job may queue behind price / rate jobs; those hit the fake CoinGecko and return instantly, but the CoinGecko client's own rate gate
+ * (a few calls per minute without a key) still spaces each call by about 6 seconds, so the sync job waits ten-odd seconds for its turn in a round.
  */
 const UPSTREAM_HIT_TIMEOUT_MS = 45_000;
 
-/** 等假上游真的开始收请求 —— 服务端这一轮在干活了。配合 `setUpstream(request, { hits: 0 })` 用。 */
+/** Waits until the fake upstream really starts receiving requests, i.e. the server is working on this round. Use with `setUpstream(request, { hits: 0 })`. */
 export async function waitForUpstreamHit(request: APIRequestContext) {
   await expect
     .poll(async () => (await upstream(request)).hits, {
-      message: "假上游一个请求都没收到 —— 服务端这一轮没起跑",
+      message: "the fake upstream received no request at all -- the server didn't start this round",
       timeout: UPSTREAM_HIT_TIMEOUT_MS,
     })
     .toBeGreaterThan(0);
@@ -226,12 +181,9 @@ interface Exported {
 }
 
 /**
- * 从 `/api/export` 读回这个用户的账户与落库快照。
- *
- * 为什么读导出而不读界面:导出是个稳定的 HTTP 端点,回的是**库里的原值**(数量、估值、takenAt),
- * 不经格式化、不受选中 Portfolio / 折叠状态影响。而「同步跑完了没有」问的正是库里有没有那一行。
- *
- * 用 `context().request` 而不是 `page.request`:页面关掉之后还要接着读 —— 那正是核心那条测试。
+ * Reads this user's accounts and persisted snapshots back from `/api/export`.
+ * Reads the export rather than the UI: it's a stable HTTP endpoint returning the **raw DB values** (quantity, valuation, takenAt), unaffected by formatting, the selected portfolio or collapse state;
+ * and "did the sync finish" is exactly "is that row in the DB". Uses `context().request` rather than `page.request` so reads continue after the page closes, which the core case needs.
  */
 async function exportData(page: Page): Promise<Exported> {
   const res = await page.context().request.get("/api/export");
@@ -246,7 +198,7 @@ async function exportData(page: Page): Promise<Exported> {
   };
 }
 
-/** 这个用户当前落库的快照总数。 */
+/** The number of snapshots currently persisted for this user. */
 export async function snapshotCount(page: Page): Promise<number> {
   return (await exportData(page)).snapshots.length;
 }
@@ -254,17 +206,14 @@ export async function snapshotCount(page: Page): Promise<number> {
 export async function accountIdByLabel(page: Page, label: string): Promise<string> {
   const { accounts } = await exportData(page);
   const hit = accounts.find((a) => a.label === label);
-  if (!hit) throw new Error(`导出里没有名为 ${label} 的账户:${JSON.stringify(accounts)}`);
+  if (!hit) throw new Error(`no account named ${label} in the export: ${JSON.stringify(accounts)}`);
   return hit.id;
 }
 
 /**
- * 轮到**每个**给定账户都出现一张满足条件的快照,按入参顺序返回它们。
- *
- * 用 `expect.poll` 而不是等一段时长:条件一满足立刻返回;不满足时把还差哪些账户打进报错,
- * 「一个都没有」「差最后两个」看一眼就分得清 —— 而后者正是并发那条测试要区分的失败形态。
- *
- * 一轮只读一次导出(不是每个账户读一次):八个账户就是八倍请求,而它们的答案本来就在同一份导出里。
+ * Waits until **every** given account has a snapshot meeting the condition, returned in input order.
+ * Uses `expect.poll` rather than waiting a duration: returns as soon as the condition holds, and otherwise puts which accounts are still missing in the error, so "none at all" vs "missing the last two"
+ * is clear at a glance, the latter being the failure shape the concurrency case must distinguish. One export read per round (not per account): eight accounts would mean eight times the requests while their answers are in the same export.
  */
 export async function waitForSnapshots(
   page: Page,
@@ -290,7 +239,7 @@ export async function waitForSnapshots(
   return found;
 }
 
-/** 单个账户的版本(上面那条的常用形态)。 */
+/** A single account's version (the common form of the one above). */
 export async function waitForSnapshot(
   page: Page,
   accountId: string,

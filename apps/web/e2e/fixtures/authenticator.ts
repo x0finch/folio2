@@ -1,49 +1,44 @@
 import type { CDPSession, Page } from "@playwright/test";
 
 /**
- * CDP 虚拟认证器 —— 让 WebAuthn 在无人值守的 CI 里跑完整 ceremony(#354)。
- *
- * 单元测试只能 mock `authClient.passkey.*`,于是「注册有没有真限定 platform」「解锁到底要不要过
- * 用户验证」这类**由浏览器和认证器裁决**的事一条都验不到 —— 那恰好是 #353 整套方案的地基。
- * Chrome DevTools Protocol 的 WebAuthn 域给的是一个软件实现的认证器:能建凭据、能签断言、能被
- * 编程地设成「用户验证失败」,行为路径与真硬件同一条。
- *
- * 注意 `transport: "internal"` —— 平台认证器。测「不限 platform 的加号也能收安全钥匙」时要另开一个
- * `transport: "usb"` 的,见 addAuthenticator 的参数。
+ * CDP virtual authenticator: lets WebAuthn run full ceremonies unattended in CI.
+ * Unit tests can only mock `authClient.passkey.*`, so what the browser and authenticator decide (whether registration really restricts to platform,
+ * whether unlock really requires user verification) goes unchecked. The DevTools Protocol's WebAuthn domain gives a software authenticator that can
+ * create credentials, sign assertions and be set to fail user verification, on the same path as real hardware.
+ * `transport: "internal"` is a platform authenticator; testing that the unrestricted plus button also accepts a security key needs a separate
+ * `transport: "usb"` one (see addAuthenticator's options).
  */
 export interface VirtualAuthenticator {
   id: string;
-  /** 让下一次 ceremony 的用户验证失败(模拟指纹认不过 / 用户取消)。 */
+  /** Makes the next ceremony's user verification fail (simulates a fingerprint mismatch / user cancel). */
   setUserVerified(verified: boolean): Promise<void>;
-  /** 这个认证器上现存的凭据(断言注册确实落在了本机)。 */
+  /** The credentials currently on this authenticator (to assert registration really landed locally). */
   credentials(): Promise<
     Array<{ credentialId: string; rpId: string; isResidentCredential: boolean }>
   >;
   /**
-   * 把凭据清空,认证器本身留着 —— 「这台设备上一把 passkey 也没有」。
-   *
-   * **别改成 `remove()`**:整个认证器拆掉会让 `isConditionalMediationAvailable()` 翻假,登录页那段
-   * autofill 连 options 都不再请求,而 `gotoHydrated("/login")` 正是拿那个请求当「客户端活了」的
-   * 信号(见 fixtures/app.ts 的 HYDRATION_PROBE)—— 于是等到超时。留着认证器、只清凭据,
-   * 两件事就都对了:autofill 照常发起,但没有任何凭据可应答。
+   * Clears the credentials but keeps the authenticator: "this device has no passkey at all".
+   * Don't change this to `remove()`: tearing the whole authenticator down flips `isConditionalMediationAvailable()` to false, so the login page's autofill
+   * never even requests options, and `gotoHydrated("/login")` uses that request as its "client is alive" signal (see HYDRATION_PROBE in fixtures/app.ts)
+   * and would time out. Keeping the authenticator and clearing credentials lets autofill start as usual with no credential to answer.
    */
   clearCredentials(): Promise<void>;
   remove(): Promise<void>;
 }
 
 export interface AuthenticatorOptions {
-  /** internal = 平台认证器(Touch ID 那类);usb = 硬件安全钥匙。 */
+  /** internal = platform authenticator (Touch ID kind); usb = hardware security key. */
   transport?: "internal" | "usb";
-  /** 可发现凭据。登录页不设 allowCredentials,靠这个才列得出来。 */
+  /** Discoverable credential. The login page sets no allowCredentials, so this is what lets it be listed. */
   hasResidentKey?: boolean;
-  /** 认证器本身支不支持用户验证。false 用来模拟「按一下就行」的老式安全钥匙。 */
+  /** Whether the authenticator itself supports user verification. false simulates old "just tap" security keys. */
   hasUserVerification?: boolean;
-  /** 初始状态下用户验证过没有。 */
+  /** Whether user verification has passed in the initial state. */
   isUserVerified?: boolean;
 }
 
-// CDP 吐的是标准 base64(带 +/=),而 WebAuthn 和 better-auth 一路用的是 base64url —— 直接拿去和
-// localStorage 里存的 credentialID 比会永远不等。在夹具这一层转掉,免得每条测试各自记着。
+// CDP emits standard base64 (with +/=) while WebAuthn and better-auth use base64url throughout; comparing it directly with the credentialID
+// in localStorage never matches, so convert at the fixture layer instead of in every test.
 function toBase64Url(standardBase64: string): string {
   return standardBase64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
@@ -68,7 +63,7 @@ export async function addAuthenticator(
       hasResidentKey,
       hasUserVerification,
       isUserVerified,
-      // 自动「按下」——否则每次 ceremony 都要显式模拟用户在场,测试会卡住等一个永不到来的手指。
+      // Auto-"press": otherwise every ceremony needs explicit user-presence simulation and the test hangs waiting for a finger that never comes.
       automaticPresenceSimulation: true,
     },
   });

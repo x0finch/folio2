@@ -1,8 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 
-// 闲置锁的全部状态都在这几个 localStorage 键上(单一源见 src/lib/idle-lock.ts 与
-// hooks/use-idle-lock.ts)。测试直接读写它们,而不是每条都先从 UI 把开关点一遍 —— 「怎么开起来的」
-// 本身是另外几条测试的主题,混进来只会让失败原因变糊。
+// All idle-lock state lives in these localStorage keys (single source: src/lib/idle-lock.ts and hooks/use-idle-lock.ts). Tests read and write
+// them directly instead of clicking the switch each time: how it gets enabled is the subject of other tests and would only blur failure causes.
 export const KEYS = {
   timeout: "folio_lock_timeout",
   enabled: "folio_lock_enabled",
@@ -19,15 +18,11 @@ export interface TestUser {
 }
 
 /**
- * 导航到某页,并等到客户端**真的活了**再返回。
- *
- * 为什么需要:CI 跑的是构建产物,页面画得极快 —— `goto` 返回时 DOM 已经在了,但 React 可能还没挂上
- * handler。这时候的点击会被**静静吞掉**(不报错、不生效),测试要到几行之后的断言才炸,报错位置离
- * 真正的原因隔着好几步。CI 上实测偶发,约 1/40,两条不同的测试都中过。
- *
- * 等法是「等该出现的东西」而不是等一段时长:每页都有一个**只可能由客户端发出**的请求,收到它就证明
- * 那棵树已经在跑了。登录页是 passkey 的 conditional-UI autofill(见 login.tsx),设置页是 passkeys
- * 列表。不用 `networkidle`:那要额外等 500ms 静默,乘上几十次导航,纯亏。
+ * Navigates to a page and returns only once the client is really alive.
+ * CI runs the build output and the page paints very fast: when `goto` returns the DOM exists but React may not have attached handlers, so a click is
+ * silently swallowed (no error, no effect) and the test fails several lines later, far from the cause (seen in CI about 1 in 40).
+ * It waits for something that should appear rather than a duration: every page has a request only the client can send (the login page's passkey
+ * conditional-UI autofill, the settings page's passkey list). Not `networkidle`: it adds a 500ms quiet wait, a pure loss over dozens of navigations.
  */
 const HYDRATION_PROBE = {
   "/login": "passkey/generate-authenticate-options",
@@ -35,20 +30,18 @@ const HYDRATION_PROBE = {
 } as const;
 
 export async function gotoHydrated(page: Page, path: keyof typeof HYDRATION_PROBE) {
-  // `waitUntil: "commit"` 一落地就返回(新文档已开始加载,JS 还没跑),**监听必须挂在这之后**:
-  // 挂在 goto 之前的话,上一页刚发出的同一个请求会把 `waitForResponse` 立刻喂饱 —— 「客户端活了」
-  // 于是是假的,填进表单的值会被随后 hydrate 出来的受控 state 冲成空(实测 4 次中 2 次:填完
-  // 200ms 后邮箱框自己清空,回车提交被 `required` 拦下,人停在 /login)。
-  // 反过来「等 load 完再挂」也不行:那时客户端可能已经发过请求了,监听会一直等到超时。
+  // `waitUntil: "commit"` returns as soon as the new document starts loading (JS hasn't run); the listener must attach after that: attached before goto,
+  // the same request just sent by the previous page would satisfy `waitForResponse` at once and "client alive" would be false, so form values get wiped by
+  // the later hydrated controlled state (2 of 4 runs: the email field cleared itself 200ms after filling and Enter was blocked by `required`).
+  // Waiting for load before attaching also fails: the client may have already sent the request and the listener waits until timeout.
   await page.goto(path, { waitUntil: "commit" });
   await page.waitForResponse((r) => r.url().includes(HYDRATION_PROBE[path]));
 }
 
 /**
- * 造一个测试用户并登录(better-auth 配了 autoSignIn,注册即拿到会话 cookie)。
- *
- * 走 HTTP 而不是 UI:登录表单本身有自己的测试,这里只是要一个「已登录」的起点。email 每次随机,
- * 所以同一个本地 D1 上反复跑不会撞唯一约束。
+ * Creates a test user and logs in (better-auth has autoSignIn, so signing up yields a session cookie).
+ * Goes over HTTP, not the UI: the login form has its own tests; this just needs a logged-in starting point. The email is random each time, so repeated runs on
+ * one local D1 don't hit the unique constraint.
  */
 export async function signUpAndLogin(page: Page, overrides: Partial<TestUser> = {}) {
   const suffix = `${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
@@ -58,7 +51,7 @@ export async function signUpAndLogin(page: Page, overrides: Partial<TestUser> = 
     name: overrides.name ?? `E2E ${suffix}`,
   };
 
-  // 得先落在同源页面上,fetch 才带对 Origin(better-auth 有 CSRF 校验)。
+  // Must land on a same-origin page first so fetch carries the right Origin (better-auth has a CSRF check).
   await page.goto("/login");
   const status = await page.evaluate(async (u) => {
     const res = await fetch("/api/auth/sign-up/email", {
@@ -73,7 +66,7 @@ export async function signUpAndLogin(page: Page, overrides: Partial<TestUser> = 
   return user;
 }
 
-/** 直接写锁状态,省掉「先把开关点开」的前戏。 */
+/** Writes lock state directly, skipping the "switch it on first" preamble. */
 export async function setLockState(
   page: Page,
   state: { enabled?: boolean; timeoutMinutes?: number; deviceCredential?: string | null },
@@ -105,10 +98,9 @@ export async function readLockState(page: Page) {
 }
 
 /**
- * 把「最后活跃」推到过去,让下一次闲置检查立刻判超时。
- *
- * 比真等 60 秒可靠得多,而且判据本身(shouldLock)是纯函数、已有单测 —— 这里要验的是「时间到了
- * 遮罩会不会真的盖上来」,不是算术。
+ * Pushes "last active" into the past so the next idle check times out at once.
+ * Far more reliable than waiting a real 60 seconds, and the criterion (shouldLock) is a pure function with unit tests; what's verified here is whether the overlay
+ * really appears when time is up, not arithmetic.
  */
 export async function travelPastIdle(page: Page, minutes: number) {
   await page.evaluate(
@@ -119,28 +111,26 @@ export async function travelPastIdle(page: Page, minutes: number) {
   );
 }
 
-/** 关掉登录后那个「加个 passkey 吧」的引导,免得它挡住后续断言。 */
+/** Dismisses the post-login "add a passkey" prompt so it doesn't block later assertions. */
 export async function dismissPasskeyPrompt(page: Page) {
   await page.evaluate((keys) => localStorage.setItem(keys.promptDismissed, "1"), KEYS);
 }
 
 /**
- * 从零到「锁已开启」:建用户 → 关掉引导 → 拨开开关跑完真 ceremony。
- *
- * 调用方得先自己 addAuth() —— 认证器是什么类型(平台 / USB / 无生物识别)常常就是测试的题目本身,
- * 不能塞进来替它决定。
+ * From zero to "lock enabled": create user -> dismiss the prompt -> flip the switch and run the real ceremony.
+ * The caller must addAuth() first: the authenticator type (platform / USB / no biometrics) is often the test's subject and can't be decided here.
  */
 export async function enableLock(page: Page) {
   await signUpAndLogin(page);
   await dismissPasskeyPrompt(page);
-  // 这里必须等 hydration:下一行的点击要是被吞掉,整条测试从起点就是假的(见 gotoHydrated)。
+  // Hydration must be awaited here: if the next click is swallowed, the whole test is fake from the start (see gotoHydrated).
   await gotoHydrated(page, "/settings");
   const toggle = page.getByRole("switch", { name: /auto-lock/i });
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "true");
 }
 
-/** 把页面推进锁屏态(改「最后活跃」+ 重载触发比对),并等锁屏真的出现。 */
+/** Pushes the page into the locked state (changes "last active" + reload to trigger comparison) and waits for the lock to really appear. */
 export async function lockNow(page: Page, timeoutMinutes = 15) {
   await travelPastIdle(page, timeoutMinutes);
   await page.reload();
