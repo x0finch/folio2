@@ -11,27 +11,17 @@ import {
   tokenRecord,
 } from "./export";
 
-// 导出那条 NDJSON 流。**路由只剩鉴权 + 跑一次**,流本身住在这里 —— 理由:handler 里的东西
-// 测不到,这里的测得到(见 tests/server/export-stream.test.ts 钉的分页边界)。
-// (`/api/sync` 曾有同形状的观察流,ADR 0048 后退役 —— 全仓的 NDJSON 出口只剩这一条。)
+// The NDJSON export stream; the route only authenticates and runs it once. Lives here so the pagination boundaries
+// are testable (tests/server/export-stream.test.ts).
 
-// 每页快照数:配 inArray(≤ 50 ids) 取余额,远低于 D1 100 绑定参数上限。
+// Snapshots per page: with inArray (<= 50 ids) for balances, well under D1's 100 bound-parameter limit.
 const SNAPSHOT_PAGE = 50;
 
 const encoder = new TextEncoder();
 
-// 导出的四段内容,拼成**一条 Effect Stream**(#394 T7)。
-//
-// 以前是 `new ReadableStream({ async start(controller) { … } })`:一个 async 生产者,里头四段各自
-// `await db.xxx(userId)`(过渡门面 → 每次各建一次 layer、各跑一次 `runPromise`),还要自己
-// `try/catch` 再 `controller.error`。改成 Stream 之后这三件事各归各位 —— 顺序是 `concat`,
-// 分页是 `paginateEffect`,失败沿流传播(`toReadableStream` 自己会 error 掉那个 ReadableStream)。
-//
-// **服务在建流之前就解析好**(闭包里的 `transfer` / `accounts` / …),所以流本身的 `R` 是 `never`,
-// `toReadableStream` 才收得下。这正是 CODING.md 那条「把已解析好的服务对象当参数传给内部函数」。
-// db 的 op 还要这次请求的连接与用户(`DbRequest`,op 跑的那一刻才取,ADR 0054)—— 同样在建流之前
-// 抓一份,流收尾时整条 provide 进去:响应体是在 handler 返回**之后**才被拉的,那时已经不在这条
-// fiber 里了,不预先装上就没人给。
+// The four export sections as one Effect Stream: `concat` orders them, `paginateEffect` pages, failures propagate
+// through the stream. Services are resolved before the stream is built, so its `R` is `never`; the request's `DbRequest`
+// is captured then and provided when the stream finishes, because the body is pulled after the handler returns.
 export const exportStream = (): Effect.Effect<
   ReadableStream<Uint8Array>,
   never,
@@ -42,19 +32,17 @@ export const exportStream = (): Effect.Effect<
     const specsByType = (yield* ConnectorRegistry).specs;
     const request = yield* Effect.context<DbRequest>();
 
-    const meta = Stream.make(metaRecord(Date.now())); // 首行:版本号等
+    const meta = Stream.make(metaRecord(Date.now())); // first line: version etc.
 
-    // Token 行(#204):必须在 snapshot / activity 之前 —— 它们按 token_id 引用,
-    // 单遍导入据流内顺序先建 Token 映射。
+    // Tokens come before snapshots / activity: those reference token_id, and the single-pass import builds the Token map first.
     const tokens = Stream.fromIterableEffect(transfer.listTokensForExport()).pipe(
       Stream.map(tokenRecord),
     );
 
-    // 安全投影(无需解密):public 原样、semi 打码、secret 丢弃 —— 绝不导出完整密钥。
+    // Safe projection (no decryption): public as-is, semi masked, secret dropped; never export full keys.
     const accountLines = Stream.fromIterableEffect(accounts.list()).pipe(
       Stream.mapEffect((a) =>
-        // 解不开的凭据 → 导成「没凭据」那一行(#527 裁定 1):一行坏数据不该让整个导出中断,
-        // 那会让「先导出再修库」这条唯一的自救路也走不通。
+        // Undecryptable creds export as "no credentials" so one bad row doesn't abort the export (the only self-rescue path).
         Effect.map(accounts.getRawCreds(a.id), (raw) => {
           const stored = readStoredCreds(raw) ?? {};
           return accountRecord(a, safeView(specsByType[a.connectorId] ?? [], stored));
@@ -62,9 +50,7 @@ export const exportStream = (): Effect.Effect<
       ),
     );
 
-    // 快照:分页拉取,每页取该页余额、流式写出 → 内存恒定,绕开参数上限。
-    // `paginateEffect` 的「下一页」是 `Option`:`none` 就是没有下一页 —— 原来那两个 `break`
-    // (空页 / 不满一页)现在是同一个表达式里的两个条件。
+    // Snapshots: paged, balances fetched per page and streamed out, so memory stays constant. `none` means no next page.
     const snapshotLines = Stream.paginateEffect(0, (offset: number) =>
       Effect.gen(function* () {
         const page = yield* snapshots.listPage(SNAPSHOT_PAGE, offset);
@@ -76,14 +62,14 @@ export const exportStream = (): Effect.Effect<
           if (arr) arr.push(b);
           else bySnapshot.set(b.snapshotId, [b]);
         }
-        // 不满一页(含空页)就是最后一页 —— 原来那两个 `break` 现在是同一个条件。
+        // A short page (including empty) is the last.
         const next =
           page.length < SNAPSHOT_PAGE ? Option.none<number>() : Option.some(offset + SNAPSHOT_PAGE);
         return [page.map((s) => snapshotRecord(s, bySnapshot.get(s.id) ?? [])), next] as const;
       }),
     ).pipe(Stream.flattenIterables);
 
-    // 手记账本(#204):最后写,accountId/tokenId 引用前面已建的账户/Token。
+    // Manual ledger last: accountId / tokenId reference the accounts / tokens written above.
     const activities = Stream.fromIterableEffect(manual.listAllActivity()).pipe(
       Stream.map(manualActivityRecord),
     );
@@ -99,7 +85,7 @@ export const exportStream = (): Effect.Effect<
     return Stream.toReadableStream(bytes);
   });
 
-// GET /api/export 的业务 effect —— 路由只认人 + 跑 `runForUser`。
+// Business effect of GET /api/export; the route only authenticates and runs `runForUser`.
 export const exportData = Effect.fn("exportData")(function* () {
   return yield* exportStream();
 });

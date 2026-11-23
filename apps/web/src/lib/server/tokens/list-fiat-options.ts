@@ -4,23 +4,18 @@ import { z } from "zod";
 import { pickLocale } from "@/lib/i18n/detect";
 import { buildFiatOptions } from "./fiat-options";
 
-// 选币下拉「法币」组:SUPPORTED_CURRENCIES 的 10 法币。**票在服务端造**(前端拿不透明串,与目录/
-// 已有/搜索一致;前端绝不构造 tokenRef/票 —— 红线见 ./model 的 `TokenOption`)。货币名按调用方传来的
-// locale 本地化 —— 界面语言住浏览器(localStorage,ADR 0049 补记),服务端不再从请求头猜。
-// 静态数据、无网络、无 per-user —— 不走边缘缓存、不建行。构造逻辑在纯函数 `buildFiatOptions`
-// (server-only 消费,故文法不进客户端 bundle)。
+// The picker's fiat group: tickets are built server-side (the client never builds tokenRefs / tickets), names are
+// localized by the caller's locale. Static, no network, no per-user data: no edge cache, no rows.
 export const ListFiatOptionsInput = z.object({ locale: z.string() });
 
 export const handleListFiatOptions = Effect.fn("listFiatOptions")(function* (
   data: z.infer<typeof ListFiatOptionsInput>,
 ) {
-  // 认不出的 locale 落默认语言(调用方可改的输入)。
+  // Unrecognized locale falls back to the default language.
   const base = buildFiatOptions(pickLocale(data.locale, null));
-  // 法币的「价」= FX 汇率(USD 恒 1),直接填进下拉项 —— 否则价格列显 "—"(法币在代币价格源没有价)。
-  // **只读缓存,不出网**(FOL-88):汇率由队列的 `fx` 活每小时暖(一把写全部支持币种)。以前这里先
-  // `fx.warm` 一次 —— 一个读端点顺手打上游、写库。
-  // asOf 置当下 → 下拉 SWR(staleTickets)判它新鲜、不再拿它去 refreshTokenPrices 白刷(价已现填,重取无意义)。
-  // 缓存里没有(还没暖过 / 上游没收录)→ 该项不带价,回退 "—"(降级,不阻断)。24h 涨跌法币不给。
+  // A fiat "price" is its FX rate (USD = 1), so the price column doesn't show "—". Cache-only, no network: the `fx`
+  // queue job warms rates hourly. asOf = now so the dropdown's SWR treats it as fresh and doesn't refetch. Missing
+  // from cache: no price (degrade to "—"). No 24h change for fiat.
   const { fx } = yield* Oracle;
   const asOf = yield* Clock.currentTimeMillis;
   return yield* Effect.forEach(base, (o) =>

@@ -7,8 +7,8 @@ import { edgeCached, SEARCH_CACHE_TTL_S } from "./edge-cache";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
 
-// 选币 autocomplete:按关键词问上游。**只在浏览器本地目录凑不够时才被调到**(见 token-search.ts)——
-// 所以到这儿的词基本都是长尾币,一次 /search 花得值。
+// Picker autocomplete against the upstream; only reached when the local catalogue can't satisfy the query, so
+// terms are mostly long-tail tokens.
 export const ListTokensInput = z.object({ query: z.string() });
 
 export const handleListTokens = Effect.fn("listTokens")(function* (
@@ -17,7 +17,7 @@ export const handleListTokens = Effect.fn("listTokens")(function* (
   const q = data.query.trim();
   tokenLog.debug("searchTokens: enter", { query: q });
   if (!q) return [];
-  // 抛错兜底在 requireAuth 中间件集中打日志(带 userId),此处只表达业务。
+  // Thrown errors are logged centrally by the requireAuth middleware.
   const out = yield* edgeCached(
     `token-search?q=${encodeURIComponent(q)}`,
     SEARCH_CACHE_TTL_S,
