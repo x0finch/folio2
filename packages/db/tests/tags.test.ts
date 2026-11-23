@@ -165,7 +165,7 @@ describe("cascade / move clearing", () => {
     expect(await tagsOf(USER_A).list()).toHaveLength(1); // the Tag itself remains
   });
 
-  it("moving an account to another Portfolio clears its Tags (ADR 0034 invariant)", async () => {
+  it("moving an account to another Portfolio clears its Tags", async () => {
     const def = await portfolios(USER_A).ensureDefault();
     const acc = await makeAccount(USER_A);
     const tag = await tagsOf(USER_A).create({ portfolioId: def.id, name: "Long" });

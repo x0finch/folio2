@@ -156,7 +156,7 @@ describe("isReduceOversold", () => {
   });
 });
 
-describe("buildManualAccountSeries(grid, ADR 0019)", () => {
+describe("buildManualAccountSeries(grid)", () => {
   const last = (s: SnapshotTotalRow[]) => s[s.length - 1];
 
   it("single same-day activity -> first activity + now, two points, drawable", () => {

@@ -92,7 +92,7 @@ beforeEach(async () => {
 });
 
 // Long-window input: the server caps per bucket in SQL and downsampling happens in the browser. These pin the row-count upper bound and that real observations are included.
-describe("history sampled (FOL-92)", () => {
+describe("history sampled", () => {
   it("listSampledTotalsByAccount: at most 4 points per bucket, row count independent of history length, global extremes and first/last kept", async () => {
     const acc = await accounts(USER).create({ connectorId: "binance", label: "B", creds: "x" });
     const start = 1_000_000;
