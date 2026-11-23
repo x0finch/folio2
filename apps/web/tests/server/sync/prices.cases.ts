@@ -11,16 +11,16 @@ import { call } from "../_kit/run";
 import { seedAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser } from "../_kit/user";
 
-// 队列的 `prices` 活(FOL-87):持仓价的回源处,按 100 个一批、一条消息 ≤ 1000 个 id。
-// 出网数按**真 fetch** 数(CoinGecko adapter 真在切批),不是数假上游的方法调用。
+// The queue's `prices` job, where held-token prices are fetched: batches of 100, at most 1000 ids per message.
+// Outbound is counted on real fetches (the CoinGecko adapter really does the batching), not on fake upstream method calls.
 
-/** 免费计划一次调用的外部 subrequest 上限。一条消息 = 一次调用。 */
+/** Free-plan cap on external subrequests per invocation; one message = one invocation. */
 const FREE_PLAN_SUBREQUESTS = 50;
 
 describe("jobs/prices", () => {
   const USER = "h-jobs-prices";
 
-  /** 跑一条消息,顺手收下它投出去的后续消息。 */
+  /** Runs one message and collects the follow-up messages it enqueues. */
   const consume = async (body: Job) => {
     const sent: Enqueued[] = [];
     const state = { acked: false, retried: false };
@@ -46,7 +46,7 @@ describe("jobs/prices", () => {
     return { state, sent };
   };
 
-  /** 建 n 个认得出来的币(CoinGecko ref)并让它们出现在最新快照里 —— 这就是「持有」。 */
+  /** Builds n recognized coins (CoinGecko refs) that appear in the latest snapshot -- that is "held". */
   const hold = async (n: number): Promise<string[]> => {
     const refs = Array.from({ length: n }, (_, i) => `coingecko/issued:coin-${i}`);
     const ids = await call(
@@ -67,11 +67,10 @@ describe("jobs/prices", () => {
     return tokenIds;
   };
 
-  // 每个被问到的 coin id 都给一个价;`/coins/markets`(元信息那半)给空表。
-  // `stubOutbound` 只认「片段 → 固定响应」,这里要按 URL 里的 ids 回价,所以自己 spy 一个。
-  //
-  // `failFirst`:同一个 URL 的前 k 次答 503(可重试),第 k+1 次才给 —— 让 adapter 的每一发都
-  // 把重试用满再成功,那才是一条消息的**最坏**出网数(code review #21)。`Infinity` = 一直挂。
+  // Gives every asked coin id a price; `/coins/markets` (the metadata half) gets an empty list. `stubOutbound` only does
+  // "fragment -> fixed response" but this must answer per the ids in the URL, so it spies itself.
+  // `failFirst`: the first k calls to the same URL answer 503 (retryable) and the (k+1)th succeeds, so each adapter call uses up
+  // its retries before succeeding: the worst-case outbound count of one message. `Infinity` = always down.
   const pricedUpstream = (opts: { failFirst?: number } = {}): { calls: string[] } => {
     const calls: string[] = [];
     const seen = new Map<string, number>();
@@ -89,7 +88,7 @@ describe("jobs/prices", () => {
         );
       }
       if (u.pathname.endsWith("/coins/markets")) return json([]);
-      throw new Error(`没有为这个 URL 准备答案:${url}`);
+      throw new Error(`no answer prepared for this URL: ${url}`);
     });
     return { calls };
   };
@@ -103,7 +102,7 @@ describe("jobs/prices", () => {
     await db(USER).portfolios.ensureDefault();
   });
 
-  it("250 个持仓币 → 价 3 发(100 个一批),写进价表;不往下投", async () => {
+  it("250 held coins -> 3 price calls (batches of 100), written to the price table; nothing enqueued further", async () => {
     const tokenIds = await hold(250);
     const outbound = pricedUpstream();
 
@@ -120,13 +119,13 @@ describe("jobs/prices", () => {
     expect(priced.size).toBe(250);
     expect([...priced.values()].every((p) => p.unitPrice === 2 && !p.stale)).toBe(true);
 
-    // 刚刷过 → 全新鲜,再跑一遍零出网(重投 / 重复投递是免费的)。
+    // Just refreshed -> all fresh; running again makes zero outbound calls (redelivery is free).
     const again = pricedUpstream();
     await consume({ kind: "prices", userId: USER });
     expect(count(again.calls, "/simple/price")).toBe(0);
   });
 
-  it("超过一条消息的预算 → 自己刷前 1000 个,其余切块另投;每条都 ≤ 50 发", async () => {
+  it("over one message's budget -> refreshes the first 1000 itself, enqueues the rest in chunks; each message <= 50 calls", async () => {
     const n = PRICES_IDS_PER_MESSAGE + 200;
     const tokenIds = await hold(n);
     const first = pricedUpstream();
@@ -139,12 +138,12 @@ describe("jobs/prices", () => {
     const [follow] = sent;
     if (follow?.job.kind !== "prices" || !follow.job.tokenIds) throw new Error("no follow-up");
     expect(follow.job.tokenIds).toHaveLength(200);
-    // 投出去的消息过得了自己的 schema(consumer 那一侧解得开)。
+    // The enqueued messages pass their own schema (the consumer side can decode them).
     expect(Either.isRight(decodeJob(follow.job))).toBe(true);
 
     const second = pricedUpstream();
     const tail = await consume(follow.job);
-    expect(tail.sent).toEqual([]); // 带块的那条不再往下投
+    expect(tail.sent).toEqual([]); // the chunk-carrying message enqueues nothing further
     expect(count(second.calls, "/simple/price")).toBe(2);
 
     const priced = await call(
@@ -152,22 +151,22 @@ describe("jobs/prices", () => {
       Effect.flatMap(Oracle, (o) => o.tokens.pricesOf(tokenIds)),
     );
     expect(priced.size).toBe(n);
-    // 造 1200 行币 + 快照在 workerd 的 D1 里要几秒,不是被测代码慢。
+    // Building 1200 coin rows + snapshots in workerd's D1 takes seconds; the code under test isn't slow.
   }, 30_000);
 
-  // 上面几条的上游从不失败,每发一次就成 —— 预算的推导里那个「× 尝试次数」从没被走到。这条
-  // 让每一发都把重试用满:先用一直挂的上游量出 adapter 实际肯试几次(同一个 URL 被打了几遍),
-  // 再让每个 URL 前 (N − 1) 次失败、第 N 次成功。1000 个币 → (10 + 10) × N 发;adapter 哪天
-  // 把尝试次数调大,这条就会越过 50 而红,而不是像只测顺利路径那样照绿。
-  it("最坏情形(每一发都把重试用满)→ 一条消息仍 ≤ 50 发", async () => {
+  // The cases above never fail upstream, so the budget derivation's "x attempts" is never exercised. This one makes every call
+  // use up its retries: first measure with an always-down upstream how many attempts the adapter makes (how many times one URL is hit),
+  // then fail each URL's first (N - 1) attempts and succeed on the Nth. 1000 coins -> (10 + 10) x N calls; if the adapter's attempt
+  // count is raised this goes over 50 and fails, instead of staying green like a happy-path-only test.
+  it("worst case (every call uses up its retries) -> one message still <= 50 calls", async () => {
     await hold(PRICES_IDS_PER_MESSAGE);
 
     const down = pricedUpstream({ failFirst: Number.POSITIVE_INFINITY });
     const probe = await consume({ kind: "prices", userId: USER });
-    expect(probe.state).toEqual({ acked: true, retried: false }); // 上游挂了不是消息失败
+    expect(probe.state).toEqual({ acked: true, retried: false }); // upstream down isn't a message failure
     const [firstUrl] = down.calls;
     const attempts = down.calls.filter((u) => u === firstUrl).length;
-    expect(attempts).toBeGreaterThan(1); // 真在重试(否则这条测不到它要测的)
+    expect(attempts).toBeGreaterThan(1); // really retrying (otherwise this can't test what it means to)
 
     const flaky = pricedUpstream({ failFirst: attempts - 1 });
     const { state, sent } = await consume({ kind: "prices", userId: USER });
@@ -177,17 +176,17 @@ describe("jobs/prices", () => {
     expect(count(flaky.calls, "/simple/price")).toBe(batches * attempts);
     expect(count(flaky.calls, "/coins/markets")).toBe(batches * attempts);
     expect(flaky.calls.length).toBeLessThanOrEqual(FREE_PLAN_SUBREQUESTS);
-    // 造 1000 行币 + 每发一次退避(250ms 起)的真等待。
+    // Building 1000 coin rows + a real wait for each call's backoff (from 250ms).
   }, 60_000);
 
-  it("没有持仓 → 一发都不出,照样 ack", async () => {
+  it("no holdings -> no calls at all, still acks", async () => {
     const outbound = blockOutbound();
     const { state } = await consume({ kind: "prices", userId: USER });
     expect(state).toEqual({ acked: true, retried: false });
     expect(outbound.calls).toEqual([]);
   });
 
-  it("超预算的块解码就拒(不会跑出 50 发去)", () => {
+  it("a chunk over budget is rejected at decode (can't run to 50+ calls)", () => {
     const ids = (k: number) => Array.from({ length: k }, (_, i) => `t${i}`);
     const body = (k: number) => ({ kind: "prices", userId: USER, tokenIds: ids(k) });
     expect(Either.isRight(decodeJob(body(PRICES_IDS_PER_MESSAGE)))).toBe(true);

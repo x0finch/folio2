@@ -11,13 +11,13 @@ import { blockOutbound, json, stubOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
 import { freshUser } from "../_kit/user";
 
-// 队列 consumer(FOL-86):一条 `sync-account` = 同步恰好那一个账户、落账、最后一个收官。
-// 消息从真的 fan-out 里来(不手拼),于是「cron 投的」与「consumer 认的」是同一个形状。
+// Queue consumer: one `sync-account` = sync exactly that account, record it, the last one closes the round out. Messages come
+// from the real fan-out (not hand-built), so what cron enqueues and what the consumer accepts share one shape.
 
-/** 免费计划一次调用的外部 subrequest 上限。一条消息 = 一次调用,所以它就是一条消息的出网预算。 */
+/** Free-plan cap on external subrequests per invocation; one message = one invocation, so it is one message's outbound budget. */
 const FREE_PLAN_SUBREQUESTS = 50;
 
-// 一个格式合法的 BTC 地址(过得了 connector 的校验闸)。余额是桩出来的,地址是谁的无所谓。
+// A well-formed BTC address (passes the connector's validation gate); balances are stubbed, so whose address it is doesn't matter.
 const BTC_ADDRESS = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
 
 describe("jobs/consume", () => {
@@ -73,7 +73,7 @@ describe("jobs/consume", () => {
     await db(USER).portfolios.ensureDefault();
   });
 
-  it("逐条落账,最后一条收官;每条都 ack", async () => {
+  it("records one by one, the last one closes out; every one acks", async () => {
     await cex("a");
     await cex("b");
     const jobs = await fanOut();
@@ -82,7 +82,7 @@ describe("jobs/consume", () => {
 
     expect(await consume(first)).toEqual({ acked: true, retried: false });
     const mid = await roundOf(first.portfolioId);
-    // 出网被掐 → 这个账户失败,但它是「落了账的失败」,不是队列重试。
+    // Outbound cut off -> this account fails, but as a recorded failure, not a queue retry.
     expect(mid?.accounts[first.accountId]?.status).toBe("failed");
     expect(mid?.accounts[second.accountId]?.status).toBe("pending");
     expect(mid?.finishedAt).toBeNull();
@@ -93,7 +93,7 @@ describe("jobs/consume", () => {
     expect(done?.finishedAt).not.toBeNull();
   });
 
-  it("成功那一条:写快照、记 synced —— 且一条消息的出网不超过免费计划的 50 发", async () => {
+  it("the successful one: writes the snapshot, records synced -- and one message's outbound stays within the free plan's 50 calls", async () => {
     const acc = await db(USER).accounts.create({
       connectorId: "bitcoin",
       label: "cold",
@@ -101,8 +101,7 @@ describe("jobs/consume", () => {
     });
     const [job] = await fanOut();
     if (!job) throw new Error("no job enqueued");
-    // 只有 Blockbook 那一条有答案;其余(估值要的价)照旧抛错 —— 抛错的也算进账,
-    // 因为它们同样花掉一个 subrequest。
+    // Only Blockbook has an answer; the rest (the prices valuation needs) still throw, and throwing calls count too since each spends a subrequest.
     const outbound = stubOutbound([
       [
         "/api/v2/address/",
@@ -119,12 +118,12 @@ describe("jobs/consume", () => {
     expect(latest.map((s) => s.snapshot.accountId)).toEqual([acc.id]);
     expect(outbound.calls.length).toBeGreaterThan(0);
     expect(outbound.calls.length).toBeLessThanOrEqual(FREE_PLAN_SUBREQUESTS);
-    // FOL-87:估值只读价表,**一发 CoinGecko 都不打**(价归队列的 `prices` 活)。
+    // Valuation reads only the price table: not one CoinGecko call (prices belong to the queue's `prices` job).
     expect(outbound.calls.filter((u) => u.includes("coingecko"))).toEqual([]);
   });
 
-  // FOL-87:重估用价表里的价(哪怕是 stale 的),不回源。
-  it("估值用价表里已有的价,零 CoinGecko 请求", async () => {
+  // Revaluation uses the price table's prices (even stale ones) and doesn't go back to source.
+  it("valuation uses prices already in the table, zero CoinGecko requests", async () => {
     await db(USER).accounts.create({
       connectorId: "bitcoin",
       label: "cold",
@@ -132,7 +131,7 @@ describe("jobs/consume", () => {
     });
     const [job] = await fanOut();
     if (!job) throw new Error("no job enqueued");
-    // 先让价表里有 BTC 的价:mint 出那一行,再经真的刷价路径写进去。
+    // First get a BTC price into the table: mint the row, then write it via the real price-refresh path.
     const ids = await call(
       USER,
       Effect.flatMap(Oracle, (o) =>
@@ -165,12 +164,12 @@ describe("jobs/consume", () => {
 
     expect(outbound.calls.filter((u) => u.includes("coingecko"))).toEqual([]);
     const [latest] = await db(USER).snapshots.latest();
-    expect(latest?.snapshot.totalUsd).toBe(60_000); // 1.5 BTC × 表里的 40k
+    expect(latest?.snapshot.totalUsd).toBe(60_000); // 1.5 BTC x 40k from the table
   });
 
-  // 最坏情形:上游整个够不到,内核的重试全用满。仍是一次调用的预算。
-  // Blockbook 是最能放大的那家:四个公共节点轮换 × 内核的重试。
-  it("上游全挂(重试用满)时一条消息的出网也不超过 50 发", async () => {
+  // Worst case: the upstream is entirely unreachable and the core's retries are all used up; still one invocation's budget.
+  // Blockbook amplifies the most: four public nodes rotating x the core's retries.
+  it("upstream entirely down (retries used up) -> one message's outbound is still <= 50 calls", async () => {
     await db(USER).accounts.create({
       connectorId: "bitcoin",
       label: "cold",
@@ -183,8 +182,8 @@ describe("jobs/consume", () => {
     expect(outbound.calls.length).toBeLessThanOrEqual(FREE_PLAN_SUBREQUESTS);
   });
 
-  // at-least-once:同一条投两遍,第二遍不该再打一次上游。
-  it("重复投递 / 轮已被覆盖 → 跳过,不出网,照样 ack", async () => {
+  // at-least-once: the same message enqueued twice must not hit the upstream a second time.
+  it("duplicate delivery / round already overwritten -> skipped, no outbound, still acks", async () => {
     await cex("a");
     const [job] = await fanOut();
     if (!job) throw new Error("no job enqueued");
@@ -198,7 +197,7 @@ describe("jobs/consume", () => {
     expect(outbound.calls).toEqual([]);
   });
 
-  it("账户在排队期间被删 → 记 skipped,轮照样收官", async () => {
+  it("account deleted while queued -> recorded skipped, the round still closes out", async () => {
     const acc = await cex("a");
     const [job] = await fanOut();
     if (!job) throw new Error("no job enqueued");
@@ -209,7 +208,7 @@ describe("jobs/consume", () => {
     expect(round?.finishedAt).not.toBeNull();
   });
 
-  it("解不开的消息 → ack 丢弃,不重试", async () => {
+  it("undecodable message -> acked and dropped, no retry", async () => {
     expect(await consume({ kind: "nope" })).toEqual({ acked: true, retried: false });
     expect(await consume("not even an object")).toEqual({ acked: true, retried: false });
     expect(await consume({ kind: "sync-account", userId: USER })).toEqual({
@@ -218,10 +217,10 @@ describe("jobs/consume", () => {
     });
   });
 
-  describe("失败的活", () => {
+  describe("failed jobs", () => {
     const boom = () => Effect.fail(new Error("D1 hiccup"));
 
-    it("还有重投机会 → retry,轮里那个账户仍 pending", async () => {
+    it("retries remain -> retry, the account stays pending in the round", async () => {
       await cex("a");
       const [job] = await fanOut();
       if (!job) throw new Error("no job enqueued");
@@ -231,9 +230,9 @@ describe("jobs/consume", () => {
       expect((await roundOf(job.portfolioId))?.accounts[job.accountId]?.status).toBe("pending");
     });
 
-    // 不收尾的话那个账户永远 pending,面板要等心跳过期才说「中断」。收完尾照样 retry()
-    // (次数已用完,运行器据此把它埋掉,见 tests/job-runner.test.ts)—— FOL-86 验收:失败的活看得见。
-    it("最后一次投递仍失败 → 记 failed、收官,再 retry() 交给运行器埋掉(不 ack)", async () => {
+    // Without wrap-up the account would stay pending forever and the panel would wait for the heartbeat to expire before saying "interrupted". After wrap-up it still calls retry()
+    // (attempts exhausted; the runner buries it accordingly, see tests/job-runner.test.ts): a failed job must be visible.
+    it("last delivery still fails -> recorded failed, round closes out, then retry() hands it to the runner to bury (no ack)", async () => {
       await cex("a");
       const [job] = await fanOut();
       if (!job) throw new Error("no job enqueued");
@@ -246,15 +245,15 @@ describe("jobs/consume", () => {
       expect(round?.finishedAt).not.toBeNull();
     });
 
-    // 刷价这类活没有收尾可做,但最终失败一样要被埋下、看得见,不能 ack 掉只剩一行日志。
-    it("没有收尾的活最后一次失败 → 同样 retry()(交给运行器埋掉)", async () => {
+    // Jobs like price refresh have no wrap-up, but a final failure must still be buried and visible, not acked into a mere log line.
+    it("a job without wrap-up fails the last time -> also retry() (handed to the runner to bury)", async () => {
       const { message, state } = fakeMessage({ kind: "prices", userId: USER }, JOB_MAX_RETRIES + 1);
       await Effect.runPromise(consumeMessage(message, boom));
       expect(state).toEqual({ acked: false, retried: true });
     });
 
-    // 埋掉的那条要是被人挖出来重跑:收尾已把账户记成 failed,「还 pending 吗」挡下它,不再出网。
-    it("埋掉的 sync-account 再被投一次 → 空跑,不出网、不改写", async () => {
+    // If the buried one is dug up and rerun: wrap-up already recorded the account failed, the "still pending?" check stops it, no outbound.
+    it("a buried sync-account delivered again -> no-op, no outbound, no rewrite", async () => {
       await cex("a");
       const [job] = await fanOut();
       if (!job) throw new Error("no job enqueued");
@@ -268,21 +267,21 @@ describe("jobs/consume", () => {
     });
   });
 
-  // —— 两条投递同时在跑(at-least-once 重投、enlist 已 pending 的账户)——
-  //
-  // 上游那一发挂起,直到两条都进了同步(= 都越过了「还 pending 吗」),再一起放行。
+  // Two deliveries running at the same time (at-least-once redelivery, enlist of an already-pending account): the upstream call hangs
+  // until both have entered the sync (both passed the "still pending?" check), then both are released together.
   const gatedBlockbook = (inFlightTarget: number) => {
     let inFlight = 0;
     let release!: () => void;
     const gate = new Promise<void>((r) => {
       release = r;
     });
-    // 兜底:另一条没进来(被「还 pending 吗」挡下)时别把用例挂死 —— 放行后由断言报出来。
+    // Safety net: if the other one never enters (stopped by the "still pending?" check), don't hang the case; the assertion reports it after release.
     const timer = setTimeout(() => release(), 5_000);
     const reached = { max: 0 };
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input instanceof Request ? input.url : input);
-      if (!url.includes("/api/v2/address/")) throw new Error(`没有为这个 URL 准备答案:${url}`);
+      if (!url.includes("/api/v2/address/"))
+        throw new Error(`no answer prepared for this URL: ${url}`);
       inFlight++;
       reached.max = Math.max(reached.max, inFlight);
       if (inFlight >= inFlightTarget) release();
@@ -300,9 +299,9 @@ describe("jobs/consume", () => {
       creds: JSON.stringify({ addressOrXpub: BTC_ADDRESS }),
     });
 
-  // #571 review:后到的那条 settle 以前照样匹配 —— 把收官写下的 7 天保留期改回 120 秒,
-  // 状态也听后到的。现在只有 pending → 终态那一步,且收官的轮一个字都不改。
-  it("同一个账户两条投递并发 → 两条都跑,但只落一次账;收官的保留期不被改短", async () => {
+  // The later settle must only act on pending -> terminal and leave the closed-out round untouched (e.g. the 7-day retention written at
+  // close-out must not be reverted to 120 seconds, nor the status taken from the later one).
+  it("two concurrent deliveries for one account -> both run, but recorded once; the closed-out round's retention isn't shortened", async () => {
     await bitcoin();
     const [job] = await fanOut();
     if (!job) throw new Error("no job enqueued");
@@ -310,7 +309,7 @@ describe("jobs/consume", () => {
 
     const [a, b] = await Promise.all([consume(job), consume(job)]);
 
-    expect(gate.reached.max).toBe(2); // 两条都越过了「还 pending 吗」
+    expect(gate.reached.max).toBe(2); // both passed the "still pending?" check
     expect(a).toEqual({ acked: true, retried: false });
     expect(b).toEqual({ acked: true, retried: false });
     const round = await roundOf(job.portfolioId);
@@ -319,11 +318,11 @@ describe("jobs/consume", () => {
     expect(round?.expiresAt).toBeGreaterThan(Date.now() + ROUND_HEARTBEAT_MS);
   });
 
-  // #571 review:重投之间没有落账,心跳只靠 consumer 开跑前那一下续。上游挂起时读一眼:已续到
-  // now + ROUND_HEARTBEAT_MS,而不是还停在开轮那一刻。
-  it("每次投递开跑前续心跳 —— 重投链上的轮不会先被念成「中断」", async () => {
+  // No recording happens between redeliveries and the heartbeat is renewed only just before the consumer starts: while the upstream hangs,
+  // check it is already renewed to now + ROUND_HEARTBEAT_MS, not still at the moment the round opened.
+  it('heartbeat renewed before each delivery starts -- a round on a redelivery chain isn\'t read as "interrupted" early', async () => {
     await bitcoin();
-    await cex("另一个"); // 让这一条落账后轮还不收官
+    await cex("Another"); // so the round isn't closed out after this one records
     const jobs = await fanOut();
     const btcJob = (
       await Promise.all(
@@ -331,7 +330,7 @@ describe("jobs/consume", () => {
       )
     ).find((x) => x.a?.connectorId === "bitcoin")?.j;
     if (!btcJob) throw new Error("no bitcoin job");
-    // 模拟「上一次投递以 defect 收场、隔了一个重投间隔」:心跳只剩 1 秒。
+    // Simulates "the previous delivery ended as a defect, a redelivery interval passed": only 1 second of heartbeat left.
     await db(USER).syncRounds.touch({
       portfolioId: btcJob.portfolioId,
       roundId: btcJob.roundId,
@@ -339,7 +338,7 @@ describe("jobs/consume", () => {
     });
     const gate = gatedBlockbook(1);
     const running = consume(btcJob);
-    // 等上游那一发真挂起(= 已越过开跑前那一步)再读。
+    // Waiting for the upstream call to really hang (past the pre-start step) before reading.
     while (gate.reached.max < 1) await new Promise((r) => setTimeout(r, 5));
     const seen = (await roundOf(btcJob.portfolioId))?.expiresAt;
     gate.release();

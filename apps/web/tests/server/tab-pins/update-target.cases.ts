@@ -68,8 +68,8 @@ describe("tab-pins/update-target", () => {
       expect((await readTabStrip(USER, {})).pins.map((p) => p.id)).toEqual(before);
     });
 
-    // Changing the target used to have no validation at all: pointing a pin at a connector made it appear in another portfolio,
-    // pushing that one to 4 while its + button was hidden by >=3, leaving the UI self-contradictory.
+    // Retargeting must be capped too: pointing a pin at a connector makes it appear in another portfolio, which could reach 4
+    // while its + button is hidden at >=3.
     it("retargeting also respects the cap: a new target that pushes a portfolio to 4 -> rejected, original target kept", async () => {
       const { pf } = await seed(USER); // seed already has 1 manual pin
       for (const c of ["binance", "okx"] as const) {

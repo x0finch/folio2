@@ -9,18 +9,14 @@ import { captureQueue, consumeJob } from "../_kit/queue";
 import { seedManualAccount } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 sync/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("sync/run", () => {
-  // #527 · syncAccount
-  //
-  // 它投的消息要带 userId —— 由装配点经 `enqueueForUser` 填,handler 不收 userId(#504)。
-  // 这里直接用 `runEffect` 底下那个内核 `runForUser`;投递换成收进数组的假队列(`captureQueue`)。
+  // The messages it enqueues carry a userId, filled by the assembly point via `enqueueForUser`; the handler takes no userId.
+  // This runs the kernel `runForUser` beneath `runEffect`, with delivery swapped for a fake queue (`captureQueue`) collecting into an array.
   const USER = "h-sync-run";
   let queue: ReturnType<typeof captureQueue>;
 
   const run = <A, E, R>(userId: string, effect: Effect.Effect<A, E, R>) =>
-    // biome-ignore lint/suspicious/noExplicitAny: 与生产装配点同形,handler 的 R 由内核补齐
+    // biome-ignore lint/suspicious/noExplicitAny: same shape as the production assembly point; the kernel fills in the handler's R
     runForUser(userId, queue.provide(effect) as any) as Promise<A>;
 
   const exitOf = <A, E, R>(userId: string, effect: Effect.Effect<A, E, R>) =>
@@ -34,9 +30,9 @@ describe("sync/run", () => {
   });
 
   describe("syncAccount", () => {
-    it("手记账户 → 跳过,理由是「没有上游」,一发外呼都不发", async () => {
+    it('manual account -> skipped, reason "no upstream", no outbound call at all', async () => {
       const outbound = blockOutbound();
-      const acc = await seedManualAccount(USER, "手记", {
+      const acc = await seedManualAccount(USER, "Manual", {
         symbol: "BTC",
         unitPrice: 1,
         amount: 1,
@@ -52,18 +48,18 @@ describe("sync/run", () => {
       expect(queue.sent).toEqual([]);
     });
 
-    it("账户不存在 → NotFound,不发请求", async () => {
+    it("account doesn't exist -> NotFound, no request sent", async () => {
       const outbound = blockOutbound();
 
-      const exit = await exitOf(USER, handleSyncAccount({ accountId: "没有这个" }));
+      const exit = await exitOf(USER, handleSyncAccount({ accountId: "no-such-account" }));
 
       expect(exit._tag).toBe("Failure");
       expect(outbound.calls).toEqual([]);
     });
 
-    it("账户是别人的 → NotFound,不发请求", async () => {
+    it("account belongs to someone else -> NotFound, no request sent", async () => {
       const outbound = blockOutbound();
-      const theirs = await seedManualAccount(otherUser(USER), "他们的", {
+      const theirs = await seedManualAccount(otherUser(USER), "Theirs", {
         symbol: "BTC",
         unitPrice: 1,
         amount: 1,
@@ -75,13 +71,12 @@ describe("sync/run", () => {
       expect(outbound.calls).toEqual([]);
     });
 
-    it("凭据不齐的 CEX 账户 → 跳过,但理由是「凭据没填完」,与手记账户分得开", async () => {
-      // #527 裁定 2:两者都跳过,但只有这一种有下一步动作(去把凭据填完)。以前返回的形状
-      // 一模一样,界面上都只能显示成「跳过了」—— 点了同步什么都不发生,而唯一该做的事没说。
+    it('CEX account with incomplete credentials -> skipped, reason "credentials not filled in", distinguishable from a manual account', async () => {
+      // Both are skipped but only this one has a next action (finish the credentials), so the UI must tell them apart.
       const acc = await db(USER).accounts.create({
         connectorId: "binance",
-        label: "币安",
-        creds: JSON.stringify({ apiKey: "只有一半" }),
+        label: "Binance",
+        creds: JSON.stringify({ apiKey: "only half" }),
       });
 
       const out = await run(USER, handleSyncAccount({ accountId: acc.id }));
@@ -97,14 +92,13 @@ describe("sync/run", () => {
       });
     });
 
-    it("凭据不齐 → 一发上游都不打、一条消息都不投(#527 发现 3)", async () => {
-      // 原来 skipped 之后照样跑 warmTokens,白烧 4 发(exchange_rates ×2 + coins/markets ×2)。
-      // FOL-89 起连排队都不排:这句话当场答得出,不值一条消息、一次调用。
+    it("incomplete credentials -> no upstream call, no message enqueued", async () => {
+      // Answerable on the spot, so it isn't even queued: not worth a message or an invocation.
       const outbound = blockOutbound();
       const acc = await db(USER).accounts.create({
         connectorId: "binance",
-        label: "币安",
-        creds: JSON.stringify({ apiKey: "只有一半" }),
+        label: "Binance",
+        creds: JSON.stringify({ apiKey: "only half" }),
       });
 
       await run(USER, handleSyncAccount({ accountId: acc.id }));
@@ -113,7 +107,7 @@ describe("sync/run", () => {
       expect(queue.sent).toEqual([]);
     });
 
-    // —— FOL-89:排进一轮、投一条消息、即返 ——
+    // -- queued into a round, one message enqueued, returns at once --
 
     const cex = (label: string) =>
       db(USER).accounts.create({
@@ -128,10 +122,10 @@ describe("sync/run", () => {
       return out;
     };
 
-    it("凭据齐的账户 → 开一轮只装它一个的轮、投一条 sync-account + 参考层那几条;一发上游都不打", async () => {
+    it("account with full credentials -> opens a round holding only it, enqueues one sync-account + the reference-layer jobs; no upstream calls", async () => {
       const outbound = blockOutbound();
-      await cex("别的账户");
-      const acc = await cex("币安");
+      await cex("Other account");
+      const acc = await cex("Binance");
 
       const out = await queued(acc.id);
 
@@ -159,8 +153,8 @@ describe("sync/run", () => {
       ]);
     });
 
-    it("消费那条消息 → 这个账户落账、那一轮收官(前端等的就是这一格)", async () => {
-      const acc = await cex("币安");
+    it("consuming that message -> this account is recorded and the round finishes (the frontend waits on this cell)", async () => {
+      const acc = await cex("Binance");
       const out = await queued(acc.id);
 
       const [job] = queue.syncJobs();
@@ -168,13 +162,13 @@ describe("sync/run", () => {
 
       const round = Option.getOrNull(await db(USER).syncRounds.get(out.portfolioId));
       expect(round?.roundId).toBe(out.roundId);
-      expect(round?.accounts[acc.id]?.status).toBe("failed"); // 出网被掐
+      expect(round?.accounts[acc.id]?.status).toBe("failed"); // outbound cut off
       expect(round?.finishedAt).not.toBeNull();
     });
 
-    it("账户在别的组合里 → 排进那个组合的轮", async () => {
-      const watch = await db(USER).portfolios.create({ name: "看单" });
-      const acc = await cex("看单里的");
+    it("account in another portfolio -> queued into that portfolio's round", async () => {
+      const watch = await db(USER).portfolios.create({ name: "Watchlist" });
+      const acc = await cex("In watchlist");
       await db(USER).portfolios.assignAccount(acc.id, watch.id);
 
       const out = await queued(acc.id);
@@ -183,12 +177,12 @@ describe("sync/run", () => {
       expect(queue.syncJobs()[0]?.portfolioId).toBe(watch.id);
     });
 
-    // 同组合正有一轮在跑(另一个设备点了全量、cron 刚开轮):不覆盖它,把这个账户拉进去。
-    it("撞上活轮 → 拉进那一轮(名单外的加进来),不另开一轮", async () => {
-      await cex("已在轮里的");
+    // A round is already running for the same portfolio (another device clicked full sync, cron just opened one): don't overwrite it, pull this account in.
+    it("hits a live round -> pulled into that round (accounts outside the list are added), no second round opened", async () => {
+      await cex("Already in round");
       const full = await run(USER, startSyncRound({ auto: false }));
       if (!full.round) throw new Error("no round");
-      const late = await cex("轮开了之后才加的");
+      const late = await cex("Added after round opened");
       queue = captureQueue();
 
       const out = await queued(late.id);
@@ -201,8 +195,8 @@ describe("sync/run", () => {
       ]);
     });
 
-    // 幂等:连点两下(或手动撞上 cron 那一条)→ 同一个账户两条消息,但只同步一遍。
-    it("同一个账户投了两条 → 先到的那条同步落账,后到的空跑(不出网、不重写)", async () => {
+    // Idempotent: a double click (or a manual hit colliding with cron's) -> two messages for one account, but synced only once.
+    it("same account enqueued twice -> the first message syncs and records, the second is a no-op (no outbound, no rewrite)", async () => {
       const BTC_ADDRESS = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
       const acc = await db(USER).accounts.create({
         connectorId: "bitcoin",
@@ -233,17 +227,8 @@ describe("sync/run", () => {
       expect(latest.map((s) => s.snapshot.accountId)).toEqual([acc.id]);
     });
 
-    it("accountId 空串 → schema 拒", () => {
+    it("empty accountId -> rejected by schema", () => {
       expect(SyncAccountInput.safeParse({ accountId: "" }).success).toBe(false);
     });
-
-    // —— 这几条的家在 sync 内核(`packages/sync/tests/orchestrator.test.ts`)——
-    //
-    // 那边本来就有假 provider 的接缝(`FetchOutcome` 注入),不需要伪造任何交易所报文:
-    //   · **真清仓 → 写空快照**:「上游返回空余额列表 → 照样写一张空快照」(#527 后续件 6 补上)
-    //   · **失败 → 保旧快照**:「重试用尽 → ok:false,不写快照」(一直就有)
-    //   · **401 → 不重试、类型化失败**:「不可重试错误(AUTH_FAILED)不重试」(一直就有)
-    //   · **没见过的币 → 照样建行、不整趟失败**:住 `sync-mint.test.ts`「映射表没有的合约」
-    //   (「同一账户两个同步同时进来」FOL-89 起由上面那条「投了两条」钉着)
   });
 });

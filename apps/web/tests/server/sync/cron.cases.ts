@@ -8,8 +8,8 @@ import { blockOutbound, type Outbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
 import { freshUser } from "../_kit/user";
 
-// cron 按**组合**分区开轮(ADR 0048),**只开轮 + 投消息,不跑**(FOL-86)。真同步在队列 consumer 里
-// 一个账户一次调用(见 ../jobs/consume.cases.ts)。这里钉的是开轮的形状,以及「这一步一发上游都不打」。
+// cron opens rounds per portfolio and only opens + enqueues, never runs (the real sync is one account per queue-consumer invocation).
+// This pins the shape of opening a round and that this step makes no upstream calls.
 
 describe("sync/cron(fan-out)", () => {
   const USER = "h-sync-cron";
@@ -46,11 +46,11 @@ describe("sync/cron(fan-out)", () => {
     await freshUser(USER);
   });
 
-  it("一个组合一轮,各只装自己那些账户", async () => {
+  it("one round per portfolio, each holding only its own accounts", async () => {
     const def = await db(USER).portfolios.ensureDefault();
-    const watch = await db(USER).portfolios.create({ name: "看单" });
-    const here = await cex("默认组合里的");
-    const there = await cex("看单里的");
+    const watch = await db(USER).portfolios.create({ name: "Watchlist" });
+    const here = await cex("In default");
+    const there = await cex("In watchlist");
     await db(USER).portfolios.assignAccount(there.id, watch.id);
 
     await fanOut();
@@ -59,16 +59,16 @@ describe("sync/cron(fan-out)", () => {
     const other = await roundOf(watch.id);
     expect(Object.keys(mine?.accounts ?? {})).toEqual([here.id]);
     expect(Object.keys(other?.accounts ?? {})).toEqual([there.id]);
-    // 发起方记在轮头上 —— 面板要能说出「这一轮是定时跑的」。
+    // The initiator is recorded on the round header: the panel must be able to say "this round ran on schedule".
     expect(mine?.trigger).toBe("cron");
     expect(other?.trigger).toBe("cron");
   });
 
-  it("一个账户一条 sync-account,指着它所在的那一轮;外加每用户一套参考层活", async () => {
+  it("one sync-account per account, pointing at its round; plus one set of reference-layer jobs per user", async () => {
     const def = await db(USER).portfolios.ensureDefault();
-    const watch = await db(USER).portfolios.create({ name: "看单" });
-    const here = await cex("默认组合里的");
-    const there = await cex("看单里的");
+    const watch = await db(USER).portfolios.create({ name: "Watchlist" });
+    const here = await cex("In default");
+    const there = await cex("In watchlist");
     await db(USER).portfolios.assignAccount(there.id, watch.id);
 
     const result = await fanOut();
@@ -93,7 +93,7 @@ describe("sync/cron(fan-out)", () => {
         },
       ].sort((a, b) => a.accountId.localeCompare(b.accountId)),
     );
-    // 每小时那套(FOL-88):一件一条;读快照的两件延后,每天那两件(剪 note / 目录)不在这里。
+    // The hourly set: one message each; the two that read snapshots are delayed; the two daily ones (note pruning / catalogue) aren't here.
     const perUser = sent
       .filter((m) => m.job.kind !== "sync-account")
       .map((m) => [m.job.kind, m.delaySeconds !== undefined] as const);
@@ -104,7 +104,7 @@ describe("sync/cron(fan-out)", () => {
       ["platforms", true],
       ["defi-logos", true],
     ]);
-    // 价那两件不带 id:跑的那一刻才读持仓(带 id 的是写路径定向投的那种)。
+    // The two price jobs carry no ids: holdings are read when they run (ids are for the targeted ones enqueued by the write path).
     expect(sent.filter((m) => m.job.kind === "prices" || m.job.kind === "daily-prices")).toEqual([
       { job: { kind: "prices", userId: USER } },
       { job: { kind: "daily-prices", userId: USER } },
@@ -116,12 +116,12 @@ describe("sync/cron(fan-out)", () => {
       jobs: 2 + 5,
       alarms: 2 + 5,
     });
-    // 轮开着、还没收官 —— 收官是最后一个 consumer 的事。
+    // The round is open and not closed out: closing out is the last consumer's job.
     expect(mine?.finishedAt).toBeNull();
   });
 
-  // FOL-86 的全部意义:cron 那一次调用不再碰上游。
-  it("fan-out 一发上游都不打", async () => {
+  // The whole point: cron's single invocation no longer touches the upstream.
+  it("fan-out makes no upstream calls", async () => {
     await db(USER).portfolios.ensureDefault();
     await cex("a");
     await cex("b");
@@ -130,9 +130,9 @@ describe("sync/cron(fan-out)", () => {
     expect(outbound.calls).toEqual([]);
   });
 
-  // 用户正好在手动同步:开轮幂等会把那一轮原样还回来,cron 就该让开 —— 不然会有两拨 worker
-  // 对着同一批账户打上游。
-  it("活轮还在 → cron 不插一脚,不投那一轮的消息", async () => {
+  // The user is manually syncing: opening a round is idempotent and returns that round as is, so cron must yield, or two waves of workers
+  // would hit the upstream for the same accounts.
+  it("live round still there -> cron doesn't barge in, doesn't enqueue that round's messages", async () => {
     const def = await db(USER).portfolios.ensureDefault();
     await cex("Binance spot");
     const manualRound = await call(USER, openSyncRound({ trigger: "manual" }));
@@ -146,12 +146,12 @@ describe("sync/cron(fan-out)", () => {
     expect(syncJobs()).toEqual([]);
   });
 
-  // 活轮只装一个账户(加账户 / 详情侧栏点同步开的,FOL-89):cron 不能整组合跳过 —— 其余账户会
-  // 缺这一小时的快照。把名单里缺的拉进那一轮、只投它们;活轮里已有的那个不重投。
-  it("活轮只装一个账户 → 把其余账户拉进那一轮、只投它们", async () => {
+  // A live round holds only one account (opened by adding an account / syncing from the detail sidebar): cron can't skip the whole portfolio,
+  // or the rest would miss this hour's snapshot. Pull the missing ones from the list into that round and enqueue only them; the one already there isn't re-enqueued.
+  it("a live round holds only one account -> pull the rest into that round and enqueue only them", async () => {
     const def = await db(USER).portfolios.ensureDefault();
-    const busy = await cex("正在单独同步的");
-    const other = await cex("其余的");
+    const busy = await cex("Syncing alone");
+    const other = await cex("The rest");
     const single = await db(USER).syncRounds.open({
       portfolioId: def.id,
       roundId: "single",
@@ -171,14 +171,14 @@ describe("sync/cron(fan-out)", () => {
     expect(result.accounts).toBe(1);
   });
 
-  // 投递炸了(队列没建 / 配额用完):开了的轮别挂着 pending 干等 120s 再念成没有原因的「中断」,
-  // 与手动那条同一个口径 —— 带一句话收官。拉进别人轮的那几个记成 failed。
-  it("投递失败 → 自己开的轮带一句话收官,拉进别人轮的账户记 failed;这个用户计 failed", async () => {
+  // Enqueue blew up (queue missing / quota exhausted): a round opened mustn't sit pending for 120s and then read as a reasonless "interrupted";
+  // same policy as the manual path: close out with a message. Accounts pulled into someone else's round are recorded failed.
+  it("enqueue failure -> a round it opened closes out with a message, accounts pulled into another's round are recorded failed; this user counts as failed", async () => {
     const def = await db(USER).portfolios.ensureDefault();
-    const watch = await db(USER).portfolios.create({ name: "看单" });
-    const busy = await cex("正在单独同步的");
-    const joined = await cex("被拉进去的");
-    const there = await cex("看单里的");
+    const watch = await db(USER).portfolios.create({ name: "Watchlist" });
+    const busy = await cex("Syncing alone");
+    const joined = await cex("Pulled in");
+    const there = await cex("In watchlist");
     await db(USER).portfolios.assignAccount(there.id, watch.id);
     await db(USER).syncRounds.open({
       portfolioId: def.id,
@@ -209,13 +209,13 @@ describe("sync/cron(fan-out)", () => {
     expect(theirs?.finishedAt).toBeNull();
   });
 
-  // 投递之前就炸了(review R2-#4):后面那个组合开轮时 D1 出错,前面已经开了的轮不能挂着 pending
-  // 等 120s 再念成没有原因的「中断」—— 与投递失败同一个收尾。用一个只拦那个组合的触发器造这次 D1 失败。
-  it("后面的组合开轮时炸了 → 前面已开的轮带一句话收官;这个用户计 failed", async () => {
+  // Blew up before enqueueing: when opening the later portfolio's round hits a D1 error, rounds already opened mustn't sit pending 120s and read as a
+  // reasonless "interrupted"; same wrap-up as an enqueue failure. A trigger that blocks only that portfolio simulates the D1 failure.
+  it("a later portfolio's round blows up on open -> earlier opened rounds close out with a message; this user counts as failed", async () => {
     await db(USER).portfolios.ensureDefault();
-    const watch = await db(USER).portfolios.create({ name: "看单" });
-    await cex("默认组合里的");
-    const there = await cex("看单里的");
+    const watch = await db(USER).portfolios.create({ name: "Watchlist" });
+    await cex("In default");
+    const there = await cex("In watchlist");
     await db(USER).portfolios.assignAccount(there.id, watch.id);
     const order = (await db(USER).portfolios.list()).map((p) => p.id);
     const [first, last] = [order[0], order[order.length - 1]];
@@ -239,8 +239,8 @@ describe("sync/cron(fan-out)", () => {
     expect(await roundOf(last)).toBeNull();
   });
 
-  // 开了轮就必须收官,空组合也不例外 —— 没有消息会去收它,120s 后面板会挂着一句「中断」。
-  it("空组合那一轮当场收官,不投消息", async () => {
+  // A round that was opened must be closed out, an empty portfolio included: no message will close it and after 120s the panel would show a bare "interrupted".
+  it("an empty portfolio's round closes out on the spot, no message enqueued", async () => {
     const def = await db(USER).portfolios.ensureDefault();
     await fanOut();
     const back = await roundOf(def.id);

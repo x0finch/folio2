@@ -25,17 +25,17 @@ import { freshUser } from "../_kit/user";
 import { oracleDbFor } from "../db-effect";
 import { ticketOf } from "../ticket";
 
-// 队列的 `daily-prices` 活(FOL-90):手记历史曲线的日价回源处,一条消息 ≤ 预算;读图表的三个
-// 端点只读表。出网数按**真 fetch** 数(CoinGecko adapter 真在发区间请求),不是数假上游的方法调用。
+// The queue's `daily-prices` job, where the manual history curve's daily prices are fetched: one message within budget; the three
+// chart-reading endpoints only read the table. Outbound is counted on real fetches (the CoinGecko adapter really sends range requests).
 
-/** 免费计划一次调用的外部 subrequest 上限。一条消息 = 一次调用。 */
+/** Free-plan cap on external subrequests per invocation; one message = one invocation. */
 const FREE_PLAN_SUBREQUESTS = 50;
 const YEARS_3 = 3 * 365;
 
 describe("jobs/daily-prices", () => {
   const USER = "h-jobs-daily-prices";
 
-  /** 跑一条消息,顺手收下它投出去的后续消息。 */
+  /** Runs one message and collects the follow-up messages it enqueues. */
   const consume = async (body: Job) => {
     const sent: Enqueued[] = [];
     const state = { acked: false, retried: false };
@@ -61,8 +61,8 @@ describe("jobs/daily-prices", () => {
     return { state, sent };
   };
 
-  // `/coins/{id}/market_chart/range`:区间里每个 UTC 日起点一个点(币价 = 100,BTC 的欧元价 = 80)。
-  // `failFirst`:同一个 URL 的前 k 次答 503(可重试),之后才给 —— 见最坏情形那条(code review #21)。
+  // `/coins/{id}/market_chart/range`: one point per UTC day start in the range (coin price = 100, BTC's EUR price = 80).
+  // `failFirst`: the first k calls to the same URL answer 503 (retryable), then it succeeds; see the worst-case case.
   const rangeUpstream = (
     opts: { fail?: boolean; failFirst?: number } = {},
   ): { calls: string[] } => {
@@ -73,7 +73,7 @@ describe("jobs/daily-prices", () => {
       calls.push(url);
       const u = new URL(url);
       if (!u.pathname.endsWith("/market_chart/range")) {
-        throw new Error(`没有为这个 URL 准备答案:${url}`);
+        throw new Error(`no answer prepared for this URL: ${url}`);
       }
       const tries = (seen.get(url) ?? 0) + 1;
       seen.set(url, tries);
@@ -100,9 +100,8 @@ describe("jobs/daily-prices", () => {
   };
 
   /**
-   * 一个手记账户,三个认得出来的币 + 欧元现金,首笔活动都在 `daysAgo` 天前。
-   * `coins` / `cash` 可换:日价表是全局的、不随用户清(别的用例、别的测试文件会补同名币),
-   * 要量「真回源多少发」的用例得用只有它自己用的币。
+   * A manual account with three recognized coins + EUR cash, first activity `daysAgo` days back. `coins` / `cash` are swappable:
+   * the daily price table is global and not cleared per user, so cases measuring real fetches must use coins only they use.
    */
   const manualAccount = async (
     daysAgo: number,
@@ -142,7 +141,7 @@ describe("jobs/daily-prices", () => {
     return { account, queue };
   };
 
-  /** 把一条消息与它投出的后续消息一路跑完,回每条消息的真 fetch 数。 */
+  /** Runs a message and its follow-ups to completion, returning each message's real fetch count. */
   const drain = async (first: Job) => {
     const perMessage: number[] = [];
     const queue: Job[] = [first];
@@ -156,7 +155,7 @@ describe("jobs/daily-prices", () => {
         expect(Either.isRight(decodeJob(m.job))).toBe(true);
         queue.push(m.job);
       }
-      expect(perMessage.length).toBeLessThan(20); // 接力链必须收敛
+      expect(perMessage.length).toBeLessThan(20); // the relay chain must converge
     }
     return perMessage;
   };
@@ -167,7 +166,7 @@ describe("jobs/daily-prices", () => {
     await db(USER).portfolios.ensureDefault();
   });
 
-  it("没有手记账户 → 零出网、不往下投", async () => {
+  it("no manual account -> zero outbound, nothing enqueued further", async () => {
     const outbound = rangeUpstream();
     const { state, sent } = await consume({ kind: "daily-prices", userId: USER });
     expect(state).toEqual({ acked: true, retried: false });
@@ -175,12 +174,12 @@ describe("jobs/daily-prices", () => {
     expect(sent).toEqual([]);
   });
 
-  it("三年回填 → 多条消息接力,每条 ≤ 预算;补完之后重跑零出网", async () => {
+  it("three-year backfill -> several messages relay, each within budget; rerun after completion makes zero outbound", async () => {
     const { account } = await manualAccount(YEARS_3);
 
     const perMessage = await drain({ kind: "daily-prices", userId: USER });
 
-    // 3 个币 × 3 窗 + 欧元 3 窗 × 2(按两条腿记账)= 15 发的量 > 一条消息的 8 → 至少两条。
+    // 3 coins x 3 windows + EUR 3 windows x 2 (two legs) = 15 calls > one message's 8 -> at least two messages.
     expect(perMessage.length).toBeGreaterThanOrEqual(2);
     for (const n of perMessage) {
       expect(n).toBeLessThanOrEqual(DAILY_PRICES_UPSTREAM_CALLS);
@@ -188,7 +187,7 @@ describe("jobs/daily-prices", () => {
     }
     expect(perMessage[0]).toBeLessThanOrEqual(DAILY_PRICES_CALLS_PER_MESSAGE);
 
-    // 表里从首笔活动那天到昨天逐日都有价(币)/ 汇率(欧元 = BTC美元 ÷ BTC欧元 = 100 / 80)。
+    // The table has prices (coins) / rates (EUR = BTC USD / BTC EUR = 100 / 80) for every day from the first activity to yesterday.
     const holdings = await db(USER).manual.listHoldings(account.id, "coingecko");
     const todayB = Math.floor(Date.now() / MS_PER_DAY);
     const past = Array.from({ length: YEARS_3 }, (_, i) => todayB - YEARS_3 + i);
@@ -202,14 +201,14 @@ describe("jobs/daily-prices", () => {
     expect(eur.size).toBe(YEARS_3);
     expect(eur.get(todayB - 1)).toBeCloseTo(1.25);
 
-    // 重跑:一次缓存读,一发都不出。
+    // Rerun: one cache read, no calls at all.
     const again = rangeUpstream();
     const { sent } = await consume({ kind: "daily-prices", userId: USER });
     expect(rangeCalls(again.calls)).toBe(0);
     expect(sent).toEqual([]);
   });
 
-  it("上游挂了 → 这一条 ack、不往下投(不原地打转),下一个整点再试", async () => {
+  it("upstream down -> this message acks and enqueues nothing further (no spinning in place), retry at the next hour", async () => {
     await manualAccount(10);
     rangeUpstream({ fail: true });
     const { state, sent } = await consume({ kind: "daily-prices", userId: USER });
@@ -217,30 +216,30 @@ describe("jobs/daily-prices", () => {
     expect(sent).toEqual([]);
   });
 
-  // 其余用例的上游一次就成,「每发 × 尝试次数」那一半推导从没被走到。这条先用一直挂的上游量出
-  // adapter 实际肯试几次(同一个 URL 被打了几遍 = N),再让每个 URL 前 (N − 1) 次失败:
-  // 一条消息把 `DAILY_PRICES_CALLS_PER_MESSAGE` 窗全花掉、每窗都试满 N 次,仍须 ≤ 50。
-  it("最坏情形(每一窗都把重试用满)→ 一条消息仍 ≤ 50 发", async () => {
-    // 只有这条用的四个币(日价表全局共享,表里有整窗就不出网 —— 用常见币会量到别人补过的)。
-    // 4 币 × 3 窗 = 12 窗 > 一条消息的 8 窗 → 预算必然花满。
+  // Other cases' upstream succeeds at once, so the "per call x attempts" half of the derivation is never reached. This one measures with an
+  // always-down upstream how many attempts the adapter makes (N, how many times one URL is hit), then fails each URL's first (N - 1)
+  // attempts: one message spends all `DAILY_PRICES_CALLS_PER_MESSAGE` windows, each tried N times, and must still be <= 50.
+  it("worst case (every window uses up its retries) -> one message still <= 50 calls", async () => {
+    // Four coins only this case uses (the daily price table is global and a full window in it means no outbound, so common coins would measure others' fills).
+    // 4 coins x 3 windows = 12 windows > one message's 8 -> the budget is certainly spent.
     await manualAccount(YEARS_3, { coins: ["wa1x", "wb2x", "wc3x", "wd4x"], cash: false });
 
     const down = rangeUpstream({ fail: true });
     await consume({ kind: "daily-prices", userId: USER });
     const [firstUrl] = down.calls;
     const attempts = down.calls.filter((u) => u === firstUrl).length;
-    expect(attempts).toBeGreaterThan(1); // 真在重试
+    expect(attempts).toBeGreaterThan(1); // really retrying
 
     const flaky = rangeUpstream({ failFirst: attempts - 1 });
     const { state, sent } = await consume({ kind: "daily-prices", userId: USER });
     expect(state).toEqual({ acked: true, retried: false });
-    expect(sent.length).toBeGreaterThan(0); // 三年的量一条装不下 → 预算确实花满了
+    expect(sent.length).toBeGreaterThan(0); // three years don't fit in one message -> the budget was really spent
     expect(rangeCalls(flaky.calls)).toBe(DAILY_PRICES_CALLS_PER_MESSAGE * attempts);
     expect(flaky.calls.length).toBeLessThanOrEqual(DAILY_PRICES_UPSTREAM_CALLS);
     expect(flaky.calls.length).toBeLessThanOrEqual(FREE_PLAN_SUBREQUESTS);
   }, 60_000);
 
-  it("读图表的三个端点对手记账户**一发都不出网**(补没补齐都一样)", async () => {
+  it("the three chart-reading endpoints make no outbound call for manual accounts (filled or not)", async () => {
     const { account } = await manualAccount(YEARS_3);
     const reads = async () => {
       const outbound = blockOutbound();
@@ -251,22 +250,22 @@ describe("jobs/daily-prices", () => {
       return outbound.calls;
     };
 
-    expect(await reads()).toEqual([]); // 还没补:缺的日子走降级链,不回源
+    expect(await reads()).toEqual([]); // not filled yet: missing days go down the degrade chain, no fetch
     await drain({ kind: "daily-prices", userId: USER });
-    expect(await reads()).toEqual([]); // 补齐之后:读表
+    expect(await reads()).toEqual([]); // after filling: reads the table
   });
 
-  it("补齐之后曲线用日价;今天没有现价 → 沿用昨天的(前向填充),不落回账本价", async () => {
+  it("after filling the curve uses daily prices; no price today -> carries yesterday's forward, doesn't fall back to the ledger price", async () => {
     const { account } = await manualAccount(5);
     await drain({ kind: "daily-prices", userId: USER });
     blockOutbound();
     const series = await call(USER, loadManualAccountSeries(account.id));
     const last = series.at(-1);
-    // 3 个币 × 1 × 100 + 欧元 100 × 1.25 —— 不是账本里的 1 / 1.1。
+    // 3 coins x 1 x 100 + EUR 100 x 1.25 -- not the ledger's 1 / 1.1.
     expect(last?.totalUsd).toBeCloseTo(3 * 100 + 100 * 1.25);
   });
 
-  it("加活动之后定向投一条带这个账户币 id 的 `daily-prices`", async () => {
+  it("after adding an activity -> enqueues one targeted `daily-prices` carrying this account's coin ids", async () => {
     const { account, queue } = await manualAccount(3);
     const daily = queue.sent.filter((m) => m.job.kind === "daily-prices");
     expect(daily).toHaveLength(1);
@@ -280,7 +279,7 @@ describe("jobs/daily-prices", () => {
     expect(msg.delaySeconds).toBeUndefined();
   });
 
-  it("改活动 / 建手记账户之后也投;卖超被拒时不投", async () => {
+  it("after editing an activity / creating a manual account also enqueues; an oversell rejection doesn't", async () => {
     const { account } = await manualAccount(3);
     const detail = await db(USER).manual.listActivityByAccount(account.id);
     const first = detail[0];
@@ -326,7 +325,7 @@ describe("jobs/daily-prices", () => {
       created.provide(
         handleCreateAccountAndRefill({
           connectorId: "manual",
-          label: "手记 2",
+          label: "Manual 2",
           values: {
             tokens: JSON.stringify([
               { symbol: "BTC", unitPrice: 100, amount: 2, ticket: ticketOf("bitcoin") },
