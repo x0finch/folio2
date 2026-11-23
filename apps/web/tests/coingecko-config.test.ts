@@ -1,20 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { coinGeckoConfigOf } from "@/lib/server/coingecko-config";
 
-// CoinGecko 的 base 覆盖(FOL-84):不设就是生产那条路(client 按有没有 key 选官方基址)。
 describe("coinGeckoConfigOf", () => {
-  it("什么都不设 → 两项都缺省(官方免费基址、无 key)", () => {
+  it("nothing set → both default (official free base URL, no key)", () => {
     expect(coinGeckoConfigOf({})).toEqual({ apiKey: undefined, baseUrl: undefined });
   });
 
-  it("空串当没设 —— .dev.vars 里留一行 `COINGECKO_API_BASE=` 不该把请求打到空基址上", () => {
+  it("empty string counts as unset — a bare `COINGECKO_API_BASE=` in .dev.vars must not target an empty base", () => {
     expect(coinGeckoConfigOf({ COINGECKO_API_KEY: "", COINGECKO_API_BASE: "  " })).toEqual({
       apiKey: undefined,
       baseUrl: undefined,
     });
   });
 
-  it("设了 base → 原样递给 client(去掉首尾空白)", () => {
+  it("base set → passed to the client as-is (trimmed)", () => {
     expect(
       coinGeckoConfigOf({
         COINGECKO_API_KEY: "k",

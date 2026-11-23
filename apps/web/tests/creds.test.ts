@@ -12,7 +12,7 @@ import {
 
 const key = generateSecret();
 
-// 字段规格(= credentialSpecs() 的形状:只 key+type+label,无 validator)。
+// Field specs in the credentialSpecs() shape: key + type + label, no validator.
 const okx: InputSpec[] = [
   { key: "apiKey", type: "semi", label: "API Key" },
   { key: "secret", type: "secret", label: "API Secret" },
@@ -24,10 +24,10 @@ describe("sealCreds / openCreds", () => {
   it("encrypts only secret fields; public/semi stay plaintext; round-trips", async () => {
     const values = { apiKey: "KEY123", secret: "SIGN", passphrase: "PASS" };
     const sealed = await sealCreds(okx, values, key);
-    expect(sealed.apiKey).toBe("KEY123"); // semi 明文
-    expect(sealed.secret).not.toBe("SIGN"); // secret 密文
+    expect(sealed.apiKey).toBe("KEY123"); // semi stays plaintext
+    expect(sealed.secret).not.toBe("SIGN"); // secret is ciphertext
     expect(sealed.passphrase).not.toBe("PASS");
-    expect(await openCreds(okx, sealed, key)).toEqual(values); // 往返还原
+    expect(await openCreds(okx, sealed, key)).toEqual(values); // round-trips
   });
 
   it("public field stays plaintext", async () => {
@@ -44,7 +44,7 @@ describe("safeView (export / hint projection)", () => {
       { apiKey: "ABCD1234WXYZ5678", secret: "S", passphrase: "P" },
       key,
     );
-    expect(safeView(okx, sealed)).toEqual({ apiKey: "ABCD…5678" }); // 无 secret/passphrase
+    expect(safeView(okx, sealed)).toEqual({ apiKey: "ABCD…5678" }); // no secret/passphrase
   });
 
   it("passes through a semi_ placeholder (imported needs-creds account)", () => {
@@ -57,13 +57,13 @@ describe("isComplete (needs-credentials)", () => {
   it("true when every non-public field has a real value", async () => {
     const sealed = await sealCreds(okx, { apiKey: "K", secret: "S", passphrase: "P" }, key);
     expect(isComplete(okx, sealed)).toBe(true);
-    expect(isComplete(onchain, { address: "0xabc" })).toBe(true); // 仅 public
-    expect(isComplete([], {})).toBe(true); // manual 无输入
+    expect(isComplete(onchain, { address: "0xabc" })).toBe(true); // public only
+    expect(isComplete([], {})).toBe(true); // manual has no inputs
   });
 
   it("false when a semi_ placeholder or a secret field is missing (imported)", () => {
-    expect(isComplete(okx, { [`${SEMI_PREFIX}apiKey`]: "ABCD…5678" })).toBe(false); // 占位、无真值
-    expect(isComplete(okx, { apiKey: "K", secret: "S" })).toBe(false); // 缺 passphrase
+    expect(isComplete(okx, { [`${SEMI_PREFIX}apiKey`]: "ABCD…5678" })).toBe(false); // placeholder, no real value
+    expect(isComplete(okx, { apiKey: "K", secret: "S" })).toBe(false); // passphrase missing
   });
 });
 

@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { type AggInput, buildCanonicalHoldings, type Holding } from "@/lib/core/portfolio";
 
-// 聚合的归并键 = `token_id`(ADR 0021 / #201)。认定在写快照时由 mint 定死,读端不再解析 ——
-// 所以这些用例直接给 token_id,不再造 `tokenRef` / `ref` 让聚合自己猜。
-// 「谁跟谁并成一行」的判断因此从聚合层整个搬走了:这里只验「同 id 并、不同 id 不并」以及
-// 平台单元 / 合计 / 排序那些真属于本层的事。
-
+// Holdings merge on token_id, fixed at snapshot write time; the read side never re-resolves identity.
+// So these tests only check same-id merges / different-id splits, plus platform units, totals and sorting.
 const zerion = { id: "z1", label: "Wallet", connectorId: "evm" };
 const binance = { id: "b1", label: "Binance", connectorId: "binance" };
 const hyper = { id: "h1", label: "HL", connectorId: "hyperliquid" };
-const manual = { id: "m1", label: "备注", connectorId: "manual" };
+const manual = { id: "m1", label: "Notes", connectorId: "manual" };
 
 const row = (
   p: Partial<AggInput> & Pick<AggInput, "symbol" | "amount" | "value" | "account">,
@@ -20,8 +17,8 @@ const row = (
 const byKey = (hs: Holding[], key: string) => hs.find((h) => h.key === key);
 
 describe("buildCanonicalHoldings", () => {
-  // ADR 0021:展示分组退场 —— 桥接变体是**另一个 token_id**,因此天然另成一行。
-  it("同一个 Token 跨链 + 交易所 + 手记 → 一行;桥接变体另成一行,总额不变", () => {
+  // A bridged variant is a different token_id, so it naturally gets its own row.
+  it("same token across chains + exchange + manual → one row; bridged variant separate, total unchanged", () => {
     const hs = buildCanonicalHoldings([
       row({
         symbol: "USDT",
@@ -31,7 +28,7 @@ describe("buildCanonicalHoldings", () => {
         account: zerion,
         tokenId: "tk-usdt",
       }),
-      // 桥接变体:mint 认成了另一个币 → 另一个 token_id。
+      // Bridged variant: resolved to a different token → different token_id.
       row({
         symbol: "USDT",
         amount: 500,
@@ -52,7 +49,7 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDT",
         amount: 100,
         value: 100,
-        // 手记的平台是 manual —— 平台读余额行报来的那一列,与代币身份无关。
+        // Manual's platform is "manual" — platform comes from the balance row, not the token identity.
         platform: "manual",
         account: manual,
         tokenId: "tk-usdt",
@@ -60,20 +57,19 @@ describe("buildCanonicalHoldings", () => {
     ]);
     expect(hs).toHaveLength(2);
     const h = byKey(hs, "tk-usdt")!;
-    // 读端只看 token_id(vendor 中立,换源后上游 id 变了也不碎),行的 token 身份就是它。
+    // Identity is the token_id alone (vendor-neutral: survives an upstream id change).
     expect(h.token).toMatchObject({ id: "tk-usdt", symbol: "USDT" });
     expect(h.totalValue).toBe(3100);
-    expect(h.totalAmount).toBe(3100); // 同一 Token 的多源(链 + 交易所 + 手记)合计总枚数
-    // aggregate 只产 platform.id(key);name 仅为 key 占位,真名/logo 由 server 读路径
-    // platforms.resolve 装饰(平台"显示成什么"整个归 @folio/platforms)。
-    const ids = ["binance", "evm:1", "manual"]; // value 降序(场馆键 = connectorId)
+    expect(h.totalAmount).toBe(3100); // total units across sources (chain + exchange + manual)
+    // aggregate emits only platform.id; name is a key placeholder until the server resolves the real name/logo.
+    const ids = ["binance", "evm:1", "manual"]; // value descending (venue key = connectorId)
     expect(h.sources.map((s) => s.platform.id)).toEqual(ids);
-    expect(h.sources.map((s) => s.platform.name)).toEqual(ids); // name == key 占位
+    expect(h.sources.map((s) => s.platform.name)).toEqual(ids); // name == key placeholder
     expect(byKey(hs, "tk-usdt0")?.totalValue).toBe(500);
     expect(hs.reduce((n, x) => n + x.totalValue, 0)).toBe(3600);
   });
 
-  it("perp 权益不进聚合(#129):同 token 的现货并成一行,权益那笔被排除、其持有点也不出现", () => {
+  it("perp equity stays out: same-token spot merges, the equity row and its source are excluded", () => {
     const hs = buildCanonicalHoldings([
       row({ symbol: "USDC", amount: 1000, value: 1000, account: zerion, tokenId: "tk-usdc" }),
       row({ symbol: "USDC", amount: 500, value: 500, account: zerion, tokenId: "tk-usdc" }),
@@ -81,22 +77,21 @@ describe("buildCanonicalHoldings", () => {
         symbol: "USDC",
         amount: 300,
         value: 300,
-        kind: "perp_equity", // 永续权益 —— 只应出现在 Perps tab,不折进代币行
+        kind: "perp_equity", // perp equity — Perps tab only, not folded into token rows
         account: hyper,
         tokenId: "tk-usdc",
       }),
     ]);
     const h = byKey(hs, "tk-usdc")!;
-    expect(h.totalValue).toBe(1500); // 只两笔现货,权益 300 不计
+    expect(h.totalValue).toBe(1500); // only the two spot rows; equity 300 excluded
     expect(h.totalAmount).toBe(1500);
-    // 权益来自 hyperliquid 账户 → 该持有点根本不该出现在这一行
+    // Equity comes from the hyperliquid account → that source must not appear on the row
     expect(h.sources.find((s) => s.platform.id === "hyperliquid")).toBeUndefined();
   });
 
-  // #243 删了快照 symbol 列后,没有 token_id 的行(只剩 v2 导入进来的)symbol 为空。若还拿 symbol
-  // 当兜底键,同一账户里所有无 token 的行会塌成一条空名持仓、金额被错误相加。兜底改用余额行 id
-  // → 各自独立成行,金额不混。
-  it("无 token_id 的行按余额行 id 各自成行,不塌成一条空名合并行", () => {
+  // Rows without token_id (legacy imports) have no symbol; keying on symbol would collapse them into one
+  // nameless holding with summed amounts. Key on the balance row id instead.
+  it("rows without token_id get one row each by balance id, not one merged nameless row", () => {
     const hs = buildCanonicalHoldings([
       row({ id: "bal-1", symbol: "", amount: 1, value: 10, account: binance }),
       row({ id: "bal-2", symbol: "", amount: 1, value: 20, account: binance }),
@@ -105,7 +100,7 @@ describe("buildCanonicalHoldings", () => {
     expect(hs.map((h) => h.totalValue).sort((a, b) => a - b)).toEqual([10, 20]);
   });
 
-  it("白名单:defi / perp 仓位不进 Holdings(只认现货)", () => {
+  it("allowlist: defi / perp positions stay out of Holdings (spot only)", () => {
     const hs = buildCanonicalHoldings([
       row({
         symbol: "ETH",
@@ -122,12 +117,12 @@ describe("buildCanonicalHoldings", () => {
         kind: "perp_position",
         account: hyper,
         tokenId: "tk-e",
-      }), // perp 仓位(value=0),不进聚合
+      }), // perp position (value=0), not aggregated
     ]);
     expect(hs).toHaveLength(0);
   });
 
-  it("account×platform 去重:同账户同平台同币两条 → 一个 source", () => {
+  it("account×platform dedupe: two rows of one coin on the same account and platform → one source", () => {
     const hs = buildCanonicalHoldings([
       row({
         symbol: "USDC",
@@ -151,7 +146,7 @@ describe("buildCanonicalHoldings", () => {
     expect(h.sources[0]).toMatchObject({ amount: 150, value: 150 });
   });
 
-  it("无美元价值(未定价/垃圾币,value=0)→ 不进组合持仓", () => {
+  it("no USD value (unpriced/junk, value=0) → not in portfolio holdings", () => {
     const hs = buildCanonicalHoldings([
       row({ symbol: "REAL", amount: 2, value: 50, account: binance, tokenId: "tk-real" }),
       row({ symbol: "SPAM", amount: 999999, value: 0, account: binance, tokenId: "tk-spam" }),
@@ -160,7 +155,7 @@ describe("buildCanonicalHoldings", () => {
     expect(hs[0]!.token.symbol).toBe("REAL");
   });
 
-  it("同代币多源合计 > 0 仍保留,即使个别源 value=0", () => {
+  it("token kept if its sources sum > 0 even when some source has value=0", () => {
     const hs = buildCanonicalHoldings([
       row({ symbol: "AAA", amount: 1, value: 0, account: binance, tokenId: "tk-a" }),
       row({ symbol: "AAA", amount: 1, value: 5, account: hyper, tokenId: "tk-a" }),
@@ -169,7 +164,7 @@ describe("buildCanonicalHoldings", () => {
     expect(hs[0]!.totalValue).toBe(5);
   });
 
-  it("token 带 unitPrice / marketCapRank(详情头部 meta 用)", () => {
+  it("token carries unitPrice / marketCapRank (for the detail header)", () => {
     const hs = buildCanonicalHoldings([
       row({
         symbol: "BTC",
@@ -185,7 +180,7 @@ describe("buildCanonicalHoldings", () => {
     expect(hs[0]!.token.marketCapRank).toBe(1);
   });
 
-  it("多源组价/排名取「首个有值」:首行无价也不漏(不依赖行序)", () => {
+  it("price/rank across sources take the first non-empty value, regardless of row order", () => {
     const hs = buildCanonicalHoldings([
       row({ symbol: "USDC", amount: 100, value: 100, account: zerion, tokenId: "tk-usdc" }),
       row({
@@ -203,7 +198,7 @@ describe("buildCanonicalHoldings", () => {
     expect(h.token.marketCapRank).toBe(6);
   });
 
-  it("平台单元 = provider 报的 platform(不从代币身份反推)", () => {
+  it("platform unit = the platform the provider reported (not derived from token identity)", () => {
     const btc = { id: "x1", label: "BTC wallet", connectorId: "bitcoin" };
     const hs = buildCanonicalHoldings([
       row({
@@ -229,7 +224,7 @@ describe("buildCanonicalHoldings", () => {
     ]);
   });
 
-  it("没报 platform 的行 → 退回账户的 connectorId", () => {
+  it("row without a platform → falls back to the account's connectorId", () => {
     const hs = buildCanonicalHoldings([
       row({ symbol: "USDC", amount: 100, value: 100, account: binance, tokenId: "tk-usdc" }),
     ]);
@@ -237,9 +232,9 @@ describe("buildCanonicalHoldings", () => {
   });
 });
 
-// 没有 token_id 的行只剩两类:本列之前写下的旧快照,和手记那种现造的持仓(#203 之后就没了)。
-describe("没有 token_id 的兜底", () => {
-  it("按 账户 + symbol 各自成组 —— **绝不**跨账户按裸 symbol 并(ADR-0002 的红线)", () => {
+// Rows without token_id: legacy snapshots only.
+describe("fallback without token_id", () => {
+  it("grouped per account + symbol — never merged across accounts by bare symbol", () => {
     const kraken = { id: "k1", label: "Kraken", connectorId: "kraken" };
     const hs = buildCanonicalHoldings([
       row({ symbol: "USDT", amount: 50, value: 50, account: kraken }),
@@ -250,17 +245,17 @@ describe("没有 token_id 的兜底", () => {
     expect(byKey(hs, "no-token:b1:USDT")?.totalValue).toBe(70);
   });
 
-  it("同账户同 symbol 的多行仍并到一起(那确实是同一笔持仓的多个来源)", () => {
+  it("rows with the same symbol in one account still merge (sources of one holding)", () => {
     const hs = buildCanonicalHoldings([
       row({ symbol: "USDT", amount: 50, value: 50, platform: "binance", account: binance }),
       row({ symbol: "USDT", amount: 20, value: 20, platform: "binance", account: binance }),
     ]);
     expect(hs).toHaveLength(1);
     expect(hs[0]!.totalValue).toBe(70);
-    expect(hs[0]!.token.id).toBeUndefined(); // 没有身份 → 详情页拿不到 id
+    expect(hs[0]!.token.id).toBeUndefined(); // no identity → detail page gets no id
   });
 
-  it("symbol 归一后再兜底(大小写/空白不影响)", () => {
+  it("symbol is normalized before the fallback (case/whitespace ignored)", () => {
     const hs = buildCanonicalHoldings([
       row({ symbol: " usdt ", amount: 50, value: 50, account: binance }),
       row({ symbol: "USDT", amount: 20, value: 20, account: binance }),
@@ -268,7 +263,7 @@ describe("没有 token_id 的兜底", () => {
     expect(hs).toHaveLength(1);
   });
 
-  it("有 token_id 的行绝不与没有的合并", () => {
+  it("rows with token_id never merge with rows without", () => {
     const hs = buildCanonicalHoldings([
       row({ symbol: "USDT", amount: 50, value: 50, account: binance, tokenId: "tk-usdt" }),
       row({ symbol: "USDT", amount: 20, value: 20, account: binance }),
@@ -277,10 +272,10 @@ describe("没有 token_id 的兜底", () => {
   });
 });
 
-// #271:法币持仓(kind="spot")本就走 spot-only 聚合(#129)——无需改 isEligible。isFiat 透传到
-// Holding.token(组 = 一个 token → 取代表值),供 hero 的稳定占比按身份判定(不看裸 symbol)。
-describe("法币聚合(isFiat)", () => {
-  it("法币 spot 行进 holdings、计入净值,并把 isFiat 透传到 Holding.token", () => {
+// Fiat holdings (kind="spot") use the spot aggregation; isFiat is passed to Holding.token so the hero's
+// stablecoin share is judged by identity, not bare symbol.
+describe("fiat aggregation (isFiat)", () => {
+  it("fiat spot rows enter holdings, count toward net worth, and pass isFiat to Holding.token", () => {
     const hs = buildCanonicalHoldings([
       row({
         symbol: "USD",
@@ -293,12 +288,12 @@ describe("法币聚合(isFiat)", () => {
       }),
     ]);
     expect(hs).toHaveLength(1);
-    expect(hs[0]!.totalValue).toBe(100); // 计入净值(subtotal 由调用方对 totalValue 求和)
+    expect(hs[0]!.totalValue).toBe(100); // counts toward net worth (caller sums totalValue)
     expect(hs[0]!.token).toMatchObject({ symbol: "USD", isFiat: true });
   });
 
-  it("同一法币跨账户按 token_id 归一成一行(与加密同源同键)", () => {
-    const manual2 = { id: "m2", label: "现金2", connectorId: "manual" };
+  it("one fiat across accounts merges into one row by token_id (same key as crypto)", () => {
+    const manual2 = { id: "m2", label: "Cash 2", connectorId: "manual" };
     const hs = buildCanonicalHoldings([
       row({
         symbol: "USD",
@@ -322,11 +317,11 @@ describe("法币聚合(isFiat)", () => {
     expect(hs).toHaveLength(1);
     expect(hs[0]!.totalValue).toBe(140);
     expect(hs[0]!.totalAmount).toBe(140);
-    expect(hs[0]!.sources).toHaveLength(2); // 两个账户各一个来源
+    expect(hs[0]!.sources).toHaveLength(2); // one source per account
     expect(hs[0]!.token.isFiat).toBe(true);
   });
 
-  it("非法币行 isFiat 缺省 → Holding.token.isFiat undefined(不误标)", () => {
+  it("non-fiat rows leave isFiat unset → Holding.token.isFiat undefined (no false flag)", () => {
     const hs = buildCanonicalHoldings([
       row({ symbol: "BTC", amount: 1, value: 65000, account: zerion, tokenId: "tk-btc" }),
     ]);
