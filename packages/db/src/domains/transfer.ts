@@ -16,19 +16,9 @@ import { assertAccountOwned, assertTokenOwned } from "./ownership";
 import { ensureDefault } from "./portfolios";
 import { makeSnapshotStore, type WriteSnapshotInput } from "./snapshots";
 
-// 导出 / 导入 v3(#204):Token 行 + 它的 ref 随文件走。
-//
-// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
-// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
-//
-// **它要用快照与手记那两个 store** —— 导快照/导活动本来就是「查重之后调那一个写」,而两个写口
-// 连同它们的归属校验都已经在那两个服务里。所以这里直接 `yield*` 它们的 make,而不是 `yield*` 它们的
-// Tag:后者会把这两个依赖顶到 `TransferStore.Default` 的 `R` 上,装配点为此得先合出一个 base
-// 再把它 provide 上去(#504 T4 之前的 `dbStoresFor` 就是那个形状)。两边都只是几个闭包,
-// 建两次不比传引用贵,却省掉装配点那一层拼装。
+// Export / import of a user's data; tokens travel with their refs.
 
-// 导出一个用户的 Token(ref 嵌在里头)。**价 facet 与 TTL 不导** —— 市场数据可重取;
-// `self_price` 也不导 —— 迁移 0016 后它已无写者(手记声明价在账本的 `price` 列,随活动导)。
+// Price fields and TTLs aren't exported: market data can be refetched.
 export interface ExportToken {
   id: string;
   symbol: string;
@@ -47,9 +37,8 @@ export interface ImportTokenInput {
   marketCapRank?: number | null;
 }
 
-// **layer 依赖另外两个 store**(不是方法的 `R`):导快照/导活动就是「查重之后调那一个写」。
-// —— 合并式导入(#204,A 方案):按内容自然键 find-or-create,让「反复导入 / 合并不同文件」幂等。 ——
-// 全程用**新 id**(不碰全局 id 主键,多用户安全);去重靠 per-user 自然键。原样再导一遍 = 命中既有、不新建。
+// Merge-style import: find-or-create by natural content keys, so re-importing or merging files is
+// idempotent. Always mints new ids (ids are global PKs; dedup uses per-user natural keys).
 export const makeTransferStore = (client: DbClient, userId: string) => {
   const snapshotStore = makeSnapshotStore(client, userId);
   const manualStore = makeManualStore(client, userId);
@@ -93,16 +82,12 @@ export const makeTransferStore = (client: DbClient, userId: string) => {
       }),
 
     /**
-     * 导入一个 Token:**find-or-create**。它的任一 ref 已在本地映射到某 Token → 复用那行(把缺的 ref
-     * 补挂过去);否则新建一行(新 id,不跟本地已有撞)+ 挂上全部 ref。返回最终 token_id,供调用方建
-     * old→new 映射。空库导入是最常见路径:恒无命中 → 每个 Token 各建新行。
-     *
-     * **已知限制(仅非空库的分叉场景)**:若这批 ref 分别命中本地**不同**的 Token(源库把多链归并成一行、
-     * 目标库却各自建了行),这里按第一条命中复用、其余 ref 撞约束被静默跳过 → 文件里那个 Token 的身份被
-     * 部分并到一行上。**这条经导入路径根本走不到** —— 导入有空库闸(见 apps/web import.ts),只往空库导,
-     * 恒无命中、每个 Token 各建新行。留这条注释是因为本 op 也被别处直接调用;跨实例分叉合并归「改绑」那张票。
+     * Find-or-create: if any ref already maps to a local token, reuse it and attach the missing refs;
+     * otherwise insert a new token with all refs. Returns the final token id for old->new mapping.
+     * Known limit: refs hitting different local tokens get merged into the first hit. Import only
+     * targets an empty database, so that path doesn't reach it.
      */
-    // ref 插入用无目标 onConflict:PK(user_id,namer,local_name)与唯一索引(user_id,token_id,namer)任一撞了都静默。
+    // Untargeted onConflict: a clash on either the PK or the (user, token, namer) index is skipped.
     importToken: (
       t: ImportTokenInput,
       refs: readonly { namer: string; localName: string }[],
@@ -128,7 +113,7 @@ export const makeTransferStore = (client: DbClient, userId: string) => {
           );
           const target = hit[0]?.tokenId;
           if (target) {
-            // 复用已有 Token:把它还没有的 ref 补挂过去(撞约束的静默跳过)。
+            // Reusing: attach the refs it lacks; clashes are skipped.
             yield* client.batch((db) =>
               refs.map((r) =>
                 db
@@ -151,7 +136,7 @@ export const makeTransferStore = (client: DbClient, userId: string) => {
             logo: t.logo ?? null,
             providerLogo: t.providerLogo ?? null,
             marketCapRank: t.marketCapRank ?? null,
-            infoExpiresAt: now(), // 建行即 stale → 下次刷价/刷图补齐 name/logo/价
+            infoExpiresAt: now(), // stale on insert, so the next refresh fills name/logo/price
           }),
           ...refs.map((r) =>
             db
@@ -163,8 +148,7 @@ export const makeTransferStore = (client: DbClient, userId: string) => {
         return id;
       }),
 
-    /** 账户自然键 = (connectorId, platform, label, creds) 全同即同一个。归档态是可变属性、不进键。 */
-    // 命中时若文件说归档而现有未归档,则对齐成归档。
+    /** Natural key: (connectorId, platform, label, creds). Archive state is mutable, not part of it. */
     importAccount: (
       input: CreateAccountInput & { archivedAt?: number | null },
     ): Effect.Effect<{ id: string; created: boolean }> =>
@@ -198,8 +182,7 @@ export const makeTransferStore = (client: DbClient, userId: string) => {
           }
           return { id: hit.id, created: false };
         }
-        // 新账户:同 AccountStore.create,建账户 + 归属默认 Portfolio 原子写
-        //(维持「每账户恰一行归属」不变量)。
+        // Account + default-portfolio membership in one batch (one membership per account).
         const pf = yield* ensureDefault(client, userId);
         const id = crypto.randomUUID();
         yield* client.batch((db) => [
@@ -218,7 +201,7 @@ export const makeTransferStore = (client: DbClient, userId: string) => {
         return { id, created: true };
       }),
 
-    /** 快照自然键 = (accountId, takenAt) —— 一个账户一个时刻一份。已存在则整份跳过。 */
+    /** Natural key: (accountId, takenAt); an existing snapshot is skipped whole. */
     importSnapshot: (
       accountId: string,
       input: WriteSnapshotInput,
@@ -237,10 +220,8 @@ export const makeTransferStore = (client: DbClient, userId: string) => {
         return { created: true };
       }),
 
-    /** 手记活动自然键 = 整条内容。**createdAt 必须进键**,理由见下。 */
-    // **createdAt 必须进键**:系统允许同一 occurredAt 有多笔、靠 createdAt 排序折叠(deriveAmount);
-    // 两笔除 createdAt 外全同是合法的不同事件,漏掉它会把它们折成一笔、丢数量(连首次恢复都出错)。
-    // v3 导出恒带 createdAt,故加进键后再导仍命中(幂等)。createdAt 缺席(非导入路径)才退回内容键。
+    // Natural key is the whole row including createdAt: same-occurredAt rows that differ only in
+    // createdAt are distinct events, and dropping it would merge them and lose amounts.
     importManualActivity: (
       accountId: string,
       tokenId: string,

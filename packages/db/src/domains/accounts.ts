@@ -6,13 +6,7 @@ import { accounts, portfolioAccounts } from "../schema";
 import type { AccountSafe } from "../schema/types";
 import { ensureDefault } from "./portfolios";
 
-// 账户:建 / 列 / 改名 / 归档 / 删,外加 creds 的原样存取(db 不解释 creds 的内容)。
-//
-// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
-// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
-// 方法名也不再带领域前缀(`createAccount` → `create`)—— 服务本身就是领域。
-
-// 安全列:不含 creds(内含 secret 密文),常规查询一律走这组列。
+// Excludes creds (holds secret ciphertext); regular reads use only these columns.
 const accountSafeColumns = {
   id: accounts.id,
   userId: accounts.userId,
@@ -27,12 +21,9 @@ export interface CreateAccountInput {
   connectorId: ConnectorId;
   platform?: string;
   label: string;
-  creds: string | null; // 凭据 map 的 JSON(db 不解释);缺凭据态由 isComplete(inputs, creds) 在内存判定
+  creds: string | null; // creds map as JSON, opaque to db
 }
 
-// 批量取该用户全部账户的原始 creds(server 端富化 listMyAccounts 用:算 needsCredentials + safeView)。
-// 返回含 secret 密文,只在服务端用、投影后才出网。
-/** 安全列 + 归属的 Portfolio(`listWithPortfolio`)。 */
 export type AccountWithPortfolio = AccountSafe & { portfolioId: string | null };
 
 export interface AccountRawCreds {
@@ -40,13 +31,8 @@ export interface AccountRawCreds {
   creds: string | null;
 }
 
-// ⚠️ 系统级查询 —— 原则 #6(全部按 userId 作用域)的【唯一、受控例外】,仅供定时同步调度器(P6.3)
-// 跨用户枚举。不接受/不返回任何用户数据,只回有账户的去重 userId 列表供逐个 syncUser。
-// 不要在请求处理(server fn)里调用它。
-//
-// **它住 `GlobalDatabase` 而不是 `Database`**:后者是 per-user 的,建它就得先有一个 userId ——
-// 而这一条问的正是「有哪些用户」。判据与 `global-ref-index.ts` 那张表同一条:**「有没有『谁的』
-// 这回事」**,没有 → 不隔离,也不该从 per-user 的那张门票上拿。
+// System-level query, the one controlled exception to per-user scoping: lets the scheduled sync
+// enumerate users. Returns only user ids; never call it from request handlers.
 export const makeGlobalAccountStore = (client: DbClient) => {
   return {
     listUserIds: (): Effect.Effect<string[]> =>
@@ -59,8 +45,8 @@ export const makeGlobalAccountStore = (client: DbClient) => {
 
 export const makeAccountStore = (client: DbClient, userId: string) => {
   return {
-    // 不变量(ADR 0033):每个账户恰一行归属。新账户落进用户的默认 Portfolio —— 建账户与建归属
-    // 一个 batch 原子写,杜绝「有账户没归属」的空窗(否则该账户会从 accountsInView 里消失)。
+    // Invariant: every account has exactly one membership row. Insert both in one batch so the
+    // account never drops out of the portfolio view.
     create: (input: CreateAccountInput): Effect.Effect<AccountSafe> =>
       Effect.gen(function* () {
         const pf = yield* ensureDefault(client, userId);
@@ -95,11 +81,8 @@ export const makeAccountStore = (client: DbClient, userId: string) => {
         db.select(accountSafeColumns).from(accounts).where(eq(accounts.userId, userId)),
       ),
 
-    /**
-     * `list()` + 每个账户归属的 Portfolio(没有归属行 → `null`,读端按兜底规则算进默认组合),
-     * **一条查询**(FOL-92)。读路径的「组合作用域」以前是 `list()` + `listMemberships()` 两趟;
-     * 每趟 D1 查询在 Worker 里都有一份固定的 CPU(语句构造、驱动、Effect 那几层),合成一趟就少一份。
-     */
+    // portfolioId is null without a membership row (readers fall back to the default portfolio).
+    // One joined query rather than two: every D1 round trip costs fixed Worker CPU.
     listWithPortfolio: (): Effect.Effect<AccountWithPortfolio[]> =>
       client.query((db) =>
         db
@@ -120,7 +103,6 @@ export const makeAccountStore = (client: DbClient, userId: string) => {
         (rows) => rows[0] ?? null,
       ),
 
-    /** 补录/再水合:整张 creds map 覆盖写入(占位被真值替换,见 P6.6.1 provideCredentials)。 */
     setCredentials: (id: string, creds: string): Effect.Effect<void> =>
       Effect.asVoid(
         client.query((db) =>
@@ -131,7 +113,7 @@ export const makeAccountStore = (client: DbClient, userId: string) => {
         ),
       ),
 
-    /** 取原始 creds map(JSON 字符串,含 secret 密文)供 sync 解密 / 服务端投影用(内部接口,绝不裸出网)。 */
+    /** Raw creds JSON including secret ciphertext: server-side only, never sent to the client. */
     getRawCreds: (id: string): Effect.Effect<string | null> =>
       Effect.map(
         client.query((db) =>
@@ -161,7 +143,6 @@ export const makeAccountStore = (client: DbClient, userId: string) => {
         ),
       ),
 
-    /** 归档/取消归档:archived=true 写当前时刻,false 置 null。可逆,不删数据。 */
     setArchived: (id: string, archived: boolean): Effect.Effect<void> =>
       Effect.asVoid(
         client.query((db) =>
@@ -172,7 +153,7 @@ export const makeAccountStore = (client: DbClient, userId: string) => {
         ),
       ),
 
-    /** 删账户:其 snapshots / portfolio_accounts / manual_activity 经 ON DELETE CASCADE 级联删除。 */
+    /** Snapshots, memberships and manual activity go with it via ON DELETE CASCADE. */
     remove: (id: string): Effect.Effect<void> =>
       Effect.asVoid(
         client.query((db) =>

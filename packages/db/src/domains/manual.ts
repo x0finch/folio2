@@ -6,51 +6,27 @@ import { NotFound } from "../errors";
 import { accounts, manualActivity, tokenRefs, tokens } from "../schema";
 import { assertAccountOwned, assertTokenOwned } from "./ownership";
 
-// 手记持仓 —— 「这个手记账户持有哪些币」,由账本折叠出来(ADR 0017;#203 起并入 tokens)。
-//
-// **持仓与账本是同一个领域的两面**(持仓正是账本折叠出来的),按能力切成两个服务会重蹈 #392
-// 拆掉的那种分法 —— 所以它们同属一个 `ManualStore`,#504 T4 起也同在一个文件里。
-//
-// **手记的币就是这个用户 `tokens` 里的一行**(#203):身份 / 名字 / 图 / 上游 ref 在 `tokens` +
-// `token_refs`,用户声明的单价在 `tokens.self_price`,数量由 `manual_activity` 折叠。
-// 原来的 `manual_token` 表整个退场 —— 那四个值全部有了真表的家。
-//
-// 于是「这个手记账户持有哪些币」不再单独存一份关系,而是**它账本里出现过的 token**。
-// 副作用是「清空某个币」= 删掉该账户对它的全部活动(见 detachManualHolding),而 `tokens` 那行留着 ——
-// 它是参考层数据,可能别的账户还在用,也可能上游认识它。
+// Manual holdings and their activity ledger, one service: holdings are folded from the ledger.
+// A manual coin is a row in the user's `tokens`; an account "holds" whatever tokens its ledger
+// mentions. Clearing a holding deletes the activity only: the `tokens` row is reference data that
+// other accounts or upstream refs may still use.
 
-// 手记持仓的定义投影(数量不在内 —— 那是账本折叠出来的)。`id` 就是 `tokens.id`。
 export interface ManualHolding {
   id: string;
   symbol: string;
-  // 这个 token 在 `namer` 那里的 **ref 整条**;那位命名者还没认出它 → null。
-  //
-  // **给整条,不给右半边。** 原来这里回的是裸的上游 id(`usd-coin`),于是每个调用方都得把 ref
-  // 拼回去才能用 —— 而拼 ref 就得知道命名者是谁,于是「当前上游是 CoinGecko」这件事一路漏进了
-  // apps/web(#227 评审)。整条给出去之后调用方只搬运:编成票、或当 Balance 的 tokenRef 交出去,
-  // 一个字都不用解释。文法留在 `@folio/oracle-ref` 这一侧,`namer` 也不必再往外说。
+  // The full ref under `namer` (null = not recognised yet), so callers never rebuild it themselves.
   ref: TokenRef | null;
 }
-
-// 手记账本 —— 活动行(add / reduce / set)的写、读、改、删,以及「一次提交一批」。
-//
-// 数量不存,由账本折叠算出;折叠出来的持仓那半是同一个服务的另外三个方法(`listHoldings` 那组)。
-//
-// **`ManualStore` 是手记这个领域的**唯一**服务** —— 持仓与账本是同一件事的两面(持仓正是账本
-// 折叠出来的),按能力切成两个服务会重蹈 #392 拆掉的那种分法。所以这里把两半合成一个。
-// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
-// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
 
 export type ManualActivityKind = "add" | "reduce" | "set";
 export interface ManualActivityInput {
   kind: ManualActivityKind;
   amount: number;
   price?: number | null;
-  fee?: number | null; // 手续费 USD(可空;不参与折叠)
+  fee?: number | null; // USD; not part of the fold
   occurredAt: number;
-  memo?: string | null; // 用户手写备注(原 note;note 让给 provider 展示概念)
-  // 仅导入用:保留原 created_at,好让同一 occurred_at 的活动折叠顺序(deriveAmount)不被打乱。
-  // 常规写入不传 → 用当下时刻。
+  memo?: string | null;
+  // Import only: keeps the original created_at so same-occurred_at fold order is preserved.
   createdAt?: number;
 }
 export type ManualActivity = InferSelectModel<typeof manualActivity>;
@@ -66,9 +42,7 @@ export interface ManualActivityPatch {
 
 export interface ManualBatchPlan {
   accountId: string;
-  // 本批要**声明**的持仓:`id` 已经是 mint 出来的 `tokens.id`(app 层在提交前认好币),
-  // 这里只落用户自己的两个字段。原来这叫 `newTokens` 并且真的插一张 `manual_token` 行 ——
-  // 币的身份现在归参考层,不再由手记这条路创建。
+  // Token ids are already minted by the app layer; only the user's symbol is written here.
   declare: { id: string; symbol: string }[];
   activities: {
     tokenId: string;
@@ -81,11 +55,7 @@ export interface ManualBatchPlan {
   }[];
 }
 
-// 活动 → {tokenId, accountId}(经 activity ⨝ account ⨝ user 归属校验)。编辑活动前用它定位
-// 所属 token(取时间线校验)+ 账户(重跑物化)。
-//
-// 活动可能是没有 tokenId 的遗留行 —— 与「不是本人的」同样 fail `NotFound`:对调用方来说
-// 「这条活动我改不了」是同一件事,分开报没有第二种处置。
+// Legacy activity rows without a tokenId fail as `NotFound` too: either way the caller can't edit it.
 const assertActivityOwned = (
   client: DbClient,
   userId: string,
@@ -110,9 +80,7 @@ const assertActivityOwned = (
 
 export const makeManualStore = (client: DbClient, userId: string) => {
   return {
-    // —— 持仓(账本折叠出来的那一面)——
-    // `namer` 决定 `ref` 从哪个命名者那一行读 —— 由调用方传(同 userTokenStoreLayer),db 层不预设任何厂商。
-    // 序:该币在本账户账本里最早一笔活动的时间 —— 即「什么时候开始持有它」,天然稳定。
+    // Ordered by first activity, i.e. when the holding started.
     listHoldings: (accountId: string, namer: string): Effect.Effect<ManualHolding[], NotFound> =>
       Effect.gen(function* () {
         yield* assertAccountOwned(client, userId, accountId);
@@ -141,15 +109,12 @@ export const makeManualStore = (client: DbClient, userId: string) => {
         return rows.map((r) => ({
           id: r.id,
           symbol: r.symbol,
-          // 两列 → 整条串,拼法归文法(`token_refs` 按两列存正是为了这个,见 ADR 0022)。
           ref: r.localName === null ? null : formatTokenRef({ namer, localName: r.localName }),
         }));
       }),
 
-    // 用户对某个币的声明:symbol(他自己的叫法)。**只动这一列** —— 名字 / 图 / 上游 ref
-    // 归参考层,手记不覆盖它们。
-    // 单价不在这里 —— 「这个币值多少」只有账本一个来源(每笔活动的 price),
-    // 而 `tokens.self_price` 从此没有写者(迁移 0016 把存量搬进账本并清空了它)。
+    // Only the user's symbol: name / logo / upstream refs belong to the reference layer, and price
+    // comes solely from the ledger.
     setHoldingDef: (tokenId: string, input: { symbol?: string }): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
         yield* assertTokenOwned(client, userId, tokenId);
@@ -164,8 +129,7 @@ export const makeManualStore = (client: DbClient, userId: string) => {
         );
       }),
 
-    // 该账户不再持有这个币:删它对该币的全部活动。**`tokens` 那行不删** —— 参考层数据,
-    // 别的账户可能还在用,而且它带着上游 ref / 历史日价,删了就得重新认一遍。
+    // The `tokens` row stays: other accounts may use it, and it carries refs and price history.
     detachHolding: (accountId: string, tokenId: string): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
         yield* assertAccountOwned(client, userId, accountId);
@@ -179,12 +143,8 @@ export const makeManualStore = (client: DbClient, userId: string) => {
         );
       }),
 
-    // —— 账本 ——
-
-    /** 活动挂 (账户, token)。两道归属校验各自挡:账户属本人、token 属本人。 */
-    // #203 起 **accountId 由调用方显式给** —— token 不再自带账户(`tokens` 是 per-user 的,
-    // 一个币可以被多个手记账户持有),没法再从它反查。
-    // 越权面靠两道归属校验各自挡。缺一道就能把活动挂到别人的东西上。
+    // accountId is explicit (a token can be held by several manual accounts); both ownership checks
+    // are needed, or activity could be attached to someone else's account or token.
     recordActivity: (
       accountId: string,
       tokenId: string,
@@ -209,9 +169,7 @@ export const makeManualStore = (client: DbClient, userId: string) => {
         );
       }),
 
-    /** 某账户对某个币的账本。**必须带 accountId** —— 同一 token 可被多个手记账户持有。 */
-    // 按 occurred_at→created_at 升序(deriveAmount 据此定序)。只按 tokenId 取会把别的账户的
-    // 活动一起折进来,数量直接算错 —— 所以 accountId 是必填。
+    // accountId is required: filtering by token alone would fold in other accounts' activity.
     listActivityByToken: (
       accountId: string,
       tokenId: string,
@@ -229,7 +187,6 @@ export const makeManualStore = (client: DbClient, userId: string) => {
         );
       }),
 
-    // userId-scoped(经 account ⨝ user 归属);按 occurred_at→created_at 升序。
     listActivityByAccount: (accountId: string): Effect.Effect<ManualActivity[]> =>
       client.query((db) =>
         db
@@ -240,8 +197,7 @@ export const makeManualStore = (client: DbClient, userId: string) => {
           .orderBy(asc(manualActivity.occurredAt), asc(manualActivity.createdAt)),
       ),
 
-    /** 导出用:全部手记活动(跨账户,扁平)。 */
-    // accountId / tokenId 都是导出侧的旧 id,导入时按各自的重映射改指。
+    /** For export: ids are remapped on import. */
     listAllActivity: (): Effect.Effect<ManualActivity[]> =>
       client.query((db) =>
         db
@@ -262,14 +218,12 @@ export const makeManualStore = (client: DbClient, userId: string) => {
         );
       }),
 
-    /** 活动 → {tokenId, accountId}(公开读,归属校验)。编辑前用它取所属 token 校验超支。 */
     activityOwner: (
       activityId: string,
     ): Effect.Effect<{ tokenId: string; accountId: string }, NotFound> =>
       assertActivityOwned(client, userId, activityId),
 
-    /** 编辑一笔既有活动(保留 id/tokenId/accountId/createdAt;只覆盖给定字段)。 */
-    // 归属经 assertActivityOwned;超支校验在 app 层(改前折叠受影响 token 时间线)。
+    // Overspend validation happens in the app layer.
     updateActivity: (
       activityId: string,
       patch: ManualActivityPatch,
@@ -283,7 +237,7 @@ export const makeManualStore = (client: DbClient, userId: string) => {
         if (patch.fee !== undefined) set.fee = patch.fee;
         if (patch.occurredAt !== undefined) set.occurredAt = patch.occurredAt;
         if (patch.memo !== undefined) set.memo = patch.memo;
-        // 空 patch → 无字段可写。drizzle 对空 set 会抛 "No values to set" → 直接短路(归属已校验)。
+        // drizzle throws "No values to set" on an empty set.
         if (Object.keys(set).length > 0) {
           yield* client.query((db) =>
             db.update(manualActivity).set(set).where(eq(manualActivity.id, activityId)),
@@ -292,12 +246,9 @@ export const makeManualStore = (client: DbClient, userId: string) => {
         return owner;
       }),
 
-    /** 批量提交写计划(app 层 planManualBatch 产出):落持仓声明 + 插入活动,**整批原子**。 */
-    // 归属:assertAccountOwned + 校验每条活动的 tokenId **属于本人**。
-    // 注意闸口从「∈ 该账户既有 token」改成了「∈ 本人的 token」—— 账户与币的关系现在**由活动本身承载**,
-    // 拿它当前置条件会循环:一个刚声明的持仓在本批插入之前一条活动都没有。
-    // 用户维度的闸仍然严格:拿别人的 tokenId 来照样抛。
-    // 活动 createdAt = now + i 保提交序(同 occurredAt 处新活动恒排在既有之后,与 planManualBatch 定序一致)。
+    // Atomic. Token gate is "owned by the user", not "already held by this account": a newly declared
+    // holding has no activity until this batch inserts it. createdAt = now + i keeps submit order
+    // after existing rows with the same occurredAt.
     commitBatch: (plan: ManualBatchPlan): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
         yield* assertAccountOwned(client, userId, plan.accountId);

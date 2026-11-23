@@ -7,15 +7,9 @@ import { accounts, accountTags, portfolioAccounts, portfolios, user } from "../s
 import type { Portfolio } from "../schema/types";
 import { assertAccountOwned, assertPortfolioOwned } from "./ownership";
 
-// Portfolio —— 命名账户集(ADR 0033)。每个账户恰属一个,新用户首次落地建默认那个。
-//
-// **服务的方法签名里没有 userId**(ADR 0037):它是下面这个绑定函数的参数,由聚合门票在 op 跑的
-// 那一刻从 `CurrentUser` 取来传进来(`../database.ts` 的 `bindPerCall`,ADR 0054)。
-// 方法名也不再带领域前缀(`createPortfolio` → `create`)——
-// 服务本身就是领域,名字里再带一遍是平铺函数时代的遗留。
+// Portfolio: a named set of accounts; every account belongs to exactly one.
 
-// 默认 Portfolio 名:`<用户名>'s`,用户名为空兜底 `My Portfolio`。
-// **必须与迁移 0003 的 seed SQL 保持一致**(那里对存量用户 seed 同名规则)。
+// `<user name>'s`, falling back to `My Portfolio`. Must match the seed SQL in migration 0003.
 const PORTFOLIO_NAME_SUFFIX = "'s";
 const PORTFOLIO_FALLBACK_NAME = "My Portfolio";
 function defaultPortfolioName(userName: string | null | undefined): string {
@@ -23,9 +17,8 @@ function defaultPortfolioName(userName: string | null | undefined): string {
   return n ? `${n}${PORTFOLIO_NAME_SUFFIX}` : PORTFOLIO_FALLBACK_NAME;
 }
 
-// 每用户内名字是否已被占(忽略大小写;可排除自身供改名用)。唯一索引
-// `portfolios_user_name_uidx` 才是并发下真正兜底那道;这一步只是先挡住、好给出一句人话
-// (与 tags 里的 `tagNameTaken` 同形 —— 同一道题不该有两种手感)。
+// Case-insensitive. The unique index `portfolios_user_name_uidx` covers races; this gives a
+// readable error first.
 async function nameTaken(
   db: Drizzle,
   userId: string,
@@ -38,8 +31,7 @@ async function nameTaken(
     .where(
       and(
         eq(portfolios.userId, userId),
-        // 与索引 `portfolios_user_name_uidx` 的表达式逐字一致 —— 两边不一样的话,这一步放过去
-        // 的名字会在插入时撞索引,而那一撞是 defect(用户拿到一坨 Cause)。
+        // Must match the index expression exactly, or a name passing here collides on insert.
         sql`lower(trim(${portfolios.name})) = lower(trim(${name}))`,
       ),
     );
@@ -49,10 +41,8 @@ async function nameTaken(
 const NAME_TAKEN = (name: string) =>
   new InvalidInput({ what: "portfolio", why: `name already used: ${name}` });
 
-// 默认那个的名字**只能让它成**:它不是用户当场输入的,没有「换一个」这一步可走。
-// 若 `<用户名>'s` 已被一个命名 Portfolio 占了(需要「没有默认」+「刚好同名」两件事同时成立,
-// 罕见但不是不可能),补 ` (2)`、` (3)` 直到空闲 —— 否则插入会撞索引,而那一撞会 die 在
-// 「第一次打开应用」这条路上。
+// The default's name can't be rejected (the user didn't type it), so on collision append ` (2)`,
+// ` (3)`, ... rather than dying on first app open.
 const DEFAULT_NAME_TRIES = 20;
 const freeDefaultName = (client: DbClient, userId: string, base: string): Effect.Effect<string> =>
   Effect.gen(function* () {
@@ -60,7 +50,7 @@ const freeDefaultName = (client: DbClient, userId: string, base: string): Effect
       const candidate = n === 1 ? base : `${base} (${n})`;
       if (!(yield* client.query((db) => nameTaken(db, userId, candidate)))) return candidate;
     }
-    // 二十个都占着 → 不是数据形状问题,是有人在刷。带上 id 让它可查,别静默换一个随机名。
+    // Twenty taken means abuse, not bad data: fail with the id rather than pick a random name.
     return `${base} (${crypto.randomUUID().slice(0, 8)})`;
   });
 
@@ -79,10 +69,8 @@ const selectDefault = (client: DbClient, userId: string): Effect.Effect<Portfoli
       .then((rows) => rows[0]),
   );
 
-// **包内函数,不是只有服务方法。** 建账户那一步也要它(accounts.ts),而让 `AccountStore` 的 layer
-// 依赖 `PortfolioStore` 只是为了调一个函数 —— 那会把两个 store 的装配顺序绑死,换不来任何东西。
-// 服务方法 `ensureDefault` 就是它绑上 userId 之后的样子。
-// onConflictDoNothing + 事后重查:并发下两个实例都「查不到→插」时,唯一索引让其一失败、两者都拿回同一行。
+// Package-level so account creation can use it without depending on the portfolio store.
+// ON CONFLICT DO NOTHING + re-read: under a race one insert loses and both get the same row.
 export const ensureDefault = (client: DbClient, userId: string): Effect.Effect<Portfolio> =>
   Effect.gen(function* () {
     const found = yield* selectDefault(client, userId);
@@ -113,11 +101,9 @@ export const ensureDefault = (client: DbClient, userId: string): Effect.Effect<P
 
 export const makePortfolioStore = (client: DbClient, userId: string) => {
   return {
-    /** 拿默认 Portfolio,没有就建一个(find-or-create,幂等)。 */
     ensureDefault: (): Effect.Effect<Portfolio> => ensureDefault(client, userId),
 
-    // 该用户的全部 Portfolio,按**创建时间**稳定排序(不把默认置顶 —— 切换默认时列表不重排;ADR 0033)。
-    // id 作最终 tiebreaker,避免同毫秒 createdAt 的顺序不确定。
+    // By creation time (default not pinned first, so changing it doesn't reorder); id breaks ties.
     list: (): Effect.Effect<Portfolio[]> =>
       client.query((db) =>
         db
@@ -127,7 +113,6 @@ export const makePortfolioStore = (client: DbClient, userId: string) => {
           .orderBy(asc(portfolios.sortOrder), asc(portfolios.createdAt), asc(portfolios.id)),
       ),
 
-    // 该用户全部 账户→Portfolio 归属(accountsInView 的过滤原料)。一次查询(portfolio_accounts ⨝ accounts 限 user)。
     listMemberships: (): Effect.Effect<PortfolioMembership[]> =>
       client.query((db) =>
         db
@@ -140,12 +125,10 @@ export const makePortfolioStore = (client: DbClient, userId: string) => {
           .where(eq(accounts.userId, userId)),
       ),
 
-    // 建一个**命名(非默认)** Portfolio(选择器「新建…」/「移到→新建」用)。默认 Portfolio 只由
-    // ensureDefault 造,这里永不建默认(is_default=false),故不碰部分唯一索引。
+    // Named portfolios only; the default is created solely by ensureDefault.
     create: (input: { name: string; sortOrder?: number }): Effect.Effect<Portfolio, InvalidInput> =>
       Effect.gen(function* () {
-        // 撞名 → 类型化拒绝(#527 裁定 5)。**双击提交也走这条**:第二下和第一下同名,
-        // 于是被同一句话挡住 —— 不必再为它单独铺一套幂等键。
+        // A double submit lands here too, so no separate idempotency key is needed.
         const name = input.name.trim();
         if (yield* client.query((db) => nameTaken(db, userId, name))) {
           return yield* Effect.fail(NAME_TAKEN(name));
@@ -162,19 +145,13 @@ export const makePortfolioStore = (client: DbClient, userId: string) => {
         return row;
       }),
 
-    // 把账户归属到某 Portfolio(一对一:先删该账户现有归属行,再插新的,一个 batch 原子换)。
-    // 两个资源都做 owner 断言,杜绝越权。
-    // **同 batch 清空该账户的全部 Tag**(ADR 0034):Tag 属于原 Portfolio,搬家后对新家是外来的,
-    // 带过去会破坏「账户只有其所在 Portfolio 的 Tag」这条不变量 —— 故随归属变更一并清掉,新家里重新打。
+    // Atomic membership swap that also clears the account's tags: tags belong to the old portfolio,
+    // and an account may only carry tags of its own portfolio.
     assignAccount: (accountId: string, portfolioId: string): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
-        // `ownership.ts` 仍是 Promise 形状(它被五个领域共用,三个还没迁)。**不为此新增桥** ——
-        // `client.query` 收的就是「拿 drizzle 句柄做点事」的回调,把它套进去即可,
-        // 全包仍只有 `DbClient` 那一处 `Effect.promise`(CODING.md「桥只留一处」)。
         yield* assertAccountOwned(client, userId, accountId);
         yield* assertPortfolioOwned(client, userId, portfolioId);
-        // 已在目标 Portfolio → 真 no-op。否则下面的「清空该账户 Tag」会在没真搬家时也误删标签
-        // (重新指到当前 Portfolio 本应无副作用)。
+        // Already there -> no-op, so the tag clearing below doesn't fire on a non-move.
         const current = yield* client.query((db) =>
           db
             .select({ portfolioId: portfolioAccounts.portfolioId })
@@ -189,8 +166,7 @@ export const makePortfolioStore = (client: DbClient, userId: string) => {
         ]);
       }),
 
-    // 改 Portfolio 名(含默认,因它是真行)。userId 作用域,越权即影响 0 行。
-    // 撞名同 create 一样类型化拒(#527 裁定 5);改成自己现在的名字(只动大小写/空格)不算撞。
+    // Renaming to its own current name (case/space changes) doesn't count as taken.
     rename: (portfolioId: string, name: string): Effect.Effect<void, InvalidInput> =>
       Effect.gen(function* () {
         const next = name.trim();
@@ -205,8 +181,7 @@ export const makePortfolioStore = (client: DbClient, userId: string) => {
         );
       }),
 
-    // 设为默认:先清掉该用户当前默认(→ 无默认),再把目标置默认(→ 恰一个)。两步一个 batch 原子换,
-    // 中途不出现「两个默认」违反部分唯一索引。
+    // Clear then set in one batch, so the partial unique index never sees two defaults.
     setDefault: (portfolioId: string): Effect.Effect<void, NotFound> =>
       Effect.gen(function* () {
         yield* assertPortfolioOwned(client, userId, portfolioId);
@@ -222,10 +197,8 @@ export const makePortfolioStore = (client: DbClient, userId: string) => {
         ]);
       }),
 
-    // 删 Portfolio:默认不可删。否则先把成员退回默认 Portfolio,再删该行(成员账户不动、不孤儿)。
-    //
-    // **两种拒绝都是类型化失败**(#527 裁定 4):以前都是 `die` —— 而这两个请求一个陈旧页面就发得出
-    // (另一个标签页刚把它删了 / 刚把它设成默认),用户于是收到一坨 Cause,而不是「默认的那个不能删」。
+    // Members move back to the default portfolio. Both rejections are typed failures: a stale page
+    // can send either request.
     remove: (portfolioId: string): Effect.Effect<void, NotFound | InvalidInput> =>
       Effect.gen(function* () {
         const rows = yield* client.query((db) =>
@@ -235,8 +208,7 @@ export const makePortfolioStore = (client: DbClient, userId: string) => {
             .where(and(eq(portfolios.id, portfolioId), eq(portfolios.userId, userId))),
         );
         const target = rows[0];
-        // 「不存在」与「不是你的」共用 NotFound,与全库同一条规矩(见 errors.ts 那段注释:
-        // 分开报等于给出一个探测别人 id 的接口)。
+        // Missing and not-owned share NotFound so other users' ids can't be probed.
         if (!target) {
           return yield* Effect.fail(new NotFound({ entity: "portfolio", id: portfolioId }));
         }
@@ -247,7 +219,6 @@ export const makePortfolioStore = (client: DbClient, userId: string) => {
         }
         const def = yield* ensureDefault(client, userId);
         yield* client.batch((db) => [
-          // 成员退回默认(1:1 不冲突:成员在 target,不在 default → 改指 default 无碰撞)。
           db
             .update(portfolioAccounts)
             .set({ portfolioId: def.id })
