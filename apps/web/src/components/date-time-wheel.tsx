@@ -2,15 +2,12 @@ import { WheelPicker } from "@folio/ui";
 import { useMemo } from "react";
 import { useLocale } from "use-intl";
 
-// manual 活动的发生时刻选择器:日期(年/月/日)与时间(时/分/秒)分开,由 `part` 决定渲染哪组滚轮 —— 两者独立打开、
-// 不同时展开。组合 beUI WheelPicker → occurredAt(ms,到秒);只改 part 对应的字段,其余保持当前值。
-// 年用完整年份(2026,滚轮更明确;摘要展示处裁到 2 位);月名走当前 locale(Intl);日随月/年夹到有效上限。
-// 精确到秒:同一天多笔活动按真实先后排序、deriveAmount 折叠有序(不再靠「当天 0 点 + createdAt」凑)。
+// `part` picks the date or time wheels; only that part's fields change. Second precision keeps
+// same-day activities in their real order.
 
-const YEAR_SPAN = 12; // 年份窗口:今年往前 YEAR_SPAN-1 年到今年
+const YEAR_SPAN = 12; // the current year and the YEAR_SPAN-1 years before it
 
-// 全程本地时区:manual 活动是用户输入的墙钟时间,按本地时区读写更符合直觉。摘要展示处也按本地格式化
-// (绕开全站 UTC 的 useFormatter),两侧一致。
+// Local time throughout: manual activity times are wall-clock input.
 function daysInMonth(year: number, monthIndex: number): number {
   return new Date(year, monthIndex + 1, 0).getDate();
 }
@@ -60,7 +57,7 @@ export function DateTimeWheel({
   const minutes = useMemo(() => numOpts(60), []);
   const seconds = useMemo(() => numOpts(60), []);
 
-  // 组合回 ms(本地):换月/年后原日越界(如 1/31 → 2 月)夹到该月末;毫秒清零(到秒)。
+  // Clamp the day when the month/year change makes it invalid (e.g. Jan 31 → Feb).
   const compose = (y: number, m: number, dd: number, hh: number, mi: number, ss: number) => {
     const clampedDay = Math.min(dd, daysInMonth(y, m));
     onChange(new Date(y, m, clampedDay, hh, mi, ss, 0).getTime());
