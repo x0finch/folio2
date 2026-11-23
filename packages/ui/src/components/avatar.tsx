@@ -1,5 +1,4 @@
 "use client";
-// 手搓头像(去 Base UI):Fallback 垫底,Image 覆于其上;图加载失败→Image 返回 null→露出 Fallback。
 
 import * as React from "react";
 import { useState } from "react";
@@ -34,8 +33,8 @@ function AvatarImage({ className, src, alt = "", ...props }: React.ComponentProp
       data-slot="avatar-image"
       src={src}
       alt={alt}
-      // logo 墙一屏几十张、多数在折叠区/滚动区外:懒加载 + 异步解码,不跟首屏抢连接与主线程。
-      // 写在 `{...props}` 之前 → 调用方要首屏立即出图时仍可覆盖。
+      // Logo walls are mostly offscreen: lazy-load so they don't compete with first paint.
+      // Before `{...props}` so callers can override.
       loading="lazy"
       decoding="async"
       onError={() => setErrored(true)}

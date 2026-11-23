@@ -1,4 +1,3 @@
-// 手搓分隔线(去 Base UI):按 orientation 渲染 1px 线,带 aria role。
 
 import type * as React from "react";
 import { cn } from "@folio/ui/lib/utils";

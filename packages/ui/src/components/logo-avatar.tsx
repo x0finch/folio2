@@ -1,7 +1,6 @@
 import { cn } from "@folio/ui/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 
-// 代币/账户 logo 头像:有图显图,失败回退首字母圆标。复刻 folio-old/components/ui/logo-avatar。
 const sizes = {
   sm: { avatar: "size-6", fallback: "text-[10px]" },
   md: { avatar: "size-8", fallback: "text-sm" },
@@ -24,7 +23,7 @@ export function LogoAvatar({
   const s = sizes[size];
   return (
     <Avatar className={cn("shrink-0", s.avatar, className)}>
-      {/* bg-logo-bg 恒亮实底:object-contain 的透明边角/透明 logo 不漏出底下 fallback 字母,且不随主题翻转。 */}
+      {/* bg-logo-bg stays solid light so transparent logo corners never reveal the fallback letter. */}
       <AvatarImage
         src={src || ""}
         alt={alt ?? ""}

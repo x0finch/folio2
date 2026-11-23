@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// 滚轮选择器的「咔嗒」声:整页共用一个 AudioContext(多个滚轮并排也只开一个)、懒创建、
-// 最后一个使用者 dispose 才关;没有 Web Audio(SSR / 老浏览器)时静默。
-// node 环境里没有 Web Audio,这里只替换这一层浏览器 API。
+// A single AudioContext is shared page-wide, created lazily and closed by the last disposer.
 
 class FakeSource {
   buffer: unknown = null;
@@ -52,7 +50,7 @@ class FakeContext {
   }
 }
 
-// 模块级共享状态(ctx / 引用计数)每个用例都要从零开始 → 每次重新导入。
+// Module-level state (ctx / refcount) must start fresh per case, so re-import each time.
 async function load() {
   vi.resetModules();
   return import("../src/lib/tick-sound");
@@ -68,7 +66,7 @@ afterEach(() => {
 });
 
 describe("createTickPlayer", () => {
-  it("创建 player 不开 AudioContext,第一次 prepare 才开", async () => {
+  it("creating a player does not open an AudioContext until the first prepare", async () => {
     const { createTickPlayer } = await load();
     const p = createTickPlayer();
     expect(instances).toHaveLength(0);
@@ -76,7 +74,7 @@ describe("createTickPlayer", () => {
     expect(instances).toHaveLength(1);
   });
 
-  it("多个 player 共用同一个 context", async () => {
+  it("multiple players share one context", async () => {
     const { createTickPlayer } = await load();
     const a = createTickPlayer();
     const b = createTickPlayer();
@@ -86,7 +84,7 @@ describe("createTickPlayer", () => {
     expect(instances[0].sources).toHaveLength(2);
   });
 
-  it("context 被挂起时尝试 resume", async () => {
+  it("tries to resume a suspended context", async () => {
     const { createTickPlayer } = await load();
     const p = createTickPlayer();
     p.prepare();
@@ -96,7 +94,7 @@ describe("createTickPlayer", () => {
     expect(instances[0].resumed).toBe(1);
   });
 
-  it("resume 被浏览器拒绝(非手势触发)不抛", async () => {
+  it("does not throw when the browser rejects resume (non-gesture)", async () => {
     const { createTickPlayer } = await load();
     const p = createTickPlayer();
     p.prepare();
@@ -106,7 +104,7 @@ describe("createTickPlayer", () => {
     await Promise.resolve();
   });
 
-  it("最后一个使用者 dispose 才关 context;之前的 dispose 不影响别人", async () => {
+  it("closes the context only on the last dispose", async () => {
     const { createTickPlayer } = await load();
     const a = createTickPlayer();
     const b = createTickPlayer();
@@ -119,9 +117,9 @@ describe("createTickPlayer", () => {
     expect(instances[0].closed).toBe(1);
   });
 
-  it("dispose 停掉正在响的那声,之后的 play/prepare 什么都不做", async () => {
+  it("dispose stops the playing tick; later play/prepare do nothing", async () => {
     const { createTickPlayer } = await load();
-    const keep = createTickPlayer(); // 另一个使用者还在,context 不关
+    const keep = createTickPlayer();
     const p = createTickPlayer();
     p.play();
     const [src] = instances[0].sources;
@@ -133,7 +131,7 @@ describe("createTickPlayer", () => {
     keep.dispose();
   });
 
-  it("重复 dispose 不会多扣引用计数(别人的 context 不被提前关掉)", async () => {
+  it("repeated dispose does not over-decrement the refcount", async () => {
     const { createTickPlayer } = await load();
     const a = createTickPlayer();
     const b = createTickPlayer();
@@ -145,7 +143,7 @@ describe("createTickPlayer", () => {
     expect(instances[0].closed).toBe(1);
   });
 
-  it("关掉之后再有新使用者,会重新开一个 context", async () => {
+  it("a new user after close opens a fresh context", async () => {
     const { createTickPlayer } = await load();
     const a = createTickPlayer();
     a.play();
@@ -155,7 +153,7 @@ describe("createTickPlayer", () => {
     expect(instances[1].sources).toHaveLength(1);
   });
 
-  it("没有 Web Audio / 没有 window(SSR)时静默,不抛", async () => {
+  it("is silent without Web Audio / window (SSR)", async () => {
     vi.stubGlobal("window", {});
     let mod = await load();
     expect(() => mod.createTickPlayer().play()).not.toThrow();
