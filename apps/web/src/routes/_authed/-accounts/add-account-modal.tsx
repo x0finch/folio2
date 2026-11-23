@@ -13,19 +13,17 @@ import { syncAccountAndWait } from "@/lib/queries/account-sync";
 import { connectorCatalogQuery, connectorCredentialSpecsQuery } from "@/lib/queries/connectors";
 import { invalidateFor } from "@/lib/queries/refresh";
 
-// 补录目标(A3):缺凭据账户点补录 icon 时传入,modal 直接进补录视图(跳过网格,锁定 connector)。
+// Opens the modal straight into the credential-completion view, connector locked.
 export interface CompleteTarget {
   accountId: string;
   connectorId: ConnectorId;
-  credsSafe: Record<string, string>; // safeView 投影:semi 打码片段供识别
+  credsSafe: Record<string, string>; // safeView projection: semi fields masked
 }
 
-// 添加账户 modal(A4):单一 MorphingModal 承载两步 —— 网格(grid)↔ 创建表单(form),viewId=step 驱动 morph 形变。
-// 桌面居中(placement=center)、手机贴底(placement=bottom);自持 open,经 cloneElement 挂账户页 Fab 触发。
-// P2:表单区先放占位骨架,只验证 morph/返回/响应式;真表单在 P4 接入。所有配色只走 design token。
+// One MorphingModal for both steps (grid ↔ form); `viewId = step` drives the morph.
 type Step = "grid" | "form";
 
-// modal 内每视图共用的头:返回(仅表单步)+ 标题 + 关闭。放在 keyed children 内,随 viewId 一起 morph。
+// Lives inside the keyed children so it morphs with the view.
 function ModalHeader({
   title,
   subtitle,
@@ -62,14 +60,13 @@ function ModalHeader({
   );
 }
 
-// 面板本体 overflow-hidden 无内滚 → 内容套 max-h 滚动容器,短屏/长表单不被裁。
-// px-1.5:overflow-y-auto 会连带把 overflow-x 算成裁剪,给边缘装饰(返回键 hover 底、网格 focus ring)留缓冲,
-// 免得贴边元素(如带 -ml 的返回键)被横向裁掉;负外边距用 -mx-1.5 抵回,内容左右缘不缩。
+// The panel is overflow-hidden, so content scrolls in its own max-h container. px-1.5 / -mx-1.5:
+// overflow-y-auto also clips x, so leave room for edge decorations (hover bg, focus rings).
 function ViewShell({ children }: { children: ReactNode }) {
   return <div className="-mx-1.5 max-h-[78vh] overflow-y-auto px-1.5">{children}</div>;
 }
 
-// 两用:自持 open(传 triggerRender,如页面按钮)或受控(传 open/onOpenChange,如全局头部注入的 + 段触发)。
+// Self-managed open (pass triggerRender) or controlled (pass open/onOpenChange).
 export function AddAccountModal({
   triggerRender,
   open: openProp,
@@ -80,18 +77,16 @@ export function AddAccountModal({
   triggerRender?: ReactElement<{ onClick?: () => void }>;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  completeFor?: CompleteTarget | null; // 非空 → 补录模式(A3):强开 + 直接进补录视图
-  onCompleteClose?: () => void; // 清除补录目标(关闭补录视图)
+  completeFor?: CompleteTarget | null; // non-null → completion mode, forced open
+  onCompleteClose?: () => void;
 } = {}) {
   const t = useTranslations("Accounts");
   const queryClient = useQueryClient();
-  // 加账户 / 补录凭据同时改账户域与组合域 —— 映射表那一条已经把两个前缀都列上了。
   const refresh = () => invalidateFor(queryClient, "account.write");
   const refreshAfterSync = () => invalidateFor(queryClient, "account.sync");
-  // 后台补一次同步,**等它在队列里跑完**(FOL-89:`syncAccount` 只排队、即返)再刷新填余额。
-  // 等的期间页头胶囊在转(那一轮落进了同步轮缓存),账户行先以空值出现。
-  // 同步失败要说出来:凭据已 live 校验过,这时候失败多半是上游抽风,用户该知道余额还没进来。
-  // 发起本身失败(网络)静默 —— 账户已建好,下一次同步自会补上。
+  // `syncAccount` only enqueues, so wait for the job before refreshing. A sync failure is surfaced
+  // (creds were just validated live, so it's likely upstream); a failure to enqueue stays silent
+  // since the next sync will catch up.
   const syncInBackground = (accountId: string) =>
     void syncAccountAndWait(queryClient, accountId)
       .then((outcome) => {
@@ -103,23 +98,22 @@ export function AddAccountModal({
   const isDesktop = useMediaQuery("(min-width: 640px)");
   const [internalOpen, setInternalOpen] = useState(false);
   const controlled = openProp !== undefined;
-  // 补录目标存在 → 强开(优先于 add 的 open);无补录时回归原 add 逻辑。
   const completing = completeFor != null;
   const open = completing ? true : controlled ? (openProp ?? false) : internalOpen;
   const setOpen = (v: boolean) => (controlled ? onOpenChange?.(v) : setInternalOpen(v));
   const [step, setStep] = useState<Step>("grid");
   const [connectorId, setConnectorId] = useState<ConnectorId | null>(null);
-  // 每次打开重置回网格步(受控/自持皆然):open false→true 才跑,网格↔表单导航不受影响。
+  // Reset to the grid on every open (false → true only), so grid ↔ form navigation is unaffected.
   useEffect(() => {
     if (open) {
       setStep("grid");
       setConnectorId(null);
     }
   }, [open]);
-  // 字段规格部署内静态 → 长 staleTime,几乎只取一次;仅打开时取,避免账户页挂载即请求(#107 review)。
+  // Fetch only when open, so mounting the accounts page doesn't trigger a request.
   const specsQuery = useQuery({ ...connectorCredentialSpecsQuery(), enabled: open });
 
-  const openModal = () => setOpen(true); // 重置由上面的 open effect 负责
+  const openModal = () => setOpen(true); // the open effect above resets the step
   const close = () => setOpen(false);
   const pick = (id: ConnectorId) => {
     setConnectorId(id);
@@ -129,15 +123,12 @@ export function AddAccountModal({
     setStep("grid");
     setConnectorId(null);
   };
-  // 创建成功:关闭 + 即时出现(此刻空值),再后台同步新账户 → 跑完二次 invalidate 填充。
   const handleDone = (newId: string) => {
     setOpen(false);
     void refresh();
     syncInBackground(newId);
   };
 
-  // 补录成功(A3):弹"已保存,正在同步…" + 关补录视图 + 立即刷新(账户翻正)+ 后台补一次 sync 填余额
-  // (同 handleDone)。
   const handleCompleteDone = () => {
     if (!completeFor) return;
     const { accountId } = completeFor;
@@ -147,12 +138,10 @@ export function AddAccountModal({
     syncInBackground(accountId);
   };
 
-  // viewId 驱动 morph:关闭为 null;补录视图独立 id;否则网格/表单各自的 step 串作 viewId → 两步间形变。
   const viewId = open ? (completing ? "complete" : step) : null;
 
   return (
     <>
-      {/* 触发器:自持模式渲染(克隆注入 onClick);受控模式无触发器(由外部 open 驱动)。 */}
       {triggerRender != null && cloneElement(triggerRender, { onClick: openModal })}
       <MorphingModal
         viewId={viewId}
@@ -170,7 +159,7 @@ export function AddAccountModal({
               subtitle={t("completeAccountHint")}
               onClose={() => onCompleteClose?.()}
             />
-            {/* key={accountId} 重挂 → 切账户清空补录字段态。specs 未到位先给空(CredentialForm 内部再筛非 public)。 */}
+            {/* key remounts to clear field state per account; non-public specs are filtered inside. */}
             <CredentialForm
               key={completeFor.accountId}
               accountId={completeFor.accountId}
@@ -187,7 +176,7 @@ export function AddAccountModal({
               onBack={back}
               onClose={close}
             />
-            {/* key={connectorId} 重挂 → 切 connector 清空字段态。specs 未到位时先给空(manual 无需 specs)。 */}
+            {/* key remounts to clear field state per connector; manual needs no specs. */}
             <AccountForm
               key={connectorId}
               connectorId={connectorId}

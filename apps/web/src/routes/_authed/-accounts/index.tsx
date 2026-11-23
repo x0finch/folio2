@@ -38,10 +38,9 @@ import {
 } from "./list-rows";
 import { accountStackItems } from "./list-stack-items";
 
-// 合并路由(FOL-81):账户页现由 `{-$page}` 路由承载,`focus` 一次性命令落在它的 search 上。
 const accountsRoute = getRouteApi("/_authed/{-$page}");
 
-// 名单那一层的重试键。归属不再是独立一份数据(随账户行下发,ADR 0047),所以只剩账户列表这一条。
+// Membership ships with the account rows, so the account list is the only reset key.
 const LIST_RESET_KEY = (portfolioId: string) => JSON.stringify(accountKeys.list(portfolioId));
 
 export function Accounts() {
@@ -54,9 +53,8 @@ export function Accounts() {
 
   return (
     <>
-      {/* 页头右上角同步入口:账户页额外把「添加账户」融进 + 段(见 SyncStatus.ActionShell),modal 由本页持有。
-          两者都留在进场容器**之外**:同步条 absolute 到外壳 `<main>`,被带 transform 的层裹住会顶跳
-          约 24px(见 StaggerReveal);modal 是浮层,不参与页面进场。 */}
+      {/* Outside the reveal container: the absolute sync bar jumps ~24px inside a transformed
+          layer (see StaggerReveal); the modal is an overlay. */}
       <HeaderSync
         action={{ icon: <Plus />, label: t("addAccount"), onClick: () => setAddOpen(true) }}
       />
@@ -66,8 +64,7 @@ export function Accounts() {
         completeFor={completeTarget}
         onCompleteClose={() => setCompleteTarget(null)}
       />
-      {/* 名单那几段(标题 / 列表 / 归档)由数据边界一起吐出来,对这层只算**一个**子节点,所以竖排
-          间距挪到错列单元上(`itemClassName`),间距与原来的 `flex flex-col gap-6` 一致。 */}
+      {/* The list sections arrive as one child, so spacing moves to `itemClassName`. */}
       <StaggerReveal className="flex flex-col" itemClassName="flex flex-col gap-6">
         <QueryBoundary
           resetKey={`list:${LIST_RESET_KEY(selectedId)}`}
@@ -111,16 +108,10 @@ function ListSkeleton() {
   );
 }
 
-// 账户名单。**账户行本身 + 归属**由外层边界等过;后到的是余额(含 24h 盈亏)、标签这两样。
-//
-// 后两样走**挂起 + 自己的边界**,不是 `useQuery` + `isPending`(原来的写法)。理由见
-// `../-home/hero/index.tsx` 开头那段:那种写法在 SSR 上服务端有数据、客户端补水那一帧没有,
-// 两边画的不是同一份 HTML,React 把整棵子树丢掉重渲。
-//
-// 24h 盈亏(FOL-51 起两端相减)**随持仓一起回**,不再是单独一条 —— `buildAccountRows` 直接把它
-// 从持仓行带进 `AccountRow.gain24h`。`pending` 的兜底就是「同一份名单,金额与增量位是骨架」。
+// Rows are awaited by the outer boundary; balances and tags suspend in their own boundary (see
+// the note in ../-home/hero/index.tsx on why not `useQuery` + `isPending`).
 function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
-  // **名单已经是当前组合那份**(ADR 0047:服务端按组合筛)—— 这一页不再拿全量账户 + 归属表自己筛。
+  // Already filtered to the selected portfolio server-side.
   const { selectedId } = usePortfolio();
   const { data: accounts } = useSuspenseQuery(accountListQuery(selectedId));
   const { anchor } = accountHoldingsSnapshotTimes();
@@ -135,7 +126,6 @@ function AccountsList({ onComplete }: { onComplete: (a: AccountRow) => void }) {
   );
 }
 
-// 挂起点在这儿:余额(含盈亏)/ 标签都到了才渲染。
 function AccountsListReady({
   accounts,
   onComplete,
@@ -161,7 +151,7 @@ function AccountsListReady({
   );
 }
 
-// 名单的形状**从被调用方推出来**,不另抄一份:抄一份的话它们迟早跟真的对不上。
+// Derived from the callee so it can't drift.
 type RowSources = Parameters<typeof buildAccountRows>[0];
 
 function AccountsListBody({
@@ -174,13 +164,12 @@ function AccountsListBody({
   accounts: RowSources["accounts"];
   onComplete: (a: AccountRow) => void;
   holdings?: RowSources["holdings"];
-  // 这两样不取 `RowSources` 的:名单只要 id + 名字那一小片投影,而抽屉要的是整行。
+  // Not from RowSources: the list needs only an id + name projection, the sheet needs full rows.
   allTags?: TagList;
   tagLinks?: AccountTagLinks;
 }) {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  // 盈亏已由 `buildAccountRows` 从持仓行带进各 `AccountRow`(FOL-51),不再另贴一层。
   const rows = useMemo(
     () => buildAccountRows({ accounts, holdings, allTags, tagLinks }),
     [accounts, holdings, allTags, tagLinks],
@@ -188,31 +177,23 @@ function AccountsListBody({
 
   const allRows = rows;
   const activeUnsorted = rows.filter((r) => r.archivedAt == null);
-  // 金额没到时别按假 0 排 —— 否则数字一到整表重排,看着像名单自己在跳。
+  // Don't sort by placeholder zeros, or the whole list reorders when amounts arrive.
   const active = activeUnsorted.every((r) => r.valuesReady)
     ? sortActiveAccounts(activeUnsorted)
     : activeUnsorted;
   const archived = rows.filter((r) => r.archivedAt != null);
   const total = activeAccountsTotal(rows);
 
-  // 详情抽屉选中哪个账户住组件内部 state(FOL-80,反转 ADR 0043):开合抽屉只是 setState,不进后退栈、
-  // 不动滚动。`focus` 不同 —— 它仍是 URL 上的**一次性命令**:同步面板在别的页头点某账户时跨页写它
-  // (`?focus=<id>`),本页到达后读一次(滚动 + 高亮)再立即抹掉,事实源仍是内部 state。跨页传值必须经
-  // 地址,所以 `focus` 留在 URL,`account` 不用。
+  // `focus` stays in the URL as a one-shot command (the sync panel writes it cross-page); it's read
+  // once then cleared. The selected account is plain state.
   const { focus } = accountsRoute.useSearch();
   const navigate = accountsRoute.useNavigate();
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const selected = selectedId ? (rows.find((r) => r.id === selectedId) ?? null) : null;
   const openRow = (r: AccountRow) => setSelectedId(r.id);
 
-  // 页头同步面板点了某一行 → 把它滚到视野中间,并短暗高亮一下(不改选中态:那看起来像选中了什么)。
-  //
-  // 面板的清单**已经按选中的 Portfolio 收口**(#530),所以点进来的账户必然就在这个列表里 ——
-  // 这里不需要「先切到那个账户所属的组合」那一步(那段跨组合切换是它收口之前留下的死代码,
-  // 随组合进 URL 一起删了)。找不到那一行只有一种情况:它归档了、或刚被删。
-  //
-  // 行还没渲染出来(刚从别的页面跳过来、数据在路上)时先不判:`allRows` 空就等下一轮,
-  // 否则会把「还在加载」误当成「不在这个视图里」。
+  // Scroll a row from the header sync panel into view and flash it (without selecting it). Wait
+  // until rows exist, or "still loading" would read as "not in this view".
   const [flashId, setFlashId] = useState<string | null>(null);
   useEffect(() => {
     if (!focus || allRows.length === 0) return;
@@ -224,7 +205,7 @@ function AccountsListBody({
       });
     const el = document.getElementById(accountRowDomId(focus));
     if (el) {
-      // 归档那些住在折叠的 <details> 里 —— 没展开就没有布局盒,scrollIntoView 会是个空操作。
+      // Archived rows live in a collapsed <details>; without a layout box scrollIntoView is a no-op.
       el.closest("details")?.setAttribute("open", "");
       const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       el.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
@@ -308,7 +289,6 @@ function AccountStatusLine({
 }) {
   const t = useTranslations("Accounts");
   const format = useFormatter();
-  // 活时钟 + 钳位收在 hook 里(为什么不用裸 useNow 见 use-relative-synced-at)。
   const syncedAt = useRelativeSyncedAt();
   const archived = archivedAt != null;
   const warn = !archived && (status === "needsCreds" || status === "stale");
@@ -329,7 +309,7 @@ function AccountStatusLine({
       {archived ? (
         t("sealedAt", { when: format.dateTime(new Date(archivedAt), SEALED_DATE) })
       ) : needsCreds && onComplete ? (
-        // biome-ignore lint/a11y/useSemanticElements: 行本身是 <button>,不能再嵌套 <button>(无效 HTML),故用 role=button span
+        // biome-ignore lint/a11y/useSemanticElements: the row is already a <button>; nesting another is invalid HTML
         <span
           role="button"
           tabIndex={0}
@@ -363,16 +343,13 @@ function AccountStatusLine({
 
 const ROW_CLASS = "group w-full rounded-xl text-left";
 
-// 滚到某一行之后那一下高亮。ring 而不是底色 —— SharedLayoutBg 的 hover/选中 pill 用的就是底色,
-// 两者叠在一起分不出「被指出来」和「被选中」。
+// A ring, not a background: SharedLayoutBg's hover/selected pill already uses the background.
 const FLASH_CLASS = "ring-2 ring-ring";
 const FLASH_MS = 1200;
 
-// 行的 DOM 锚。只有「从页头面板滚到这一行」用它,所以就近定义,不进公共模块。
 const accountRowDomId = (accountId: string) => `account-row-${accountId}`;
 
-// 必须是单个 flex 容器 —— SharedLayoutBg 会把 <button> 的 children 塞进一个非 flex 的 z-10 div,
-// 故 flex 布局放这层内层,避免竖排。归档行只调暗,不抽市值与叠标(#437)。
+// Must be a single flex container: SharedLayoutBg wraps <button> children in a non-flex div.
 function AccountRowContent({
   row,
   total,
@@ -389,7 +366,7 @@ function AccountRowContent({
   const showGain = !(row.needsCredentials || archived);
   const dayChange = showGain ? row.gain24h : undefined;
   const sharePct = accountShare(row.totalUsd, total) * 100;
-  // 缺凭据 / 归档封存日 / manual「实时」名单里已经能确定,立刻写;其余同步时间等持仓到。
+  // Known from the list alone; the rest waits for holdings.
   const statusKnown =
     row.needsCredentials || archived || isManual(row.connectorId) || row.valuesReady;
   return (
