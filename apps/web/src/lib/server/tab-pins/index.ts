@@ -7,9 +7,6 @@ import { DeleteTabPinInput, handleDeleteTabPin } from "./delete";
 import { handleGetPortfolioTabPins } from "./read";
 import { handleUpdateTabPinTarget, UpdateTabPinInput } from "./update-target";
 
-// 首页自定义 Tab(pin,ADR 0034)资源面:读 + 写装配。
-// 读:`getPortfolioTabPins` 只发 pin 行;tab 条其余原料来自 overview / 标签 query 缓存。
-
 export const getPortfolioTabPins = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(PortfolioSelectInput)
