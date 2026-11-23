@@ -12,15 +12,7 @@ import { OTHERS_KEY } from "@/routes/_authed/-insights/allocation";
 import { AllocationPie } from "@/routes/_authed/-insights/allocation-pie";
 import { PortfolioChart } from "@/routes/_authed/-insights/portfolio-chart";
 
-// Insights 页两张图里**我们自己写的那部分**:
-//   · 净值走势(PortfolioChart):金额按偏好币种换算;开了隐私时 tooltip 里的净值被遮。
-//   · 分布饼图(AllocationPie):图例的名字 / 占比 / 金额、尾部「其他」的翻译、空数据的提示;开隐私时
-//     只遮金额、留占比。
-// 不断言 recharts 的几何。图例是我们自己的 <ul>;坐标轴与 tooltip 的文字是我们的 formatter 产出的。
 //
-// **怎么让 ResponsiveContainer 在 jsdom 里画出来**:它靠 ResizeObserver 回报尺寸,setup 里那个 stub
-// 永不回报 → 0×0 → 什么都不画。这里换一个 observe 时立刻回报 600×220 的,画完还原。
-// tooltip 用键盘打开(聚焦图面 + →),不靠鼠标坐标 —— jsdom 里元素没有几何,鼠标那条路摸不到点。
 
 const DAY = 86_400_000;
 const T0 = Date.UTC(2026, 0, 10);
@@ -58,7 +50,6 @@ function wrap(
     </IntlProvider>
   );
   if (opts.currency) tree = <CurrencyProvider value={opts.currency}>{tree}</CurrencyProvider>;
-  // 不传 hide → 不挂 Provider = 隐私关(缺省)。
   if (opts.hide != null)
     tree = <BalancePrivacyProvider hideBalances={opts.hide}>{tree}</BalancePrivacyProvider>;
   return render(tree);
@@ -75,9 +66,8 @@ function openTooltip(container: HTMLElement) {
 const series = (points: [number, number][]): HistoryPoint[] =>
   points.map(([t, total]) => ({ t, total }));
 
-describe("PortfolioChart —— 币种与隐私", () => {
-  it("金额按偏好币种换算(轴与 tooltip 都是)", () => {
-    // rate = 1 欧元的美元价;0.5 → 展示值翻倍。
+describe("PortfolioChart: currency and privacy", () => {
+  it("amounts convert to the preferred currency (axis and tooltip alike)", () => {
     const { container } = wrap(
       <PortfolioChart
         series={series([
@@ -93,7 +83,7 @@ describe("PortfolioChart —— 币种与隐私", () => {
     expect(text).not.toContain("$");
   });
 
-  it("开隐私 → tooltip 里的净值被遮,轴刻度照常(那是图的尺度)", () => {
+  it("privacy on: net value in the tooltip masked, axis ticks unchanged (that is the chart scale)", () => {
     const { container } = wrap(
       <PortfolioChart
         series={series([
@@ -114,14 +104,14 @@ describe("PortfolioChart —— 币种与隐私", () => {
 const legendRows = (container: HTMLElement) =>
   [...container.querySelectorAll("li")].map((li) => li.textContent ?? "");
 
-describe("AllocationPie —— 图例", () => {
-  it("没有切片 → 提示没数据,不画饼", () => {
+describe("AllocationPie: legend", () => {
+  it("no slices: shows the no-data hint, draws no pie", () => {
     const { container } = wrap(<AllocationPie slices={[]} />);
     expect(screen.getByText("No data yet.")).toBeTruthy();
     expect(container.querySelector("li")).toBeNull();
   });
 
-  it("每格一行:名字 · 四舍五入的占比 · 金额;尾部合并项显示「Others」", () => {
+  it('one row per slice: name · rounded share · amount; the merged tail shows "Others"', () => {
     const { container } = wrap(
       <AllocationPie
         slices={[
@@ -134,12 +124,12 @@ describe("AllocationPie —— 图例", () => {
     expect(legendRows(container)).toEqual(["BTC67%$666.00", "ETH23%$234.00", "Others10%$100.00"]);
   });
 
-  it("总额为 0 → 占比写 0%,不出 NaN", () => {
+  it("total 0: share reads 0%, no NaN", () => {
     const { container } = wrap(<AllocationPie slices={[{ key: "x", label: "X", value: 0 }]} />);
     expect(legendRows(container)).toEqual(["X0%$0.00"]);
   });
 
-  it("金额按偏好币种换算", () => {
+  it("amounts convert to the preferred currency", () => {
     const { container } = wrap(
       <AllocationPie slices={[{ key: "btc", label: "BTC", value: 50 }]} />,
       {
@@ -149,7 +139,7 @@ describe("AllocationPie —— 图例", () => {
     expect(legendRows(container)).toEqual(["BTC100%€100.00"]);
   });
 
-  it("开隐私 → 每格金额被遮,占比留着", () => {
+  it("privacy on: each slice amount masked, share kept", () => {
     wrap(
       <AllocationPie
         slices={[

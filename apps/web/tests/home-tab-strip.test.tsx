@@ -10,17 +10,6 @@ import type { PinScopeKey } from "@/lib/queries/keys";
 import type { PortfolioOverview } from "@/lib/queries/portfolio";
 import { tabLabel } from "./helpers/tabs";
 
-// 首页 tab 条(视角 tab + 自定义 Tab + ＋ 加钮 + 右侧合计)从用户这一侧看:
-//   · 视角 tab:Tokens 恒在;Perps / DeFi 只在组合里真有时才出;pin 以 `#名` / `@名` 显示
-//   · 右侧合计跟着选中的 tab 走:tokens → 现货小计、perps → 永续权益小计、defi → DeFi 小计;
-//     选中 pin → 按 pin 另拉一份总览取它的总额;还在取 → 骨架;失败 → `—`;开隐私 → 被遮
-//   · ＋ 加钮:点开选择器(选项只来自当前组合、不含归档账户、连接器去重);选一项 → createTabPin,
-//     等条子上真挂上了新 tab 再选中它;失败 → toast;已满 3 个 → ＋ 不出现
-//   · pin 本身:**先选中、再点才开管理面板**;面板里改指向 → updateTabPinTarget,取消固定 →
-//     deleteTabPin,且取消的是当前选中的 → 选中挪到左邻(前一个 pin,没有就最后一个视角 tab)
-//   · 面板浮层:按 Esc / 点面板外面 → 关
-// 数据钩子与 server fn 打桩;写完之后「等条子变了」那一步(fetchHomeTabStrip)也打桩成立刻就绪。
-
 const h = vi.hoisted(() => ({
   strip: {
     current: { hasAccounts: true, hasPerps: false, hasDefi: false, pins: [] } as HomeTabStripView,
@@ -95,7 +84,6 @@ beforeEach(() => {
   h.deleteTabPin.mockReset();
   h.updateTabPinTarget.mockReset();
   h.fetchHomeTabStrip.mockReset();
-  // 「等条子真的变了」:直接给一份已经变好的条子 —— 新 pin 在、被删的不在、改指向的已改。
   h.fetchHomeTabStrip.mockImplementation(async () => h.strip.current);
   h.listConnectors.mockReset();
   h.listConnectors.mockResolvedValue({ binance: { label: "Binance" } });
@@ -153,27 +141,26 @@ const selectedTab = () =>
     screen.getAllByRole("tab").find((t) => t.getAttribute("aria-selected") === "true") as Element,
   );
 const tab = (name: string) => screen.getByRole("tab", { name });
-// 右侧合计:tab 条之外、紧挨着它的那一格。
 const total = (container: HTMLElement) =>
   (container.querySelector("[role=tablist]")?.closest(".flex.items-center.gap-4") as HTMLElement)
     .lastElementChild as HTMLElement;
 const addButton = () => screen.queryByRole("button", { name: "Pin a view" });
 const unpinButton = () => screen.queryByRole("button", { name: "Unpin" });
 
-describe("tab 条", () => {
-  it("Tokens 恒在;Perps / DeFi 跟着组合有没有;pin 带 #/@ 前缀", () => {
+describe("tab strip", () => {
+  it("Tokens always shown; Perps / DeFi follow the portfolio; pins carry a #/@ prefix", () => {
     h.strip.current = { ...h.strip.current, pins: [tagPin, acctPin] };
     mount();
     expect(tabNames()).toEqual(["Tokens", "Perps", "DeFi", "#DeFi", "@Cold"]);
   });
 
-  it("组合里没有永续 / DeFi → 只剩 Tokens", () => {
+  it("no perps / DeFi in the portfolio: only Tokens remain", () => {
     h.strip.current = { ...h.strip.current, hasPerps: false, hasDefi: false };
     mount();
     expect(tabNames()).toEqual(["Tokens"]);
   });
 
-  it("默认选中 Tokens;点别的 tab 就选中它", () => {
+  it("Tokens selected by default; clicking another tab selects it", () => {
     mount();
     expect(selectedTab()).toBe("Tokens");
     fireEvent.click(tab("Perps"));
@@ -182,8 +169,8 @@ describe("tab 条", () => {
   });
 });
 
-describe("右侧合计", () => {
-  it("跟着视角 tab 走:现货小计 / 永续权益小计 / DeFi 小计", () => {
+describe("right-hand total", () => {
+  it("follows the view tab: spot / perp equity / DeFi subtotal", () => {
     const { container } = mount();
     expect(total(container).textContent).toBe("$1,500.00");
     fireEvent.click(tab("Perps"));
@@ -192,7 +179,7 @@ describe("右侧合计", () => {
     expect(total(container).textContent).toBe("$15.00");
   });
 
-  it("选中 pin → 按 pin 的目标另拉总览,显示那份的总额", () => {
+  it("selected pin: fetches a separate overview for its target and shows that total", () => {
     h.strip.current = { ...h.strip.current, pins: [tagPin] };
     const { container } = mount();
     fireEvent.click(tab("#DeFi"));
@@ -200,7 +187,7 @@ describe("右侧合计", () => {
     expect(total(container).textContent).toBe("$42.00");
   });
 
-  it("pin 那份还在取 → 骨架,不显未收窄的全量总额", () => {
+  it("pin overview still loading: skeleton, never the unnarrowed full total", () => {
     h.strip.current = { ...h.strip.current, pins: [tagPin] };
     h.overview.mockImplementation((_id, pin) => {
       if (pin) throw new Promise(() => {});
@@ -212,7 +199,7 @@ describe("右侧合计", () => {
     expect(total(container).querySelector("[data-slot=skeleton]")).toBeTruthy();
   });
 
-  it("取总额失败 → `—`", () => {
+  it("total fetch fails: `—`", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     h.overview.mockImplementation(() => {
       throw new Error("boom");
@@ -221,7 +208,7 @@ describe("右侧合计", () => {
     expect(total(container).textContent).toBe("—");
   });
 
-  it("开隐私 → 合计被遮", () => {
+  it("privacy on: total is masked", () => {
     const { container } = mount({ hide: true });
     expect(
       within(total(container)).getByRole("button", { name: /balance hidden/i }).textContent,
@@ -229,8 +216,8 @@ describe("右侧合计", () => {
   });
 });
 
-describe("＋ 固定一个视图", () => {
-  it("已满 3 个 → ＋ 不出现", () => {
+describe("+ pin a view", () => {
+  it("3 pins already: + is hidden", () => {
     h.strip.current = {
       ...h.strip.current,
       pins: [tagPin, acctPin, { id: "pin3", kind: "connector", connectorId: "okx", name: "OKX" }],
@@ -239,9 +226,9 @@ describe("＋ 固定一个视图", () => {
     expect(addButton()).toBeNull();
   });
 
-  it("点 ＋ → 选择器:选项只来自当前组合的活跃账户,连接器去重,归档的不出现", async () => {
+  it("click +: picker lists only active accounts of the current portfolio, connectors deduped, archived hidden", async () => {
     mount();
-    expect(screen.queryByText("Tags")).toBeNull(); // 关着时不拉、不渲染
+    expect(screen.queryByText("Tags")).toBeNull();
     fireEvent.click(addButton() as HTMLElement);
     await screen.findByRole("button", { name: "@Cold" });
     expect(screen.getByRole("button", { name: "#DeFi" })).toBeTruthy();
@@ -253,7 +240,7 @@ describe("＋ 固定一个视图", () => {
     expect(h.listTags).toHaveBeenCalledWith({ data: { portfolioId: "p1" } });
   });
 
-  it("选一项 → createTabPin;条子上挂上新 tab 之后选中它", async () => {
+  it("pick one: createTabPin; selects the new tab once it appears on the strip", async () => {
     h.createTabPin.mockImplementation(async () => {
       h.strip.current = { ...h.strip.current, pins: [acctPin] };
       return acctPin;
@@ -268,11 +255,11 @@ describe("＋ 固定一个视图", () => {
     expect(h.fetchHomeTabStrip).toHaveBeenCalled();
   });
 
-  it("刷新回来的条子上还没有新 tab → 先等,真挂上了才选中(否则药丸指向一个不存在的 tab)", async () => {
+  it("refreshed strip lacks the new tab: waits, selects only once it really appears", async () => {
     const before = h.strip.current;
     h.createTabPin.mockResolvedValue(acctPin);
     h.fetchHomeTabStrip
-      .mockImplementationOnce(async () => before) // 第一次刷新:还是旧条子
+      .mockImplementationOnce(async () => before)
       .mockImplementation(async () => ({ ...before, pins: [acctPin] }));
     mount();
     fireEvent.click(addButton() as HTMLElement);
@@ -283,7 +270,7 @@ describe("＋ 固定一个视图", () => {
     expect(h.fetchHomeTabStrip).toHaveBeenCalledTimes(2);
   });
 
-  it("创建失败 → toast 报错,不切 tab", async () => {
+  it("create fails: toast error, tab not switched", async () => {
     const err = vi.spyOn(toast, "error").mockImplementation(() => "");
     h.createTabPin.mockRejectedValue(new Error("cap"));
     mount();
@@ -293,7 +280,7 @@ describe("＋ 固定一个视图", () => {
     expect(currentTab).toBe("tokens");
   });
 
-  it("选择器的数据拉不到 → 面板里说失败,不是空白", async () => {
+  it("picker data fails to load: panel says so instead of staying blank", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     h.listTags.mockRejectedValue(new Error("down"));
     mount();
@@ -302,12 +289,12 @@ describe("＋ 固定一个视图", () => {
   });
 });
 
-describe("pin 的管理面板", () => {
+describe("pin management panel", () => {
   beforeEach(() => {
     h.strip.current = { ...h.strip.current, pins: [tagPin, acctPin] };
   });
 
-  it("没选中的 pin:第一下只选中、不开面板;再点才开", async () => {
+  it("unselected pin: first click only selects, second opens the panel", async () => {
     mount();
     fireEvent.click(tab("#DeFi"));
     expect(selectedTab()).toBe("#DeFi");
@@ -316,7 +303,7 @@ describe("pin 的管理面板", () => {
     expect(await screen.findByRole("button", { name: "Unpin" })).toBeTruthy();
   });
 
-  it("面板开着再点一下 → 关", async () => {
+  it("click again while open: closes", async () => {
     mount();
     fireEvent.click(tab("#DeFi"));
     fireEvent.click(tab("#DeFi"));
@@ -325,7 +312,7 @@ describe("pin 的管理面板", () => {
     await waitFor(() => expect(unpinButton()).toBeNull());
   });
 
-  it("改指向 → updateTabPinTarget 带着 pin id 与新目标;面板随即关上", async () => {
+  it("retarget: updateTabPinTarget with pin id and new target; panel closes", async () => {
     mount();
     fireEvent.click(tab("#DeFi"));
     fireEvent.click(tab("#DeFi"));
@@ -338,7 +325,7 @@ describe("pin 的管理面板", () => {
     await waitFor(() => expect(unpinButton()).toBeNull());
   });
 
-  it("取消固定当前选中的 → deleteTabPin,选中挪到左邻的 pin", async () => {
+  it("unpin the selected one: deleteTabPin, selection moves to the left neighbour pin", async () => {
     mount();
     fireEvent.click(tab("@Cold"));
     fireEvent.click(tab("@Cold"));
@@ -347,7 +334,7 @@ describe("pin 的管理面板", () => {
     expect(currentTab).toBe("pin1");
   });
 
-  it("最左边那个 pin 被取消 → 选中落到最后一个视角 tab", async () => {
+  it("leftmost pin unpinned: selection falls to the last view tab", async () => {
     mount();
     fireEvent.click(tab("#DeFi"));
     fireEvent.click(tab("#DeFi"));
@@ -355,7 +342,7 @@ describe("pin 的管理面板", () => {
     expect(currentTab).toBe("defi");
   });
 
-  it("删除失败 → toast 报错", async () => {
+  it("delete fails: toast error", async () => {
     const err = vi.spyOn(toast, "error").mockImplementation(() => "");
     h.deleteTabPin.mockRejectedValue(new Error("x"));
     mount();
@@ -365,7 +352,7 @@ describe("pin 的管理面板", () => {
     await waitFor(() => expect(err).toHaveBeenCalledWith("Something went wrong."));
   });
 
-  it("按 Esc / 点面板外面 → 关", async () => {
+  it("Esc / click outside the panel: closes", async () => {
     mount();
     fireEvent.click(tab("#DeFi"));
     fireEvent.click(tab("#DeFi"));

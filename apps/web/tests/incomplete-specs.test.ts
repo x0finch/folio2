@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { incompleteSpecs } from "@/components/incomplete-specs";
 import type { InputSpec } from "@/lib/server/creds";
 
-// 补录只问"能被 isComplete gate 的字段" = 非 public(semi + secret)。public 已知/导入带真值,不重问。
 const SPECS: InputSpec[] = [
   { key: "address", type: "public", label: "Address" },
   { key: "apiKey", type: "semi", label: "API Key" },

@@ -7,13 +7,6 @@ import type { Holding } from "@/lib/core/portfolio";
 import { messages } from "@/lib/i18n/messages";
 import type { PortfolioOverview } from "@/lib/queries/portfolio";
 
-// Insights 页的装配:
-//   · 走势卡:按「全部」窗口拉组合历史(断言拉的是哪个组合、哪个窗口),浏览器里阶梯重建;末点换成
-//     总览按账户那张表的实时值(与首页大数字同源);短窗(未采样)按天聚,长窗(已采样)不再聚;
-//     不足两个点 → 「No data yet.」;历史还在取 → 骨架(不画空图)
-//   · 分布卡:默认按代币切;切到按链 / 按账户,图例换成对应的名字
-// 图本身(PortfolioChart)换成替身,只看它收到的序列;饼图用真的(图例是我们的 <ul>)。
-
 const DAY = 86_400_000;
 const T0 = Date.UTC(2026, 0, 1);
 
@@ -74,7 +67,6 @@ const overview = (): PortfolioOverview => ({
   pending: false,
 });
 
-// 同一天两次同步 + 两天后一次;实时值 200。
 const raw = (over: Partial<PortfolioHistoryRaw> = {}): PortfolioHistoryRaw => ({
   rows: [
     { accountId: "a1", takenAt: T0, totalUsd: 100 },
@@ -108,30 +100,30 @@ function mount() {
 
 const lastSeries = () => h.chartSeries.at(-1) ?? [];
 
-describe("走势卡", () => {
-  it("按「全部」窗口拉当前组合的历史", async () => {
+describe("trend card", () => {
+  it('fetches the current portfolio history with the "All" window', async () => {
     mount();
     await screen.findByTestId("chart");
     expect(h.history).toHaveBeenCalledWith("p1", "all");
     expect(screen.getByText("Portfolio value")).toBeTruthy();
   });
 
-  it("历史还在取 → 骨架,不画图", () => {
+  it("history still loading: skeleton, no chart", () => {
     h.history.mockImplementation(() => new Promise(() => {}));
     const { container } = mount();
     expect(screen.queryByTestId("chart")).toBeNull();
     expect(container.querySelector("[data-slot=skeleton]")).toBeTruthy();
   });
 
-  it("未采样(短窗)→ 按天聚,末点换成总览里的实时值", async () => {
+  it("unsampled (short window): aggregated by day, last point replaced with the live overview value", async () => {
     mount();
     await screen.findByTestId("chart");
     const s = lastSeries();
-    expect(s).toHaveLength(2); // 同一天那两次并成一个点
-    expect(s.at(-1)?.total).toBe(200); // 不是快照里冻住的 150
+    expect(s).toHaveLength(2);
+    expect(s.at(-1)?.total).toBe(200);
   });
 
-  it("已采样(长窗)→ 不再按天聚,每个采样点都留着", async () => {
+  it("sampled (long window): not aggregated by day, every sample point is kept", async () => {
     h.history.mockImplementation(async () => raw({ sampled: true }));
     mount();
     await screen.findByTestId("chart");
@@ -139,7 +131,7 @@ describe("走势卡", () => {
     expect(lastSeries().at(-1)?.total).toBe(200);
   });
 
-  it("不足两个点 → 「No data yet.」,不画图", async () => {
+  it('fewer than two points: "No data yet.", no chart', async () => {
     h.history.mockImplementation(async () =>
       raw({ rows: [{ accountId: "a1", takenAt: T0, totalUsd: 100 }] }),
     );
@@ -151,14 +143,14 @@ describe("走势卡", () => {
 
 const legend = () => [...document.querySelectorAll("li")].map((li) => li.textContent);
 
-describe("分布卡", () => {
-  it("默认按代币切,按金额降序", () => {
+describe("distribution card", () => {
+  it("split by token by default, sorted by amount descending", () => {
     mount();
     expect(screen.getByText("Allocation")).toBeTruthy();
     expect(legend()).toEqual(["BTC60%$600.00", "ETH30%$300.00", "USDC10%$100.00"]);
   });
 
-  it("切到按链 → 图例换成平台名;按账户 → 换成账户名", () => {
+  it("switch to by chain: legend uses platform names; by account: account names", () => {
     mount();
     fireEvent.click(screen.getByRole("tab", { name: "By chain" }));
     expect(legend()).toEqual(["Binance60%$600.00", "Ethereum40%$400.00"]);
