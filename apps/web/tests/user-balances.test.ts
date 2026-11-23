@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { BalanceLike } from "@/lib/core/token-model";
 import { userDisplayBalances } from "@/lib/core/token-model";
 
-// 身份走 token_id(#243:symbol / tokenRef 不再落快照,显示名住 Token 那一行)。
-// 快照那半是 `latestRaw()` 的余额元组(账户, id, 数量, 美元值, kind, 自带价, 平台, token_id, meta)。
 const snap = (accountId: string, tokenIds: string[]): BalanceRawRow[] =>
   tokenIds.map((tokenId, i) => [
     accountId,
@@ -20,25 +18,22 @@ const snap = (accountId: string, tokenIds: string[]): BalanceRawRow[] =>
 
 const manual = (tokenId: string): BalanceLike => ({ kind: "spot", tokenId });
 
-// 三门同源收口:enrich/warm/refresh 必须喂同一集合。这些用例锁住「manual 合成余额一定在集合里」——
-// 正是 T2 首版漏掉 refresh 门(#1)的回归防线。
 describe("userDisplayBalances", () => {
-  it("合并快照余额与 manual 合成余额(两者都在)", () => {
+  it("merges snapshot balances with synthesized manual balances (both present)", () => {
     const out = userDisplayBalances(
       [...snap("cex", ["tk-btc"]), ...snap("wallet", ["tk-eth"])],
       [manual("tk-sol")],
     );
     expect(out.map((b) => b.tokenId)).toEqual(["tk-btc", "tk-eth", "tk-sol"]);
-    // 元组按列落到 BalanceLike 的四个字段(dust 门要 usdValue / kind)。
     expect(out[0]).toEqual({ kind: "spot", usdValue: 5, platform: "evm:1", tokenId: "tk-btc" });
   });
 
-  it("无 manual → 只快照余额", () => {
+  it("no manual: snapshot balances only", () => {
     const out = userDisplayBalances(snap("cex", ["tk-btc"]), []);
     expect(out.map((b) => b.tokenId)).toEqual(["tk-btc"]);
   });
 
-  it("纯 manual 用户(无快照)→ 集合仍含 manual(refresh 门够得到 → 不会空转刷新)", () => {
+  it("manual-only user (no snapshot): set still contains manual (reachable by the refresh gate, so no idle refresh)", () => {
     const out = userDisplayBalances([], [manual("tk-eth")]);
     expect(out.map((b) => b.tokenId)).toEqual(["tk-eth"]);
   });
