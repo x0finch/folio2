@@ -8,14 +8,10 @@ import {
 } from "../src";
 import cases from "./fixtures/token-ref-cases.json" with { type: "json" };
 
-// tokenRef 文法(ADR 0020)。**用例表在 fixtures/token-ref-cases.json** —— 输入、期望输出、
-// 每条为什么在那里,都在那一个文件里排着,一眼扫得完;本文件只说「拿这张表怎么断言」。
-//
-// 分成两张表,因为造串与拆串是两个方向、期望的形状不同:
-//   construct:给结构 → 期望一个串(归一规则在这里看:哪个命名者小写地址、什么被 trim)
-//   parse:    给串 → 期望一个结构(`parsed: null` = 读不懂)
-// 每条 parse 用例被**三种**断言吃:拆出这个结构 / 语义形拼回去 / 两段形拼回去 —— 后两者
-// 是同一个 `formatTokenRef` 的两种入参,结果必须一致(见 src 里那段注释)。
+// tokenRef grammar. The case table is in fixtures/token-ref-cases.json (input, expected output, why each is there);
+// this file only says how to assert against it. Two tables, one per direction: `construct` (structure to string) and
+// `parse` (string to structure, `parsed: null` = unreadable). Each parse case is checked three ways: the split structure,
+// formatting back from the semantic form, and from the two-segment form; the last two must agree.
 
 interface ConstructCase {
   note: string;
@@ -28,25 +24,25 @@ interface ConstructCase {
 interface ParseCase {
   note: string;
   raw: string;
-  // 缺省即等于 raw;给了就表示 raw 不是规范形,拼回去会变成它。
+  // Defaults to raw; when given, raw is not canonical and formatting back yields it.
   canonical?: string;
-  // null = 读不懂(kind 为 unknown)。
+  // null = unreadable (kind is unknown).
   parsed: Record<string, string> | null;
 }
 
 const { construct, parse } = cases as { construct: ConstructCase[]; parse: ParseCase[] };
 
-// 表本身也要有个下限:哪天有人把 fixture 清空了,下面每个 `it.each` 都会「零条用例全绿」。
-describe("用例表", () => {
-  it("两张表都不为空(空表会让下面所有 it.each 静默零断言)", () => {
+// The table needs a floor: if the fixture were emptied, every `it.each` below would pass with zero cases.
+describe("case table", () => {
+  it("neither table is empty (an empty one would make every it.each assert nothing)", () => {
     expect(construct.length).toBeGreaterThan(5);
     expect(parse.filter((c) => c.parsed !== null).length).toBeGreaterThan(5);
     expect(parse.filter((c) => c.parsed === null).length).toBeGreaterThan(5);
   });
 });
 
-// —— 造串:调用方给结构,`kind` 由构造函数定,不手写 ——
-describe("tokenRef.* 构造", () => {
+// Construction: the caller gives structure, the constructor sets `kind`
+describe("tokenRef.* constructors", () => {
   const build = ({ kind, namer, value }: ConstructCase): string => {
     switch (kind) {
       case "native":
@@ -64,7 +60,7 @@ describe("tokenRef.* 构造", () => {
     expect(build(c)).toBe(c.ref);
   });
 
-  it("造出来的串拆回去就是同一个结构(构造与解析同一套归一)", () => {
+  it("a built string parses back to the same structure (construction and parsing share one normalisation)", () => {
     for (const c of construct) {
       const parsed = parseTokenRef(c.ref);
       expect(parsed.kind).toBe(c.kind);
@@ -73,7 +69,7 @@ describe("tokenRef.* 构造", () => {
   });
 });
 
-// —— 拆串 ——
+// Parsing
 const readable = parse.filter((c) => c.parsed !== null);
 const unreadable = parse.filter((c) => c.parsed === null);
 
@@ -82,30 +78,34 @@ describe("parseTokenRef", () => {
     expect(parseTokenRef(raw)).toEqual(parsed);
   });
 
-  // 读不懂的一律 unknown 且**永不 throw** —— 任何串都得有个去处。
+  // Unreadable strings are always unknown and never throw: any string needs a home.
   it.each(unreadable)("$raw → unknown — $note", ({ raw }) => {
     expect(() => parseTokenRef(raw)).not.toThrow();
     expect(parseTokenRef(raw)).toEqual({ kind: "unknown", raw });
   });
 });
 
-// —— 拼回去:同一个 formatTokenRef,两种入参,结果必须一致 ——
-// 语义形是「知道这是个什么东西」时用的(改一个字段再拼回去);两段形是按两列存的表用的
-// (`token_refs`,ADR 0022)—— 存储层因此不必认识 `native` / `contract:`,也不必知道分隔符是斜杠。
+// Formatting back: one formatTokenRef, two input forms, same result
+// The semantic form is for when the thing is known (change a field, format back); the two-segment form is for the two-column
+// `token_refs` table, so storage need not know `native` / `contract:` or the separator.
 describe("formatTokenRef", () => {
-  it.each(readable)("$raw — 两种入参拼出同一个规范形", ({ raw, canonical, parsed }) => {
+  it.each(readable)("$raw: both input forms format to the same canonical form", ({
+    raw,
+    canonical,
+    parsed,
+  }) => {
     const want = canonical ?? raw;
     const got = parseTokenRef(raw);
     expect(got.kind).not.toBe("unknown");
     if (got.kind === "unknown") return;
 
-    expect(formatTokenRef(got)).toBe(want); // 语义形
-    expect(formatTokenRef({ namer: got.namer, localName: got.localName })).toBe(want); // 两段形
-    // localName 与那一支自己的字段说的是同一件事(不该有两个说法)。
+    expect(formatTokenRef(got)).toBe(want); // semantic form
+    expect(formatTokenRef({ namer: got.namer, localName: got.localName })).toBe(want); // two-segment form
+    // localName and the branch's own field say the same thing.
     expect(got.localName).toBe((parsed as Record<string, string>).localName);
   });
 
-  it("归一幂等 —— 拆过再拼再拆,结果不再变", () => {
+  it("normalisation is idempotent: parse, format, parse again changes nothing", () => {
     for (const { raw } of readable) {
       const once = parseTokenRef(raw);
       if (once.kind === "unknown") continue;
@@ -113,9 +113,8 @@ describe("formatTokenRef", () => {
     }
   });
 
-  // 反方向:从**构造入参**出发(`TokenRefParts`,不带 localName)。parse 的输出是它的超集,
-  // 所以是「在构造字段上」恒等,不是整个对象相等。
-  it("parse ∘ format 在构造字段上是恒等", () => {
+  // The other direction, from the constructor input (`TokenRefParts`, no localName); parse's output is a superset, so identity holds on the constructor fields only.
+  it("parse then format is identity on the constructor fields", () => {
     const parts: TokenRefParts[] = [
       { kind: "contract", namer: "evm:1", address: "0xabc" },
       {
@@ -134,29 +133,40 @@ describe("formatTokenRef", () => {
   });
 });
 
-// —— 「这条 ref 带来的 symbol 有没有背书人」——
-// 判据收在文法里(而不是留给每个调用方自己 switch),因为它问的就是形状:选哪个构造函数,
-// 就是在声明这条 ref 的证据强度。表是手写的字面表,不从 kind 反算 —— 否则它只会跟着实现走。
+// Whether the symbol this ref carries has a voucher. The criterion lives in the grammar, not in each caller's switch.
+// The table is a hand-written literal, not derived from kind, or it would only follow the implementation.
 describe("hasTrustedSymbol", () => {
   const table = [
     {
       ref: "bitcoin/native",
       trusted: true,
-      note: "原生币:symbol 是链自己的,而且原生币按设计不进映射表 —— symbol 是它唯一的一条路",
+      note: "native coin: the symbol is the chain's own, and native coins are by design not in the map, so symbol is their only route",
     },
-    { ref: "binance/issued:USDC", trusted: true, note: "场馆上架代号:binance 为这个标识负责" },
-    { ref: "coingecko/issued:usd-coin", trusted: true, note: "上游 coin id:命名者就是发它的人" },
+    {
+      ref: "binance/issued:USDC",
+      trusted: true,
+      note: "venue ticker: binance vouches for the identifier",
+    },
+    {
+      ref: "coingecko/issued:usd-coin",
+      trusted: true,
+      note: "upstream coin id: the namer is the issuer",
+    },
     {
       ref: "evm:1/contract:0xabc",
       trusted: false,
-      note: "合约的 symbol 是部署者随手填的 —— 山寨合约照样能写 USDC",
+      note: "a contract's symbol is deployer-chosen: a fake contract can write USDC",
     },
     {
       ref: "manual/custom:USDC",
       trusted: false,
-      note: "用户自己敲的,没有注册表背书 —— 这一条正是第四轮的由来",
+      note: "typed by the user with no registry behind it",
     },
-    { ref: "nonsense", trusted: false, note: "读不懂 → 关于它我们什么都不知道,最不该猜" },
+    {
+      ref: "nonsense",
+      trusted: false,
+      note: "unreadable: we know nothing, the worst thing to guess",
+    },
   ];
 
   it.each(table)("$ref → $trusted — $note", ({ ref, trusted }) => {
