@@ -1,41 +1,30 @@
-// CoinGecko adapter 的常量。**全仓只有本包认识这些东西**(ADR 0023)。
+// Constants for the CoinGecko adapter; only this package knows them.
 
-// 本 adapter 自报的标识 —— 它同时是产出 tokenRef 的 namer、以及全局映射表的 `namer` 列。
+// Id this adapter reports; it is the tokenRef namer and the global ref-index `namer` column.
 export const UPSTREAM_ID = "coingecko";
 
 export const VS_USD = "usd";
-// `/simple/price?include_last_updated_at=true` 每条回的时刻字段(秒)。**不带币种前缀**,与 `usd_24h_change` 不同。
+// Per-entry timestamp field (seconds) of `/simple/price?include_last_updated_at=true`; carries no currency prefix.
 export const LAST_UPDATED_AT = "last_updated_at";
 
-// BTC 的 CoinGecko coin id。法币历史汇率从 BTC 反算(ADR 0026),两条腿都是「BTC 在某币种下的价」,
-// base 恒是它。也是 `token_daily_prices` 里 BTC 美元历史腿的键(`coingecko/issued:bitcoin`)。
+// BTC's coin id: base of both legs of fiat history (derived from BTC), and the key of the BTC/USD leg in `token_daily_prices`.
 export const BTC_COIN_ID = "bitcoin";
 export const SEARCH_LIMIT = 20;
-export const MARKETS_PER_PAGE = 250; // CoinGecko 单页上限
+export const MARKETS_PER_PAGE = 250; // CoinGecko per-page cap
 
-// 按 id 批量取价 / 取整行时,每次 GET 送多少个 id。`/simple/price` 与 `/coins/markets?ids=`
-// 都把 id 塞进 query 串,id 一多整条 URL 就超服务端 URI 长度上限 → CoinGecko 回 **HTTP 414
-// URI Too Long**,整批失败(#245:数百币的钱包刷价/刷图恒挂)。故按此数分块请求再合并。
-// 取值保守:coin id 是 slug,少数长达 ~40 字符,100 个即便全是长 slug(~4KB)也远在常见 8KB
-// URI 上限内;且 100 ≤ MARKETS_PER_PAGE,故每批 `/coins/markets` 一页就装得下、无需翻页。
+// Ids per GET: too many ids in the query string exceed the server's URI limit (HTTP 414), failing the whole batch.
+// 100 long slugs (~4KB) stay under common 8KB limits and 100 <= MARKETS_PER_PAGE, so one page per batch.
 export const IDS_PER_REQUEST = 100;
 
-// 非 EVM 链的显式 slug 对照:**我们的命名者 → CoinGecko 的 asset_platform id**。
-//
-// EVM 不需要这张表:两边都能归到 `evm:<chainId>` —— CoinGecko 的 `chain_identifier` 就是那个
-// 数字,靠数字对齐不会歧义。非 EVM 没有这样的公共编号,是「连接器说 `solana`」对
-// 「CoinGecko 说什么」,slug 对 slug。三条链恰好两边同名 **纯属运气**,不是规律 —— 所以写下来。
-// 对不上的后果是这条链上的币从此没价没图、而且不报错;`toRefIndexRows` 会把对不上的链
-// 单独喊出来(见 RefIndexFetch.unmatchedPlatforms)。
+// Explicit non-EVM slug map: our namer to CoinGecko's asset_platform id. EVM needs none (aligned by chainId).
+// Matching names are luck, not a rule; a mismatch silently drops that chain's prices, so `toRefIndexRows` reports unmatched ones.
 export const NON_EVM_PLATFORMS: Readonly<Record<string, string>> = {
   solana: "solana",
   sui: "sui",
   cosmos: "cosmos",
 };
 
-// symbol → CoinGecko coin id 的策展小表:majors + 已知撞名,优先于市值排名(防山寨撞名)。
-// 键须为归一后的大写 symbol。**住在 adapter 里** —— 逐条写的都是 CoinGecko 的 id,
-// 留在中立的契约层就是硬编码某一家(ADR 0023)。
+// Curated symbol to coin id for majors and known collisions; wins over market-cap rank. Keys are normalised uppercase symbols.
 export const OVERRIDES: Readonly<Record<string, string>> = {
   BTC: "bitcoin",
   ETH: "ethereum",
@@ -54,21 +43,14 @@ export const OVERRIDES: Readonly<Record<string, string>> = {
   ATOM: "cosmos",
 };
 
-// EVM 命名者前缀:`evm:<chainId>` → CoinGecko 的合约端点要数字 chainId 翻出来的 slug。
+// EVM namer prefix: the contract endpoint needs a slug derived from the numeric chainId.
 export const EVM_NAMER_PREFIX = "evm:";
 
-// —— 重试 ——
-// **搬家而来**:这三个数原本在 `@folio/coingecko-client` 的 constants.ts 里,因为老那版把重试
-// 收进了传输层。Effect 版的 client 不自带重试(重试是调用方的事,见它的 index.ts),
-// 于是策略和它的数字一起落到这里 —— 本 adapter 就是那个调用方。
-//
-// **1 次重试就够**:目的是躲瞬时抖动,不是硬扛持续限流。配额真耗尽时 Retry-After 会给到几十秒,
-// 那种情况按下面的上限直接放弃,交给 SWR 顶旧数据。
-export const RETRY_ATTEMPTS = 2; // 总尝试次数(1 + 1 重试)
-export const RETRY_BASE_MS = 250; // 退避基数,同时是抖动幅度
+// Retry: the client has no retry of its own, so this adapter (the caller) owns the policy.
+// One retry is enough: it only dodges transient blips; real quota exhaustion gives a long Retry-After and we give up (SWR serves stale).
+export const RETRY_ATTEMPTS = 2; // total attempts (1 + 1 retry)
+export const RETRY_BASE_MS = 250; // backoff base and jitter amplitude
 
-// 单次等待上限。**为什么是 2 秒**:这条路可能挂在用户的写路径上(mint 冷启动那一次用户在等),
-// 而 CGK 免费档的 Retry-After 能给到 60s —— 等下去等于把请求挂死。Workers 上等待烧的是
-// wall-clock 不是 CPU,但仍受请求总时长约束,所以上限要按「用户还愿意等多久」定,不是按 CPU 定。
-// 超过它就**不等了,直接放弃**(`exceedsMaxWait: "throw"` 的语义,与后台同步那份的 clamp 刻意相反)。
+// Max single wait: this path can sit on a user's write path and free-tier Retry-After can reach 60s, so over-limit waits give up
+// instead of sleeping (`exceedsMaxWait: "throw"`, deliberately opposite to the background-sync clamp).
 export const RETRY_MAX_WAIT_MS = 2000;

@@ -7,11 +7,8 @@ import { EVM_NAMER_PREFIX, UPSTREAM_ID } from "./constants";
 import { closeOver, type Needs } from "./layer";
 import { req, withClient } from "./runtime";
 
-// `PlatformUpstream` 的 CoinGecko 实现:一次 `/asset_platforms` 拿整张链表。
-//
-// **一条链产两个键**:短形 slug(`solana`),以及有数字 chainId 时再产一条 `evm:<id>`。
-// 两种 platformKey 都可能出现在余额行上(链上 provider 报 `evm:1`,比特币那类报 slug),
-// 与其让服务层去猜哪种,不如两条都产 —— 反正是同一份名与图。
+// CoinGecko `PlatformUpstream`: one `/asset_platforms` call yields the whole chain table.
+// Each chain yields two keys (slug, plus `evm:<id>` when a numeric chainId exists) since balances report either form.
 export const fetchChainsEffect: Effect.Effect<
   PlatformMeta[],
   UpstreamError,
@@ -21,7 +18,7 @@ export const fetchChainsEffect: Effect.Effect<
     const out: PlatformMeta[] = [];
     for (const p of list) {
       if (!p?.id) continue;
-      // 上游没给名字就用它的 id —— 比留空强,而且服务层的兜底名也推不出更好的。
+      // Falls back to the id when upstream gives no name.
       const name = p.name?.trim() || p.id;
       const logo = p.image?.small ?? p.image?.thumb ?? undefined;
       out.push({ key: p.id.toLowerCase(), name, logo });
@@ -41,6 +38,6 @@ const make = Effect.map(
   }),
 );
 
-/** 接在给定的传输层上 —— 唯一的出口是 `coinGeckoUpstreamLayers`(./upstreams.ts),三个端口共用那一个 client。 */
+/** Mounted on a given transport; the only export path is `coinGeckoUpstreamLayers`. */
 export const platformUpstreamOn = (t: Layer.Layer<Needs>): Layer.Layer<PlatformUpstream> =>
   Layer.provide(Layer.effect(PlatformUpstream, make), t);
