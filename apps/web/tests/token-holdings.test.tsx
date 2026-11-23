@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Holding, HoldingSource } from "@/lib/core/portfolio";
 import { BalancePrivacyProvider } from "@/lib/hooks/use-balance-privacy";
 import { messages } from "@/lib/i18n/messages";
+import { tabPanel } from "./helpers/tabs";
 
 // 首页代币列表 + 代币详情抽屉:
 //   · 列表:少于 10 个持仓全展开;≥ 10 个时 < $1 的小额收进「N small holdings」,点开 / 收起
@@ -215,10 +216,7 @@ describe("代币详情抽屉", () => {
 const showPanel = (name: "Platforms" | "Accounts") => {
   const tab = screen.getByRole("tab", { name });
   fireEvent.click(tab);
-  const list = tab.closest("[role=tablist]") as HTMLElement;
-  return [...(list.parentElement?.children ?? [])].find(
-    (c) => c !== list && !c.hasAttribute("hidden"),
-  ) as HTMLElement;
+  return tabPanel(tab);
 };
 // 一行 = GroupRow:头像 / 主名 / 副名 / 数量 + 占比。
 const panelRows = (name: "Platforms" | "Accounts") =>

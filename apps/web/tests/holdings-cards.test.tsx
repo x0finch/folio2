@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { AccountHoldingsCards } from "@/components/holdings-cards";
 import type { OverviewBalance } from "@/lib/core/account-view";
 import { messages } from "@/lib/i18n/messages";
+import { tabLabel } from "./helpers/tabs";
 
 // 账户详情抽屉的持仓卡片列表。钉住「给这些余额 → 屏幕上出哪些分区、每区出哪些行」:
 // ① 空态分两种说法:真没快照 vs. 有余额但全是尘埃(后者以前漏成空白面板);
@@ -50,11 +51,10 @@ function mount(balances: OverviewBalance[], accountNote?: Note[]) {
       <AccountHoldingsCards balances={balances} accountNote={accountNote} />
     </IntlProvider>,
   );
-  const tabs = () =>
-    [...utils.container.querySelectorAll('[role="tab"]')].map((t) => t.textContent?.trim());
+  const tabs = () => [...utils.container.querySelectorAll('[role="tab"]')].map(tabLabel);
   const tab = (label: string) =>
     [...utils.container.querySelectorAll('[role="tab"]')].find(
-      (t) => t.textContent?.trim() === label,
+      (t) => tabLabel(t) === label,
     ) as HTMLElement;
   // 当前可见的文字(未激活的 tab 面板是 `hidden` 挂着的,不算)。
   const visibleText = () => {

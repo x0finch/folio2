@@ -4,12 +4,18 @@
 import { animate, motion, useInView, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EASE_OUT } from "@folio/ui/lib/ease";
+import { useLocale } from "@folio/ui/lib/i18n";
 import { cn } from "@folio/ui/lib/utils";
 
 export interface NumberTickerProps {
   value: number;
   /** Digits to pad to (left). */
   pad?: number;
+  /**
+   * Fraction digits to keep. The value is rounded to this many places before
+   * `format` runs (default 0, whole numbers).
+   */
+  decimals?: number;
   /** Per-digit roll duration in seconds. */
   duration?: number;
   /** Stagger between digits. */
@@ -22,8 +28,11 @@ export interface NumberTickerProps {
   blur?: boolean;
   className?: string;
   digitClassName?: string;
-  /** Insert locale group separators (commas). Server-component safe. */
-  locale?: boolean;
+  /**
+   * Insert locale group separators. `true` uses the `LocaleProvider` locale
+   * (or the runtime default without one); a BCP 47 tag such as `"de-DE"` pins it.
+   */
+  locale?: boolean | string;
   /** Custom formatter. Client-only — server components must use `locale` instead. */
   format?: (value: number) => string;
 }
@@ -34,6 +43,7 @@ const DIGITS = Array.from({ length: 10 }, (_, n) => n);
 export function NumberTicker({
   value,
   pad,
+  decimals = 0,
   duration = 0.9,
   stagger = 0.04,
   startOnView = true,
@@ -48,20 +58,26 @@ export function NumberTicker({
   const containerRef = useRef<HTMLSpanElement>(null);
   const inView = useInView(containerRef, { once: true, amount: 0.6 });
   const [armed, setArmed] = useState(!startOnView);
+  const { locale: contextLocale } = useLocale();
 
   useEffect(() => {
     if (startOnView && inView) setArmed(true);
   }, [startOnView, inView]);
 
   const text = useMemo(() => {
-    const rounded = Math.round(value);
+    const places = Math.max(0, Math.floor(decimals));
+    const factor = 10 ** places;
+    const rounded = Math.round(value * factor) / factor;
     const formatted = format
       ? format(rounded)
       : locale
-        ? rounded.toLocaleString()
-        : rounded.toString();
+        ? rounded.toLocaleString(typeof locale === "string" ? locale : contextLocale, {
+            minimumFractionDigits: places,
+            maximumFractionDigits: places,
+          })
+        : rounded.toFixed(places);
     return pad ? formatted.padStart(pad, "0") : formatted;
-  }, [value, pad, format, locale]);
+  }, [value, pad, decimals, format, locale, contextLocale]);
   const glyphs = useMemo(() => {
     const chars = text.split("");
     // Key by place value (position from the right): a changing digit keeps its
@@ -86,10 +102,10 @@ export function NumberTicker({
   return (
     <span
       ref={containerRef}
-      className={cn("inline-flex items-center tabular-nums", className)}
+      className={cn("inline-flex items-baseline tabular-nums", className)}
     >
       <span className="sr-only">{readableText}</span>
-      <span aria-hidden="true" className="inline-flex items-center">
+      <span aria-hidden="true" className="inline-flex items-baseline">
         {prefix ? <span>{prefix}</span> : null}
         {glyphs.map(({ char, id }, i) => {
           const isDigit = /\d/.test(char);
@@ -157,10 +173,21 @@ function Digit({
   }, [blur, delay, digit, duration, reduce]);
 
   return (
+    // The invisible in-flow digit gives the slot a real text baseline so it
+    // lines up with surrounding text; clip-path clips the rolling column
+    // without moving that baseline the way overflow: hidden would.
     <span
-      className={cn("relative inline-block overflow-hidden", className)}
-      style={{ height: `${DIGIT_HEIGHT_EM}em`, width: "1ch" }}
+      className={cn(
+        "relative inline-block text-center [clip-path:inset(0)]",
+        className,
+      )}
+      style={{
+        height: `${DIGIT_HEIGHT_EM}em`,
+        lineHeight: `${DIGIT_HEIGHT_EM}em`,
+        width: "1ch",
+      }}
     >
+      <span className="invisible">{digit}</span>
       <motion.span
         ref={columnRef}
         initial={{ y: 0 }}

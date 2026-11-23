@@ -243,7 +243,7 @@ describe("价值历史的窗口", () => {
     mount(row());
     await waitFor(() => expect(getAccountHistory).toHaveBeenCalled());
 
-    fireEvent.click(screen.getByText("7D"));
+    fireEvent.click(screen.getByRole("tab", { name: "7D" }));
 
     await waitFor(() =>
       expect(getAccountHistory).toHaveBeenLastCalledWith({
