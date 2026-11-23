@@ -8,20 +8,17 @@ import { usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
 import { CHART_FRAME } from "./chart-frame";
 
 const DAY_MS = 86_400_000;
-/** 图框高度。骨架必须同值,后到的图才不会把下面顶开。 */
+
 export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
   const t = useTranslations("Overview");
   const format = useFormatter();
   const { currency, rate } = usePreferCurrency();
   const locale = useLocale();
 
-  // app 级组合(原则 #11):组合 @folio/ui 的 ChartContainer + recharts 原语;配色走 shadcn
-  // 图表 token(--chart-1),不写死颜色。ChartContainer 据 config 注入 --color-total。
   const chartConfig = {
     total: { label: t("portfolioValue"), color: "var(--chart-1)" },
   } satisfies ChartConfig;
 
-  // 紧凑金额(轴):$13.1K,避免过宽裁切;tooltip 用完整精度。按偏好币种换算 + locale 感知。
   const axisUsd = (n: number) => formatMoney(n, { rate, locale, currency, compact: true });
   const fullUsd = (n: number) => formatMoney(n, { rate, locale, currency });
   const fullDateTime = (ms: number) =>
@@ -32,7 +29,6 @@ export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
       minute: "2-digit",
     });
 
-  // 自适应 X 轴刻度:整段跨度 < 2 天 → 「时:分」(同日多次同步可区分);更长 → 「月 日」。
   const spanMs = series.length > 1 ? series[series.length - 1].t - series[0].t : 0;
   const axisX = (ms: number) =>
     spanMs < 2 * DAY_MS
@@ -62,7 +58,7 @@ export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
           content={
             <ChartTooltipContent
               labelFormatter={(_, payload) => fullDateTime(Number(payload?.[0]?.payload?.t))}
-              // 遮 tooltip 里的净值(ADR 0052 把 tooltip 列进要遮的点);Y 轴刻度是图的尺度、不遮。
+              // Y-axis ticks are scale, not amounts, so only the tooltip value is hidden.
               formatter={(value) => <Sensitive>{fullUsd(Number(value))}</Sensitive>}
             />
           }
