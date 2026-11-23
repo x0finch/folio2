@@ -5,14 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "@/lib/i18n/messages";
 import { settingsKeys } from "@/lib/queries/keys";
 
-// 估值口径开关(#428 片 1)。这张卡以前自己存一份 `sourceFirst` + `busy`,失败时手动写回;
-// 现在显示值是从 mutation 推出来的:在飞时看这次点的 `variables`,落地后看服务端那份 `mode`。
 //
-// 换掉一段显式回滚代码,就得有东西盯着「失败会回到旧值」——否则哪天 isPending 的边界变了,
-// 开关会静悄悄停在用户点的那个状态上,而服务端根本没改。这三条测的就是这个。
 //
-// 路由模块在**模块加载期**跑 createFileRoute + import server fn(`cloudflare:workers` 在 jsdom 下
-// 解析不了),故先 mock 掉 server 那层再 import 组件 —— 与 settings-passkey-lock.test.tsx 同一套。
 const { updateValuationSettings, getValuationSettings } = vi.hoisted(() => ({
   updateValuationSettings: vi.fn(),
   getValuationSettings: vi.fn(),
@@ -57,8 +51,8 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("估值口径开关", () => {
-  it("勾上 → 写 source-first", async () => {
+describe("valuation basis switch", () => {
+  it("checked: writes source-first", async () => {
     updateValuationSettings.mockResolvedValue(undefined);
     const { box } = mount("self-first");
 
@@ -69,7 +63,7 @@ describe("估值口径开关", () => {
     );
   });
 
-  it("取消勾选 → 写 self-first", async () => {
+  it("unchecked: writes self-first", async () => {
     updateValuationSettings.mockResolvedValue(undefined);
     const { box } = mount("source-first");
 
@@ -80,8 +74,7 @@ describe("估值口径开关", () => {
     );
   });
 
-  // 这一条是整份文件的理由:回滚不再是一行 setState,而是「pending 结束后显示值自然落回 mode」。
-  it("写失败 → 勾选框回到原样,不停在用户点的那个状态", async () => {
+  it("write fails: checkbox reverts instead of staying at the clicked state", async () => {
     updateValuationSettings.mockRejectedValue(new Error("boom"));
     const { box } = mount("self-first");
     expect(isChecked(box())).toBe(false);
@@ -92,8 +85,7 @@ describe("估值口径开关", () => {
     await waitFor(() => expect(isChecked(box())).toBe(false));
   });
 
-  // 连点两次只发一个请求 —— 手搓 busy 时代这里是没有保护的。
-  it("在飞的时候开关是禁用的,连点两次只发一次", async () => {
+  it("switch is disabled while in flight; double click sends once", async () => {
     let release: (() => void) | undefined;
     updateValuationSettings.mockImplementation(
       () =>
@@ -108,7 +100,6 @@ describe("估值口径开关", () => {
     fireEvent.click(box());
     expect(updateValuationSettings).toHaveBeenCalledTimes(1);
 
-    // 收尾:放行后 pending 结束,显示值交回 `mode`(测里父层不换 prop,所以回到 unchecked)。
     release?.();
     await waitFor(() => expect(isChecked(box())).toBe(false));
   });
