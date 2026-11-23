@@ -25,28 +25,25 @@ import { currentSigner } from "./signer";
 import { RabbyChain, RabbyProtocol, RabbyToken } from "./types";
 
 export interface RabbyConfig {
-  // 基址,**当不透明整串用**。**这家没有 #264 那个需求**(代理覆盖是给被按地区拒的交易所用的),
-  // 但链映射缓存按它分桶,测试靠它天然隔离。
+  // Base URL, used as one opaque string. No proxy-override need here, but the chain-mapping cache is bucketed by it, so tests isolate naturally.
   readonly apiBase?: string;
 }
 
-// Rabby(实为 DeBank 后端)的请求层。**方法按上游端点组织,吐的是上游形状(DTO)** ——
-// `parseTokens` / `parseProtocols`(垃圾币过滤、负债腿取负、协议仓位展开)、`tokenRef` 命名、
-// dust 过滤,全在适配层(ADR 0036)。
-//
-// **不要任何 API key**(这是它取代 zerion 的主要收益),代价是请求必须签名 —— 见 sign.ts。
+// Request layer for Rabby (a DeBank backend): methods follow upstream endpoints and return upstream shapes (DTOs); `parseTokens` /
+// `parseProtocols` (junk filter, debt legs negated, protocol position expansion), `tokenRef` naming and dust filtering are in the adapter.
+// Needs no API key (its main gain over zerion), at the cost of signing every request: see sign.ts.
 export interface RabbyClientApi {
-  // 钱包代币,**只收地址、一次回全链**。注意上游没有 usd_value 字段,价值要 amount × price 自己算。
+  // Wallet tokens: address only, all chains in one response. Upstream has no usd_value field, so value is amount x price computed by us.
   readonly tokens: (
     address: string,
   ) => Effect.Effect<readonly RabbyToken[], UpstreamError, Outbound>;
-  // DeFi 仓位,同样一次回全链。
+  // DeFi positions, likewise all chains in one response.
   readonly protocols: (
     address: string,
   ) => Effect.Effect<readonly RabbyProtocol[], UpstreamError, Outbound>;
-  // slug → 数字 chainId(`community_id` 就是规范 EVM chainId)。**带 24h 缓存**。
+  // slug to numeric chainId (`community_id` is the canonical EVM chainId), with a 24h cache.
   readonly chainIds: Effect.Effect<Record<string, number>, UpstreamError, Outbound>;
-  // 最轻的端点。探活用。
+  // The lightest endpoint, for liveness probes.
   readonly totalBalance: (address: string) => Effect.Effect<unknown, UpstreamError, Outbound>;
 }
 
@@ -55,8 +52,8 @@ export class RabbyClient extends Context.Tag("clients/Rabby")<RabbyClient, Rabby
     Layer.scoped(RabbyClient, make(config));
 }
 
-// `community_id` 就是规范 EVM chainId(抽查 15 条全中:eth=1 bsc=56 arb=42161 …)。
-// **这个转换留在 client** —— 它是「读懂上游怎么说话」,不涉及任何 folio 概念。
+// `community_id` is the canonical EVM chainId (15 spot checks all matched: eth=1 bsc=56 arb=42161 …).
+// This conversion stays in the client: it is "reading how upstream speaks", with no folio concept.
 export function parseChainIds(chains: readonly RabbyChain[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const c of chains ?? []) {
@@ -70,16 +67,15 @@ export function make(config: RabbyConfig = {}): Effect.Effect<RabbyClientApi, ne
   return Effect.gen(function* () {
     const baseUrl = config.apiBase ?? RABBY_API_BASE;
 
-    // **limit=1:不许突发。** rabby 掐的是瞬时并发不是总量(见 constants.ts 那笔实测账)。
+    // limit=1: no bursts. Rabby throttles instantaneous concurrency, not total volume (see constants.ts).
     const limit = yield* makeRateLimit({
       key: RATE_LIMIT_KEY,
       limit: 1,
       interval: Duration.millis(1000 / MAX_REQUESTS_PER_SECOND),
     });
 
-    // 签名头。`params` 必须与真正发出去的 query 完全一致 —— 签的就是它(上游按 key 排序后哈希)。
-    // `options.query` 就是 `makeRequester` 稍后要拼进 URL 的那一份,所以这里天然一致,
-    // 不像 bybit / okx 要自己重建一遍 query 串。
+    // Signing header. `params` must equal the query actually sent (it is what is signed; upstream hashes it sorted by key). `options.query` is
+    // the very copy `makeRequester` appends to the URL, so it matches by construction, unlike bybit / okx which rebuild the query string.
     const signedHeaders = (
       path: string,
       options: RequestOptions | undefined,
@@ -102,7 +98,7 @@ export function make(config: RabbyConfig = {}): Effect.Effect<RabbyClientApi, ne
       name: "chains",
       scope: baseUrl,
       ttlMs: CHAINS_CACHE_TTL_MS,
-      // 200 + 空列表存进去会让整整一天都产不出规范标识 —— 当没拉到。
+      // A 200 with an empty list would block canonical identifiers for a whole day: treat as not fetched.
       isEmpty: (map) => Object.keys(map).length === 0,
       onEmpty: () =>
         new UpstreamUnavailableError({
@@ -126,7 +122,7 @@ export function make(config: RabbyConfig = {}): Effect.Effect<RabbyClientApi, ne
       ),
 
       totalBalance: (
-        address, // 只用来探活「这个地址通不通」,回什么形状不关心 —— 所以不声明形状。
+        address, // only probes whether this address works; the response shape does not matter, so none is declared.
       ) => request(TOTAL_BALANCE_PATH, Schema.Unknown, { query: { id: address } }),
     };
   });
