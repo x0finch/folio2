@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseClearinghouseState } from "../../../src/connectors/hyperliquid/parse";
+import { parseClearinghouseState } from "../../../src/balance/hyperliquid/parse";
 import fixture from "./fixtures/clearinghouse-state.json";
 import expected from "./fixtures/expected-balances.json";
 

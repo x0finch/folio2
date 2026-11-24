@@ -3,6 +3,7 @@
 // timeout; retrying here too would multiply attempts.
 
 export { coinstatsBalance } from "./balance/coinstats/upstream";
+export { hyperliquidBalance } from "./balance/hyperliquid/upstream";
 export { hmacSha256 } from "./runtime/crypto";
 export { HttpFailure, type HttpFailureKind, SigningFailure, summaryOf } from "./runtime/errors";
 export {

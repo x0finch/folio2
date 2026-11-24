@@ -17,7 +17,6 @@
     "@folio/blockbook-client": "workspace:*",
     "@folio/bybit-client": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
-    "@folio/hyperliquid-client": "workspace:*",
     "@folio/okx-client": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/rabby-client": "workspace:*",

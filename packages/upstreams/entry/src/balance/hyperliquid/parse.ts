@@ -1,17 +1,15 @@
 import type { PerpEquity, PerpPosition } from "@folio/connectors-basic";
-import type { ClearinghouseState } from "@folio/hyperliquid-client";
 import { tokenRef } from "@folio/oracle-ref";
-import type { z } from "zod";
+import type { ClearinghouseState } from "./api";
+import { ID } from "./constants";
 
 // Hyperliquid sends every numeric field as a string.
-export type Row = z.infer<typeof PerpEquity> | z.infer<typeof PerpPosition>;
+export type Row = PerpEquity | PerpPosition;
 
 const MARGIN_ASSET = "USDC";
 
-export const PROVIDER_ID = "hyperliquid";
-
 // `issued` passes the symbol through verbatim, so upper-casing is the producer's job.
-const venueTokenRef = (symbol: string) => tokenRef.issued(PROVIDER_ID, symbol.trim().toUpperCase());
+const venueTokenRef = (symbol: string) => tokenRef.issued(ID, symbol.trim().toUpperCase());
 
 const num = (s: string | null | undefined): number => Number(s ?? 0);
 
