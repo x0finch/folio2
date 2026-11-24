@@ -57,45 +57,38 @@ type Collector = ReturnType<typeof makeCollector>;
 
 const tracerOf = (c: Collector): Tracer.Tracer =>
   Tracer.make({
-    span(name, parent, context, links, startTime, kind) {
-      const depth = Option.match(parent, {
+    span(options) {
+      const depth = Option.match(options.parent, {
         onNone: () => 0,
         onSome: (p) => (c.depthOf.get(p) ?? 0) + 1,
       });
-      const row: Recorded = { name, depth, startNs: startTime, attributes: new Map() };
+      const row: Recorded = {
+        name: options.name,
+        depth,
+        startNs: options.startTime,
+        attributes: new Map(),
+      };
       c.rows.push(row);
-      const span: Tracer.Span = {
-        _tag: "Span",
-        spanId: `${c.rows.length}`,
-        traceId: "folio",
-        name,
-        parent,
-        context,
-        status: { _tag: "Started", startTime },
-        attributes: row.attributes,
-        links: [...links],
-        sampled: true,
-        kind,
-        attribute(key, value) {
-          row.attributes.set(key, value);
-        },
-        event() {},
-        addLinks() {},
-        end(endTime) {
-          (row as { endNs?: bigint }).endNs = endTime;
-          if (depth === 0) c.flush();
-        },
+      const span = new Tracer.NativeSpan(options);
+      const setAttribute = span.attribute.bind(span);
+      span.attribute = (key, value) => {
+        row.attributes.set(key, value);
+        setAttribute(key, value);
+      };
+      const finish = span.end.bind(span);
+      span.end = (endTime, exit) => {
+        (row as { endNs?: bigint }).endNs = endTime;
+        finish(endTime, exit);
+        if (depth === 0) c.flush();
       };
       c.depthOf.set(span, depth);
       return span;
     },
-    // No cross-process hop, so no context propagation.
-    context: (f) => f(),
   });
 
 /** `emit` is injectable only so unit tests can capture the tree. */
 export const spanTracerTo = (emit: (tree: string) => void): Layer.Layer<never> =>
-  Layer.unwrapEffect(Effect.sync(() => Layer.setTracer(tracerOf(makeCollector(emit)))));
+  Layer.unwrap(Effect.sync(() => Layer.succeed(Tracer.Tracer, tracerOf(makeCollector(emit)))));
 
 const spanTracer: Layer.Layer<never> = spanTracerTo((tree) =>
   log.debug("span tree\n{tree}", { tree }),

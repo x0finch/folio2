@@ -11,7 +11,7 @@ import type {
   Note,
   ProviderNeeds,
 } from "@folio/connectors-basic";
-import { Effect, Either, Fiber } from "effect";
+import { Effect, Fiber, Result } from "effect";
 import { z } from "zod";
 import { asConnector, bestEffortVerdict } from "../../upstream";
 import { PROVIDER_ID } from "./constants";
@@ -59,7 +59,7 @@ interface Wallet {
   readonly rows: (
     client: BinanceClientApi,
     creds: BinanceCreds,
-    prices: Fiber.RuntimeFiber<Record<string, number>, ConnectorError>,
+    prices: Fiber.Fiber<Record<string, number>, ConnectorError>,
   ) => Effect.Effect<BinanceRow[], ConnectorError, ProviderNeeds>;
 }
 
@@ -128,33 +128,33 @@ const walletFailureNote = (failed: readonly { name: string; auth: boolean }[]): 
 // futures-only key still syncs.
 export interface WalletOutcome {
   readonly wallet: { readonly name: string };
-  readonly result: Either.Either<BinanceRow[], ConnectorError>;
+  readonly result: Result.Result<BinanceRow[], ConnectorError>;
 }
 
 export const verdict = (
   outcomes: readonly WalletOutcome[],
-  priceTable: Either.Either<unknown, ConnectorError>,
-): Either.Either<{ balances: BinanceRow[]; note?: Note[] }, ConnectorError> => {
+  priceTable: Result.Result<unknown, ConnectorError>,
+): Result.Result<{ balances: BinanceRow[]; note?: Note[] }, ConnectorError> => {
   // Regardless of retryability: the dependent wallets got no data either way.
-  if (Either.isLeft(priceTable)) {
+  if (Result.isFailure(priceTable)) {
     const collateral = outcomes.some(
-      (o) => Either.isLeft(o.result) && o.result.left === priceTable.left,
+      (o) => Result.isFailure(o.result) && o.result.failure === priceTable.failure,
     );
-    if (collateral) return Either.left(priceTable.left);
+    if (collateral) return Result.fail(priceTable.failure);
   }
 
   const verdicted = bestEffortVerdict(outcomes);
-  if (Either.isLeft(verdicted)) return Either.left(verdicted.left);
-  const failed = verdicted.right;
+  if (Result.isFailure(verdicted)) return Result.fail(verdicted.failure);
+  const failed = verdicted.success;
 
-  return Either.right({
-    balances: outcomes.flatMap((o) => (Either.isRight(o.result) ? o.result.right : [])),
+  return Result.succeed({
+    balances: outcomes.flatMap((o) => (Result.isSuccess(o.result) ? o.result.success : [])),
     note: failed.length
       ? [
           walletFailureNote(
             failed.map((o) => ({
               name: o.wallet.name,
-              auth: Either.isLeft(o.result) && o.result.left._tag === "ConnectorAuthError",
+              auth: Result.isFailure(o.result) && o.result.failure._tag === "ConnectorAuthError",
             })),
           ),
         ]
@@ -201,13 +201,13 @@ export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountC
         const creds = ctx.account.creds;
 
         // Forked first: the ticker is rate-gated by egress IP and must not hold up signed calls.
-        const prices = yield* Effect.fork(asConnector(client.tickerPrices));
+        const prices = yield* Effect.forkChild(asConnector(client.tickerPrices));
 
         // `either` + `all` rather than `partition`: each outcome keeps its wallet, whose name the
         // failure note needs.
         const outcomes = yield* Effect.all(
           WALLETS.map((wallet) =>
-            Effect.either(wallet.rows(client, creds, prices)).pipe(
+            Effect.result(wallet.rows(client, creds, prices)).pipe(
               Effect.map((result) => ({ wallet, result })),
             ),
           ),
@@ -215,9 +215,9 @@ export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountC
         );
 
         // Usually already complete; otherwise bounded by sync's per-call timeout.
-        const priceTable = yield* Effect.either(Fiber.join(prices));
+        const priceTable = yield* Effect.result(Fiber.join(prices));
 
-        return yield* verdict(outcomes, priceTable);
+        return yield* Effect.fromResult(verdict(outcomes, priceTable));
       }),
     ),
 

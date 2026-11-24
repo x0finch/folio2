@@ -5,7 +5,8 @@ import {
   jsonResponse as json,
   runClient,
 } from "@folio/client-core/testing";
-import { Duration, Effect, Fiber, Option, TestClock } from "effect";
+import { Duration, Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import {
   CoinstatsClient,
@@ -120,12 +121,12 @@ describe("rate limiting: both endpoints pass the gate", () => {
       stub(() => json(solanaFixture)).fn,
       Effect.gen(function* () {
         const client = yield* make({});
-        const fiber = yield* Effect.fork(use(client));
+        const fiber = yield* Effect.forkChild(use(client));
         yield* TestClock.adjust(Duration.millis(ms));
         // The fake egress is a `Promise.resolve`, which TestClock does not govern: yield a few microtask turns to drain it.
         // The side held by the gate waits on the virtual clock and never completes however many turns, so both sides stay accurate.
-        yield* Effect.repeatN(Effect.yieldNow(), 50);
-        return Option.isSome(yield* Fiber.poll(fiber));
+        yield* Effect.repeat(Effect.yieldNow, { times: 50 });
+        return (yield* Effect.sync(() => fiber.pollUnsafe())) !== undefined;
       }),
     );
 

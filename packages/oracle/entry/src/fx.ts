@@ -11,7 +11,7 @@ import {
 } from "@folio/oracle-basic";
 import { FxUpstream, TokenUpstream } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
-import { Clock, Effect, Option, Schema } from "effect";
+import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import { type DailyFillReport, fillDaily } from "./daily-fill";
 import { degradeTo } from "./tokens/swr";
 
@@ -108,8 +108,8 @@ export function deriveFiatDaily(
 }
 
 // Service shape is derived from the `effect` return value; `.Default` is its layer.
-export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
-  effect: Effect.gen(function* () {
+export class FxService extends Context.Service<FxService>()("oracle/FxService", {
+  make: Effect.gen(function* () {
     const { cache, tokenPrices: prices } = yield* DatabaseForOracle;
     const upstream = yield* FxUpstream;
     // Ports used only by the historical half (`rateSeries` / `fillDaily`): daily rates in `token_daily_prices`,
@@ -230,4 +230,6 @@ export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
       },
     };
   }),
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}

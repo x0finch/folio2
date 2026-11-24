@@ -22,14 +22,12 @@ const seed = (symbol: string, name?: string, providerLogo?: string) => ({
 });
 
 // Candidate source for mint's symbol tier (the real one filters warm rows). Counts calls: "did it reach the symbol tier" is itself asserted.
-interface RecordingCandidates extends CandidateSource {
-  asked: string[];
-}
+type RecordingCandidates = CandidateSource["Service"] & { asked: string[] };
 const candidatesOf = (map: Record<string, TokenCandidate[]>): RecordingCandidates => {
   const asked: string[] = [];
-  // `new CandidateSource(…)`: the service is an `Effect.Service` class, so the fake uses its own constructor like production.
+  // `CandidateSource.of(…)` builds the fake the same way production builds the service.
   return Object.assign(
-    new CandidateSource({
+    CandidateSource.of({
       bySymbol: (symbol) =>
         Effect.sync(() => {
           asked.push(symbol);

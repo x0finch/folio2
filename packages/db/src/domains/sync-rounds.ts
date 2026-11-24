@@ -106,7 +106,7 @@ const decode = (row: { v: string; expiresAt: number }): SyncRoundRecord | undefi
   }
 };
 
-export const makeSyncRoundStore = (client: DbClient, userId: string) => {
+export const makeSyncRoundStore = (client: DbClient["Service"], userId: string) => {
   const mine = (portfolioId: string) =>
     and(eq(userCache.userId, userId), eq(userCache.k, keyOf(portfolioId)));
 
@@ -122,7 +122,7 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
           .where(mine(portfolioId)),
       );
       const row = rows[0];
-      return Option.fromNullable(row ? decode(row) : undefined);
+      return Option.fromNullishOr(row ? decode(row) : undefined);
     });
 
   return {
@@ -232,7 +232,7 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
             )
             .returning({ v: userCache.v, expiresAt: userCache.expiresAt }),
         );
-        return Option.fromNullable(rows[0] ? decode(rows[0]) : undefined);
+        return Option.fromNullishOr(rows[0] ? decode(rows[0]) : undefined);
       }),
 
     /**
@@ -300,7 +300,7 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
             )
             .returning({ v: userCache.v, expiresAt: userCache.expiresAt }),
         );
-        return Option.fromNullable(rows[0] ? decode(rows[0]) : undefined);
+        return Option.fromNullishOr(rows[0] ? decode(rows[0]) : undefined);
       }),
   };
 };

@@ -1,5 +1,5 @@
-import { HttpClient, HttpClientResponse } from "@effect/platform";
 import { Effect, Exit, Fiber, Layer, Schema, Tracer } from "effect";
+import { HttpClient, HttpClientResponse } from "effect/http";
 import { describe, expect, it } from "vitest";
 import { SigningFailure } from "../src/errors";
 import { makeRequester } from "../src/http";
@@ -240,33 +240,19 @@ describe("red line: what may be recorded", () => {
   const captureSpans = () => {
     const spans: { name: string; attributes: Map<string, unknown> }[] = [];
     const tracer = Tracer.make({
-      span: (name, parent, context, links, startTime, kind) => {
+      span: (options) => {
+        const span = new Tracer.NativeSpan(options);
         const attributes = new Map<string, unknown>();
-        spans.push({ name, attributes });
-        const span: Tracer.Span = {
-          _tag: "Span",
-          name,
-          spanId: `span-${spans.length}`,
-          traceId: "trace",
-          parent,
-          context,
-          links,
-          status: { _tag: "Started", startTime },
-          attributes,
-          sampled: true,
-          kind,
-          end: () => {},
-          attribute: (key, value) => {
-            attributes.set(key, value);
-          },
-          event: () => {},
-          addLinks: () => {},
+        spans.push({ name: options.name, attributes });
+        const record = span.attribute.bind(span);
+        span.attribute = (key, value) => {
+          attributes.set(key, value);
+          record(key, value);
         };
         return span;
       },
-      context: (f) => f(),
     });
-    return { spans, layer: Layer.setTracer(tracer) };
+    return { spans, layer: Layer.succeed(Tracer.Tracer, tracer) };
   };
 
   const SECRET_QUERY = { address: "0xdeadbeef", signature: "s3cr3t-signature" };
@@ -302,7 +288,7 @@ describe("red line: what may be recorded", () => {
     );
     clean(err);
     // Still says which kind and why — that's what debugging needs.
-    expect(String(err.cause)).toContain("RequestError");
+    expect(String(err.cause)).toContain("TransportError");
     expect(String(err.cause)).toContain("ENOTFOUND");
   });
 
@@ -369,14 +355,15 @@ describe("interruption aborts the underlying request", () => {
     });
 
     const exit = await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(req()("/v1/slow", ANY));
+      const fiber = yield* Effect.forkChild(req()("/v1/slow", ANY));
       // Let the request go out (stub records the signal), then interrupt.
-      yield* Effect.yieldNow();
-      yield* Effect.yieldNow();
-      return yield* Fiber.interrupt(fiber);
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      yield* Fiber.interrupt(fiber);
+      return yield* Fiber.await(fiber);
     }).pipe(Effect.provideService(HttpClient.HttpClient, client), Effect.runPromise);
 
-    expect(Exit.isInterrupted(exit)).toBe(true);
+    expect(Exit.hasInterrupts(exit)).toBe(true);
     expect(signal).toBeDefined();
     expect(signal?.aborted).toBe(true);
   });

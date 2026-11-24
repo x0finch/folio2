@@ -112,7 +112,7 @@ function createSeedCollector(): SeedCollector {
 const asDep =
   (step: Parameters<typeof depError>[0]) =>
   <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E | SyncDepError> =>
-    effect.pipe(Effect.catchAllDefect((cause) => Effect.fail(depError(step, cause))));
+    effect.pipe(Effect.catchDefect((cause) => Effect.fail(depError(step, cause))));
 
 /** `only`: restrict the round to these accounts (the queue consumer's single account). */
 interface SyncScope {

@@ -1,11 +1,11 @@
 import { Database } from "@folio/db";
-import { Effect } from "effect";
 import { z } from "zod";
 import { accountIdsInView, accountsInView } from "@/lib/core/accounts-in-view";
 import { type HistoryRange, type PortfolioHistoryRaw, rangeSince } from "@/lib/core/history";
 import { historyResolution } from "@/lib/core/history-range";
 import { isManual } from "@/lib/core/manual";
 import { loadManualHistoryRows } from "@/lib/server/manual/store";
+import { serverFn } from "@/lib/server/server-fn";
 import { scopedMembership } from "./scope";
 
 export const PortfolioHistoryInput = z.object({
@@ -13,7 +13,7 @@ export const PortfolioHistoryInput = z.object({
   range: z.enum(["7d", "30d", "1y", "all"]).default("30d"),
 });
 
-export const handleGetPortfolioHistory = Effect.fn("getPortfolioHistory")(function* (data: {
+export const handleGetPortfolioHistory = serverFn("getPortfolioHistory")(function* (data: {
   portfolioId?: string;
   range?: HistoryRange;
 }) {

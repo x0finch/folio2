@@ -57,7 +57,7 @@ export interface ManualBatchPlan {
 
 // Legacy activity rows without a tokenId fail as `NotFound` too: either way the caller can't edit it.
 const assertActivityOwned = (
-  client: DbClient,
+  client: DbClient["Service"],
   userId: string,
   activityId: string,
 ): Effect.Effect<{ tokenId: string; accountId: string }, NotFound> =>
@@ -78,7 +78,7 @@ const assertActivityOwned = (
       }),
     );
 
-export const makeManualStore = (client: DbClient, userId: string) => {
+export const makeManualStore = (client: DbClient["Service"], userId: string) => {
   return {
     // Ordered by first activity, i.e. when the holding started.
     listHoldings: (accountId: string, namer: string): Effect.Effect<ManualHolding[], NotFound> =>

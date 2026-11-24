@@ -17,7 +17,7 @@ const bestEffort = <A>(
   message: string,
 ): Effect.Effect<A, never, SyncServices> =>
   effect.pipe(
-    Effect.catchAll((e) =>
+    Effect.catch((e) =>
       Effect.logWarning(message).pipe(Effect.annotateLogs("error", e.message), Effect.as(fallback)),
     ),
   );
@@ -98,7 +98,7 @@ export const syncAccount = (
     }
     return yield* finish(account, outcome);
   }).pipe(
-    Effect.catchAll((err) =>
+    Effect.catch((err) =>
       Effect.logError("account sync failed").pipe(
         Effect.annotateLogs({
           reason: err._tag,

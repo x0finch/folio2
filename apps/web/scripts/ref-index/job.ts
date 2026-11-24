@@ -28,8 +28,8 @@ export async function refreshRefIndex(
     const result = yield* svc.warm();
     return { lastRefreshedAt: Option.getOrNull(before), ...result };
   });
-  const services = GlobalRefIndexService.Default.pipe(
-    Layer.provide(Layer.merge(GlobalDatabase.Default, coinGeckoUpstreamLayers(coingecko).token)),
+  const services = GlobalRefIndexService.layer.pipe(
+    Layer.provide(Layer.merge(GlobalDatabase.layer, coinGeckoUpstreamLayers(coingecko).token)),
   );
   const exit = await Effect.runPromiseExit(
     program.pipe(provideRemoteDbClient(sql), Effect.mapError(toError), Effect.provide(services)),

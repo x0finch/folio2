@@ -5,7 +5,8 @@ import {
   PRICE_TTL_MS,
   type TokenInfo,
 } from "@folio/oracle-basic";
-import { Duration, Effect, Option, TestClock } from "effect";
+import { Duration, Effect, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { TokenService } from "../src/tokens";
 import { harness, now0, upstreamDown } from "./fakes";
@@ -664,8 +665,8 @@ describe("showcase and candidates", () => {
   it('search failure: the error goes to the caller, not treated as "no results"', async () => {
     const h = setup();
     h.upstream.fail = upstreamDown();
-    const result = await h.run(Effect.either(Effect.flatMap(TokenService, (t) => t.search("bit"))));
-    expect(result._tag).toBe("Left");
+    const result = await h.run(Effect.result(Effect.flatMap(TokenService, (t) => t.search("bit"))));
+    expect(result._tag).toBe("Failure");
   });
 });
 

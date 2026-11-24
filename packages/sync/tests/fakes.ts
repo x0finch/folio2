@@ -17,9 +17,9 @@ import type { FetchOutcome, SyncLogger } from "../src/types";
 export interface FakeOptions {
   accounts?: readonly AccountSafe[] | (() => Promise<readonly AccountSafe[]>);
   rawCreds?: readonly AccountRawCreds[];
-  fetch?: BalanceSource["Type"]["fetch"];
-  mint?: TokenOracle["Type"]["mint"];
-  revalue?: TokenOracle["Type"]["revalue"];
+  fetch?: BalanceSource["Service"]["fetch"];
+  mint?: TokenOracle["Service"]["mint"];
+  revalue?: TokenOracle["Service"]["revalue"];
   log?: SyncLogger;
 }
 
@@ -36,7 +36,7 @@ export const fakeServices = (options: FakeOptions = {}): Fakes => {
   const layer = Layer.mergeAll(
     FolioHttpClient,
     // Silent logger by default, so Effect's console logger stays out of test output.
-    options.log ? syncLoggerLayer(options.log) : Logger.replace(Logger.defaultLogger, Logger.none),
+    options.log ? syncLoggerLayer(options.log) : Logger.layer([]),
     Layer.succeed(AccountStore, {
       // Failures must map to `SyncDepError`, not defects: `Sweep.userTally` catchAll only handles typed failures.
       list: () =>

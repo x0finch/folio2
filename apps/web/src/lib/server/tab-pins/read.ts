@@ -1,8 +1,8 @@
 import { Database } from "@folio/db";
-import { Effect } from "effect";
 import { connectorLabelFallback, platformLogoUrl } from "@/lib/core/logo";
 import type { PortfolioTabPinsData } from "@/lib/core/portfolio";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
+import { serverFn } from "@/lib/server/server-fn";
 
 // Only pin rows + connector display meta; accounts, snapshots and tag names come from other caches.
 
@@ -27,7 +27,7 @@ const connectorMetaEntries = (
   return out;
 };
 
-export const handleGetPortfolioTabPins = Effect.fn("getPortfolioTabPins")(function* () {
+export const handleGetPortfolioTabPins = serverFn("getPortfolioTabPins")(function* () {
   const pins = yield* (yield* Database).tabPins.list();
   return {
     pins,

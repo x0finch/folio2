@@ -5,7 +5,8 @@ import {
   jsonResponse as json,
   runClient,
 } from "@folio/client-core/testing";
-import { Duration, Effect, Fiber, Option, TestClock } from "effect";
+import { Duration, Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import {
   make,
@@ -225,10 +226,10 @@ describe("rate limiting: limit=1, no bursts", () => {
       byPath().fn,
       Effect.gen(function* () {
         const client = yield* make({ apiBase: freshBase() });
-        const fiber = yield* Effect.fork(use(client));
+        const fiber = yield* Effect.forkChild(use(client));
         yield* TestClock.adjust(Duration.millis(ms));
-        yield* Effect.repeatN(Effect.yieldNow(), 50);
-        return Option.isSome(yield* Fiber.poll(fiber));
+        yield* Effect.repeat(Effect.yieldNow, { times: 50 });
+        return (yield* Effect.sync(() => fiber.pollUnsafe())) !== undefined;
       }).pipe(Effect.provideService(RabbySigner, fakeSigner().sign)),
     );
 

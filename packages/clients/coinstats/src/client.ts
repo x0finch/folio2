@@ -40,12 +40,11 @@ export interface CoinstatsClientApi {
   readonly blockchains: (apiKey: string) => Effect.Effect<unknown, UpstreamError, Outbound>;
 }
 
-export class CoinstatsClient extends Context.Tag("clients/Coinstats")<
-  CoinstatsClient,
-  CoinstatsClientApi
->() {
+export class CoinstatsClient extends Context.Service<CoinstatsClient, CoinstatsClientApi>()(
+  "clients/Coinstats",
+) {
   static readonly layer = (config: CoinstatsConfig = {}): Layer.Layer<CoinstatsClient> =>
-    Layer.scoped(CoinstatsClient, make(config));
+    Layer.effect(CoinstatsClient, make(config));
 }
 
 export function make(

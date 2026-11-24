@@ -42,10 +42,9 @@ export interface BlockbookClientApi {
   readonly address: (address: string) => Effect.Effect<AddressResponse, UpstreamError, Outbound>;
 }
 
-export class BlockbookClient extends Context.Tag("clients/Blockbook")<
-  BlockbookClient,
-  BlockbookClientApi
->() {
+export class BlockbookClient extends Context.Service<BlockbookClient, BlockbookClientApi>()(
+  "clients/Blockbook",
+) {
   static readonly layer = (config: BlockbookConfig = {}): Layer.Layer<BlockbookClient> =>
     Layer.sync(BlockbookClient, () => make(config));
 }
@@ -84,7 +83,7 @@ export function make(config: BlockbookConfig = {}): BlockbookClientApi {
   // Recursion rather than `Effect.firstSuccessOf`, which keeps trying after any failure, while some errors must stop at once.
   const tryBases = <A, I>(
     path: string,
-    schema: Schema.Schema<A, I>,
+    schema: Schema.Codec<A, I>,
     query: Record<string, string> | undefined,
     from: number,
     left: number,
@@ -92,7 +91,7 @@ export function make(config: BlockbookConfig = {}): BlockbookClientApi {
     Effect.suspend(() => {
       const at = requesters[from % requesters.length];
       return at(path, schema, { query }).pipe(
-        Effect.catchAll((error) =>
+        Effect.catch((error) =>
           left > 1 && shouldTryNextBase(error)
             ? tryBases(path, schema, query, from + 1, left - 1)
             : Effect.fail(error),
@@ -102,7 +101,7 @@ export function make(config: BlockbookConfig = {}): BlockbookClientApi {
 
   const request = <A, I>(
     path: string,
-    schema: Schema.Schema<A, I>,
+    schema: Schema.Codec<A, I>,
     query?: Record<string, string>,
   ): Effect.Effect<A, UpstreamError, Outbound> =>
     Effect.suspend(() => {

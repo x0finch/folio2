@@ -9,6 +9,7 @@ import { z } from "zod";
 import { GAIN_WINDOW_MS } from "@/lib/core/portfolio";
 import type { SnapshotsWire } from "@/lib/core/snapshot-wire";
 import { injectManualPrevSnapshots, injectManualSnapshots } from "@/lib/server/manual/store";
+import { serverFn } from "@/lib/server/server-fn";
 import { scopedMembership } from "./scope";
 
 // Per-account snapshots for a portfolio at a point in time. Raw D1 rows only (no enrich, no parsing):
@@ -41,7 +42,7 @@ const manualToWire = (byAccount: ReadonlyMap<string, SnapshotWithBalances>): Sna
   return { snapshots, balances };
 };
 
-export const handleGetSnapshots = Effect.fn("getSnapshots")(function* (
+export const handleGetSnapshots = serverFn("getSnapshots")(function* (
   data: z.infer<typeof SnapshotsInput>,
 ) {
   const db = yield* Database;

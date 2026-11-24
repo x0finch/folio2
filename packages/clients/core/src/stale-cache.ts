@@ -1,4 +1,4 @@
-import { Clock, Effect } from "effect";
+import { Clock, Effect, Semaphore } from "effect";
 import type { UpstreamError } from "./upstream-error";
 
 // TTL cache for near-static data (chain slug → chainId) that falls back to the stale value when a
@@ -40,7 +40,7 @@ export function staleTolerantCache<A>(
 
 function makeCache<A>(options: StaleTolerantCacheOptions<A>): StaleTolerantCache<A> {
   // Serialized so concurrent misses share one fetch.
-  const lock = Effect.unsafeMakeSemaphore(1);
+  const lock = Semaphore.makeUnsafe(1);
   const isEmpty = options.isEmpty ?? (() => false);
   let value: A | undefined;
   let fetchedAt = Number.NEGATIVE_INFINITY;
@@ -52,9 +52,9 @@ function makeCache<A>(options: StaleTolerantCacheOptions<A>): StaleTolerantCache
           const now = yield* Clock.currentTimeMillis;
           if (value !== undefined && now - fetchedAt < options.ttlMs) return value;
 
-          const fresh = yield* Effect.either(fetch);
-          if (fresh._tag === "Right" && !isEmpty(fresh.right)) {
-            value = fresh.right;
+          const fresh = yield* Effect.result(fetch);
+          if (fresh._tag === "Success" && !isEmpty(fresh.success)) {
+            value = fresh.success;
             fetchedAt = now;
             return value;
           }
@@ -62,7 +62,7 @@ function makeCache<A>(options: StaleTolerantCacheOptions<A>): StaleTolerantCache
           if (value !== undefined) return value;
 
           // No value at all: surface the fetch error (keeps 429/401 semantics), else `onEmpty`.
-          return yield* Effect.fail(fresh._tag === "Left" ? fresh.left : options.onEmpty());
+          return yield* Effect.fail(fresh._tag === "Failure" ? fresh.failure : options.onEmpty());
         }),
       ),
   };

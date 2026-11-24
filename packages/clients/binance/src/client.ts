@@ -75,14 +75,13 @@ export interface BinanceClientApi {
   ) => Effect.Effect<EarnLockedRow[], UpstreamError, Outbound>;
 }
 
-export class BinanceClient extends Context.Tag("clients/Binance")<
-  BinanceClient,
-  BinanceClientApi
->() {
+export class BinanceClient extends Context.Service<BinanceClient, BinanceClientApi>()(
+  "clients/Binance",
+) {
   // Bases can differ per account, so the layer takes config. Rebuilding it doesn't reset quota:
   // the `isolated` cursor is module-level.
   static readonly layer = (config: BinanceConfig = {}): Layer.Layer<BinanceClient> =>
-    Layer.scoped(BinanceClient, make(config));
+    Layer.effect(BinanceClient, make(config));
 }
 
 export function make(
@@ -120,7 +119,7 @@ export function make(
     const signedGet = <A, I>(
       requester: Requester,
       path: string,
-      schema: Schema.Schema<A, I>,
+      schema: Schema.Codec<A, I>,
       params: Record<string, string | number>,
       creds: BinanceCreds,
       method: "GET" | "POST" = "GET", // funding is a signed POST; params still go in the query
@@ -152,7 +151,7 @@ export function make(
     // Page until a short page or `total` is reached; the first page alone holds only 10 rows.
     const earnRows = <Row, I>(
       path: string,
-      row: Schema.Schema<Row, I>,
+      row: Schema.Codec<Row, I>,
       creds: BinanceCreds,
     ): Effect.Effect<Row[], UpstreamError, Outbound> =>
       Effect.gen(function* () {

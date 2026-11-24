@@ -39,7 +39,7 @@ export interface ImportTokenInput {
 
 // Merge-style import: find-or-create by natural content keys, so re-importing or merging files is
 // idempotent. Always mints new ids (ids are global PKs; dedup uses per-user natural keys).
-export const makeTransferStore = (client: DbClient, userId: string) => {
+export const makeTransferStore = (client: DbClient["Service"], userId: string) => {
   const snapshotStore = makeSnapshotStore(client, userId);
   const manualStore = makeManualStore(client, userId);
 

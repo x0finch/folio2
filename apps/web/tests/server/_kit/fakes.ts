@@ -6,8 +6,8 @@ import type { InputSpec } from "@/lib/server/creds";
 // upstream flake) are test inputs, not live calls. Field specs stay real by default: they drive which
 // fields get encrypted.
 
-export const realRegistry = (): Promise<ConnectorRegistry> =>
-  Effect.runPromise(Effect.provide(ConnectorRegistry, ConnectorRegistry.Default));
+export const realRegistry = (): Promise<ConnectorRegistry["Service"]> =>
+  Effect.runPromise(Effect.provide(ConnectorRegistry, ConnectorRegistry.layer));
 
 export interface FakeRegistryOptions {
   /** Result of the probe/shape check. Defaults to pass. */
@@ -23,7 +23,10 @@ export interface FakeRegistryOptions {
 /** Records each `validate` input: on the probe-failure path nothing is persisted to inspect. */
 export const fakeRegistry = async (
   options: FakeRegistryOptions = {},
-): Promise<{ registry: ConnectorRegistry; validated: Array<Record<string, string>> }> => {
+): Promise<{
+  registry: ConnectorRegistry["Service"];
+  validated: Array<Record<string, string>>;
+}> => {
   const real = await realRegistry();
   const validated: Array<Record<string, string>> = [];
   const registry = {
@@ -39,7 +42,7 @@ export const fakeRegistry = async (
         ? options.validate(connectorId, values, opts)
         : (Effect.void as Effect.Effect<void, Error>);
     },
-  } as ConnectorRegistry;
+  } as ConnectorRegistry["Service"];
   return { registry, validated };
 };
 

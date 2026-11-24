@@ -97,24 +97,24 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
           [
             Effect.all(
               BUCKETS.map((bucket) =>
-                Effect.either(bucket.rows(client, creds)).pipe(
+                Effect.result(bucket.rows(client, creds)).pipe(
                   Effect.map((result) => ({ bucket, result })),
                 ),
               ),
               { concurrency: "unbounded" },
             ),
             // Soft signals: failure just drops their notes this round.
-            Effect.either(asConnector(client.assetValuation(creds))),
-            Effect.either(asConnector(client.positions(creds))),
+            Effect.result(asConnector(client.assetValuation(creds))),
+            Effect.result(asConnector(client.positions(creds))),
           ],
           { concurrency: "unbounded" },
         );
 
-        const failed = yield* bestEffortVerdict(buckets);
+        const failed = yield* Effect.fromResult(bestEffortVerdict(buckets));
 
         const bodyOf = <T>(bucket: Bucket): T | undefined => {
           const hit = buckets.find((b) => b.bucket === bucket);
-          return hit?.result._tag === "Right" ? (hit.result.right as T) : undefined;
+          return hit?.result._tag === "Success" ? (hit.result.success as T) : undefined;
         };
 
         const details: OkxDetail[] =
@@ -138,28 +138,28 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
             bucketFailureNote(
               failed.map((f) => ({
                 name: f.bucket.name,
-                auth: f.result._tag === "Left" && f.result.left._tag === "ConnectorAuthError",
+                auth: f.result._tag === "Failure" && f.result.failure._tag === "ConnectorAuthError",
               })),
             ),
           );
         }
 
-        if (valuation._tag === "Right") {
+        if (valuation._tag === "Success") {
           // The residual is only meaningful if both earn buckets were fetched.
           const earnComplete = !failed.some((f) => f.bucket === SAVINGS || f.bucket === STAKING);
           if (earnComplete) {
-            const earnBucketUsd = Number(valuation.right.data?.[0]?.details?.earn ?? 0);
+            const earnBucketUsd = Number(valuation.success.data?.[0]?.details?.earn ?? 0);
             if (earnBucketUsd > 0) {
               const row = earnResidualRow(earnBucketUsd, earnItems, hint);
               if (row) balances.push(row);
             }
           }
-          const cn = classicNote(valuation.right);
+          const cn = classicNote(valuation.success);
           if (cn) notes.push(cn);
         }
 
-        if (positions._tag === "Right") {
-          const pn = perpNote(positions.right);
+        if (positions._tag === "Success") {
+          const pn = perpNote(positions.success);
           if (pn) notes.push(pn);
         }
 

@@ -10,8 +10,8 @@ import { createImporter, type ImportCounts, type ImportDeps, parseImportLine } f
 
 // `request` is the request's connection and user; `ImportDeps`' `R` is `never`, so db ops get it provided here.
 const depsFrom = (
-  transfer: Database["transfer"],
-  specs: ConnectorRegistry["specs"],
+  transfer: Database["Service"]["transfer"],
+  specs: ConnectorRegistry["Service"]["specs"],
   request: Context.Context<DbRequest>,
 ): ImportDeps => ({
   categorize: (connectorId) => {
@@ -74,8 +74,8 @@ export const importData = Effect.fn("importData")(function* (
     return importer.counts;
   }).pipe(
     Effect.map((counts) => ({ kind: "ok", counts }) as const),
-    Effect.catchAll((e) => Effect.succeed({ kind: "rejected", message: e.message } as const)),
-    Effect.catchAllDefect((d) =>
+    Effect.catch((e) => Effect.succeed({ kind: "rejected", message: e.message } as const)),
+    Effect.catchDefect((d) =>
       Effect.succeed({
         kind: "failed",
         message: d instanceof Error ? d.message : String(d),

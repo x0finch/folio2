@@ -53,12 +53,14 @@ function recordingD1(db: D1Database, log: Recorded[]): D1Database {
 
 // Runs `pick(snapshots)` once as USER and returns the first statement it emits (the snapshot one; the second fetches balances by id).
 async function firstStatementOf(
-  pick: (s: Database["snapshots"]) => ReturnType<Database["snapshots"]["latest"]>,
+  pick: (
+    s: Database["Service"]["snapshots"],
+  ) => ReturnType<Database["Service"]["snapshots"]["latest"]>,
 ): Promise<Recorded> {
   const log: Recorded[] = [];
   await Effect.runPromise(
     Effect.flatMap(Database, (db) => pick(db.snapshots)).pipe(
-      Effect.provide(Database.Default),
+      Effect.provide(Database.layer),
       provideCurrentUser(USER),
       provideDbClient({ DB: recordingD1(env.DB, log) }),
     ),
@@ -144,7 +146,7 @@ describe("snapshots rows_read does not grow with total snapshots", () => {
     // Behaviour unchanged: one per account, the latest one (index 599).
     const rows = await Effect.runPromise(
       Effect.flatMap(Database, (db) => db.snapshots.latest()).pipe(
-        Effect.provide(Database.Default),
+        Effect.provide(Database.layer),
         provideCurrentUser(USER),
         provideDbClient(env),
       ),

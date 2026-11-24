@@ -3,7 +3,7 @@ import { DatabaseForOracle } from "@folio/db";
 import type { PlatformMeta } from "@folio/oracle-basic";
 import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS } from "@folio/oracle-basic";
 import { PlatformUpstream } from "@folio/oracle-basic/ports";
-import { Effect, Option, Schema } from "effect";
+import { Context, Effect, Layer, Option, Schema } from "effect";
 import { degradeTo } from "./tokens/swr";
 
 // Platform (chain + venue) names and logos. `resolve` reads (zero network, soft expiry); `warm` writes (fetch only when expired).
@@ -61,8 +61,8 @@ export const writePlatforms = (
   );
 
 // Service shape is derived from the `effect` return value; `.Default` is its layer.
-export class PlatformService extends Effect.Service<PlatformService>()("oracle/PlatformService", {
-  effect: Effect.gen(function* () {
+export class PlatformService extends Context.Service<PlatformService>()("oracle/PlatformService", {
+  make: Effect.gen(function* () {
     const { cache } = yield* DatabaseForOracle;
     const upstream = yield* PlatformUpstream;
 
@@ -127,4 +127,6 @@ export class PlatformService extends Effect.Service<PlatformService>()("oracle/P
         }),
     };
   }),
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}

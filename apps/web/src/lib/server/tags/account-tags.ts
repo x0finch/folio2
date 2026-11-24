@@ -1,9 +1,10 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { type PortfolioScope, scopedMembership } from "@/lib/server/portfolio/scope";
+import { serverFn } from "@/lib/server/server-fn";
 
 // Scoped to the current portfolio's accounts, archived included (they show tags too).
-export const handleListAccountTags = Effect.fn("listAccountTags")(function* (
+export const handleListAccountTags = serverFn("listAccountTags")(function* (
   data: PortfolioScope = {},
 ) {
   const [scope, links] = yield* Effect.all(

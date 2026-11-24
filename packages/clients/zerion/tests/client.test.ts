@@ -5,7 +5,8 @@ import {
   jsonResponse as json,
   runClient,
 } from "@folio/client-core/testing";
-import { Duration, Effect, TestClock } from "effect";
+import { Duration, Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { make, ZerionClient, type ZerionClientApi, type ZerionConfig } from "../src/client";
 import { CHAINS_CACHE_TTL_MS, ZERION_API_BASE } from "../src/constants";

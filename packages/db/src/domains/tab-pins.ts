@@ -10,7 +10,7 @@ import { assertAccountOwned, assertTagOwned } from "./ownership";
 // Custom tabs: pin a tag / account / connector as a navigation entry.
 
 const assertTabPinOwned = (
-  client: DbClient,
+  client: DbClient["Service"],
   userId: string,
   pinId: string,
 ): Effect.Effect<void, NotFound> =>
@@ -38,7 +38,7 @@ export interface TabPinInput {
 // Connector pins have no FK, so their existence isn't checked. A missing target id is
 // `InvalidInput`, not a defect: the input schema makes all three optional, so it can get through.
 const resolvePinTarget = (
-  client: DbClient,
+  client: DbClient["Service"],
   userId: string,
   input: Pick<TabPinInput, "kind" | "tagId" | "accountId" | "connectorId">,
 ): Effect.Effect<
@@ -63,7 +63,7 @@ const resolvePinTarget = (
 const missingTarget = (what: string, field: string): Effect.Effect<never, InvalidInput> =>
   Effect.fail(new InvalidInput({ what, why: `requires ${field}` }));
 
-export const makeTabPinStore = (client: DbClient, userId: string) => {
+export const makeTabPinStore = (client: DbClient["Service"], userId: string) => {
   return {
     /**
      * The per-portfolio pin limit isn't enforced here: which portfolio a pin belongs to is derived

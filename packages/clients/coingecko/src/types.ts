@@ -25,7 +25,7 @@ export const CoinListItem = Schema.Struct({
   id: maybe(Schema.String),
   symbol: maybe(Schema.String),
   name: maybe(Schema.String),
-  platforms: maybe(Schema.Record({ key: Schema.String, value: Schema.NullOr(Schema.String) })),
+  platforms: maybe(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
 });
 export type CoinListItem = typeof CoinListItem.Type;
 
@@ -43,16 +43,16 @@ export const MarketCoin = Schema.Struct({
 export type MarketCoin = typeof MarketCoin.Type;
 
 // GET /simple/price: { [coinId]: { usd, usd_24h_change, last_updated_at } }
-export const SimplePriceMap = Schema.Record({
-  key: Schema.String,
-  value: Schema.Record({ key: Schema.String, value: Schema.Number }),
-});
+export const SimplePriceMap = Schema.Record(
+  Schema.String,
+  Schema.Record(Schema.String, Schema.Number),
+);
 export type SimplePriceMap = typeof SimplePriceMap.Type;
 
 // GET /coins/{id}/market_chart/range: { prices, market_caps, total_volumes }
 // Each item is a [msTimestamp, value] pair (timestamp in milliseconds, unlike the seconds of the from/to query params); only prices is consumed.
 export const MarketChartRange = Schema.Struct({
-  prices: maybe(Schema.Array(Schema.Tuple(Schema.Number, Schema.Number))),
+  prices: maybe(Schema.Array(Schema.Tuple([Schema.Number, Schema.Number]))),
 });
 export type MarketChartRange = typeof MarketChartRange.Type;
 
@@ -78,7 +78,7 @@ export const CoinContract = Schema.Struct({
   market_cap_rank: Schema.optional(Schema.NullOr(Schema.Number)),
   market_data: maybe(
     Schema.Struct({
-      current_price: maybe(Schema.Record({ key: Schema.String, value: Schema.Number })),
+      current_price: maybe(Schema.Record(Schema.String, Schema.Number)),
       price_change_percentage_24h: Schema.optional(Schema.NullOr(Schema.Number)),
     }),
   ),
@@ -106,6 +106,6 @@ const ExchangeRateEntry = Schema.Struct({
 });
 
 export const ExchangeRates = Schema.Struct({
-  rates: maybe(Schema.Record({ key: Schema.String, value: ExchangeRateEntry })),
+  rates: maybe(Schema.Record(Schema.String, ExchangeRateEntry)),
 });
 export type ExchangeRates = typeof ExchangeRates.Type;

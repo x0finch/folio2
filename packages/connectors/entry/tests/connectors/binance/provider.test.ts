@@ -1,6 +1,6 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
 import { type ConnectorError, isRetryable, type ProviderNeeds } from "@folio/connectors-basic";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import type { BinanceRow } from "../../../src/connectors/binance/parse";
 import { binanceProvider, verdict } from "../../../src/connectors/binance/provider";
@@ -64,38 +64,41 @@ describe("verdict", () => {
     ({ symbol, amount: 1, value: 1, kind: "spot" }) as BinanceRow;
   const ok = (name: string, symbols: string[]) => ({
     wallet: { name },
-    result: Either.right(symbols.map(row)),
+    result: Result.succeed(symbols.map(row)),
   });
-  const ko = (name: string, e: ConnectorError) => ({ wallet: { name }, result: Either.left(e) });
+  const ko = (name: string, e: ConnectorError) => ({ wallet: { name }, result: Result.fail(e) });
 
   it("all succeed → merges every balance, no note", () => {
-    const v = verdict([ok("Spot", ["BTC"]), ok("Funding", ["USDT"])], Either.right({}));
-    expect(Either.isRight(v)).toBe(true);
-    if (Either.isRight(v)) {
-      expect(v.right.balances.map((b) => b.symbol)).toEqual(["BTC", "USDT"]);
-      expect(v.right.note).toBeUndefined();
+    const v = verdict([ok("Spot", ["BTC"]), ok("Funding", ["USDT"])], Result.succeed({}));
+    expect(Result.isSuccess(v)).toBe(true);
+    if (Result.isSuccess(v)) {
+      expect(v.success.balances.map((b) => b.symbol)).toEqual(["BTC", "USDT"]);
+      expect(v.success.note).toBeUndefined();
     }
   });
 
   it("partial failure (wallet's own error) → still succeeds; note names it with a reason", () => {
     const v = verdict(
       [ok("Spot", ["BTC"]), ko("Earn", err("ConnectorAuthError"))],
-      Either.right({}),
+      Result.succeed({}),
     );
-    expect(Either.isRight(v)).toBe(true);
-    if (Either.isRight(v)) {
-      expect(v.right.balances.map((b) => b.symbol)).toEqual(["BTC"]);
-      expect(String(v.right.note?.[0]?.content)).toContain("Earn");
-      expect(String(v.right.note?.[0]?.content)).toContain("permissions");
+    expect(Result.isSuccess(v)).toBe(true);
+    if (Result.isSuccess(v)) {
+      expect(v.success.balances.map((b) => b.symbol)).toEqual(["BTC"]);
+      expect(String(v.success.note?.[0]?.content)).toContain("Earn");
+      expect(String(v.success.note?.[0]?.content)).toContain("permissions");
     }
   });
 
   it("partial failure that isn't a permission error → note doesn't suggest checking permissions", () => {
-    const v = verdict([ok("Spot", ["BTC"]), ko("Earn", err("ConnectorFailure"))], Either.right({}));
-    expect(Either.isRight(v)).toBe(true);
-    if (Either.isRight(v)) {
-      expect(String(v.right.note?.[0]?.content)).toContain("Earn");
-      expect(String(v.right.note?.[0]?.content)).not.toContain("permissions");
+    const v = verdict(
+      [ok("Spot", ["BTC"]), ko("Earn", err("ConnectorFailure"))],
+      Result.succeed({}),
+    );
+    expect(Result.isSuccess(v)).toBe(true);
+    if (Result.isSuccess(v)) {
+      expect(String(v.success.note?.[0]?.content)).toContain("Earn");
+      expect(String(v.success.note?.[0]?.content)).not.toContain("permissions");
     }
   });
 
@@ -103,27 +106,27 @@ describe("verdict", () => {
     const priceErr = err("ConnectorRateLimitError");
     const v = verdict(
       [ok("USDⓈ-M Futures", ["USDT"]), ko("Spot", priceErr)],
-      Either.left(priceErr),
+      Result.fail(priceErr),
     );
-    expect(Either.isLeft(v)).toBe(true);
-    if (Either.isLeft(v)) expect(v.left).toBe(priceErr);
+    expect(Result.isFailure(v)).toBe(true);
+    if (Result.isFailure(v)) expect(v.failure).toBe(priceErr);
   });
 
   it("partial transient failure (rate limit / timeout / 5xx) → fails whole for retry, no partial snapshot", () => {
     const transient = err("ConnectorUnavailableError");
-    const v = verdict([ok("Spot", ["BTC"]), ko("Funding", transient)], Either.right({}));
-    expect(Either.isLeft(v)).toBe(true);
-    if (Either.isLeft(v)) expect(v.left).toBe(transient);
+    const v = verdict([ok("Spot", ["BTC"]), ko("Funding", transient)], Result.succeed({}));
+    expect(Result.isFailure(v)).toBe(true);
+    if (Result.isFailure(v)) expect(v.failure).toBe(transient);
   });
 
   it("transient mixed with auth → fails with the transient one (it's the reason to retry)", () => {
     const transient = err("ConnectorRateLimitError");
     const v = verdict(
       [ok("Spot", ["BTC"]), ko("Earn", err("ConnectorAuthError")), ko("Funding", transient)],
-      Either.right({}),
+      Result.succeed({}),
     );
-    expect(Either.isLeft(v)).toBe(true);
-    if (Either.isLeft(v)) expect(v.left).toBe(transient);
+    expect(Result.isFailure(v)).toBe(true);
+    if (Result.isFailure(v)) expect(v.failure).toBe(transient);
   });
 
   it("price table down but no wallet died on it → not collateral; wallet's own error rules", () => {
@@ -131,20 +134,20 @@ describe("verdict", () => {
     const own = err("ConnectorRateLimitError");
     const v = verdict(
       [ok("USDⓈ-M Futures", ["USDT"]), ko("Spot", own)],
-      Either.left(err("ConnectorRateLimitError")),
+      Result.fail(err("ConnectorRateLimitError")),
     );
-    expect(Either.isLeft(v)).toBe(true);
-    if (Either.isLeft(v)) expect(v.left).toBe(own);
+    expect(Result.isFailure(v)).toBe(true);
+    if (Result.isFailure(v)) expect(v.failure).toBe(own);
   });
 
   it("everything failed → fails with the first wallet's error", () => {
     const first = err("ConnectorUnavailableError");
     const v = verdict(
       [ko("Spot", first), ko("Funding", err("ConnectorUnavailableError"))],
-      Either.right({}),
+      Result.succeed({}),
     );
-    expect(Either.isLeft(v)).toBe(true);
-    if (Either.isLeft(v)) expect(v.left).toBe(first);
+    expect(Result.isFailure(v)).toBe(true);
+    if (Result.isFailure(v)) expect(v.failure).toBe(first);
   });
 });
 

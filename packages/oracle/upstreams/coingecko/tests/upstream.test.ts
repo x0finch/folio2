@@ -1,9 +1,8 @@
-import { FetchHttpClient } from "@effect/platform";
 import { runClient } from "@folio/client-core/testing";
 import type { AssetPlatform, MarketCoin } from "@folio/coingecko-client";
 import { TokenUpstream } from "@folio/oracle-basic/ports";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 // The page cap is not exported; take it from the constants module to test the page boundary.
 import { IDS_PER_REQUEST, MARKETS_PER_PAGE, UPSTREAM_ID } from "../src/constants";
 import { makeUpstreamEffects } from "../src/upstream";
@@ -37,23 +36,22 @@ const page = (count: number, pageNo = 1) =>
 
 describe("port layer", () => {
   // The assembly point only imports this layer, so it must be exercised once: `R = never` and `id` is this adapter's constant
-  // (used by the service as the ref namer). The layer brings its own real `FetchHttpClient`, which an outside fake cannot replace,
-  // so the `Fetch` in fiber context is swapped instead (`FetchHttpClient` falls back to `globalThis.fetch` only if absent).
+  // (used by the service as the ref namer). The layer brings its own real HTTP client, which reads the global `fetch` per call,
+  // so the global is spied on instead of providing a fake client.
   it("methods obtained via the layer still reach the network (wiring intact)", async () => {
     const hits: string[] = [];
-    const fakeFetch: typeof globalThis.fetch = async (input) => {
-      hits.push(String(input));
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      hits.push(String(input instanceof Request ? input.url : input));
       return Response.json([marketRow("bitcoin", 1)]);
-    };
+    });
     const stub = routed({});
     const rows = await runClient(
       stub.http,
       Effect.flatMap(TokenUpstream, (u) => u.fetchMarkets({ topN: 1 })).pipe(
         Effect.provide(coinGeckoUpstreamLayers().token),
-        Effect.provideService(FetchHttpClient.Fetch, fakeFetch),
       ),
       "none",
-    );
+    ).finally(() => vi.restoreAllMocks());
     expect(rows.map((r) => r.ref)).toEqual(["coingecko/issued:bitcoin"]);
     expect(hits).toHaveLength(1);
     expect(hits[0]).toContain("/coins/markets");

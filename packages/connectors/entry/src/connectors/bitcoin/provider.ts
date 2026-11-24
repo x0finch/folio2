@@ -82,7 +82,7 @@ const asBitcoin = <A, R>(
 const derivationIsCredentials = <A, R>(
   effect: Effect.Effect<A, ConnectorError, R>,
 ): Effect.Effect<A, ConnectorError, R> =>
-  Effect.catchAllDefect(effect, (defect) =>
+  Effect.catchDefect(effect, (defect) =>
     defect instanceof BitcoinDeriveError
       ? Effect.fail(new ConnectorAuthError({ message: defect.message, cause: defect }))
       : Effect.die(defect),

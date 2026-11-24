@@ -19,7 +19,6 @@
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@effect/platform": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

@@ -43,13 +43,13 @@ beforeEach(async () => {
 const createExit = (userId: string, input: Parameters<TabPinCreate>[0]) =>
   Effect.runPromiseExit(
     Effect.flatMap(Database, (db) => db.tabPins.create(input)).pipe(
-      Effect.provide(Database.Default),
+      Effect.provide(Database.layer),
       provideCurrentUser(userId),
       provideDbClient(env),
     ),
   );
 
-type TabPinCreate = Database["tabPins"]["create"];
+type TabPinCreate = Database["Service"]["tabPins"]["create"];
 
 describe("createTabPin", () => {
   it("creates a connector pin / tag pin, the two columns mutually exclusive", async () => {
@@ -95,8 +95,8 @@ describe("createTabPin", () => {
     const exit = await createExit(USER_A, { kind: "tag" });
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
-      expect(Cause.isDie(exit.cause)).toBe(false);
-      expect(Cause.failureOption(exit.cause).pipe(Option.getOrUndefined)).toBeInstanceOf(
+      expect(Cause.hasDies(exit.cause)).toBe(false);
+      expect(Cause.findErrorOption(exit.cause).pipe(Option.getOrUndefined)).toBeInstanceOf(
         InvalidInput,
       );
     }

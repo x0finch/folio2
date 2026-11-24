@@ -87,18 +87,18 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
         // Business errors (HTTP 200 + retCode ≠ 0) are already failures from the client.
         const outcomes = yield* Effect.all(
           BUCKETS.map((bucket) =>
-            Effect.either(bucket.rows(client, creds)).pipe(
+            Effect.result(bucket.rows(client, creds)).pipe(
               Effect.map((result) => ({ bucket, result })),
             ),
           ),
           { concurrency: "unbounded" },
         );
 
-        const failed = yield* bestEffortVerdict(outcomes);
+        const failed = yield* Effect.fromResult(bestEffortVerdict(outcomes));
 
         const bodyOf = <T>(bucket: Bucket): T | undefined => {
           const hit = outcomes.find((o) => o.bucket === bucket);
-          return hit?.result._tag === "Right" ? (hit.result.right as T) : undefined;
+          return hit?.result._tag === "Success" ? (hit.result.success as T) : undefined;
         };
 
         const list = bodyOf<{
@@ -130,7 +130,7 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
             bucketFailureNote(
               failed.map((f) => ({
                 name: f.bucket.name,
-                auth: f.result._tag === "Left" && f.result.left._tag === "ConnectorAuthError",
+                auth: f.result._tag === "Failure" && f.result.failure._tag === "ConnectorAuthError",
               })),
             ),
           );

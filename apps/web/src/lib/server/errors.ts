@@ -23,3 +23,19 @@ export const toError = (error: AppError): Error =>
         { cause: error },
       )
     : error;
+
+const PRETTY_CAUSE = Symbol.for("folio/pretty-cause");
+
+/** Attaches the full `Cause.pretty` to an error thrown out of the runtime; plain values pass through. */
+export const withPrettyCause = (error: unknown, pretty: string): unknown => {
+  if (typeof error === "object" && error !== null) {
+    Object.defineProperty(error, PRETTY_CAUSE, { value: pretty });
+  }
+  return error;
+};
+
+/** The full cause of an error rejected by the runtime, if it came from there. */
+export const prettyCauseOf = (error: unknown): string | undefined =>
+  typeof error === "object" && error !== null
+    ? (error as { [PRETTY_CAUSE]?: string })[PRETTY_CAUSE]
+    : undefined;

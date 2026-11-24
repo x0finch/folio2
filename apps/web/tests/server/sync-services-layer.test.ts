@@ -136,7 +136,7 @@ describe("makeSyncServicesLayer() wiring", () => {
     );
     expect(Exit.isFailure(exit)).toBe(true);
     // What matters is a failure, not a defect: the kind `catchAll` can catch.
-    const failure = Exit.isFailure(exit) ? Cause.failureOption(exit.cause) : Option.none();
+    const failure = Exit.isFailure(exit) ? Cause.findErrorOption(exit.cause) : Option.none();
     expect(Option.isSome(failure)).toBe(true);
     expect((Option.getOrThrow(failure) as { _tag: string })._tag).toBe("SyncDepError");
   });

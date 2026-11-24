@@ -37,7 +37,7 @@ export interface MintDeps {
   readonly store: TokenStore;
   // Contract is the `@folio/db` implementation (derived from it).
   readonly globalRefIndex: GlobalRefIndexStore;
-  readonly candidates: CandidateSource;
+  readonly candidates: CandidateSource["Service"];
   // Current upstream's id: ref namer and the global map's `namer` column; `overrides` is its curated symbol to upstream id table (see `Namer`).
   readonly namer: Namer;
 }
@@ -86,7 +86,7 @@ export function makeMinting(deps: MintDeps): TokenMinting {
 
       // The global table lookup by address returns the whole upstream ref.
       const found = yield* globalRefIndex.lookup(namer, [ref]);
-      const upstreamRef = Option.fromNullable(found.get(ref));
+      const upstreamRef = Option.fromNullishOr(found.get(ref));
       if (Option.isSome(upstreamRef)) return upstreamRef;
 
       // The symbol tier admits only shapes with a vouching party (`native` / `issued`); see `hasTrustedSymbol`. Contract symbols are
@@ -98,7 +98,7 @@ export function makeMinting(deps: MintDeps): TokenMinting {
       const override = overrides[symbol];
       if (override) return Option.some(buildRef.issued(namer, override));
       // Not confident (small tokens sharing a name): `none`, each gets its own row with no upstream link.
-      return Option.fromNullable(pickByConfidence(yield* candidates.bySymbol(symbol)));
+      return Option.fromNullishOr(pickByConfidence(yield* candidates.bySymbol(symbol)));
     });
 
   // Full decision tree for one ref; returns the token_id it ends up with.
@@ -136,7 +136,7 @@ export function makeMinting(deps: MintDeps): TokenMinting {
         return yield* store.create(seed, [ref]);
       }
 
-      const owner = Option.fromNullable(
+      const owner = Option.fromNullishOr(
         (yield* store.findByRefs([upstreamRef.value])).get(upstreamRef.value),
       );
 

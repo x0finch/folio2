@@ -1,8 +1,8 @@
-import type { HttpClientError } from "@effect/platform";
-import { HttpClient, HttpClientRequest } from "@effect/platform";
-import { Clock, Effect, ParseResult, type RateLimiter, Schema } from "effect";
+import { Clock, Effect, Schema, type SchemaIssue } from "effect";
+import { HttpClient, type HttpClientError, HttpClientRequest } from "effect/http";
 import { HttpFailure, type SigningFailure } from "./errors";
 import { disableBuiltInTracing } from "./http-client";
+import type { RateLimit } from "./ratelimit";
 import { classifyFailure, type UpstreamError } from "./upstream-error";
 
 // Thin HTTP layer: rate-limit → send → classify the failure. Retries are the caller's
@@ -43,7 +43,7 @@ export interface HttpConfig {
     path: string,
     options: RequestOptions | undefined,
   ) => Effect.Effect<HeadersInit, SigningFailure>;
-  readonly limit?: RateLimiter.RateLimiter; // omitted = unlimited
+  readonly limit?: RateLimit; // omitted = unlimited
   readonly rateLimitedStatuses?: readonly number[]; // default [429]
 }
 
@@ -56,30 +56,47 @@ export type Outbound = HttpClient.HttpClient;
 const transportFailure =
   (where: string) =>
   (error: HttpClientError.HttpClientError): HttpFailure =>
-    error._tag === "ResponseError" && error.reason === "Decode"
+    error.reason._tag === "DecodeError"
       ? new HttpFailure({ kind: "parse", where, cause: summarize(error) })
       : new HttpFailure({ kind: "network", where, cause: summarize(error) });
 
 // Loggable summary of an outbound failure; never pass the library's error object through.
-// RequestError keeps the inner message (at most a hostname, and it says why). ResponseError gets
-// only the status: a JSON parse message embeds a slice of the response body (user data).
+// A request-side reason keeps the inner message (at most a hostname, and it says why). A
+// response-side reason gets only the status: a JSON parse message embeds a slice of the response
+// body (user data).
 const summarize = (error: HttpClientError.HttpClientError): string => {
-  if (error._tag === "ResponseError") {
-    return `ResponseError/${error.reason} ${error.response.status}`;
-  }
-  const inner = error.cause;
-  const detail = inner instanceof Error ? inner.message : undefined;
-  return detail ? `RequestError/${error.reason}: ${detail}` : `RequestError/${error.reason}`;
+  const reason = error.reason;
+  if ("response" in reason) return `${reason._tag} ${reason.response.status}`;
+  const detail = reason.cause instanceof Error ? reason.cause.message : undefined;
+  return detail ? `${reason._tag}: ${detail}` : reason._tag;
 };
 
 // Schema failure → path + issue kind only. The default formatter embeds the actual value, which
 // is response body.
-const whyInvalid = (error: ParseResult.ParseError): string => {
-  const issues = ParseResult.ArrayFormatter.formatErrorSync(error);
-  const first = issues[0];
-  const at = first && first.path.length > 0 ? first.path.join(".") : "(root)";
-  const more = issues.length > 1 ? ` (+${issues.length - 1} more)` : "";
-  return `schema: ${at} ${first?._tag ?? "Invalid"}${more}`;
+const whyInvalid = (error: Schema.SchemaError): string => {
+  const leaves = leavesOf(error.issue, []);
+  const first = leaves[0];
+  const at = first && first.path.length > 0 ? first.path.map(String).join(".") : "(root)";
+  const more = leaves.length > 1 ? ` (+${leaves.length - 1} more)` : "";
+  return `schema: ${at} ${first?.tag ?? "Invalid"}${more}`;
+};
+
+const leavesOf = (
+  issue: SchemaIssue.Issue,
+  path: readonly PropertyKey[],
+): { readonly path: readonly PropertyKey[]; readonly tag: string }[] => {
+  switch (issue._tag) {
+    case "Pointer":
+      return leavesOf(issue.issue, [...path, ...issue.path]);
+    case "Filter":
+    case "Encoding":
+      return leavesOf(issue.issue, path);
+    case "Composite":
+    case "AnyOf":
+      return issue.issues.flatMap((inner) => leavesOf(inner, path));
+    default:
+      return [{ path, tag: issue._tag }];
+  }
 };
 
 // Sends a request and returns schema-validated JSON (null on 404 with `notFoundAsNull`).
@@ -88,12 +105,12 @@ const whyInvalid = (error: ParseResult.ParseError): string => {
 export interface Requester {
   <A, I>(
     path: string,
-    schema: Schema.Schema<A, I>,
+    schema: Schema.Codec<A, I>,
     options: RequestOptions & { readonly notFoundAsNull: true },
   ): Effect.Effect<A | null, UpstreamError, Outbound>;
   <A, I>(
     path: string,
-    schema: Schema.Schema<A, I>,
+    schema: Schema.Codec<A, I>,
     options?: RequestOptions,
   ): Effect.Effect<A, UpstreamError, Outbound>;
 }
@@ -102,7 +119,7 @@ export function makeRequester(config: HttpConfig): Requester {
   const rateLimited = new Set(config.rateLimitedStatuses ?? DEFAULT_RATE_LIMITED);
   const classify = classifyFailure({ upstream: config.upstream });
 
-  return (<A, I>(path: string, schema: Schema.Schema<A, I>, options?: RequestOptions) => {
+  return (<A, I>(path: string, schema: Schema.Codec<A, I>, options?: RequestOptions) => {
     const url = new URL(`${config.baseUrl}${path}`);
     for (const [k, v] of Object.entries(options?.query ?? {})) {
       if (v !== undefined) url.searchParams.set(k, String(v));
@@ -148,7 +165,7 @@ export function makeRequester(config: HttpConfig): Requester {
           (error) => new HttpFailure({ kind: "parse", where, cause: summarize(error) }),
         ),
       );
-      return yield* Schema.decodeUnknown(schema)(body).pipe(
+      return yield* Schema.decodeUnknownEffect(schema)(body).pipe(
         Effect.mapError(
           (error) => new HttpFailure({ kind: "parse", where, cause: whyInvalid(error) }),
         ),

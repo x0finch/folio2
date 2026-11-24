@@ -1,9 +1,10 @@
-import { HttpClient, HttpClientError, HttpClientResponse } from "@effect/platform";
-import { Effect, Layer, type Scope, TestContext } from "effect";
+import { Effect, Layer, type Scope } from "effect";
+import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
+import { TestClock } from "effect/testing";
 import { type RateLimitScope, RateLimitScopeOverride } from "./ratelimit";
 
-// Shared test wiring for the clients. Not `@effect/vitest`: its stable release peers on vitest 3,
-// and the vitest-4 beta requires effect 4.
+// Shared test wiring for the clients. Not `@effect/vitest`: it needs vitest 5, and the Workers
+// test pool still needs vitest 4.
 
 export interface Seen {
   readonly request: HttpClientRequestLike;
@@ -46,14 +47,17 @@ export function httpStub(
           : undefined,
     };
     calls.push({ request: seen });
-    // A throwing `reply` simulates a network failure: map it to `RequestError` (not a defect) so
+    // A throwing `reply` simulates a network failure: map it to `TransportError` (not a defect) so
     // failure classification stays testable.
     return Effect.tryPromise({
       try: async () => {
         const res = await reply(seen, calls.length - 1);
         return HttpClientResponse.fromWeb(request, res);
       },
-      catch: (cause) => new HttpClientError.RequestError({ request, reason: "Transport", cause }),
+      catch: (cause) =>
+        new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({ request, cause }),
+        }),
     });
   });
   return { layer: Layer.succeed(HttpClient.HttpClient, client), calls };
@@ -70,7 +74,7 @@ export const jsonResponse = (body: unknown, init?: ResponseInit): Response =>
 // module-level per key, so tests would leak quota into each other. Pass `"none"` for files that
 // fire many requests: once the burst is spent, `memory` waits on a `TestClock` that never moves.
 export const testLayer = (stub: HttpStub, gate: RateLimitScope = "memory") =>
-  Layer.mergeAll(stub.layer, Layer.succeed(RateLimitScopeOverride, gate), TestContext.TestContext);
+  Layer.mergeAll(stub.layer, Layer.succeed(RateLimitScopeOverride, gate), TestClock.layer());
 
 // Logs the full `Cause` on failure; `runPromise` alone only surfaces an opaque `FiberFailure`.
 export const runClient = <A, E>(
@@ -79,7 +83,7 @@ export const runClient = <A, E>(
   gate?: RateLimitScope,
 ): Promise<A> =>
   effect.pipe(
-    Effect.tapErrorCause((cause) => Effect.logError(cause)),
+    Effect.tapCause((cause) => Effect.logError(cause)),
     Effect.scoped,
     Effect.provide(testLayer(stub, gate)),
     Effect.runPromise,

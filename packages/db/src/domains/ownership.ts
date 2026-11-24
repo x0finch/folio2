@@ -17,7 +17,7 @@ const requireRow = <A>(
 };
 
 export const assertAccountOwned = (
-  client: DbClient,
+  client: DbClient["Service"],
   userId: string,
   accountId: string,
 ): Effect.Effect<void, NotFound> =>
@@ -34,7 +34,7 @@ export const assertAccountOwned = (
     );
 
 export const assertPortfolioOwned = (
-  client: DbClient,
+  client: DbClient["Service"],
   userId: string,
   portfolioId: string,
 ): Effect.Effect<void, NotFound> =>
@@ -52,7 +52,7 @@ export const assertPortfolioOwned = (
 
 // Also returns portfolioId so callers can check the same-portfolio invariant without another read.
 export const assertTagOwned = (
-  client: DbClient,
+  client: DbClient["Service"],
   userId: string,
   tagId: string,
 ): Effect.Effect<{ portfolioId: string }, NotFound> =>
@@ -67,7 +67,7 @@ export const assertTagOwned = (
 
 // `tokens` carries user_id directly, so no join through accounts.
 export const assertTokenOwned = (
-  client: DbClient,
+  client: DbClient["Service"],
   userId: string,
   tokenId: string,
 ): Effect.Effect<void, NotFound> =>

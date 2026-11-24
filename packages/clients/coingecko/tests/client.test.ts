@@ -5,7 +5,8 @@ import {
   jsonResponse as json,
   runClient,
 } from "@folio/client-core/testing";
-import { Duration, Effect, Fiber, Option, TestClock } from "effect";
+import { Duration, Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import {
   CoinGeckoClient,
@@ -172,7 +173,7 @@ describe("rate limiting", () => {
       stub(() => json([])).fn,
       Effect.gen(function* () {
         const client = yield* make(config);
-        const fiber = yield* Effect.fork(
+        const fiber = yield* Effect.forkChild(
           Effect.all([
             Effect.orDie(client.assetPlatforms),
             Effect.orDie(client.assetPlatforms),
@@ -181,8 +182,8 @@ describe("rate limiting", () => {
         );
         yield* TestClock.adjust(Duration.millis(ms));
         // The fake egress is a `Promise.resolve`, which TestClock does not govern: yield a few microtask turns to drain it.
-        yield* Effect.repeatN(Effect.yieldNow(), 50);
-        return Option.isSome(yield* Fiber.poll(fiber));
+        yield* Effect.repeat(Effect.yieldNow, { times: 50 });
+        return (yield* Effect.sync(() => fiber.pollUnsafe())) !== undefined;
       }),
     );
 

@@ -90,12 +90,11 @@ export interface CoinGeckoClientApi {
   readonly exchangeRates: Effect.Effect<ExchangeRates, UpstreamError, Outbound>;
 }
 
-export class CoinGeckoClient extends Context.Tag("clients/CoinGecko")<
-  CoinGeckoClient,
-  CoinGeckoClientApi
->() {
+export class CoinGeckoClient extends Context.Service<CoinGeckoClient, CoinGeckoClientApi>()(
+  "clients/CoinGecko",
+) {
   static readonly layer = (config: CoinGeckoConfig = {}): Layer.Layer<CoinGeckoClient> =>
-    Layer.scoped(CoinGeckoClient, make(config));
+    Layer.effect(CoinGeckoClient, make(config));
 }
 
 export function make(
@@ -169,7 +168,7 @@ export function make(
       coinsMarketChartRange: (params) =>
         request(
           `/coins/${params.id}/market_chart/range`,
-          Schema.Struct({ prices: Schema.Array(Schema.Tuple(Schema.Number, Schema.Number)) }),
+          Schema.Struct({ prices: Schema.Array(Schema.Tuple([Schema.Number, Schema.Number])) }),
           { query: { vs_currency: params.vsCurrency, from: params.fromSec, to: params.toSec } },
         ).pipe(Effect.map((res) => res.prices)),
 

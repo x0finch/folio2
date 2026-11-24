@@ -7,7 +7,8 @@ import {
   ConnectorUnavailableError,
 } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
-import { Duration, Effect, Fiber, type Layer, Option, TestClock, TestContext } from "effect";
+import { Duration, Effect, Fiber, type Layer, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { depError, type FetchOutcome, Sweep, type SyncLogger, type SyncServices } from "../src";
 import { type FakeOptions, fakeServices } from "./fakes";
@@ -245,10 +246,10 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
   // Runs an Effect on the fake clock: fork, advance generously, join. Cases needing exact timing fork themselves.
   const runWithClock = <A, E>(effect: Effect.Effect<A, E>, advanceMs = 100_000): Promise<A> =>
     Effect.gen(function* () {
-      const fiber = yield* Effect.fork(effect);
+      const fiber = yield* Effect.forkChild(effect);
       yield* TestClock.adjust(Duration.millis(advanceMs));
       return yield* Fiber.join(fiber);
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
 
   it("uses Retry-After instead of exponential backoff: no retry at 1233ms, retry after 1234ms", async () => {
     const { fetchBalances, calls } = flaky(
@@ -257,7 +258,7 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
     );
     const { layer } = makeServices([account()], { fetch: fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
+      const fiber = yield* Effect.forkChild(syncWith(layer, "u1"));
       // The first exponential step is 200ms; without Retry-After we'd have retried by now.
       yield* TestClock.adjust(Duration.millis(1233));
       expect(calls()).toBe(1);
@@ -266,7 +267,7 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
       const { results } = yield* Fiber.join(fiber);
       expect(calls()).toBe(2);
       expect(results[0].ok).toBe(true);
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
   });
 
   it("backoff doubles per step: the second wait is 400ms, not another 200ms", async () => {
@@ -278,7 +279,7 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
     );
     const { layer } = makeServices([account()], { fetch: fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
+      const fiber = yield* Effect.forkChild(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(199));
       expect(calls()).toBe(1); // first step is at least 200ms
       yield* TestClock.adjust(Duration.millis(201)); // t=400: call 2 has happened
@@ -288,7 +289,7 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
       yield* TestClock.adjust(Duration.millis(401)); // t=1000: call 3 has happened
       yield* Fiber.join(fiber);
       expect(calls()).toBe(3);
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
   });
 
   it("Retry-After above the cap is clamped and still retried, not abandoned", async () => {
@@ -298,14 +299,14 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
     );
     const { layer } = makeServices([account()], { fetch: fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
+      const fiber = yield* Effect.forkChild(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(4999));
       expect(calls()).toBe(1);
       yield* TestClock.adjust(Duration.millis(1201)); // 5s cap + 200ms jitter ceiling
       const { results } = yield* Fiber.join(fiber);
       expect(calls()).toBe(2);
       expect(results[0].ok).toBe(true);
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
   });
 
   it("exhausted retries give ok:false (isolated) and no snapshot", async () => {
@@ -408,7 +409,7 @@ describe("syncUser (Effect core): fetch timeout", () => {
       },
     });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
+      const fiber = yield* Effect.forkChild(syncWith(layer, "u1"));
       // 3 attempts x 20s timeout + two backoffs; advance generously.
       yield* TestClock.adjust(Duration.millis(100_000));
       const { results } = yield* Fiber.join(fiber);
@@ -416,7 +417,7 @@ describe("syncUser (Effect core): fetch timeout", () => {
       expect(results[0].error).toContain("timed out");
       expect(calls).toBe(3); // RETRY_MAX_ATTEMPTS
       expect(writes).toHaveLength(0);
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
   });
 
   it("each attempt is timed separately: no timeout at 19.9s, timeout and retry after 20s", async () => {
@@ -428,14 +429,14 @@ describe("syncUser (Effect core): fetch timeout", () => {
       },
     });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
+      const fiber = yield* Effect.forkChild(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(19_900));
       expect(calls).toBe(1); // FETCH_TIMEOUT_MS not reached
       // 20s timeout + 200 first backoff + 200 jitter ceiling = 20_400; advance to 20_500.
       yield* TestClock.adjust(Duration.millis(600));
       expect(calls).toBe(2);
-      yield* Effect.fork(Fiber.interrupt(fiber)); // wrap up without waiting for the other two attempts
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+      yield* Effect.forkChild(Fiber.interrupt(fiber)); // wrap up without waiting for the other two attempts
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
   });
 });
 

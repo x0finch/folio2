@@ -5,6 +5,7 @@ import { z } from "zod";
 import { isManual } from "@/lib/core/manual";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { isComplete, readStoredCreds } from "@/lib/server/creds";
+import { serverFn } from "@/lib/server/server-fn";
 import { startAccountRound } from "./round";
 import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 
@@ -24,7 +25,7 @@ export type SyncAccountStart =
       round: SyncRoundView;
     };
 
-export const handleSyncAccount = Effect.fn("syncAccount")(function* (
+export const handleSyncAccount = serverFn("syncAccount")(function* (
   data: z.infer<typeof SyncAccountInput>,
 ) {
   const accounts = (yield* Database).accounts;

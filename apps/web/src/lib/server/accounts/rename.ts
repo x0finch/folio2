@@ -1,7 +1,7 @@
 import { Database } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
-import { Effect } from "effect";
 import { z } from "zod";
+import { serverFn } from "@/lib/server/server-fn";
 
 const log = getLogger(["folio", "web", "accounts"]);
 
@@ -10,7 +10,7 @@ export const RenameAccountInput = z.object({
   label: z.string().trim().min(1, "label is required"),
 });
 
-export const handleRenameAccount = Effect.fn("renameAccount")(function* (
+export const handleRenameAccount = serverFn("renameAccount")(function* (
   data: z.infer<typeof RenameAccountInput>,
 ) {
   yield* (yield* Database).accounts.rename(data.accountId, data.label);

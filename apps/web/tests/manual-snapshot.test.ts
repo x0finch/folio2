@@ -94,7 +94,7 @@ describe("manualUnitPrices", () => {
       Effect.sync(() => {
         asked.push(code);
         const c = code.trim().toUpperCase();
-        return Option.fromNullable(c === "USD" ? 1 : rates[c]);
+        return Option.fromNullishOr(c === "USD" ? 1 : rates[c]);
       });
     return { resolve, asked };
   };

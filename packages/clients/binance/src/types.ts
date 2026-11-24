@@ -90,13 +90,13 @@ export const EarnLockedRow = Schema.Struct({
   asset: maybe(Schema.String),
   amount: maybe(Schema.String),
   apy: maybe(Schema.String), // fraction
-  redeemDate: maybe(Schema.Union(Schema.Number, Schema.String)), // maturity, ms timestamp
+  redeemDate: maybe(Schema.Union([Schema.Number, Schema.String])), // maturity, ms timestamp
 });
 export type EarnLockedRow = typeof EarnLockedRow.Type;
 
 // Pagination envelope; internal only — callers get the collected rows.
-export const EarnPage = <A, I>(row: Schema.Schema<A, I>) =>
+export const EarnPage = <A, I>(row: Schema.Codec<A, I>) =>
   Schema.Struct({
     rows: maybe(Schema.Array(row)),
-    total: maybe(Schema.Union(Schema.Number, Schema.String)),
+    total: maybe(Schema.Union([Schema.Number, Schema.String])),
   });

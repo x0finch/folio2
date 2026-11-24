@@ -1,5 +1,5 @@
 import { Oracle } from "@folio/oracle";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PRICES_IDS_PER_MESSAGE } from "@/lib/server/jobs/constants";
 import { consumeMessage, type JobMessage } from "@/lib/server/jobs/consume";
@@ -139,7 +139,7 @@ describe("jobs/prices", () => {
     if (follow?.job.kind !== "prices" || !follow.job.tokenIds) throw new Error("no follow-up");
     expect(follow.job.tokenIds).toHaveLength(200);
     // The enqueued messages pass their own schema (the consumer side can decode them).
-    expect(Either.isRight(decodeJob(follow.job))).toBe(true);
+    expect(Result.isSuccess(decodeJob(follow.job))).toBe(true);
 
     const second = pricedUpstream();
     const tail = await consume(follow.job);
@@ -189,7 +189,7 @@ describe("jobs/prices", () => {
   it("a chunk over budget is rejected at decode (can't run to 50+ calls)", () => {
     const ids = (k: number) => Array.from({ length: k }, (_, i) => `t${i}`);
     const body = (k: number) => ({ kind: "prices", userId: USER, tokenIds: ids(k) });
-    expect(Either.isRight(decodeJob(body(PRICES_IDS_PER_MESSAGE)))).toBe(true);
-    expect(Either.isLeft(decodeJob(body(PRICES_IDS_PER_MESSAGE + 1)))).toBe(true);
+    expect(Result.isSuccess(decodeJob(body(PRICES_IDS_PER_MESSAGE)))).toBe(true);
+    expect(Result.isFailure(decodeJob(body(PRICES_IDS_PER_MESSAGE + 1)))).toBe(true);
   });
 });

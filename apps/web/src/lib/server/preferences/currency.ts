@@ -1,6 +1,6 @@
-import { Effect } from "effect";
 import { z } from "zod";
 import type { PreferCurrency } from "@/lib/hooks/use-prefer-currency";
+import { serverFn } from "@/lib/server/server-fn";
 import { resolveCurrency } from "./currency-detect";
 import { displayRate } from "./fx";
 
@@ -9,7 +9,7 @@ import { displayRate } from "./fx";
 // result falls back to USD: showing EUR with a rate of 1 is worse. requireAuth is applied in index (rates are per-user).
 export const CurrencyPreferenceInput = z.object({ code: z.string() });
 
-export const handleGetCurrencyPreference = Effect.fn("getCurrencyPreference")(function* (
+export const handleGetCurrencyPreference = serverFn("getCurrencyPreference")(function* (
   data: z.infer<typeof CurrencyPreferenceInput>,
 ) {
   const currency = resolveCurrency(data.code);

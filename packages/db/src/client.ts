@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { type DbEnv, type Drizzle, getDb } from "./connect";
 
 type Stmt = Parameters<Drizzle["batch"]>[0][number];
@@ -14,32 +14,28 @@ export const connectTo = (db: Drizzle) => {
     //
     // `withSpan` + `captureStackTrace: false`, not `Effect.fn`: Effect.fn captures a call-site Error per call (~1ms per snapshot read).
     query: <A>(build: (d: Drizzle) => PromiseLike<A>): Effect.Effect<A> =>
-      Effect.withSpan(
-        Effect.promise(() => build(db)),
-        "db.query",
-        { captureStackTrace: false },
+      Effect.promise(() => build(db)).pipe(
+        Effect.withSpan("db.query", undefined, { captureStackTrace: false }),
       ),
 
     // Takes a builder, not a prebuilt statement, so callers never pull `db` out of the service. drizzle needs a non-empty tuple; empty is a no-op. `build(db)` is in `suspend` so statements are built at run time.
     batch: (build: (d: Drizzle) => readonly Stmt[]): Effect.Effect<void> =>
-      Effect.withSpan(
-        Effect.suspend(() => {
-          const [first, ...rest] = build(db);
-          return first
-            ? Effect.asVoid(Effect.promise(() => db.batch([first, ...rest])))
-            : Effect.void;
-        }),
-        "db.batch",
-        { captureStackTrace: false },
-      ),
+      Effect.suspend(() => {
+        const [first, ...rest] = build(db);
+        return first
+          ? Effect.asVoid(Effect.promise(() => db.batch([first, ...rest])))
+          : Effect.void;
+      }).pipe(Effect.withSpan("db.batch", undefined, { captureStackTrace: false })),
   };
 };
 
 const connect = (env: DbEnv) => connectTo(getDb(env));
 
-export class DbClient extends Effect.Service<DbClient>()("db/DbClient", {
-  effect: (env: DbEnv) => Effect.sync(() => connect(env)),
-}) {}
+export class DbClient extends Context.Service<DbClient, ReturnType<typeof connect>>()(
+  "db/DbClient",
+) {
+  static readonly layer = (env: DbEnv) => Layer.sync(this, () => connect(env));
+}
 
 export const provideDbClient =
   (env: DbEnv) =>
@@ -47,7 +43,7 @@ export const provideDbClient =
     Effect.provideServiceEffect(
       self,
       DbClient,
-      Effect.sync(() => DbClient.make(connect(env))),
+      Effect.sync(() => DbClient.of(connect(env))),
     );
 
 // D1 allows ~100 bound parameters per statement, so list queries (`WHERE k IN (...)`) must be chunked; default 90 leaves room for fixed bindings, other shapes pass their own `size`.

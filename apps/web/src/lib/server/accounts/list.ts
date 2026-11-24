@@ -3,9 +3,10 @@ import { Effect } from "effect";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { isComplete, readStoredCreds, safeView } from "@/lib/server/creds";
 import { type PortfolioScope, scopedMembership } from "@/lib/server/portfolio/scope";
+import { serverFn } from "@/lib/server/server-fn";
 
 // Raw creds (incl. secret ciphertext) never leave the server, only the safeView projection.
-export const handleListAccounts = Effect.fn("listAccounts")(function* (data: PortfolioScope = {}) {
+export const handleListAccounts = serverFn("listAccounts")(function* (data: PortfolioScope = {}) {
   const { accounts: store } = yield* Database;
   const specsByType = (yield* ConnectorRegistry).specs;
   const [scope, rawList] = yield* Effect.all(

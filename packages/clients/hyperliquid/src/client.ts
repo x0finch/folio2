@@ -21,10 +21,9 @@ export interface HyperliquidClientApi {
   ) => Effect.Effect<ClearinghouseState, UpstreamError, Outbound>;
 }
 
-export class HyperliquidClient extends Context.Tag("clients/Hyperliquid")<
-  HyperliquidClient,
-  HyperliquidClientApi
->() {
+export class HyperliquidClient extends Context.Service<HyperliquidClient, HyperliquidClientApi>()(
+  "clients/Hyperliquid",
+) {
   static readonly layer = (config: HyperliquidConfig = {}): Layer.Layer<HyperliquidClient> =>
     Layer.sync(HyperliquidClient, () => make(config));
 }

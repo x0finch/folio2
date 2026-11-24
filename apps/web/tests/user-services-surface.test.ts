@@ -59,7 +59,9 @@ describe("user material exists only at the assembly point", () => {
     expect(enqueueForUser).toBe("enqueueForUser");
     expect<Tag | undefined>(undefined).toBeUndefined();
     const src = readFileSync(join(__dirname, "../src/lib/server/runtime.ts"), "utf8");
-    expect(src).toMatch(/^class UserJobs extends Context\.Tag\("web\/UserJobs"\)/m);
+    expect(src).toMatch(
+      /^class UserJobs extends Context\.Service<[\s\S]*?>\(\)\("web\/UserJobs"\)/m,
+    );
     expect(src).toMatch(/^export type \{ UserJobs \};$/m);
   });
 

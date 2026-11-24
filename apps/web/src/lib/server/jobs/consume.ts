@@ -1,5 +1,5 @@
 import { getLogger } from "@logtape/logtape";
-import { Cause, Effect, Either, Exit } from "effect";
+import { Cause, Effect, Exit, Result } from "effect";
 import { runPruneNotesJob } from "@/lib/server/entry/note-retention";
 import { runDailyPricesJob } from "@/lib/server/prices/daily";
 import { runPricesJob } from "@/lib/server/prices/job";
@@ -75,12 +75,12 @@ export const consumeMessage = (
   Effect.gen(function* () {
     const log = getLogger(["folio", "jobs"]);
     const decoded = decodeJob(message.body);
-    if (Either.isLeft(decoded)) {
-      log.warn("invalid job dropped", { messageId: message.id, error: decoded.left });
+    if (Result.isFailure(decoded)) {
+      log.warn("invalid job dropped", { messageId: message.id, error: decoded.failure });
       message.ack();
       return;
     }
-    const job = decoded.right;
+    const job = decoded.success;
     const exit = yield* Effect.exit(run(job));
     const meta = { kind: job.kind, messageId: message.id, attempts: message.attempts };
     if (Exit.isSuccess(exit)) {
@@ -128,11 +128,11 @@ export const abandonMessage = (
   Effect.gen(function* () {
     const log = getLogger(["folio", "jobs"]);
     const decoded = decodeJob(message.body);
-    if (Either.isLeft(decoded)) {
-      log.warn("invalid job abandoned", { messageId: message.id, error: decoded.left });
+    if (Result.isFailure(decoded)) {
+      log.warn("invalid job abandoned", { messageId: message.id, error: decoded.failure });
       return;
     }
-    const meta = { kind: decoded.right.kind, messageId: message.id, attempts: message.attempts };
+    const meta = { kind: decoded.success.kind, messageId: message.id, attempts: message.attempts };
     log.error("job never finished its final attempt, burying it", meta);
-    yield* settleGiveUp(decoded.right, reason, meta);
+    yield* settleGiveUp(decoded.success, reason, meta);
   });

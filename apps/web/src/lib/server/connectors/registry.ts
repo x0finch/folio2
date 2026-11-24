@@ -8,7 +8,7 @@ import {
   validateCredentials,
 } from "@folio/connectors";
 import { type ConnectorError, isRetryable, retryAfterOf } from "@folio/connectors-basic";
-import { Context, Duration, Effect, Schedule } from "effect";
+import { Context, Duration, Effect, Layer, Schedule } from "effect";
 import { platformLogoUrl } from "@/lib/core/logo";
 import type { InputSpec } from "@/lib/server/creds";
 
@@ -22,26 +22,27 @@ const VALIDATE_RETRY_BASE_MS = 200;
 const validateRetryPolicy = Schedule.exponential(Duration.millis(VALIDATE_RETRY_BASE_MS)).pipe(
   // ① Retry only retryable errors, and give up if the upstream's suggested wait exceeds our cap: clamping would likely
   //    hit 429 again, and surfacing the error beats a hung form (opposite of sync's clamp, deliberately).
-  //    Must precede `passthrough`, which pins the input type to ConnectorError.
-  Schedule.whileInput((e: ConnectorError) => {
-    if (!isRetryable(e)) return false;
-    const suggested = retryAfterOf(e);
+  Schedule.while(({ input }: Schedule.Metadata<Duration.Duration, ConnectorError>) => {
+    if (!isRetryable(input)) return false;
+    const suggested = retryAfterOf(input);
     return suggested === undefined || suggested <= VALIDATE_RETRY_MAX_WAIT_MS;
   }),
-  // Output becomes the error itself, so the next step can read Retry-After.
-  Schedule.passthrough,
   // ② Use the upstream's stated delay, else the exponential value; both clamped to the cap.
-  Schedule.modifyDelay((err, computed) => {
-    const suggested = retryAfterOf(err);
-    return Duration.min(
-      Duration.millis(VALIDATE_RETRY_MAX_WAIT_MS),
-      suggested !== undefined ? Duration.millis(suggested) : computed,
+  Schedule.modifyDelay(({ input, duration }) => {
+    const suggested = retryAfterOf(input);
+    return Effect.succeed(
+      Duration.min(
+        Duration.millis(VALIDATE_RETRY_MAX_WAIT_MS),
+        suggested !== undefined ? Duration.millis(suggested) : duration,
+      ),
     );
   }),
   // ③ Jitter is required: callers on one key all wake at the same Retry-After and would collide again.
   //    Additive (+0..baseMs) because Effect's multiplicative `jittered` can undercut the base.
-  Schedule.addDelay(() => Duration.millis(Math.random() * VALIDATE_RETRY_BASE_MS)),
-  Schedule.intersect(Schedule.recurs(VALIDATE_RETRY_ATTEMPTS - 1)),
+  Schedule.addDelay(() =>
+    Effect.sync(() => Duration.millis(Math.random() * VALIDATE_RETRY_BASE_MS)),
+  ),
+  (backoff) => Schedule.max([backoff, Schedule.recurs(VALIDATE_RETRY_ATTEMPTS - 1)]),
 );
 
 // App-side connector dispatch hub (server-only: imports cloudflare:workers, so only referenced inside handler bodies;
@@ -144,11 +145,13 @@ const makeRegistry = () => ({
     }),
 });
 
-export class ConnectorRegistry extends Effect.Service<ConnectorRegistry>()(
+export class ConnectorRegistry extends Context.Service<ConnectorRegistry>()(
   "web/ConnectorRegistry",
-  { sync: makeRegistry },
-) {}
+  { make: Effect.sync(makeRegistry) },
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 /** The same ticket as a Context built without Layer, for `runtime.ts`'s hand-assembled runtime. */
 export const connectorRegistryContext = (): Context.Context<ConnectorRegistry> =>
-  Context.make(ConnectorRegistry, ConnectorRegistry.make(makeRegistry()));
+  Context.make(ConnectorRegistry, ConnectorRegistry.of(makeRegistry()));

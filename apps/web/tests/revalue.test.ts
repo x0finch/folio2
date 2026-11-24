@@ -31,7 +31,7 @@ function fakeFx(rates: Record<string, number> = {}) {
       Effect.sync(() => {
         asked.push(currency);
         const c = currency.trim().toUpperCase();
-        return Option.fromNullable(c === "USD" ? 1 : rates[c]);
+        return Option.fromNullishOr(c === "USD" ? 1 : rates[c]);
       }),
   };
   return { fx, asked };

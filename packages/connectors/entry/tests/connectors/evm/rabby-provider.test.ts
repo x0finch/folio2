@@ -1,7 +1,8 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
 import type { ConnectorError, ProviderNeeds } from "@folio/connectors-basic";
 import { RabbySigner, type SignRequest } from "@folio/rabby-client";
-import { Duration, Effect, Fiber, TestClock } from "effect";
+import { Duration, Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { rabbyProvider } from "../../../src/connectors/evm/rabby-provider";
 import tokens from "./fixtures/rabby-cache-token-list.json";
@@ -46,9 +47,9 @@ const ctx = (address = ADDR, providerCreds: Record<string, string> = {}): Ctx =>
 // egress uses `Promise.resolve`, which TestClock does not govern.
 const drive = <A, E>(effect: Effect.Effect<A, E, ProviderNeeds>) =>
   Effect.gen(function* () {
-    const fiber = yield* Effect.fork(effect);
+    const fiber = yield* Effect.forkChild(effect);
     for (let i = 0; i < 20; i++) {
-      yield* Effect.repeatN(Effect.yieldNow(), 20);
+      yield* Effect.repeat(Effect.yieldNow, { times: 20 });
       yield* TestClock.adjust(Duration.seconds(1));
     }
     return yield* Fiber.join(fiber);

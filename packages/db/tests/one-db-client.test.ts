@@ -26,9 +26,9 @@ const counting = (): { env: DbEnv; built: () => number } => {
 
 // Production-shaped: three tickets built once (an isolate-level `ManagedRuntime` in production); each request supplies only two values.
 const tickets = Layer.mergeAll(
-  Database.Default,
-  DatabaseForOracle.Default("coingecko"),
-  GlobalDatabase.Default,
+  Database.layer,
+  DatabaseForOracle.layer("coingecko"),
+  GlobalDatabase.layer,
 );
 
 // One "request": one op in each of four domains across the three tickets.
@@ -58,7 +58,7 @@ describe("one DbClient per request", () => {
     const c = counting();
     const runtime = ManagedRuntime.make(tickets);
     const request = oneRequest.pipe(
-      Effect.zipRight(Database),
+      Effect.andThen(Database),
       provideCurrentUser("user-probe"),
       provideDbClient(c.env),
     );

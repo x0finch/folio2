@@ -65,7 +65,7 @@ const byBytes = (rows: readonly Row[]): Row[][] => {
   return parts;
 };
 
-export const makeUserCacheStore = (client: DbClient, userId: string) => {
+export const makeUserCacheStore = (client: DbClient["Service"], userId: string) => {
   // A corrupt value is treated as a miss: the next access refetches it instead of crashing the page.
   const decode = (row: { v: string; expiresAt: number }, now: number): CacheEntry | undefined => {
     try {
@@ -87,7 +87,7 @@ export const makeUserCacheStore = (client: DbClient, userId: string) => {
             .where(and(eq(userCache.userId, userId), eq(userCache.k, key))),
         );
         const row = rows[0];
-        return Option.fromNullable(row ? decode(row, now) : undefined);
+        return Option.fromNullishOr(row ? decode(row, now) : undefined);
       }),
 
     /** Missing keys are absent from the result. */

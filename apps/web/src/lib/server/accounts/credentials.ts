@@ -3,6 +3,7 @@ import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
+import { serverFn } from "@/lib/server/server-fn";
 import { raw2sealed } from "./create";
 
 // Log safe fields only, never creds.
@@ -14,7 +15,7 @@ export const ReplaceCredentialsInput = z.object({
   creds: z.record(z.string(), z.string().trim()),
 });
 
-export const handleReplaceAccountCredentials = Effect.fn("replaceAccountCredentials")(function* (
+export const handleReplaceAccountCredentials = serverFn("replaceAccountCredentials")(function* (
   data: z.infer<typeof ReplaceCredentialsInput>,
 ) {
   const { accounts } = yield* Database;

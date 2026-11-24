@@ -1,7 +1,7 @@
 import { getLogger, withContext } from "@logtape/logtape";
 import { createMiddleware } from "@tanstack/react-start";
 import { getRequestHeaders } from "@tanstack/react-start/server";
-import { Cause, Runtime } from "effect";
+import { prettyCauseOf } from "../errors";
 import { resolveAuth } from "./auth-session";
 import { getSessionAuth } from "./session-auth";
 
@@ -26,10 +26,8 @@ export const requireAuth = createMiddleware({ type: "function" }).server(async (
   });
 });
 
-// The fallback log must show which handler failed and where: `runEffect` throws a `FiberFailure` whose `message`
-// is only the outermost line, while handler names and the call chain live in its `Cause`. So log `Cause.pretty`
-// for a FiberFailure (keeps `at createTabPin (...)`), message otherwise.
-const describe = (err: unknown): string => {
-  if (Runtime.isFiberFailure(err)) return Cause.pretty(err[Runtime.FiberFailureCauseId]);
-  return err instanceof Error ? err.message : String(err);
-};
+// The fallback log must show which handler failed and where: a rejected `runEffect` carries only the
+// outermost message, while handler names and the call chain live in its `Cause`. So log the pretty
+// cause when the rejection came from the runtime (keeps `at createTabPin (...)`), message otherwise.
+const describe = (err: unknown): string =>
+  prettyCauseOf(err) ?? (err instanceof Error ? err.message : String(err));

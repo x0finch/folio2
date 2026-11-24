@@ -1,28 +1,17 @@
-import {
-  Cause,
-  Clock,
-  Duration,
-  Effect,
-  Exit,
-  Fiber,
-  Layer,
-  Option,
-  type RateLimiter,
-  Schedule,
-  TestClock,
-  TestContext,
-} from "effect";
+import { Clock, Duration, Effect, Fiber, Layer, Schedule } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import {
   make,
+  type RateLimit,
   type RateLimitOptions,
   RateLimitScopeOverride,
   setScopeDefaultForTests,
 } from "../src/ratelimit";
 import { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "../src/slot-cursor";
 
-// Timing asserts run on TestClock, never the wall clock. `memory` delegates to Effect (only the
-// delegation is checked); `isolated` is our GCRA. Its cursors are module-level per key, so each
+// Timing asserts run on TestClock, never the wall clock. Both scopes run our GCRA; `memory` keeps
+// its cursor private to the gate, `isolated` shares it by key. Its cursors are module-level per key, so each
 // case uses a distinct key.
 
 let seq = 0;
@@ -33,25 +22,25 @@ const freshKey = () => `test:${seq++}`;
 const settledAfter = (
   options: Omit<RateLimitOptions, "key"> & { key?: string },
   ms: number,
-  use: (gate: RateLimiter.RateLimiter) => Effect.Effect<unknown>,
+  use: (gate: RateLimit) => Effect.Effect<unknown>,
   cache?: SlotCache,
 ): Promise<boolean> =>
   Effect.gen(function* () {
     const gate = yield* make({ key: options.key ?? freshKey(), ...options });
-    const fiber = yield* Effect.fork(use(gate));
+    const fiber = yield* Effect.forkChild(use(gate));
     yield* TestClock.adjust(Duration.millis(ms));
-    return Option.isSome(yield* Fiber.poll(fiber));
+    return (yield* Effect.sync(() => fiber.pollUnsafe())) !== undefined;
   }).pipe(
     Effect.scoped,
     cache ? Effect.provide(Layer.succeed(SlotCacheOverride, cache)) : (e) => e,
-    Effect.provide(TestContext.TestContext),
+    Effect.provide(TestClock.layer()),
     Effect.runPromise,
   );
 
-const nTimes = (n: number) => (gate: RateLimiter.RateLimiter) =>
+const nTimes = (n: number) => (gate: RateLimit) =>
   Effect.all(Array.from({ length: n }, (_, i) => gate(Effect.succeed(i))));
 
-describe("scope: memory — delegates to the built-in", () => {
+describe("scope: memory — GCRA on a private cursor", () => {
   // Explicit scope: the default is `isolated`, whose cursor is shared across `make` calls.
   it("first `limit` requests burst at full quota", async () => {
     expect(
@@ -59,7 +48,7 @@ describe("scope: memory — delegates to the built-in", () => {
     ).toBe(true);
   });
 
-  it("request limit+1 waits one token (built-in token-bucket: interval/limit)", async () => {
+  it("request limit+1 waits one spacing (interval/limit)", async () => {
     const opts = { limit: 5, interval: "1 seconds", scope: "memory" } as const;
     expect(await settledAfter(opts, 199, nTimes(6))).toBe(false);
     expect(await settledAfter(opts, 200, nTimes(6))).toBe(true);
@@ -118,7 +107,7 @@ describe("scope: isolated — GCRA slot cursor", () => {
     // `Effect.retry` reruns the whole effect, gate included.
     const flaky = () => {
       let n = 0;
-      return (gate: RateLimiter.RateLimiter) =>
+      return (gate: RateLimit) =>
         Effect.orDie(
           Effect.retry(
             gate(
@@ -186,7 +175,7 @@ describe("scope: isolated — cursor shared across isolates", () => {
 describe("scope: isolated — concurrency", () => {
   // `Effect.all` is sequential by default, so the slot-grab atomicity needs explicit concurrency.
 
-  const stamped = (seen: number[]) => (gate: RateLimiter.RateLimiter) =>
+  const stamped = (seen: number[]) => (gate: RateLimit) =>
     Effect.all(
       Array.from({ length: 5 }, () =>
         gate(Effect.flatMap(Clock.currentTimeMillis, (t) => Effect.sync(() => seen.push(t)))),
@@ -199,10 +188,10 @@ describe("scope: isolated — concurrency", () => {
     const key = freshKey();
     await Effect.gen(function* () {
       const gate = yield* make({ key, limit: 1, interval: "125 millis", scope: "isolated" });
-      const fiber = yield* Effect.fork(stamped(seen)(gate));
+      const fiber = yield* Effect.forkChild(stamped(seen)(gate));
       yield* TestClock.adjust(Duration.millis(1000));
       yield* Fiber.join(fiber);
-    }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer()), Effect.runPromise);
 
     // limit=1 → 125ms spacing, no burst: 0 / 125 / 250 / 375 / 500.
     expect([...seen].sort((a, b) => a - b)).toEqual([0, 125, 250, 375, 500]);
@@ -215,10 +204,10 @@ describe("scope: isolated — concurrency", () => {
     const key = freshKey();
     await Effect.gen(function* () {
       const gate = yield* make({ key, limit: 3, interval: "300 millis", scope: "isolated" });
-      const fiber = yield* Effect.fork(stamped(seen)(gate));
+      const fiber = yield* Effect.forkChild(stamped(seen)(gate));
       yield* TestClock.adjust(Duration.millis(1000));
       yield* Fiber.join(fiber);
-    }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.scoped, Effect.provide(TestClock.layer()), Effect.runPromise);
 
     // 100ms spacing, 200ms burst → first 3 at 0, then one every 100ms.
     expect([...seen].sort((a, b) => a - b)).toEqual([0, 0, 0, 100, 200]);
@@ -242,7 +231,7 @@ describe("scope: isolated — concurrent cold start (new isolate syncing many ac
     const seen: number[] = [];
     await Effect.gen(function* () {
       const gate = yield* make({ key, limit: 1, interval: "125 millis", scope: "isolated" });
-      const fiber = yield* Effect.fork(
+      const fiber = yield* Effect.forkChild(
         Effect.all(
           Array.from({ length: 5 }, () =>
             gate(Effect.flatMap(Clock.currentTimeMillis, (t) => Effect.sync(() => seen.push(t)))),
@@ -250,43 +239,21 @@ describe("scope: isolated — concurrent cold start (new isolate syncing many ac
           { concurrency: "unbounded" },
         ),
       );
+      // The fake cache answers on real promises: let every fiber finish seeding and register its
+      // sleep before the clock moves, or sleeps land after the jump and never fire.
+      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 10)));
       yield* TestClock.adjust(Duration.millis(10_000));
       yield* Fiber.join(fiber);
     }).pipe(
       Effect.scoped,
       Effect.provide(Layer.succeed(SlotCacheOverride, cache)),
-      Effect.provide(TestContext.TestContext),
+      Effect.provide(TestClock.layer()),
       Effect.runPromise,
     );
 
     // None may pass before the 5000 already taken elsewhere.
     expect(Math.min(...seen)).toBeGreaterThanOrEqual(5000);
     expect(new Set(seen).size).toBe(5);
-  });
-});
-
-describe("unsupported options fail loudly", () => {
-  it('`algorithm: "fixed-window"` dies at construction in the isolated scope', async () => {
-    // The type allows `algorithm`; one GCRA cursor can't express fixed-window.
-    const exit = await Effect.runPromiseExit(
-      Effect.scoped(
-        make({ key: "fw-test", limit: 2, interval: "1 seconds", algorithm: "fixed-window" }),
-      ),
-    );
-    expect(Exit.isFailure(exit)).toBe(true);
-    // A defect (misconfiguration); the message must name the scope to switch to.
-    const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "";
-    expect(message).toContain("token-bucket");
-    expect(message).toContain("memory scope");
-  });
-
-  it("token-bucket (or omitted) builds normally", async () => {
-    for (const algorithm of ["token-bucket", undefined] as const) {
-      const gate = await Effect.runPromise(
-        Effect.scoped(make({ key: `tb-${algorithm}`, limit: 2, interval: "1 seconds", algorithm })),
-      );
-      expect(typeof gate).toBe("function");
-    }
   });
 });
 
@@ -302,7 +269,7 @@ describe("scope: none — pass-through", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(Layer.succeed(RateLimitScopeOverride, "none" as const)),
-      Effect.provide(TestContext.TestContext),
+      Effect.provide(TestClock.layer()),
       Effect.runPromise,
     );
     expect(done).toHaveLength(5);
@@ -323,7 +290,7 @@ describe("scope: none — pass-through", () => {
             const second = yield* gate(Clock.currentTimeMillis);
             return [first, second];
           }),
-          TestContext.TestContext,
+          TestClock.layer(),
         ),
       );
       expect(at[0]).toBe(at[1]);
@@ -339,13 +306,13 @@ describe("scope: none — pass-through", () => {
       const started = await Effect.runPromise(
         Effect.gen(function* () {
           const gate = yield* make({ key, limit: 1, interval: "1 minutes" });
-          const fiber = yield* Effect.fork(Effect.all([gate(Effect.void), gate(Effect.void)]));
+          const fiber = yield* Effect.forkChild(Effect.all([gate(Effect.void), gate(Effect.void)]));
           yield* TestClock.adjust(Duration.millis(0));
-          return Option.isNone(yield* Fiber.poll(fiber));
+          return (yield* Effect.sync(() => fiber.pollUnsafe())) === undefined;
         }).pipe(
           Effect.scoped,
           Effect.provide(Layer.succeed(RateLimitScopeOverride, "isolated" as const)),
-          Effect.provide(TestContext.TestContext),
+          Effect.provide(TestClock.layer()),
         ),
       );
       // Actually gated → the service's `isolated` won over the process-wide `none`.

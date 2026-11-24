@@ -5,7 +5,8 @@ import {
   jsonResponse as json,
   runClient,
 } from "@folio/client-core/testing";
-import { Duration, Effect, Fiber, Option, TestClock } from "effect";
+import { Clock, Duration, Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { BinanceClient, type BinanceClientApi, type BinanceConfig, make } from "../src/client";
 import {
@@ -272,13 +273,13 @@ describe("rate limiting: which endpoints pass the gate", () => {
       fn,
       Effect.gen(function* () {
         const client = yield* make({});
-        const fiber = yield* Effect.fork(use(client));
+        const fiber = yield* Effect.forkChild(use(client));
         yield* TestClock.adjust(Duration.millis(ms));
         // The fake egress is a `Promise.resolve`, which TestClock does not govern: advancing the virtual clock does not mean it has finished.
         // Polling after only adjusting would let the "not gated" side pass by luck. Yield a few microtask turns to drain it; the gated side
         // waits on the virtual clock and never completes however many turns, so both sides stay accurate.
-        yield* Effect.repeatN(Effect.yieldNow(), 50);
-        return Option.isSome(yield* Fiber.poll(fiber));
+        yield* Effect.repeat(Effect.yieldNow, { times: 50 });
+        return (yield* Effect.sync(() => fiber.pollUnsafe())) !== undefined;
       }),
     );
   };
@@ -305,7 +306,7 @@ describe("rate limiting: which endpoints pass the gate", () => {
       Effect.gen(function* () {
         const client = yield* make({});
         yield* nTimes(10, (c) => Effect.orDie(c.spotAccount(CREDS)))(client);
-        return yield* TestClock.currentTimeMillis;
+        return yield* Clock.currentTimeMillis;
       }),
     );
 

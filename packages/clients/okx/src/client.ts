@@ -66,7 +66,7 @@ export interface OkxClientApi {
   ) => Effect.Effect<OkxPositionsResponse, UpstreamError, Outbound>;
 }
 
-export class OkxClient extends Context.Tag("clients/Okx")<OkxClient, OkxClientApi>() {
+export class OkxClient extends Context.Service<OkxClient, OkxClientApi>()("clients/Okx") {
   // base may differ per account (proxy override is per-account), so the Layer takes config.
   static readonly layer = (config: OkxConfig = {}): Layer.Layer<OkxClient> =>
     Layer.sync(OkxClient, () => make(config));
@@ -111,7 +111,7 @@ export function make(config: OkxConfig = {}): OkxClientApi {
   // callback field on a core config object.
   const get = <A extends OkxEnvelope, I>(
     path: string,
-    schema: Schema.Schema<A, I>,
+    schema: Schema.Codec<A, I>,
     creds: OkxCreds,
     query?: Record<string, string>,
   ) =>

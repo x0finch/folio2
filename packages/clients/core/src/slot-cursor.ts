@@ -1,4 +1,4 @@
-import { Context, Effect, Option } from "effect";
+import { Context, Effect, Option, Semaphore } from "effect";
 
 // State for the `isolated` scope: one slot cursor (a number) per key, mirrored to the Cache API
 // so isolates share progress.
@@ -12,10 +12,9 @@ export interface SlotCache {
 }
 
 // Optional service (`R` stays clean). Production falls back to `globalThis.caches`.
-export class SlotCacheOverride extends Context.Tag("client-core/SlotCacheOverride")<
-  SlotCacheOverride,
-  SlotCache
->() {}
+export class SlotCacheOverride extends Context.Service<SlotCacheOverride, SlotCache>()(
+  "client-core/SlotCacheOverride",
+) {}
 
 const CACHE_NAME = "folio-ratelimit";
 // Exported so tests can seed "another isolate already used quota".
@@ -42,7 +41,7 @@ export function cursorFor(key: string): SlotCursor {
 function makeCursor(key: string): SlotCursor {
   const url = URL_PREFIX + encodeURIComponent(key);
   // Serializes the whole grab, not just the tat update (see top of file).
-  const lock = Effect.unsafeMakeSemaphore(1);
+  const lock = Semaphore.makeUnsafe(1);
   let tat = Number.NEGATIVE_INFINITY;
   let seeded = false;
   // "unknown": write not probed yet; "dead": not on Workers, or writes don't stick.

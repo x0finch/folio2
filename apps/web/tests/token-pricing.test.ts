@@ -35,7 +35,7 @@ function fakeFx(rates: Record<string, number> = {}) {
     resolve: (code: string) =>
       Effect.sync(() => {
         asked.push(code);
-        return Option.fromNullable(rates[code.trim().toUpperCase()]);
+        return Option.fromNullishOr(rates[code.trim().toUpperCase()]);
       }),
     warm: (codes: readonly string[] = []) => Effect.sync(() => void warmed.push([...codes])),
   };

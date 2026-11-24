@@ -1,6 +1,6 @@
 import type { Balance, ConnectorError, ProviderNeeds } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
-import { Context, type Effect, HashMap, Layer, Logger, LogLevel } from "effect";
+import { Context, type Effect, Layer, Logger, References } from "effect";
 import type { SyncDepError } from "./errors";
 import type { FetchOutcome, SyncLogger } from "./types";
 
@@ -8,15 +8,15 @@ import type { FetchOutcome, SyncLogger } from "./types";
 //
 // The entry points still take userId, but only for log context: cron has no request-scoped context.
 
-export class AccountStore extends Context.Tag("sync/AccountStore")<
+export class AccountStore extends Context.Service<
   AccountStore,
   {
     readonly list: () => Effect.Effect<readonly AccountSafe[], SyncDepError>;
     readonly rawCreds: () => Effect.Effect<readonly AccountRawCreds[], SyncDepError>;
   }
->() {}
+>()("sync/AccountStore") {}
 
-export class BalanceSource extends Context.Tag("sync/BalanceSource")<
+export class BalanceSource extends Context.Service<
   BalanceSource,
   {
     readonly fetch: (
@@ -24,9 +24,9 @@ export class BalanceSource extends Context.Tag("sync/BalanceSource")<
       stored: Record<string, string>,
     ) => Effect.Effect<FetchOutcome, ConnectorError, ProviderNeeds>;
   }
->() {}
+>()("sync/BalanceSource") {}
 
-export class SnapshotStore extends Context.Tag("sync/SnapshotStore")<
+export class SnapshotStore extends Context.Service<
   SnapshotStore,
   {
     readonly write: (
@@ -34,9 +34,9 @@ export class SnapshotStore extends Context.Tag("sync/SnapshotStore")<
       input: WriteSnapshotInput,
     ) => Effect.Effect<string, SyncDepError>;
   }
->() {}
+>()("sync/SnapshotStore") {}
 
-export class TokenOracle extends Context.Tag("sync/TokenOracle")<
+export class TokenOracle extends Context.Service<
   TokenOracle,
   {
     readonly mint: (
@@ -49,7 +49,7 @@ export class TokenOracle extends Context.Tag("sync/TokenOracle")<
       idByRef: ReadonlyMap<string, string>,
     ) => Effect.Effect<Balance[] | null, SyncDepError>;
   }
->() {}
+>()("sync/TokenOracle") {}
 
 // All capabilities orchestration needs. `ProviderNeeds` (outbound HTTP) is declared, not provided, so tests can swap it.
 export type SyncServices =
@@ -62,19 +62,18 @@ export type SyncServices =
 // Level threshold is All: filtering belongs to the injected logger, and Effect's default Info would eat `debug`.
 // Test-only forwarder: lets cases assert which log, level and fields were emitted.
 //
-// Don't stack this over a production logger: Logger.replace is remove(default)+add, so both forwarders would write each line twice.
+// Replaces every logger: don't combine it with a production logger, or each line is written twice.
 export const syncLoggerLayer = (log: SyncLogger): Layer.Layer<never> =>
   Layer.merge(
-    Logger.replace(
-      Logger.defaultLogger,
-      Logger.make(({ annotations, logLevel, message }) => {
+    Logger.layer([
+      Logger.make(({ fiber, logLevel, message }) => {
         const text = Array.isArray(message) ? message.map(String).join(" ") : String(message);
-        const props = Object.fromEntries(HashMap.toEntries(annotations));
-        switch (logLevel._tag) {
+        const props = { ...fiber.getRef(References.CurrentLogAnnotations) };
+        switch (logLevel) {
           case "Fatal":
           case "Error":
             return log.error(text, props);
-          case "Warning":
+          case "Warn":
             return log.warning(text, props);
           case "Debug":
           case "Trace":
@@ -83,6 +82,6 @@ export const syncLoggerLayer = (log: SyncLogger): Layer.Layer<never> =>
             return log.info(text, props);
         }
       }),
-    ),
-    Logger.minimumLogLevel(LogLevel.All),
+    ]),
+    Layer.succeed(References.MinimumLogLevel, "All"),
   );

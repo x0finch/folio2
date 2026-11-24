@@ -62,7 +62,7 @@ export const makeReading = (store: TokenStore, prices: TokenPriceStore): TokenRe
 
   logoUrlById: (id) =>
     Effect.map(store.getById(id), (info) =>
-      Option.flatMap(info, (i) => Option.fromNullable(i.logo ?? i.providerLogo)),
+      Option.flatMap(info, (i) => Option.fromNullishOr(i.logo ?? i.providerLogo)),
     ),
 });
 
@@ -72,7 +72,7 @@ export const makePricing = (prices: TokenPriceStore, upstream: TokenUpstream): T
 
   priceByRef: (ref) =>
     upstream.fetchPrices([ref]).pipe(
-      Effect.map((found) => Option.fromNullable(found.get(ref))),
+      Effect.map((found) => Option.fromNullishOr(found.get(ref))),
       degradeTo("tokens.priceByRef", Option.none<TokenPrice>()),
     ),
 

@@ -1,10 +1,10 @@
 import { Database } from "@folio/db";
-import { Effect } from "effect";
 import { z } from "zod";
+import { serverFn } from "@/lib/server/server-fn";
 
 export const DeleteTabPinInput = z.object({ pinId: z.string().min(1) });
 
-export const handleDeleteTabPin = Effect.fn("deleteTabPin")(function* (
+export const handleDeleteTabPin = serverFn("deleteTabPin")(function* (
   data: z.infer<typeof DeleteTabPinInput>,
 ) {
   const db = yield* Database;

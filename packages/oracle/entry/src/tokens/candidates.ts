@@ -3,7 +3,7 @@ import { DatabaseForOracle } from "@folio/db";
 import type { TokenCandidate, TokenMetaUpstream } from "@folio/oracle-basic";
 import { DEFAULT_TOP_N, normalizeSymbol } from "@folio/oracle-basic";
 import { TokenUpstream } from "@folio/oracle-basic/ports";
-import { Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { type WarmRow, warmBlob } from "./warm";
 
 // Candidate source for mint's symbol tier; a package-internal Tag consumed by `oracleLayer` when wiring `TokenService`.
@@ -33,8 +33,8 @@ export function candidatesBySymbol(rows: readonly WarmRow[], symbol: string): To
 }
 
 // Service shape is derived from the `effect` return value; `.Default` is its layer.
-export class CandidateSource extends Effect.Service<CandidateSource>()("oracle/CandidateSource", {
-  effect: Effect.gen(function* () {
+export class CandidateSource extends Context.Service<CandidateSource>()("oracle/CandidateSource", {
+  make: Effect.gen(function* () {
     const { cache } = yield* DatabaseForOracle;
     // The only egress, called only when the cache is empty (see `warmCatalogue`).
     const coldStart = yield* TokenUpstream;
@@ -45,4 +45,6 @@ export class CandidateSource extends Effect.Service<CandidateSource>()("oracle/C
         ),
     };
   }),
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}

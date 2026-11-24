@@ -27,11 +27,10 @@ const upstreams = () => {
 };
 
 // `namer` is passed in because the db layer is vendor-neutral and `Namer` would make db consume an oracle service.
-const dbForOracle = () =>
-  Layer.merge(DatabaseForOracle.Default(UPSTREAM_ID), GlobalDatabase.Default);
+const dbForOracle = () => Layer.merge(DatabaseForOracle.layer(UPSTREAM_ID), GlobalDatabase.layer);
 
 /** Sealed reference layer: its three domain services plus the userless `GlobalDatabase` (cron needs it to list users). `DatabaseForOracle` is deliberately not exposed to handlers. */
 export const oracleServices = (): Layer.Layer<OracleServices | GlobalDatabase> =>
   Layer.provide(oracleLayer, Layer.merge(dbForOracle(), upstreams())).pipe(
-    Layer.provideMerge(GlobalDatabase.Default),
+    Layer.provideMerge(GlobalDatabase.layer),
   );

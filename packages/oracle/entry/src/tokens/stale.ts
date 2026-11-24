@@ -33,12 +33,12 @@ export const makeStaleRefresh = (
   ): Effect.Effect<{ written: number; degraded: boolean }, never, DbRequest> =>
     Effect.gen(function* () {
       if (byRef.size === 0) return { written: 0, degraded: false };
-      const fetched = yield* Effect.either(upstream.fetchPrices([...byRef.keys()]));
-      if (fetched._tag === "Left") {
-        yield* logDegraded("tokens.refreshStale.prices", fetched.left);
+      const fetched = yield* Effect.result(upstream.fetchPrices([...byRef.keys()]));
+      if (fetched._tag === "Failure") {
+        yield* logDegraded("tokens.refreshStale.prices", fetched.failure);
         return { written: 0, degraded: true };
       }
-      const writes = [...fetched.right.entries()]
+      const writes = [...fetched.success.entries()]
         .map(([ref, price]) => {
           const tokenId = byRef.get(ref);
           // Drop refs upstream returned that we did not ask for (or that were merged away); never write stray rows.
@@ -58,12 +58,12 @@ export const makeStaleRefresh = (
   ): Effect.Effect<{ written: number; degraded: boolean }, never, DbRequest> =>
     Effect.gen(function* () {
       if (byRef.size === 0) return { written: 0, degraded: false };
-      const fetched = yield* Effect.either(upstream.fetchTokens([...byRef.keys()]));
-      if (fetched._tag === "Left") {
-        yield* logDegraded("tokens.refreshStale.infos", fetched.left);
+      const fetched = yield* Effect.result(upstream.fetchTokens([...byRef.keys()]));
+      if (fetched._tag === "Failure") {
+        yield* logDegraded("tokens.refreshStale.infos", fetched.failure);
         return { written: 0, degraded: true };
       }
-      const writes = fetched.right
+      const writes = fetched.success
         .map((t) => {
           const tokenId = byRef.get(t.ref);
           // Refs upstream did not list are absent; ones that came back but match no requested key are dropped.
@@ -103,7 +103,7 @@ export const makeStaleRefresh = (
           infoTargets.set(info.ref, id);
         }
 
-        // The two branches run concurrently, each failing independently: `Effect.either` rather than `degradeTo` because
+        // The two branches run concurrently, each failing independently: `Effect.result` rather than `degradeTo` because
         // the failure must also reach the caller (`RefreshStaleReport.degraded`).
         const [priceOutcome, infoOutcome] = yield* Effect.all(
           [refreshPrices(priceTargets), refreshInfos(infoTargets)],

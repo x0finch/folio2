@@ -47,9 +47,9 @@ export interface RabbyClientApi {
   readonly totalBalance: (address: string) => Effect.Effect<unknown, UpstreamError, Outbound>;
 }
 
-export class RabbyClient extends Context.Tag("clients/Rabby")<RabbyClient, RabbyClientApi>() {
+export class RabbyClient extends Context.Service<RabbyClient, RabbyClientApi>()("clients/Rabby") {
   static readonly layer = (config: RabbyConfig = {}): Layer.Layer<RabbyClient> =>
-    Layer.scoped(RabbyClient, make(config));
+    Layer.effect(RabbyClient, make(config));
 }
 
 // `community_id` is the canonical EVM chainId (15 spot checks all matched: eth=1 bsc=56 arb=42161 …).

@@ -12,9 +12,6 @@ catalogs:
     '@cloudflare/workers-types':
       specifier: ^4.20260626.1
       version: 4.20260626.1
-    '@effect/platform':
-      specifier: ^0.97.1
-      version: 0.97.1
     '@types/node':
       specifier: ^22.20.0
       version: 22.20.0
@@ -31,8 +28,8 @@ catalogs:
       specifier: ^1.6.25
       version: 1.6.25
     effect:
-      specifier: ^3.22.1
-      version: 3.22.1
+      specifier: ~4.1.5
+      version: 4.1.5
     jsdom:
       specifier: ^28.1.0
       version: 28.1.0
@@ -178,7 +175,7 @@ importers:
         version: 1.6.25(@cloudflare/workers-types@4.20260626.1)(@prisma/client@5.22.0)(@tanstack/react-start@1.168.26(esbuild@0.28.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(rolldown@1.1.3)(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0)))(better-sqlite3@12.11.1)(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@cloudflare/workers-types@4.20260626.1)(@prisma/client@5.22.0)(@types/pg@8.20.0)(better-sqlite3@12.11.1)(kysely@0.29.2)(pg@8.22.0))(pg@8.22.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(solid-js@1.9.13)(vitest@4.1.9)
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
       idb-keyval:
         specifier: ^6.3.0
         version: 6.3.0
@@ -278,7 +275,7 @@ importers:
         version: link:../core
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -316,7 +313,7 @@ importers:
         version: link:../core
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -332,7 +329,7 @@ importers:
         version: link:../core
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -348,7 +345,7 @@ importers:
         version: link:../core
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -364,7 +361,7 @@ importers:
         version: link:../core
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -375,12 +372,9 @@ importers:
 
   packages/clients/core:
     dependencies:
-      '@effect/platform':
-        specifier: 'catalog:'
-        version: 0.97.1(effect@3.22.1)
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -396,7 +390,7 @@ importers:
         version: link:../core
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -412,7 +406,7 @@ importers:
         version: link:../core
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -428,7 +422,7 @@ importers:
         version: link:../core
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -444,7 +438,7 @@ importers:
         version: link:../core
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -463,7 +457,7 @@ importers:
         version: 1.1.0
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -519,7 +513,7 @@ importers:
     devDependencies:
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -562,7 +556,7 @@ importers:
         version: 0.31.10
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -583,7 +577,7 @@ importers:
         version: link:../ref
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -608,7 +602,7 @@ importers:
         version: link:../ref
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -642,11 +636,8 @@ importers:
         version: link:../../ref
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
-      '@effect/platform':
-        specifier: 'catalog:'
-        version: 0.97.1(effect@3.22.1)
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -670,7 +661,7 @@ importers:
         version: link:../oracle/ref
       effect:
         specifier: 'catalog:'
-        version: 3.22.1
+        version: 4.1.5
     devDependencies:
       typescript:
         specifier: 'catalog:'
@@ -1074,11 +1065,6 @@ packages:
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
-
-  '@effect/platform@0.97.1':
-    resolution: {integrity: sha512-IevWxwmrxCdeXxbXDx/hiOstHtERRigd1nhZSuHgiFEl7NkBmS/5GVWsRacq4NfJN2uCXqggETKNwij15VEpew==}
-    peerDependencies:
-      effect: ^3.22.1
 
   '@emnapi/core@1.11.1':
     resolution: {integrity: sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ==}
@@ -1930,36 +1916,6 @@ packages:
     resolution: {integrity: sha512-JWUFYP79t9MFDrcSsG6yYZ8M92b7PRcvUDV0FTZnTrycpk98UrzgFLJbWAFewYx5wEcbNRVnISsza46GksDDUw==}
     peerDependencies:
       '@logtape/logtape': ^2.2.1
-
-  '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4':
-    resolution: {integrity: sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ==}
-    cpu: [arm64]
-    os: [darwin]
-
-  '@msgpackr-extract/msgpackr-extract-darwin-x64@3.0.4':
-    resolution: {integrity: sha512-zExlW9zUJKZH/tOtVMttwjKa4Xm/3KcNjnE3dPN92uCktwavMxpgCA3MoJK/DOnTWsQgo224OaST27/mPNAf+w==}
-    cpu: [x64]
-    os: [darwin]
-
-  '@msgpackr-extract/msgpackr-extract-linux-arm64@3.0.4':
-    resolution: {integrity: sha512-dgX0P/9wGPJeHFBG+ZmhgE6bmtMt7NP5CRBGyyktpopdk/mW4POnrpQsSLtKI1dwpc+pPLuXHDh6vvskyQE/sw==}
-    cpu: [arm64]
-    os: [linux]
-
-  '@msgpackr-extract/msgpackr-extract-linux-arm@3.0.4':
-    resolution: {integrity: sha512-Tg3yX65f5GbtXLkrYEHE5oibZG9epyYWas7FogTTEJeDEF9JlXJzKgXaNhT3UXlTOeA+AfZpYZYZ0uPj7Cfquw==}
-    cpu: [arm]
-    os: [linux]
-
-  '@msgpackr-extract/msgpackr-extract-linux-x64@3.0.4':
-    resolution: {integrity: sha512-8TNXMEjJc3QEy7R/x1INhgiU+XakDAFUzBhaz7+Rbrs8NH5UQeHQxxmzsSBJGyV6I1jW79undiQm8tOI+D+8FQ==}
-    cpu: [x64]
-    os: [linux]
-
-  '@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4':
-    resolution: {integrity: sha512-CmCXPQrkbwExx3j946/PtHWHbYJiCRBRDl4BlkRQcJB/YOwQxJRTpoo7aTsortjgoJ1x7opzTSxn7C+ASSLVjQ==}
-    cpu: [x64]
-    os: [win32]
 
   '@napi-rs/wasm-runtime@1.1.6':
     resolution: {integrity: sha512-ZLv/JdUfkvOy9eCnnBaGfiO+XimbjebAeO+MRQqD/B+FR1tnRN0tpKSJHRbE8sFfS6aqsXZ67TQjfwfsxULVbg==}
@@ -3578,8 +3534,8 @@ packages:
       sqlite3:
         optional: true
 
-  effect@3.22.1:
-    resolution: {integrity: sha512-TNoXushmPOBAjJlthF5d2QwnX2xBPEtcNJr5XKNKbRLbDvBcOYkXlYDfvGfSA0zriwLFuCll5MDtNMAdZL17PQ==}
+  effect@4.1.5:
+    resolution: {integrity: sha512-xyR20KhQI0vg2gD8ILUSQRTTESEYJ0JKdP+QD8J37xbwPTqXRxFM/l0+vUVD9fuSvoYruoTqyt33C4FZv1s4TQ==}
 
   electron-to-chromium@1.5.379:
     resolution: {integrity: sha512-v/qV5aV5EUA2pGilzUCq5/eyOloZAqDZBu9UMBIzgPpLlprjSR6zswsWBTv0KpqxLGUAZEwhO95ZCt7srymNVA==}
@@ -3643,10 +3599,6 @@ packages:
   exsolve@1.1.0:
     resolution: {integrity: sha512-D+42+T12DdIlJM3uepa55qGiL3sYdLBOxIl2ifQCzCHz4c7eiolaHsi3BIqEr7JxBzxv2pYZQX9kw16ziMcEmw==}
 
-  fast-check@3.23.2:
-    resolution: {integrity: sha512-h5+1OzzfCC3Ef7VbtKdcv7zsstUQwUDlYpUTvjeUsJAssPgLn7QzbboPtL5ro04Mq0rPOsMzl7q5hIbRs2wD1A==}
-    engines: {node: '>=8.0.0'}
-
   fd-package-json@2.0.0:
     resolution: {integrity: sha512-jKmm9YtsNXN789RS/0mSzOC1NUq9mkVd65vbSSVsKdjGvYXBuE4oWe2QOEoFeRmJg+lPuZxpmrfFclNhoRMneQ==}
 
@@ -3664,9 +3616,6 @@ packages:
 
   file-uri-to-path@1.0.0:
     resolution: {integrity: sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==}
-
-  find-my-way-ts@0.1.6:
-    resolution: {integrity: sha512-a85L9ZoXtNAey3Y6Z+eBWW658kO/MwR7zIafkIUPUMf3isZG0NCs2pjW2wtjxAKuJPxMAsHUIP4ZPGv0o5gyTA==}
 
   formatly@0.3.0:
     resolution: {integrity: sha512-9XNj/o4wrRFyhSMJOvsuyMwy8aUfBaZ1VrqHVfohyXf0Sw0e+yfKG+xZaY3arGCOMdwFsqObtzVOc1gU9KiT9w==}
@@ -3995,16 +3944,6 @@ packages:
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
 
-  msgpackr-extract@3.0.4:
-    resolution: {integrity: sha512-4kmO/MdyUIkLIvTPr8VHLil4AtoKIoniWPIEk5+CDy0xnWC84azhSFmuJ7PxZdsYtiP5kEeQsORAVIeMgxT+Hw==}
-    hasBin: true
-
-  msgpackr@1.12.1:
-    resolution: {integrity: sha512-4EUH9tQHnMmEgzW/MdAP0KIfa1T9AF+htl0ffe2n5vb2EKn9y2co8ccpgWko6S52Jy1PQZKwRnx5/KkYjtd9MQ==}
-
-  multipasta@0.2.8:
-    resolution: {integrity: sha512-ZPWuMKyv0cSO29f7hozp+k6+crZbQijV8ipMvxNxRf2SwtYGTX1ZX89Kd20VV4H9Znonx+EQn+iy1wGQsJ+b+Q==}
-
   nanoid@3.3.15:
     resolution: {integrity: sha512-y7Wygv/7mEOvxTuEQDB8StXdMRBWf1kR/tlhAzBRUFkB2jfcLOAxO/SHmOO2zgz1pVgK29/kyupn059/bCHdjA==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
@@ -4020,10 +3959,6 @@ packages:
   node-abi@3.92.0:
     resolution: {integrity: sha512-KdHvFWZjEKDf0cakgFjebl371GPsISX2oZHcuyKqM7DtogIsHrqKeLTo8wBHxaXRAQlY2PsPlZmfo+9ZCxEREQ==}
     engines: {node: '>=10'}
-
-  node-gyp-build-optional-packages@5.2.2:
-    resolution: {integrity: sha512-s+w+rBWnpTMwSFbaE0UXsRlg7hU4FjekKU4eyAih5T8nJuNZT1nNsskXpxmeqSK9UzkBl6UgRlnKc8hz8IEqOw==}
-    hasBin: true
 
   node-releases@2.0.50:
     resolution: {integrity: sha512-J6l92tKHX6w8Jy5nO1Vuc01NoIiRGi/d6qBKVxh+IQ8Cr3b6HbVNfKiF8ZpFKufTwpwxMmce2W3iQZ861ZRyTg==}
@@ -4156,9 +4091,6 @@ packages:
   punycode@2.3.1:
     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
     engines: {node: '>=6'}
-
-  pure-rand@6.1.0:
-    resolution: {integrity: sha512-bVWawvoZoBYpp6yIoQtQXHZjmz35RSVHnUOTefl8Vcjr8snTPY1wnpSPMWekcFwbxI6gtmT7rSYPFvz71ldiOA==}
 
   pvtsutils@1.3.6:
     resolution: {integrity: sha512-PLgQXQ6H2FWCaeRak8vvk1GW462lMxB5s3Jm673N82zI4vqtVUPuZdffdZbPDFRoU8kAhItWFtPCWiPpp4/EDg==}
@@ -5044,13 +4976,6 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
-  '@effect/platform@0.97.1(effect@3.22.1)':
-    dependencies:
-      effect: 3.22.1
-      find-my-way-ts: 0.1.6
-      msgpackr: 1.12.1
-      multipasta: 0.2.8
-
   '@emnapi/core@1.11.1':
     dependencies:
       '@emnapi/wasi-threads': 1.2.2
@@ -5579,24 +5504,6 @@ snapshots:
   '@logtape/pretty@2.2.1(@logtape/logtape@2.2.1)':
     dependencies:
       '@logtape/logtape': 2.2.1
-
-  '@msgpackr-extract/msgpackr-extract-darwin-arm64@3.0.4':
-    optional: true
-
-  '@msgpackr-extract/msgpackr-extract-darwin-x64@3.0.4':
-    optional: true
-
-  '@msgpackr-extract/msgpackr-extract-linux-arm64@3.0.4':
-    optional: true
-
-  '@msgpackr-extract/msgpackr-extract-linux-arm@3.0.4':
-    optional: true
-
-  '@msgpackr-extract/msgpackr-extract-linux-x64@3.0.4':
-    optional: true
-
-  '@msgpackr-extract/msgpackr-extract-win32-x64@3.0.4':
-    optional: true
 
   '@napi-rs/wasm-runtime@1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
     dependencies:
@@ -6984,10 +6891,7 @@ snapshots:
       kysely: 0.29.2
       pg: 8.22.0
 
-  effect@3.22.1:
-    dependencies:
-      '@standard-schema/spec': 1.1.0
-      fast-check: 3.23.2
+  effect@4.1.5: {}
 
   electron-to-chromium@1.5.379: {}
 
@@ -7109,10 +7013,6 @@ snapshots:
 
   exsolve@1.1.0: {}
 
-  fast-check@3.23.2:
-    dependencies:
-      pure-rand: 6.1.0
-
   fd-package-json@2.0.0:
     dependencies:
       walk-up-path: 4.0.0
@@ -7129,8 +7029,6 @@ snapshots:
 
   file-uri-to-path@1.0.0:
     optional: true
-
-  find-my-way-ts@0.1.6: {}
 
   formatly@0.3.0:
     dependencies:
@@ -7464,24 +7362,6 @@ snapshots:
 
   ms@2.1.3: {}
 
-  msgpackr-extract@3.0.4:
-    dependencies:
-      node-gyp-build-optional-packages: 5.2.2
-    optionalDependencies:
-      '@msgpackr-extract/msgpackr-extract-darwin-arm64': 3.0.4
-      '@msgpackr-extract/msgpackr-extract-darwin-x64': 3.0.4
-      '@msgpackr-extract/msgpackr-extract-linux-arm': 3.0.4
-      '@msgpackr-extract/msgpackr-extract-linux-arm64': 3.0.4
-      '@msgpackr-extract/msgpackr-extract-linux-x64': 3.0.4
-      '@msgpackr-extract/msgpackr-extract-win32-x64': 3.0.4
-    optional: true
-
-  msgpackr@1.12.1:
-    optionalDependencies:
-      msgpackr-extract: 3.0.4
-
-  multipasta@0.2.8: {}
-
   nanoid@3.3.15: {}
 
   nanostores@1.3.0: {}
@@ -7492,11 +7372,6 @@ snapshots:
   node-abi@3.92.0:
     dependencies:
       semver: 7.8.5
-    optional: true
-
-  node-gyp-build-optional-packages@5.2.2:
-    dependencies:
-      detect-libc: 2.1.2
     optional: true
 
   node-releases@2.0.50: {}
@@ -7703,8 +7578,6 @@ snapshots:
     optional: true
 
   punycode@2.3.1: {}
-
-  pure-rand@6.1.0: {}
 
   pvtsutils@1.3.6:
     dependencies:

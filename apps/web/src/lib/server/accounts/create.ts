@@ -10,12 +10,13 @@ import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { sealCreds } from "@/lib/server/creds";
 import { createManualAccount } from "@/lib/server/manual/store";
 import { refillDailyPrices } from "@/lib/server/prices/daily";
+import { serverFn } from "@/lib/server/server-fn";
 
 const log = getLogger(["folio", "web", "accounts"]);
 
 // Seals per field type: only `secret` fields are encrypted. SECRETS_KEY stays in the app layer.
 export const raw2sealed = async (
-  specs: ConnectorRegistry["specs"],
+  specs: ConnectorRegistry["Service"]["specs"],
   connectorId: ConnectorId,
   values: Record<string, string>,
 ) => JSON.stringify(await sealCreds(specs[connectorId] ?? [], values, env.SECRETS_KEY));
@@ -65,7 +66,7 @@ export const handleCreateAccount = Effect.fn("createAccount")(function* (
 
 // Manual accounts get a targeted daily-prices refill so the first token's history needn't wait
 // for the next hourly run.
-export const handleCreateAccountAndRefill = Effect.fn("createAccount")(function* (
+export const handleCreateAccountAndRefill = serverFn("createAccount")(function* (
   data: z.infer<typeof CreateAccountInput>,
 ) {
   const account = yield* handleCreateAccount(data);

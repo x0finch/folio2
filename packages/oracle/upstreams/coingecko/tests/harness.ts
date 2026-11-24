@@ -1,7 +1,8 @@
 import type { Outbound, UpstreamError } from "@folio/client-core";
 import { type HttpStub, httpStub, jsonResponse, runClient } from "@folio/client-core/testing";
 import { CoinGeckoClient, type CoinGeckoConfig } from "@folio/coingecko-client";
-import { Duration, Effect, Fiber, TestClock } from "effect";
+import { Duration, Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
 
 // Shared wiring for the adapter tests. Stubs the `HttpClient` service (not `globalThis.fetch`) so the real path
 // is exercised and the endpoint and params the adapter asked for are pinned.
@@ -64,9 +65,9 @@ export const runDriven = <A, E>(
   runClient(
     stub.http,
     Effect.gen(function* () {
-      const fiber = yield* Effect.fork(provide(effect, config));
+      const fiber = yield* Effect.forkChild(provide(effect, config));
       for (let i = 0; i < 20; i++) {
-        yield* Effect.yieldNow();
+        yield* Effect.yieldNow;
         yield* TestClock.adjust(Duration.seconds(1));
       }
       return yield* Fiber.join(fiber);

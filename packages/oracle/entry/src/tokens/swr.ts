@@ -10,10 +10,10 @@ import { Effect, Option } from "effect";
 export const degradeTo =
   <A>(at: string, fallback: A) =>
   <R>(self: Effect.Effect<A, UpstreamError, R>): Effect.Effect<A, never, R> =>
-    Effect.catchAll(self, (error) => Effect.as(logDegraded(at, error), fallback));
+    Effect.catch(self, (error) => Effect.as(logDegraded(at, error), fallback));
 
 // Logs only tag / pathname / status; `where` deliberately carries no query, so no API key, signature or wallet address can appear.
-// Exported separately because warm needs to carry "failed" back to the caller (`RefreshStaleReport.degraded`) after its own `Effect.either`.
+// Exported separately because warm needs to carry "failed" back to the caller (`RefreshStaleReport.degraded`) after its own `Effect.result`.
 export const logDegraded = (at: string, error: UpstreamError): Effect.Effect<void> =>
   Effect.logWarning("oracle: upstream fetch failed, serving local data").pipe(
     Effect.annotateLogs({

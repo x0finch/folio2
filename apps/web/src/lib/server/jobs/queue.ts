@@ -15,18 +15,18 @@ export interface Enqueued {
  * Optional service: production falls back to `env.JOB_RUNNER`; tests provide a fake that collects
  * messages, since the test Worker has no runner binding.
  */
-export class JobQueue extends Context.Tag("web/JobQueue")<
+export class JobQueue extends Context.Service<
   JobQueue,
   {
     readonly send: (batch: readonly Enqueued[]) => Effect.Effect<void>;
     readonly poke: Effect.Effect<void>;
   }
->() {}
+>()("web/JobQueue") {}
 
 const runner = () => env.JOB_RUNNER.get(env.JOB_RUNNER.idFromName(JOB_RUNNER_NAME));
 
 // Send failures are defects: a cron that couldn't enqueue should fail loudly. One RPC per batch.
-const runnerQueue: JobQueue["Type"] = {
+const runnerQueue: JobQueue["Service"] = {
   send: (batch) => Effect.promise(() => runner().enqueue(batch)),
   poke: Effect.promise(() => runner().poke()),
 };

@@ -14,9 +14,9 @@ describe("@folio/db encapsulation", () => {
   // Exports are per-user services: a name that is both Tag and layer (`Effect.Service`), with no userId in signatures (read from `CurrentUser` at op time).
   it("exposes per-user store services + global infra, not a facade or raw query functions", () => {
     expect(surface.createDb).toBeUndefined();
-    // `Effect.Service` yields a class (typeof function); `.Default` is its layer, parameterless: userId comes from `CurrentUser`.
+    // `Context.Service` yields a class (typeof function); `.layer` is its layer, parameterless: userId comes from `CurrentUser`.
     expect(typeof db.Database).toBe("function");
-    expect(typeof db.Database.Default).toBe("object");
+    expect(typeof db.Database.layer).toBe("object");
     // Per-domain Tags no longer leave the package: domains are reached only via the aggregate.
     expect(surface.AccountStore).toBeUndefined();
     expect(surface.SnapshotStore).toBeUndefined();
@@ -33,18 +33,18 @@ describe("@folio/db encapsulation", () => {
   });
 
   it("hands out one ticket per half: Database for the domains, oraclePortsLayer for the ports", () => {
-    // One ticket for all domains; `.Default` needs nothing (built once per isolate); ops' `R` is `DbClient | CurrentUser`.
+    // One ticket for all domains; `.layer` needs nothing (built once per isolate); ops' `R` is `DbClient | CurrentUser`.
     expect(typeof db.Database).toBe("function");
-    expect(typeof db.Database.Default).toBe("object");
+    expect(typeof db.Database.layer).toBe("object");
     // Second ticket: ops with no owner (global ref index + cron user scan); `R` is only `DbClient`, so no user data is reachable.
     expect(typeof db.GlobalDatabase).toBe("function");
-    expect(typeof db.GlobalDatabase.Default).toBe("object");
+    expect(typeof db.GlobalDatabase.layer).toBe("object");
     // `DbClient` is exported as a type only: exporting the class would let outside code build arbitrary queries.
     expect(surface.DbClient).toBeUndefined();
     expect(typeof db.provideDbClient).toBe("function");
     // Oracle ticket, for `@folio/oracle` only. `.Default` takes the namer (db has no vendor).
     expect(typeof db.DatabaseForOracle).toBe("function");
-    expect(typeof db.DatabaseForOracle.Default("coingecko")).toBe("object");
+    expect(typeof db.DatabaseForOracle.layer("coingecko")).toBe("object");
     // The layer-style export was removed: the contract is the implementation.
     expect(surface.oraclePortsLayer).toBeUndefined();
     expect(surface.userTokenStoreLayer).toBeUndefined();

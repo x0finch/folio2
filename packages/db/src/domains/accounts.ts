@@ -33,7 +33,7 @@ export interface AccountRawCreds {
 
 // System-level query, the one controlled exception to per-user scoping: lets the scheduled sync
 // enumerate users. Returns only user ids; never call it from request handlers.
-export const makeGlobalAccountStore = (client: DbClient) => {
+export const makeGlobalAccountStore = (client: DbClient["Service"]) => {
   return {
     listUserIds: (): Effect.Effect<string[]> =>
       Effect.map(
@@ -43,7 +43,7 @@ export const makeGlobalAccountStore = (client: DbClient) => {
   };
 };
 
-export const makeAccountStore = (client: DbClient, userId: string) => {
+export const makeAccountStore = (client: DbClient["Service"], userId: string) => {
   return {
     // Invariant: every account has exactly one membership row. Insert both in one batch so the
     // account never drops out of the portfolio view.

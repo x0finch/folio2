@@ -7,7 +7,7 @@ import {
   ConnectorUnavailableError,
   isRetryable,
 } from "@folio/connectors-basic";
-import { Effect, Either, Match } from "effect";
+import { Effect, Match, Result } from "effect";
 
 // One-to-one: client errors and connector errors are split by the same caller needs. Lives here,
 // not in connectors-basic, because a value import of `@folio/client-core` there would pull the
@@ -56,29 +56,29 @@ export const asConnector = <A, R>(
 //   and return the failed buckets so the caller can name them in a note.
 // - everything failed → fail, so an empty snapshot never wipes the account.
 export const bestEffortVerdict = <
-  T extends { readonly result: Either.Either<A, ConnectorError> },
+  T extends { readonly result: Result.Result<A, ConnectorError> },
   A,
 >(
   outcomes: readonly T[],
-): Either.Either<readonly T[], ConnectorError> => {
-  const failed = outcomes.filter((o) => Either.isLeft(o.result));
+): Result.Result<readonly T[], ConnectorError> => {
+  const failed = outcomes.filter((o) => Result.isFailure(o.result));
 
   // Prefer a rate-limit error among transient ones: its Retry-After is what sync's backoff uses.
   const transient =
     failed.find(
-      (o) => Either.isLeft(o.result) && o.result.left._tag === "ConnectorRateLimitError",
-    ) ?? failed.find((o) => Either.isLeft(o.result) && isRetryable(o.result.left));
-  if (transient && Either.isLeft(transient.result)) return Either.left(transient.result.left);
+      (o) => Result.isFailure(o.result) && o.result.failure._tag === "ConnectorRateLimitError",
+    ) ?? failed.find((o) => Result.isFailure(o.result) && isRetryable(o.result.failure));
+  if (transient && Result.isFailure(transient.result)) return Result.fail(transient.result.failure);
 
   const first = failed[0];
   if (
     outcomes.length > 0 &&
     failed.length === outcomes.length &&
     first &&
-    Either.isLeft(first.result)
+    Result.isFailure(first.result)
   ) {
-    return Either.left(first.result.left);
+    return Result.fail(first.result.failure);
   }
 
-  return Either.right(failed);
+  return Result.succeed(failed);
 };

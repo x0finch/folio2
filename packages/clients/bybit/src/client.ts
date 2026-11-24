@@ -56,7 +56,7 @@ export interface BybitClientApi {
   ) => Effect.Effect<BybitEarnResponse, UpstreamError, Outbound>;
 }
 
-export class BybitClient extends Context.Tag("clients/Bybit")<BybitClient, BybitClientApi>() {
+export class BybitClient extends Context.Service<BybitClient, BybitClientApi>()("clients/Bybit") {
   // base may differ per account (proxy override is per-account), so the Layer takes config and the adapter provides it then.
   static readonly layer = (config: BybitConfig = {}): Layer.Layer<BybitClient> =>
     Layer.sync(BybitClient, () => make(config));
@@ -103,7 +103,7 @@ export function make(config: BybitConfig = {}): BybitClientApi {
   // callback field on a core config object.
   const get = <A extends BybitEnvelope, I>(
     path: string,
-    schema: Schema.Schema<A, I>,
+    schema: Schema.Codec<A, I>,
     query: Record<string, string>,
     creds: BybitCreds,
   ) =>

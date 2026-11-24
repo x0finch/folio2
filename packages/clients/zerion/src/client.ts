@@ -47,9 +47,11 @@ export interface ZerionClientApi {
   }) => Effect.Effect<unknown, UpstreamError, Outbound>;
 }
 
-export class ZerionClient extends Context.Tag("clients/Zerion")<ZerionClient, ZerionClientApi>() {
+export class ZerionClient extends Context.Service<ZerionClient, ZerionClientApi>()(
+  "clients/Zerion",
+) {
   static readonly layer = (config: ZerionConfig = {}): Layer.Layer<ZerionClient> =>
-    Layer.scoped(ZerionClient, make(config));
+    Layer.effect(ZerionClient, make(config));
 }
 
 // Zerion's Basic auth shape: key as username, empty password.

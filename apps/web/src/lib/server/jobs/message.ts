@@ -1,4 +1,4 @@
-import { Either, ParseResult, Schema } from "effect";
+import { Result, Schema, type SchemaIssue } from "effect";
 import { DAILY_PRICES_IDS_PER_MESSAGE, PRICES_IDS_PER_MESSAGE } from "./constants";
 
 // Bodies carry only ids, never data: data is read at run time and may change while queued.
@@ -42,13 +42,13 @@ export type PruneNotesJob = typeof PruneNotesJob.Type;
 
 /**
  * Refresh a user's held-token prices. Without `tokenIds` it plans: computes ids at run time,
- * refreshes the first chunk and enqueues the rest. `maxItems` enforces the budget at decode time.
+ * refreshes the first chunk and enqueues the rest. `isMaxLength` enforces the budget at decode time.
  */
 export const PricesJob = Schema.Struct({
   kind: Schema.Literal("prices"),
   userId: Schema.NonEmptyString,
   tokenIds: Schema.optional(
-    Schema.Array(Schema.NonEmptyString).pipe(Schema.maxItems(PRICES_IDS_PER_MESSAGE)),
+    Schema.Array(Schema.NonEmptyString).check(Schema.isMaxLength(PRICES_IDS_PER_MESSAGE)),
   ),
 });
 export type PricesJob = typeof PricesJob.Type;
@@ -56,18 +56,18 @@ export type PricesJob = typeof PricesJob.Type;
 /**
  * Backfill daily prices / fx for manual accounts. Without `tokenIds`: all charted tokens; with
  * them: a targeted refill or a follow-up after the budget ran out. The budget is counted in calls
- * by the consumer, so `maxItems` only caps the body.
+ * by the consumer, so `isMaxLength` only caps the body.
  */
 export const DailyPricesJob = Schema.Struct({
   kind: Schema.Literal("daily-prices"),
   userId: Schema.NonEmptyString,
   tokenIds: Schema.optional(
-    Schema.Array(Schema.NonEmptyString).pipe(Schema.maxItems(DAILY_PRICES_IDS_PER_MESSAGE)),
+    Schema.Array(Schema.NonEmptyString).check(Schema.isMaxLength(DAILY_PRICES_IDS_PER_MESSAGE)),
   ),
 });
 export type DailyPricesJob = typeof DailyPricesJob.Type;
 
-export const Job = Schema.Union(
+export const Job = Schema.Union([
   SyncAccountJob,
   PricesJob,
   DailyPricesJob,
@@ -76,13 +76,31 @@ export const Job = Schema.Union(
   CatalogueJob,
   DefiLogosJob,
   PruneNotesJob,
-);
+]);
 export type Job = typeof Job.Type;
 
-/** Errors carry paths and expectations only, never values: bodies hold ids we must not log. */
-export const decodeJob = (body: unknown): Either.Either<Job, string> =>
-  Either.mapLeft(Schema.decodeUnknownEither(Job)(body), (error) =>
-    ParseResult.ArrayFormatter.formatErrorSync(error)
-      .map((issue) => `${issue.path.join(".") || "<root>"}: ${issue._tag}`)
+/** Errors carry paths and issue kinds only, never values: bodies hold ids we must not log. */
+export const decodeJob = (body: unknown): Result.Result<Job, string> =>
+  Result.mapError(Schema.decodeUnknownResult(Job)(body), (error) =>
+    issuesOf(error.issue, [])
+      .map(({ path, tag }) => `${path.map(String).join(".") || "<root>"}: ${tag}`)
       .join("; "),
   );
+
+const issuesOf = (
+  issue: SchemaIssue.Issue,
+  path: readonly PropertyKey[],
+): { readonly path: readonly PropertyKey[]; readonly tag: string }[] => {
+  switch (issue._tag) {
+    case "Pointer":
+      return issuesOf(issue.issue, [...path, ...issue.path]);
+    case "Filter":
+    case "Encoding":
+      return issuesOf(issue.issue, path);
+    case "Composite":
+    case "AnyOf":
+      return issue.issues.flatMap((inner) => issuesOf(inner, path));
+    default:
+      return [{ path, tag: issue._tag }];
+  }
+};

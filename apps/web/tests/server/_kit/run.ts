@@ -45,14 +45,14 @@ export const callExit = <A, E extends AppError, R extends UserServices>(
 /** Inner provide wins over the one `runForUser` applies outside, so the fake connector takes effect. */
 export const callWithRegistry = <A, E extends AppError, R extends UserServices>(
   userId: string,
-  registry: ConnectorRegistry,
+  registry: ConnectorRegistry["Service"],
   effect: Effect.Effect<A, E, R>,
 ): Promise<A> =>
   runForUser(userId, Effect.provide(effect, Layer.succeed(ConnectorRegistry, registry)));
 
 export const callWithRegistryExit = <A, E extends AppError, R extends UserServices>(
   userId: string,
-  registry: ConnectorRegistry,
+  registry: ConnectorRegistry["Service"],
   effect: Effect.Effect<A, E, R>,
 ): Promise<Exit.Exit<A, E>> =>
   runForUser(
@@ -60,9 +60,9 @@ export const callWithRegistryExit = <A, E extends AppError, R extends UserServic
     Effect.exit(Effect.provide(effect, Layer.succeed(ConnectorRegistry, registry))),
   ) as Promise<Exit.Exit<A, E>>;
 
-/** The typed failure, or `undefined` on success or defect (assert defects with `Cause.isDie`). */
+/** The typed failure, or `undefined` on success or defect (assert defects with `Cause.hasDies`). */
 export const failureOf = <A, E>(exit: Exit.Exit<A, E>): E | undefined =>
-  Exit.isFailure(exit) ? Option.getOrUndefined(Cause.failureOption(exit.cause)) : undefined;
+  Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined;
 
 /** `getSnapshots` plus the client-side wire decode, so assertions see what the page sees. */
 export const getSnapshotsDecoded = (data: Parameters<typeof handleGetSnapshots>[0]) =>

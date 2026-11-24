@@ -1,8 +1,8 @@
 import { Database } from "@folio/db";
-import { Effect } from "effect";
 import { z } from "zod";
 import { historyResolution } from "@/lib/core/history-range";
 import type { TokenValueHistoryRaw } from "@/lib/core/portfolio";
+import { serverFn } from "@/lib/server/server-fn";
 
 export const TokenValueHistoryInput = z.object({
   key: z.string().min(1),
@@ -13,7 +13,7 @@ export const TokenValueHistoryInput = z.object({
 // Per-account spot value history of one holding (token_id) in the window. Identity is frozen into snapshot
 // rows, so no server-side identity aggregation. Totals and caps are done in SQL (bounded rows per account per
 // bucket); the browser rebuilds and downsamples (`tokenValueHistoryFromRaw`).
-export const handleGetTokenValueHistory = Effect.fn("getTokenValueHistory")(function* (
+export const handleGetTokenValueHistory = serverFn("getTokenValueHistory")(function* (
   data: z.infer<typeof TokenValueHistoryInput>,
 ) {
   const db = yield* Database;

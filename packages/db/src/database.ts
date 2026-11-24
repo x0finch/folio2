@@ -1,4 +1,4 @@
-import { Context, Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { DbClient } from "./client";
 import { CurrentUser } from "./current-user";
 import { makeAccountStore, makeGlobalAccountStore } from "./domains/accounts";
@@ -47,22 +47,22 @@ const bindPerCall =
             method,
             (...args: never[]) =>
               Effect.flatMap(read, (ctx) => bind(...ctx)[method](...args)).pipe(
-                Effect.withSpan(`${domain}.${method}`, { captureStackTrace: false }),
+                Effect.withSpan(`${domain}.${method}`, undefined, { captureStackTrace: false }),
               ),
           ]),
         ),
       ]),
     ) as { [K in keyof D]: PerCall<ReturnType<D[K]>, R> };
 
-const unbound = DbClient.make({
+const unbound = DbClient.of({
   query: () => Effect.die(new Error("db: an op ran against the placeholder client")),
   batch: () => Effect.die(new Error("db: an op ran against the placeholder client")),
 });
 
 const perUser = bindPerCall(
-  Effect.contextWith(
-    (ctx: Context.Context<DbRequest>) =>
-      [Context.get(ctx, DbClient), Context.get(ctx, CurrentUser)] as const,
+  Effect.map(
+    Effect.context<DbRequest>(),
+    (ctx) => [Context.get(ctx, DbClient), Context.get(ctx, CurrentUser)] as const,
   ),
   [unbound, ""] as const,
 );
@@ -91,7 +91,11 @@ const databaseOps = () =>
     cache: makeUserCacheStore,
   });
 
-export class Database extends Effect.Service<Database>()("db/Database", { sync: databaseOps }) {}
+export class Database extends Context.Service<Database>()("db/Database", {
+  make: Effect.sync(databaseOps),
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 // `R` has `DbClient` but no `CurrentUser`: this ticket can't reach user data.
 const globalOps = () =>
@@ -100,14 +104,16 @@ const globalOps = () =>
     accounts: makeGlobalAccountStore,
   });
 
-export class GlobalDatabase extends Effect.Service<GlobalDatabase>()("db/GlobalDatabase", {
-  sync: globalOps,
-}) {}
+export class GlobalDatabase extends Context.Service<GlobalDatabase>()("db/GlobalDatabase", {
+  make: Effect.sync(globalOps),
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 /** The two tickets built as a plain context, skipping Layer machinery (~20ms CPU on a cold isolate) for cron / queue entry points. */
 export const databaseTickets = (): Context.Context<Database | GlobalDatabase> =>
-  Context.make(Database, Database.make(databaseOps())).pipe(
-    Context.add(GlobalDatabase, GlobalDatabase.make(globalOps())),
+  Context.make(Database, Database.of(databaseOps())).pipe(
+    Context.add(GlobalDatabase, GlobalDatabase.of(globalOps())),
   );
 
 // Not part of `Database`: tokens / tokenPrices there would let any handler edit token and price rows, bypassing mint and SWR orchestration.
@@ -115,18 +121,21 @@ export const databaseTickets = (): Context.Context<Database | GlobalDatabase> =>
 // `namer` is a parameter, not yielded from a service, so db never consumes an oracle service and stays vendor-free.
 //
 // `cache` also exists on `Database`; the store is stateless, so both read and write the same table.
-export class DatabaseForOracle extends Effect.Service<DatabaseForOracle>()("db/DatabaseForOracle", {
-  effect: (namer: string) =>
-    Effect.sync(() =>
-      perUser({
-        tokens: makeUserTokenStore(namer),
-        tokenPrices: makeUserTokenPriceStore(namer),
-        cache: makeUserCacheStore,
-      }),
-    ),
-}) {}
+const oracleOps = (namer: string) =>
+  perUser({
+    tokens: makeUserTokenStore(namer),
+    tokenPrices: makeUserTokenPriceStore(namer),
+    cache: makeUserCacheStore,
+  });
 
-export type TokenStore = DatabaseForOracle["tokens"];
-export type TokenPriceStore = DatabaseForOracle["tokenPrices"];
-export type CacheStore = DatabaseForOracle["cache"];
-export type GlobalRefIndexStore = GlobalDatabase["refIndex"];
+export class DatabaseForOracle extends Context.Service<
+  DatabaseForOracle,
+  ReturnType<typeof oracleOps>
+>()("db/DatabaseForOracle") {
+  static readonly layer = (namer: string) => Layer.sync(this, () => oracleOps(namer));
+}
+
+export type TokenStore = DatabaseForOracle["Service"]["tokens"];
+export type TokenPriceStore = DatabaseForOracle["Service"]["tokenPrices"];
+export type CacheStore = DatabaseForOracle["Service"]["cache"];
+export type GlobalRefIndexStore = GlobalDatabase["Service"]["refIndex"];

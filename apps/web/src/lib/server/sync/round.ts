@@ -21,6 +21,7 @@ import { type Enqueued, enqueue } from "@/lib/server/jobs/queue";
 import { hourlyUserJobs } from "@/lib/server/jobs/schedule";
 import { scopedMembership } from "@/lib/server/portfolio/scope";
 import { enqueueForUser, forUser, forUserDb, type UserJobs } from "@/lib/server/runtime";
+import { serverFn } from "@/lib/server/server-fn";
 import { makeSyncServices } from "./deps";
 import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
 
@@ -163,7 +164,7 @@ export const startSyncRound = (input: {
     const allIds = new Set(claim.ids);
     const toRun: ReadonlySet<string> = input.auto
       ? yield* planFreshSkips(round, claim.ids).pipe(
-          Effect.catchAllCause((cause) =>
+          Effect.catchCause((cause) =>
             Effect.logWarning(
               "skip-fresh planning failed; running full round",
               Cause.pretty(cause),
@@ -177,7 +178,7 @@ export const startSyncRound = (input: {
       yield* enqueueForUser((userId) => [
         ...syncJobsOf(userId, round, toRun),
         ...hourlyUserJobs(userId),
-      ]).pipe(Effect.tapErrorCause(() => abandonClaims([{ ...claim, ids: [...toRun] }])));
+      ]).pipe(Effect.tapCause(() => abandonClaims([{ ...claim, ids: [...toRun] }])));
     }
     const opened = claim.kind === "opened";
     // Our own full round with no skips is already current; otherwise re-read for the response.
@@ -227,9 +228,7 @@ export const startAccountRound = (account: {
     yield* enqueueForUser((userId) => [
       { job: syncJobOf(userId, round.value, account.id) },
       ...hourlyUserJobs(userId),
-    ]).pipe(
-      Effect.tapErrorCause(() => settleQueued(slot, { status: "failed", error: ENQUEUE_FAILED })),
-    );
+    ]).pipe(Effect.tapCause(() => settleQueued(slot, { status: "failed", error: ENQUEUE_FAILED })));
     return round.value;
   });
 
@@ -283,9 +282,7 @@ const claimPortfolio = (
           ids.push(account.id);
         }
       });
-      yield* enlistAll.pipe(
-        Effect.tapErrorCause(() => abandonClaims([{ kind: "joined", round, ids }])),
-      );
+      yield* enlistAll.pipe(Effect.tapCause(() => abandonClaims([{ kind: "joined", round, ids }])));
       if (ids.length > 0) return { kind: "joined", round, ids };
     }
     return { kind: "none", round: live };
@@ -314,7 +311,7 @@ const abandonClaims = (
             ),
           ),
     );
-  }).pipe(Effect.catchAllCause(() => Effect.void));
+  }).pipe(Effect.catchCause(() => Effect.void));
 
 /**
  * Cron, per user: one round per portfolio; only opens rounds and enqueues, no network (running
@@ -359,7 +356,7 @@ const fanOutUserRounds = (userId: string): Effect.Effect<Enqueued[], Error> =>
       yield* enqueue(batch);
       return batch;
     });
-    const batch = yield* claimAndQueue.pipe(Effect.tapErrorCause(() => abandonClaims(toQueue)));
+    const batch = yield* claimAndQueue.pipe(Effect.tapCause(() => abandonClaims(toQueue)));
     return batch;
   }).pipe((work) => forUserDb(userId, work));
 
@@ -390,7 +387,7 @@ export const fanOutAllUsers = (
         failed: 0,
         jobs: batch.length,
       })),
-      Effect.catchAllCause((cause) =>
+      Effect.catchCause((cause) =>
         Effect.sync(() => {
           getLogger(["folio", "cron"]).warn("user fan-out failed, user skipped", {
             error: Cause.pretty(cause),
@@ -500,7 +497,7 @@ export const giveUpQueuedAccount = (
 export const GetSyncRoundInput = z.object({ portfolioId: z.string().min(1) });
 
 /** `null` when there was never a round: "never synced" reads differently from "just started". */
-export const handleGetSyncRound = Effect.fn("getSyncRound")(function* (
+export const handleGetSyncRound = serverFn("getSyncRound")(function* (
   data: z.infer<typeof GetSyncRoundInput>,
 ) {
   const db = yield* Database;

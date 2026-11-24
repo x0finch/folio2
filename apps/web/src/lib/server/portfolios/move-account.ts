@@ -1,6 +1,6 @@
 import { Database } from "@folio/db";
-import { Effect } from "effect";
 import { z } from "zod";
+import { serverFn } from "@/lib/server/server-fn";
 
 // Exactly one of portfolioId / newName is required (enforced by the refine).
 export const MoveAccountInput = z
@@ -13,7 +13,7 @@ export const MoveAccountInput = z
     message: "portfolioId or newName required",
   });
 
-export const handleMoveAccountToPortfolio = Effect.fn("moveAccountToPortfolio")(function* (
+export const handleMoveAccountToPortfolio = serverFn("moveAccountToPortfolio")(function* (
   data: z.infer<typeof MoveAccountInput>,
 ) {
   const store = (yield* Database).portfolios;

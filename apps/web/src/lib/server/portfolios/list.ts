@@ -1,9 +1,9 @@
 import { Database } from "@folio/db";
-import { Effect } from "effect";
+import { serverFn } from "@/lib/server/server-fn";
 
 // List first and ensureDefault only if the default row is missing: one query after first visit.
 // Never run both concurrently, or list can win and return a defaultId absent from the list.
-export const handleListPortfolios = Effect.fn("listPortfolios")(function* () {
+export const handleListPortfolios = serverFn("listPortfolios")(function* () {
   const store = (yield* Database).portfolios;
   let portfolios = yield* store.list();
   let defaultPf = portfolios.find((p) => p.isDefault);
