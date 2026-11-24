@@ -3,6 +3,7 @@
 // timeout; retrying here too would multiply attempts.
 
 export { blockbookBalance } from "./balance/blockbook/upstream";
+export { bybitBalance } from "./balance/bybit/upstream";
 export { coinstatsBalance } from "./balance/coinstats/upstream";
 export { hyperliquidBalance } from "./balance/hyperliquid/upstream";
 export { okxBalance } from "./balance/okx/upstream";
@@ -19,7 +20,7 @@ export {
   type RequestOptions,
 } from "./runtime/http";
 export { FolioHttpClient } from "./runtime/http-client";
-export { formatAmount, formatCents } from "./runtime/note-format";
+export { formatAmount } from "./runtime/note-format";
 export {
   make as makeRateLimit,
   type RateLimitOptions,

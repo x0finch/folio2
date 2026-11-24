@@ -14,7 +14,6 @@
   "dependencies": {
     "@folio/binance-client": "workspace:*",
     "@folio/bitcoin-derive": "workspace:*",
-    "@folio/bybit-client": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/upstream-basic": "workspace:*",

@@ -4,7 +4,7 @@ import {
   parseEarn,
   parseFunding,
   parseUnified,
-} from "../../../src/connectors/bybit/parse";
+} from "../../../src/balance/bybit/parse";
 import earnFlexible from "./fixtures/earn-flexible.json";
 import earnOnchain from "./fixtures/earn-onchain.json";
 import expectedFlexible from "./fixtures/expected-flexible-earn.json";

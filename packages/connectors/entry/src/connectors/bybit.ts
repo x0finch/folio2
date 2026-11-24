@@ -1,6 +1,7 @@
 import { Spot } from "@folio/connectors-basic";
-import { defineConnector } from "../../connector";
-import { bybitAccountCreds, bybitProvider } from "./provider";
+import { bybitBalance } from "@folio/upstreams";
+import { defineConnector } from "../connector";
+import { apiKeyCreds } from "./api-key-creds";
 
 const BYBIT_LOGO = "https://assets.coingecko.com/markets/images/698/large/bybit_spot.png";
 
@@ -8,6 +9,6 @@ export const bybit = defineConnector({
   id: "bybit",
   label: "Bybit",
   logo: BYBIT_LOGO,
-  account: { creds: bybitAccountCreds },
-  balance: { schema: Spot, providers: [bybitProvider] },
+  account: { creds: apiKeyCreds },
+  balance: { schema: Spot, providers: [bybitBalance] },
 });
