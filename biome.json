@@ -12,7 +12,6 @@
       "!**/routeTree.gen.ts",
       "!**/worker-configuration.d.ts",
       "!packages/db/drizzle",
-      "!packages/connectors/providers/rabby/vendor",
       "!packages/upstreams/entry/src/balance/rabby/vendor",
       "!packages/ui/src/components",
       "!packages/ui/src/lib/tick-sound.ts",

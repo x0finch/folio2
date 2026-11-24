@@ -408,13 +408,13 @@ importers:
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../upstreams/basic
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../upstreams/entry
       zod:
         specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
-      '@folio/upstreams':
-        specifier: workspace:*
-        version: link:../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5

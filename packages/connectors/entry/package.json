@@ -19,10 +19,10 @@
     "@folio/okx-client": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/upstream-basic": "workspace:*",
+    "@folio/upstreams": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@folio/upstreams": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
