@@ -71,7 +71,7 @@ describe("defineUpstream", () => {
     expect(stub.calls).toHaveLength(4);
   });
 
-  it("nodes: base first, then mirrors; the override replaces them all", async () => {
+  it("base and nodes: base first, then mirrors; the override replaces them all", async () => {
     const mirrored = defineUpstream({
       id: "mirrored",
       label: "Mirrored",
@@ -85,7 +85,9 @@ describe("defineUpstream", () => {
       Effect.gen(function* () {
         const call = yield* mirrored.connect({});
         for (const node of call.nodes) yield* node("/x", ANY);
+        expect(call.base).toBe("https://a.test");
         const pinned = yield* mirrored.connect({ MIRRORED_BASE: "http://127.0.0.1:9" });
+        expect(pinned.base).toBe("http://127.0.0.1:9");
         expect(pinned.nodes).toHaveLength(1);
         yield* pinned.nodes[0]("/x", ANY);
       }),

@@ -1,9 +1,10 @@
 /// <reference path="./vendor.d.ts" />
-import { SigningFailure, summaryOf } from "@folio/upstreams";
+
 import { Effect } from "effect";
-import RABBY_WASM from "../vendor/rabby_sign.wasm";
-import type { RabbySignature } from "../vendor/sign-patched.cjs";
+import { SigningFailure, summaryOf } from "../../runtime/errors";
 import { RABBY_CLIENT, RABBY_CLIENT_VERSION } from "./constants";
+import RABBY_WASM from "./vendor/rabby_sign.wasm";
+import type { RabbySignature } from "./vendor/sign-patched.cjs";
 
 // Rabby request signing. Unsigned is not a 401 but a rate tier: measured on one IP and endpoint, signed 20 in a row all pass, unsigned gets
 // a 429 after 2 requests with no Retry-After and still 429 after 45s. So signing is required, not an optimisation.
@@ -38,7 +39,7 @@ const usable = (v: unknown): v is Required<LoadedSigner> =>
 async function loadSigner(): Promise<Signer> {
   const globals = globalThis as unknown as Record<string, unknown>;
   globals[WASM_HANDOFF_KEY] = RABBY_WASM;
-  const mod = await import("../vendor/sign-patched.cjs");
+  const mod = await import("./vendor/sign-patched.cjs");
   // The upstream file is UMD; which shape it lands in depends on the bundler: CJS interop gives `default`; evaluated as ESM,
   // `module`/`exports`/`define` are all undefined so it takes the last branch and attaches to `self.RabbySign`. All three are accepted;
   // the `.cjs` filename aims for the first, the other two are a safety net.

@@ -1,11 +1,16 @@
-import type { RabbyChain, RabbyProtocol, RabbyToken } from "@folio/rabby-client";
-import { parseChainIds } from "@folio/rabby-client";
 import { describe, expect, it } from "vitest";
-import { DUST_USD } from "../../../src/connectors/evm/constants";
-import { parseProtocols, parseTokens } from "../../../src/connectors/evm/rabby-parse";
-import tokenList from "./fixtures/rabby-cache-token-list.json";
-import chainList from "./fixtures/rabby-chain-list.json";
-import protocolList from "./fixtures/rabby-complex-protocol-list.json";
+import {
+  parseChainIds,
+  type RabbyChain,
+  type RabbyProtocol,
+  type RabbyToken,
+} from "../../../src/balance/rabby/api";
+import { DUST_USD } from "../../../src/balance/rabby/constants";
+import { parseProtocols, parseTokens } from "../../../src/balance/rabby/parse";
+import tokenList from "./fixtures/cache-token-list.json";
+import chainList from "./fixtures/chain-list.json";
+import protocolList from "./fixtures/complex-protocol-list.json";
+import expected from "./fixtures/expected-balances.json";
 
 // The fixture is cut from real responses (rows kept verbatim, only a few picked), each row there to cover one rule:
 //   eth ETH  native, large              kept, evm:1/native
@@ -210,5 +215,12 @@ describe("parseProtocols", () => {
       },
     ];
     expect(() => parseProtocols(bad, ids)).toThrow();
+  });
+});
+
+describe("golden: recorded responses in, pinned rows out", () => {
+  it("wallet rows then protocol rows", () => {
+    const ids = parseChainIds(chains);
+    expect([...parseTokens(tokens, ids), ...parseProtocols(protocols, ids)]).toEqual(expected);
   });
 });

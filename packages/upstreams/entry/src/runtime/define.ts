@@ -47,6 +47,8 @@ export interface Call<K extends string = string, O extends string = never> {
   readonly via: (limit: string) => Requester;
   // One requester per node, `base` first, under the default limit; just the override when set.
   readonly nodes: readonly Requester[];
+  // The base requests go to (the override when set); scopes caches per endpoint.
+  readonly base: string;
   readonly keys: Keys<K, O>;
 }
 
@@ -161,7 +163,7 @@ export function defineUpstream<const K extends string = never, const O extends s
         if (!gated) throw new Error(`${spec.id}: no limit named ${name}`);
         return gated;
       };
-      return { request, via, nodes, keys } satisfies Call<K, O>;
+      return { request, via, nodes, base: bases[0], keys } satisfies Call<K, O>;
     });
 
   return { ...spec, connect, envNames };

@@ -12,8 +12,8 @@
     "packages/db": {
       "ignoreDependencies": ["cloudflare", "wrangler"]
     },
-    "packages/clients/rabby": {
-      "entry": ["vendor/regenerate.mjs"]
+    "packages/upstreams/entry": {
+      "entry": ["src/balance/rabby/vendor/regenerate.mjs"]
     }
   }
 }

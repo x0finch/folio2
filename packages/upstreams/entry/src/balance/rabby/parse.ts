@@ -1,14 +1,8 @@
-import type { Defi, Spot } from "@folio/connectors-basic";
+import type { Defi as DefiRow, Spot as SpotRow } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import type { RabbyProtocol, RabbyToken } from "@folio/rabby-client";
 import { UpstreamUnavailableError } from "@folio/upstream-basic";
-import type { z } from "zod";
-import { DUST_USD } from "./constants";
-
-type SpotRow = z.infer<typeof Spot>;
-type DefiRow = z.infer<typeof Defi>;
-
-export type Row = SpotRow | DefiRow;
+import type { RabbyProtocol, RabbyToken } from "./api";
+import { DUST_USD, ID } from "./constants";
 
 // Always yields a canonical ref or throws: a fallback ref would pollute the token index, which is
 // worse than failing the sync. Native gas coins have a chain slug (e.g. "eth") as `id`, not 0x.
@@ -17,7 +11,7 @@ function refOf(token: RabbyToken, chainIds: Record<string, number>): string {
   const chainId = chain ? chainIds[chain] : undefined;
   if (chainId === undefined) {
     throw new UpstreamUnavailableError({
-      upstream: "rabby",
+      upstream: ID,
       where: "(chain list)",
       cause: `no chainId for chain '${chain ?? "?"}'`,
     });

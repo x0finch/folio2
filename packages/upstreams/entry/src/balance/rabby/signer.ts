@@ -1,5 +1,5 @@
-import type { SigningFailure } from "@folio/upstreams";
 import { Context, Effect, Option } from "effect";
+import type { SigningFailure } from "../../runtime/errors";
 
 export type SignRequest = (
   method: string,
@@ -8,11 +8,11 @@ export type SignRequest = (
 ) => Effect.Effect<Record<string, string>, SigningFailure>;
 
 // The signer: an optional service read with `Effect.serviceOption`, so the `R` channel stays clean (same scheme as `Fetcher` / `SlotCacheOverride`).
-// Why a service rather than a direct call: `./sign` imports `../vendor/rabby_sign.wasm` at top level, which only resolves in the Workers runtime /
+// Why a service rather than a direct call: `./sign` imports `./vendor/rabby_sign.wasm` at top level, which only resolves in the Workers runtime /
 // build chain, so a plain node import blows up. As an optional service, production provides none and takes the dynamic import below,
 // while tests provide a fake, so the signing wiring (is params the copy that was sent, are all headers present) is pinned in ordinary tests.
 export class RabbySigner extends Context.Service<RabbySigner, SignRequest>()(
-  "clients/RabbySigner",
+  "upstreams/RabbySigner",
 ) {}
 
 // When none is provided: load the real one on demand.
