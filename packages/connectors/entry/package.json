@@ -16,7 +16,6 @@
     "@folio/bitcoin-derive": "workspace:*",
     "@folio/blockbook-client": "workspace:*",
     "@folio/bybit-client": "workspace:*",
-    "@folio/coinstats-client": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
     "@folio/hyperliquid-client": "workspace:*",
     "@folio/okx-client": "workspace:*",

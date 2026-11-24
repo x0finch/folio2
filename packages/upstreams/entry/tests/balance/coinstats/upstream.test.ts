@@ -1,12 +1,8 @@
-import { validateCredentials } from "@folio/connectors-basic";
 import type { UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
-import { type HttpStub, httpStub, runClient } from "@folio/upstreams/testing";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import {
-  coinstatsAccountCreds,
-  createCoinstatsProvider,
-} from "../../../src/connectors/coinstats/provider";
+import { coinstatsBalance } from "../../../src/balance/coinstats/upstream";
+import { type HttpStub, httpStub, runClient } from "../../../src/runtime/testing";
 import solana from "./fixtures/solana.json";
 
 const ADDR = "So11111111111111111111111111111111111111112";
@@ -19,10 +15,13 @@ const json = (body: unknown, init?: ResponseInit): Response =>
     ...init,
   });
 
-type Ctx = Parameters<ReturnType<typeof createCoinstatsProvider>["fetchBalances"]>[0];
-const ctx = (providerCreds: Record<string, string> = { COINSTATS_API_KEY: KEY }): Ctx =>
+type Ctx = Parameters<typeof coinstatsBalance.fetchBalances>[0];
+const ctx = (
+  providerCreds: Record<string, string> = { COINSTATS_API_KEY: KEY },
+  connectorId = "solana",
+): Ctx =>
   ({
-    account: { id: "a1", label: "Wallet", connectorId: "solana", creds: { address: ADDR } },
+    account: { id: "a1", label: "Wallet", connectorId, creds: { address: ADDR } },
     creds: providerCreds,
   }) as unknown as Ctx;
 
@@ -33,13 +32,13 @@ const failing = (
   effect: Effect.Effect<unknown, UpstreamError, UpstreamNeeds>,
 ): Promise<UpstreamError> => runClient(stub, Effect.flip(effect));
 
-describe("factory: one adapter service for three chains", () => {
+describe("one upstream for three chains", () => {
   it("base override takes effect, no default host left; unset goes to the official host", async () => {
     const overrides = {
       COINSTATS_API_KEY: KEY,
       COINSTATS_API_BASE: "http://127.0.0.1:3399/coinstats",
     };
-    const provider = createCoinstatsProvider("solana");
+    const provider = coinstatsBalance;
     // The declared keys are the two that really take effect when injected here (the app injects ctx.creds from env per the declaration); the base override is public.
     expect(provider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
     expect(provider.creds.find((f) => f.key === "COINSTATS_API_BASE")?.type).toBe("public");
@@ -52,9 +51,9 @@ describe("factory: one adapter service for three chains", () => {
     expect(plain.startsWith("https://openapiv1.coinstats.app/")).toBe(true);
   });
 
-  it("connectionId binds each chain (sui to 'sui-wallet')", async () => {
+  it("connectionId follows the account kind (sui to 'sui-wallet')", async () => {
     const stub = httpStub(() => json([]));
-    await run(stub, createCoinstatsProvider("sui-wallet").fetchBalances(ctx()));
+    await run(stub, coinstatsBalance.fetchBalances(ctx(undefined, "sui")));
     expect(stub.calls[0].request.url.searchParams.get("connectionId")).toBe("sui-wallet");
   });
 });
@@ -62,7 +61,7 @@ describe("factory: one adapter service for three chains", () => {
 describe("fetchBalances", () => {
   it("sends X-API-KEY and parses balances", async () => {
     const stub = httpStub(() => json(solana));
-    const { balances } = await run(stub, createCoinstatsProvider("solana").fetchBalances(ctx()));
+    const { balances } = await run(stub, coinstatsBalance.fetchBalances(ctx()));
 
     expect(balances.length).toBeGreaterThan(0);
     expect(stub.calls[0].request.headers["x-api-key"]).toBe(KEY);
@@ -71,59 +70,49 @@ describe("fetchBalances", () => {
 
   it("no provider key configured: a credentials problem, and no request at all", async () => {
     const stub = httpStub(() => json([]));
-    const err = await failing(stub, createCoinstatsProvider("solana").fetchBalances(ctx({})));
+    const err = await failing(stub, coinstatsBalance.fetchBalances(ctx({})));
     expect(err._tag).toBe("UpstreamAuthError");
     expect(stub.calls).toHaveLength(0);
   });
 
   it("429 gives rate-limited; 401 gives a credentials problem", async () => {
     const limited = httpStub(() => json({}, { status: 429 }));
-    expect(
-      (await failing(limited, createCoinstatsProvider("solana").fetchBalances(ctx())))._tag,
-    ).toBe("UpstreamRateLimitError");
+    expect((await failing(limited, coinstatsBalance.fetchBalances(ctx())))._tag).toBe(
+      "UpstreamRateLimitError",
+    );
     const denied = httpStub(() => json({}, { status: 401 }));
-    expect(
-      (await failing(denied, createCoinstatsProvider("solana").fetchBalances(ctx())))._tag,
-    ).toBe("UpstreamAuthError");
+    expect((await failing(denied, coinstatsBalance.fetchBalances(ctx())))._tag).toBe(
+      "UpstreamAuthError",
+    );
   });
 });
 
 describe("validateAccount", () => {
   it("no key configured: false, and no request at all", async () => {
-    // The old version had an `if (!apiKey) return false` precheck for this. A missing key now reports a credentials problem,
-    // which this path already answers with `false`, so the same thing need not be written twice.
     const stub = httpStub(() => json([]));
-    expect(await run(stub, createCoinstatsProvider("solana").validateAccount(ctx({})))).toBe(false);
+    expect(await run(stub, coinstatsBalance.validateAccount(ctx({})))).toBe(false);
     expect(stub.calls).toHaveLength(0);
   });
 
   it("200 → true;401 → false", async () => {
     const ok = httpStub(() => json([]));
-    expect(await run(ok, createCoinstatsProvider("solana").validateAccount(ctx()))).toBe(true);
+    expect(await run(ok, coinstatsBalance.validateAccount(ctx()))).toBe(true);
     const denied = httpStub(() => json({}, { status: 401 }));
-    expect(await run(denied, createCoinstatsProvider("solana").validateAccount(ctx()))).toBe(false);
+    expect(await run(denied, coinstatsBalance.validateAccount(ctx()))).toBe(false);
   });
 
   it("unreachable goes through the error channel, not squashed into false", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
-    expect(
-      (await failing(stub, createCoinstatsProvider("solana").validateAccount(ctx())))._tag,
-    ).toBe("UpstreamUnavailableError");
+    expect((await failing(stub, coinstatsBalance.validateAccount(ctx())))._tag).toBe(
+      "UpstreamUnavailableError",
+    );
   });
 });
 
-// account.creds validation gate (runs before the app's dispatch bridge fetches; the three chains share this declaration, format left to the API so only non-empty).
-describe("account.creds validation gate", () => {
-  it("accepts a non-empty address (after trim)", async () => {
-    await expect(validateCredentials(coinstatsAccountCreds, { address: ADDR })).resolves.toEqual({
-      address: ADDR,
-    });
-  });
-
-  it("rejects an empty / missing address (a fast non-retryable failure in the bridge)", async () => {
-    await expect(validateCredentials(coinstatsAccountCreds, { address: "  " })).rejects.toThrow(
-      /address/,
-    );
-    await expect(validateCredentials(coinstatsAccountCreds, {})).rejects.toThrow(/address/);
+describe("output check", () => {
+  it("a row that breaks the balance contract fails the call as parse", async () => {
+    const stub = httpStub(() => json([{ symbol: "SOL", amount: "lots", price: 1 }]));
+    const err = await failing(stub, coinstatsBalance.fetchBalances(ctx()));
+    expect(err._tag).toBe("UpstreamParseError");
   });
 });

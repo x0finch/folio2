@@ -1,4 +1,5 @@
 import { Clock, Context, Duration, Effect, Option } from "effect";
+import * as RateLimiter from "effect/persistence/RateLimiter";
 import { cursorFor } from "./slot-cursor";
 
 // Outbound rate gate: wraps a task so it waits for a slot. Scopes decide where the bucket lives:
@@ -71,21 +72,51 @@ const memoryCursor = (): Cursor => {
   };
 };
 
-// GCRA over one theoretical-arrival-time cursor: grant = cursor − burst; each grant pushes the
-// cursor one spacing; the cursor never trails `now`, so idle time refills the burst.
-// Smooths peaks, not strict: strict limiting on Workers needs a Durable Object; 429 + retry
-// covers the leak.
+// GCRA over one theoretical-arrival-time cursor, served as the token-bucket store of
+// `effect/persistence/RateLimiter`: each grant pushes the cursor one spacing, the cursor never
+// trails `now`, so idle time refills the burst. The Cache API holds one value with no atomic
+// read-modify-write, hence a single cursor rather than a counter. Smooths peaks, not strict:
+// strict limiting on Workers needs a Durable Object; 429 + retry covers the leak.
 // The isolated cursor is keyed and shared across `make` calls, not scoped: on Workers each request
 // is its own run, so scoped state would reset per request.
-const gcra = (options: RateLimitOptions, cursor: Cursor): RateLimit => {
-  const spacing = Duration.toMillis(Duration.fromInputUnsafe(options.interval)) / options.limit;
-  const burst = (options.limit - 1) * spacing;
-  return <A, E, R>(task: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+const unsupported = (what: string) =>
+  Effect.die(new Error(`rate limit store: ${what} is not supported`));
+
+const gcraStore = (cursor: Cursor): RateLimiter.RateLimiterStore["Service"] => ({
+  tokenBucket: ({ tokens, limit, refillRate }) =>
     Effect.gen(function* () {
+      const spacing = Duration.toMillis(refillRate);
+      const burst = (limit - 1) * spacing;
       const now = yield* Clock.currentTimeMillis;
-      const tat = yield* cursor.advance(spacing, now);
-      const waitMs = tat - burst - now;
-      if (waitMs > 0) yield* Effect.sleep(Duration.millis(waitMs));
-      return yield* task;
-    });
+      const slot = yield* cursor.advance(spacing * tokens, now);
+      const wait = slot - burst - now;
+      // Encoded so the limiter's `ceil(-remaining) * refill - elapsed` is exactly `wait`.
+      if (wait <= 0) return [Math.floor(-wait / spacing), 0] as const;
+      const owed = Math.ceil(wait / spacing);
+      return [-owed, owed * spacing - wait] as const;
+    }),
+  fixedWindow: () => unsupported("fixed-window"),
+  adaptiveConsume: () => unsupported("adaptive"),
+  adaptiveFeedback: () => unsupported("adaptive"),
+});
+
+const gcra = (options: RateLimitOptions, cursor: Cursor): RateLimit => {
+  const limiter = RateLimiter.make.pipe(
+    Effect.provideService(RateLimiter.RateLimiterStore, gcraStore(cursor)),
+    Effect.runSync,
+  );
+  const consume = limiter.consume({
+    algorithm: "token-bucket",
+    onExceeded: "delay",
+    window: options.interval,
+    limit: options.limit,
+    key: options.key,
+  });
+  return <A, E, R>(task: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+    consume.pipe(
+      // The store never fails, and "delay" never reports an excess.
+      Effect.orDie,
+      Effect.flatMap(({ delay }) => (Duration.isZero(delay) ? Effect.void : Effect.sleep(delay))),
+      Effect.andThen(task),
+    );
 };

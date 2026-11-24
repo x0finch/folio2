@@ -1,6 +1,6 @@
-import type { CoinstatsCoin } from "@folio/coinstats-client";
 import type { Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import type { CoinstatsCoin } from "./api";
 
 // Serves solana / sui / cosmos; only `connectionId` differs.
 function chainTokenRef(chain: string, contract: string | undefined): string {

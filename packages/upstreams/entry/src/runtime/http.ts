@@ -38,7 +38,7 @@ export interface RequestOptions {
   readonly body?: string;
   // Treat 404 as "no such thing" → null. Only for lookup-by-id endpoints.
   readonly notFoundAsNull?: boolean;
-  // Per-request headers; override `HttpConfig.headers`. For clients whose creds vary per call.
+  // Per-request headers, merged over `HttpConfig.headers`. For clients whose creds vary per call.
   readonly headers?: Effect.Effect<HeadersInit, SigningFailure>;
 }
 
@@ -55,6 +55,17 @@ export interface HttpConfig {
   readonly limit?: RateLimit; // omitted = unlimited
   readonly rateLimitedStatuses?: readonly number[]; // default [429]
 }
+
+const mergeHeaders = (
+  shared: HeadersInit | undefined,
+  own: HeadersInit | undefined,
+): Record<string, string> => {
+  const merged = new Headers(shared);
+  new Headers(own).forEach((value, name) => {
+    merged.set(name, value);
+  });
+  return Object.fromEntries(merged);
+};
 
 // Re-exported so client signatures depend on this package, not on the HTTP library.
 export type Outbound = HttpClient.HttpClient;
@@ -139,8 +150,9 @@ export function makeRequester(config: HttpConfig): Requester {
 
     const once = Effect.gen(function* () {
       const client = yield* HttpClient.HttpClient;
-      const headerSource = options?.headers ?? config.headers?.(path, options);
-      const headers = headerSource ? yield* headerSource : undefined;
+      const shared = config.headers ? yield* config.headers(path, options) : undefined;
+      const own = options?.headers ? yield* options.headers : undefined;
+      const headers = shared || own ? mergeHeaders(shared, own) : undefined;
 
       const request = HttpClientRequest.make(method)(url).pipe(
         headers ? HttpClientRequest.setHeaders(headers) : (r) => r,
