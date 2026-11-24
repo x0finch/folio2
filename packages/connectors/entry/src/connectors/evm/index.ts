@@ -1,5 +1,6 @@
-import { Defi, defineConnector, Spot } from "@folio/connectors-basic";
+import { Defi, Spot } from "@folio/connectors-basic";
 import { z } from "zod";
+import { defineConnector } from "../../connector";
 import { evmAccountCreds } from "./creds";
 import { rabbyProvider } from "./rabby-provider";
 import { zerionProvider } from "./zerion-provider";

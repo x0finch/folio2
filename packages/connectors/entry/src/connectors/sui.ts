@@ -1,4 +1,5 @@
-import { defineConnector, Spot } from "@folio/connectors-basic";
+import { Spot } from "@folio/connectors-basic";
+import { defineConnector } from "../connector";
 import { coinstatsAccountCreds, createCoinstatsProvider } from "./coinstats/provider";
 
 // CoinStats names this connection "sui-wallet", not "sui".

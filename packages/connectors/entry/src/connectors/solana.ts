@@ -1,4 +1,5 @@
-import { defineConnector, Spot } from "@folio/connectors-basic";
+import { Spot } from "@folio/connectors-basic";
+import { defineConnector } from "../connector";
 import { coinstatsAccountCreds, createCoinstatsProvider } from "./coinstats/provider";
 
 const SOL_LOGO = "https://assets.coingecko.com/coins/images/4128/large/solana.png";

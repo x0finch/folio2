@@ -1,5 +1,6 @@
 import type { DatabaseForOracle, GlobalDatabase } from "@folio/db";
-import type { FxUpstream, Namer, PlatformUpstream, TokenUpstream } from "@folio/oracle-basic/ports";
+import type { Namer } from "@folio/oracle-basic/ports";
+import type { FxUpstream, PlatformUpstream, TokenUpstream } from "@folio/upstream-basic/ports";
 import { Context, Effect, Layer } from "effect";
 import { FxService } from "./fx";
 import { PlatformService } from "./platforms";

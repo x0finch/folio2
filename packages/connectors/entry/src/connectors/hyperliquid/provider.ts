@@ -1,10 +1,10 @@
-import type { BalanceProvider, CredField, ProviderNeeds } from "@folio/connectors-basic";
+import type { CredField } from "@folio/connectors-basic";
 import {
   type ClearinghouseState,
   type HyperliquidClientApi,
   make as makeClient,
 } from "@folio/hyperliquid-client";
-import type { UpstreamError } from "@folio/upstream-basic";
+import type { BalanceUpstream, UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { z } from "zod";
 import { EVM_ADDRESS_RE } from "./constants";
@@ -40,7 +40,7 @@ const providerCreds = [
   },
 ] as const satisfies readonly CredField[];
 
-export const hyperliquidProvider: BalanceProvider<
+export const hyperliquidProvider: BalanceUpstream<
   Row,
   typeof hyperliquidAccountCreds,
   typeof providerCreds
@@ -66,5 +66,5 @@ export const hyperliquidProvider: BalanceProvider<
 const state = (
   client: HyperliquidClientApi,
   address: string,
-): Effect.Effect<ClearinghouseState, UpstreamError, ProviderNeeds> =>
+): Effect.Effect<ClearinghouseState, UpstreamError, UpstreamNeeds> =>
   client.clearinghouseState(address);

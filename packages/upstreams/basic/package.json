@@ -5,13 +5,16 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./ports": "./src/ports.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@folio/connectors-basic": "workspace:*",
+    "@folio/oracle-basic": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

@@ -1,4 +1,5 @@
-import { defineConnector, Spot } from "@folio/connectors-basic";
+import { Spot } from "@folio/connectors-basic";
+import { defineConnector } from "../../connector";
 import { bitcoinAccountCreds, blockbookProvider } from "./provider";
 
 const BTC_LOGO = "https://assets.coingecko.com/coins/images/1/large/bitcoin.png";

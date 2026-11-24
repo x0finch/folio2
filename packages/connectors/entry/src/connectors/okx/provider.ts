@@ -1,10 +1,4 @@
-import type {
-  BalanceProvider,
-  CredField,
-  Note,
-  ProviderNeeds,
-  Spot,
-} from "@folio/connectors-basic";
+import type { CredField, Note, Spot } from "@folio/connectors-basic";
 import {
   make as makeOkxClient,
   OKX_API_BASE,
@@ -12,7 +6,7 @@ import {
   type OkxCreds,
   type OkxDetail,
 } from "@folio/okx-client";
-import type { UpstreamError } from "@folio/upstream-basic";
+import type { BalanceUpstream, UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { z } from "zod";
 import { bestEffortVerdict } from "../../upstream";
@@ -49,7 +43,7 @@ interface Bucket {
   readonly rows: (
     client: OkxClientApi,
     creds: OkxCreds,
-  ) => Effect.Effect<unknown, UpstreamError, ProviderNeeds>;
+  ) => Effect.Effect<unknown, UpstreamError, UpstreamNeeds>;
 }
 
 const TRADING: Bucket = { name: "Trading", rows: (c, creds) => c.balance(creds) };
@@ -71,10 +65,10 @@ const BUCKETS: readonly Bucket[] = [TRADING, FUNDING, SAVINGS, STAKING];
 
 const withClient = <A, E>(
   creds: Record<string, unknown>,
-  use: (client: OkxClientApi) => Effect.Effect<A, E, ProviderNeeds>,
-): Effect.Effect<A, E, ProviderNeeds> => use(makeOkxClient({ apiBase: baseFrom(creds) }));
+  use: (client: OkxClientApi) => Effect.Effect<A, E, UpstreamNeeds>,
+): Effect.Effect<A, E, UpstreamNeeds> => use(makeOkxClient({ apiBase: baseFrom(creds) }));
 
-export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
+export const okxProvider: BalanceUpstream<Spot, typeof okxAccountCreds> = {
   id: PROVIDER_ID,
   label: "OKX",
   // Not real credentials: an env-injected base override. May embed a proxy key: never log it.

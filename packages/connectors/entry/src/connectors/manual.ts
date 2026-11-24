@@ -1,5 +1,6 @@
-import { type CredField, defineConnector, Spot } from "@folio/connectors-basic";
+import { type CredField, Spot } from "@folio/connectors-basic";
 import { z } from "zod";
+import { defineConnector } from "../connector";
 
 // Inline data URI (not proxied, since the proxy can't fetch data:). The viewBox frames the glyph's
 // own bounding box so a circular avatar doesn't clip it. Fill is fixed, not currentColor: a data-URI

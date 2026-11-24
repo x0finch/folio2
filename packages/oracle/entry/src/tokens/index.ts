@@ -1,5 +1,6 @@
 import { DatabaseForOracle, GlobalDatabase } from "@folio/db";
-import { Namer, TokenUpstream } from "@folio/oracle-basic/ports";
+import { Namer } from "@folio/oracle-basic/ports";
+import { TokenUpstream } from "@folio/upstream-basic/ports";
 import { Context, Effect, Layer } from "effect";
 import { CandidateSource } from "./candidates";
 import { makeCatalogue, type TokenCatalogue } from "./catalogue";

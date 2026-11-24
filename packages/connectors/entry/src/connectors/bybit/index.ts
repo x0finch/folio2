@@ -1,4 +1,5 @@
-import { defineConnector, Spot } from "@folio/connectors-basic";
+import { Spot } from "@folio/connectors-basic";
+import { defineConnector } from "../../connector";
 import { bybitAccountCreds, bybitProvider } from "./provider";
 
 const BYBIT_LOGO = "https://assets.coingecko.com/markets/images/698/large/bybit_spot.png";

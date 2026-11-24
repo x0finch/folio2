@@ -1,5 +1,5 @@
 import { runClient } from "@folio/client-core/testing";
-import { FxUpstream } from "@folio/oracle-basic/ports";
+import { FxUpstream } from "@folio/upstream-basic/ports";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { fetchRatesEffect } from "../src/fx";

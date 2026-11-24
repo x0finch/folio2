@@ -5,14 +5,8 @@ import {
   type BybitCreds,
   make as makeBybitClient,
 } from "@folio/bybit-client";
-import type {
-  BalanceProvider,
-  CredField,
-  Note,
-  ProviderNeeds,
-  Spot,
-} from "@folio/connectors-basic";
-import type { UpstreamError } from "@folio/upstream-basic";
+import type { CredField, Note, Spot } from "@folio/connectors-basic";
+import type { BalanceUpstream, UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { z } from "zod";
 import { bestEffortVerdict } from "../../upstream";
@@ -44,7 +38,7 @@ interface Bucket {
   readonly rows: (
     client: BybitClientApi,
     creds: BybitCreds,
-  ) => Effect.Effect<unknown, UpstreamError, ProviderNeeds>;
+  ) => Effect.Effect<unknown, UpstreamError, UpstreamNeeds>;
 }
 
 const UNIFIED: Bucket = {
@@ -63,10 +57,10 @@ const BUCKETS: readonly Bucket[] = [UNIFIED, FUNDING, ...EARN];
 
 const withClient = <A, E>(
   creds: Record<string, unknown>,
-  use: (client: BybitClientApi) => Effect.Effect<A, E, ProviderNeeds>,
-): Effect.Effect<A, E, ProviderNeeds> => use(makeBybitClient({ apiBase: baseFrom(creds) }));
+  use: (client: BybitClientApi) => Effect.Effect<A, E, UpstreamNeeds>,
+): Effect.Effect<A, E, UpstreamNeeds> => use(makeBybitClient({ apiBase: baseFrom(creds) }));
 
-export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
+export const bybitProvider: BalanceUpstream<Spot, typeof bybitAccountCreds> = {
   id: PROVIDER_ID,
   label: "Bybit",
   // Not real credentials: an env-injected base override. May embed a proxy key: never log it.

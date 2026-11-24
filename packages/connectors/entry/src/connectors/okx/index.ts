@@ -1,4 +1,5 @@
-import { defineConnector, Spot } from "@folio/connectors-basic";
+import { Spot } from "@folio/connectors-basic";
+import { defineConnector } from "../../connector";
 import { okxAccountCreds, okxProvider } from "./provider";
 
 const OKX_LOGO =

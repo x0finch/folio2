@@ -1,6 +1,6 @@
 import { runClient } from "@folio/client-core/testing";
 import type { AssetPlatform, MarketCoin } from "@folio/coingecko-client";
-import { TokenUpstream } from "@folio/oracle-basic/ports";
+import { TokenUpstream } from "@folio/upstream-basic/ports";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 // The page cap is not exported; take it from the constants module to test the page boundary.

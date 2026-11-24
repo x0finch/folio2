@@ -9,9 +9,7 @@ import type {
 } from "@folio/db";
 import { DatabaseForOracle, GlobalDatabase, provideCurrentUser, provideDbClient } from "@folio/db";
 import type {
-  FxUpstream,
   PlatformMeta,
-  PlatformUpstream,
   ProviderTokenSeed,
   TokenCandidate,
   TokenInfo,
@@ -24,12 +22,12 @@ import type {
   TokenRef,
   TokenRefHit,
   TokenRefIndexRow,
-  TokenUpstream,
   UpstreamToken,
 } from "@folio/oracle-basic";
-import * as Ports from "@folio/oracle-basic/ports";
+import { Namer } from "@folio/oracle-basic/ports";
 import { parseTokenRef } from "@folio/oracle-ref";
 import { type UpstreamError, UpstreamUnavailableError } from "@folio/upstream-basic";
+import { FxUpstream, PlatformUpstream, TokenUpstream } from "@folio/upstream-basic/ports";
 import { Clock, Effect, Layer, Logger, Option, References } from "effect";
 import { TestClock } from "effect/testing";
 import type { OraclePorts, OracleServices } from "../src";
@@ -607,10 +605,10 @@ export function harness(opts: HarnessOpts = {}): Harness {
       refIndex: globalRefIndex,
       accounts: { listUserIds: () => Effect.succeed([]) },
     } as unknown as GlobalDatabase["Service"]),
-    Layer.succeed(Ports.TokenUpstream, upstream),
-    Layer.succeed(Ports.FxUpstream, fxUpstream),
-    Layer.succeed(Ports.PlatformUpstream, platformUpstream),
-    Layer.succeed(Ports.Namer, { id: namer, overrides: opts.overrides ?? {} }),
+    Layer.succeed(TokenUpstream, upstream),
+    Layer.succeed(FxUpstream, fxUpstream),
+    Layer.succeed(PlatformUpstream, platformUpstream),
+    Layer.succeed(Namer, { id: namer, overrides: opts.overrides ?? {} }),
   );
   // `provideMerge` so ports are also exposed: cases get both services and fake ports (`readPlatforms(h.cache, …)` unit tests use ports directly).
   // `CandidateSource.layer` is exposed too: `oracleLayer` consumes it, but it has its own tests ("does the write path egress") needing the service.

@@ -1,10 +1,6 @@
 import { type CoinstatsClientApi, make as makeCoinstatsClient } from "@folio/coinstats-client";
-import type {
-  BalanceProvider,
-  CredField,
-  FetchContext,
-  ProviderNeeds,
-} from "@folio/connectors-basic";
+import type { CredField } from "@folio/connectors-basic";
+import type { BalanceUpstream, FetchContext, UpstreamNeeds } from "@folio/upstream-basic";
 import { UpstreamAuthError, type UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { z } from "zod";
@@ -40,8 +36,8 @@ type CoinstatsCtx = FetchContext<{ address: string }, Record<string, string>>;
 // client instance, so all three chains still share one queue.
 const withClient = <A, E>(
   creds: Record<string, unknown>,
-  use: (client: CoinstatsClientApi) => Effect.Effect<A, E, ProviderNeeds>,
-): Effect.Effect<A, E, ProviderNeeds> => {
+  use: (client: CoinstatsClientApi) => Effect.Effect<A, E, UpstreamNeeds>,
+): Effect.Effect<A, E, UpstreamNeeds> => {
   const v = creds[COINSTATS_BASE_KEY];
   const apiBase = typeof v === "string" && v.trim() ? v.trim() : undefined;
   return Effect.scoped(Effect.flatMap(makeCoinstatsClient({ apiBase }), use));
@@ -64,7 +60,7 @@ const apiKeyOf = (ctx: CoinstatsCtx): Effect.Effect<string, UpstreamError> => {
 const balanceOf = (
   connectionId: string,
   ctx: CoinstatsCtx,
-): Effect.Effect<Row[], UpstreamError, ProviderNeeds> =>
+): Effect.Effect<Row[], UpstreamError, UpstreamNeeds> =>
   apiKeyOf(ctx).pipe(
     Effect.flatMap((apiKey) =>
       withClient(ctx.creds, (client) =>
@@ -77,7 +73,7 @@ const balanceOf = (
 
 export function createCoinstatsProvider(
   connectionId: string,
-): BalanceProvider<Row, typeof coinstatsAccountCreds, typeof providerCreds> {
+): BalanceUpstream<Row, typeof coinstatsAccountCreds, typeof providerCreds> {
   return {
     id: PROVIDER_ID,
     label: "CoinStats",

@@ -1,4 +1,5 @@
-import type { BalanceProvider, CredField, ProviderNeeds } from "@folio/connectors-basic";
+import type { CredField } from "@folio/connectors-basic";
+import type { BalanceUpstream, UpstreamNeeds } from "@folio/upstream-basic";
 import { UpstreamAuthError, type UpstreamError } from "@folio/upstream-basic";
 import { make as makeZerionClient, type ZerionClientApi } from "@folio/zerion-client";
 import { Effect } from "effect";
@@ -14,8 +15,8 @@ const zerionProviderCreds = [
 ] as const satisfies readonly CredField[];
 
 const withZerion = <A, E>(
-  use: (client: ZerionClientApi) => Effect.Effect<A, E, ProviderNeeds>,
-): Effect.Effect<A, E, ProviderNeeds> => Effect.scoped(Effect.flatMap(makeZerionClient(), use));
+  use: (client: ZerionClientApi) => Effect.Effect<A, E, UpstreamNeeds>,
+): Effect.Effect<A, E, UpstreamNeeds> => Effect.scoped(Effect.flatMap(makeZerionClient(), use));
 
 // A missing env key is a credentials problem, not a request to fire.
 const zerionKeyOf = (creds: Record<string, string>): Effect.Effect<string, UpstreamError> => {
@@ -31,7 +32,7 @@ const zerionKeyOf = (creds: Record<string, string>): Effect.Effect<string, Upstr
       );
 };
 
-export const zerionProvider: BalanceProvider<
+export const zerionProvider: BalanceUpstream<
   Row,
   typeof evmAccountCreds,
   typeof zerionProviderCreds

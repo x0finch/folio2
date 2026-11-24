@@ -1,6 +1,6 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import { type ProviderNeeds, validateCredentials } from "@folio/connectors-basic";
-import type { UpstreamError } from "@folio/upstream-basic";
+import { validateCredentials } from "@folio/connectors-basic";
+import type { UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -26,11 +26,11 @@ const ctx = (providerCreds: Record<string, string> = { COINSTATS_API_KEY: KEY })
     creds: providerCreds,
   }) as unknown as Ctx;
 
-const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, ProviderNeeds>) =>
+const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, UpstreamNeeds>) =>
   runClient(stub, effect);
 const failing = (
   stub: HttpStub,
-  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+  effect: Effect.Effect<unknown, UpstreamError, UpstreamNeeds>,
 ): Promise<UpstreamError> => runClient(stub, Effect.flip(effect));
 
 describe("factory: one adapter service for three chains", () => {

@@ -1,9 +1,9 @@
 import type { Outbound } from "@folio/client-core";
 import type { CoinGeckoClient } from "@folio/coingecko-client";
 import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
-import { FxUpstream } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
 import { type UpstreamError, UpstreamParseError } from "@folio/upstream-basic";
+import { FxUpstream } from "@folio/upstream-basic/ports";
 import { Effect, Layer } from "effect";
 import { BTC_COIN_ID, UPSTREAM_ID } from "./constants";
 import { closeOver, type Needs } from "./layer";

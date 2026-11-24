@@ -1,5 +1,6 @@
-import type { BalanceProvider, CredField, ProviderNeeds } from "@folio/connectors-basic";
+import type { CredField } from "@folio/connectors-basic";
 import { make as makeRabbyClient, type RabbyClientApi } from "@folio/rabby-client";
+import type { BalanceUpstream, UpstreamNeeds } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { z } from "zod";
 import type { evmAccountCreds } from "./creds";
@@ -19,14 +20,14 @@ const providerCreds = [
 // Built per call (the gate needs a Scope); gate state is module-level, so quotas aren't reset.
 const withRabby = <A, E>(
   creds: Record<string, unknown>,
-  use: (client: RabbyClientApi) => Effect.Effect<A, E, ProviderNeeds>,
-): Effect.Effect<A, E, ProviderNeeds> => {
+  use: (client: RabbyClientApi) => Effect.Effect<A, E, UpstreamNeeds>,
+): Effect.Effect<A, E, UpstreamNeeds> => {
   const v = creds[RABBY_BASE_KEY];
   const apiBase = typeof v === "string" && v.trim() ? v.trim() : undefined;
   return Effect.scoped(Effect.flatMap(makeRabbyClient({ apiBase }), use));
 };
 
-export const rabbyProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof providerCreds> = {
+export const rabbyProvider: BalanceUpstream<Row, typeof evmAccountCreds, typeof providerCreds> = {
   id: "rabby",
   label: "Rabby",
   creds: providerCreds,

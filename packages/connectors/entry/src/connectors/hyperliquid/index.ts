@@ -1,5 +1,6 @@
-import { defineConnector, PerpEquity, PerpPosition } from "@folio/connectors-basic";
+import { PerpEquity, PerpPosition } from "@folio/connectors-basic";
 import { z } from "zod";
+import { defineConnector } from "../../connector";
 import { hyperliquidAccountCreds, hyperliquidProvider } from "./provider";
 
 const HYPERLIQUID_LOGO = "https://assets.coingecko.com/coins/images/50882/large/hyperliquid.jpg";

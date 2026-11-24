@@ -1,3 +1,4 @@
+export type { BalanceUpstream, FetchContext, UpstreamNeeds } from "./balance";
 export {
   isRetryable,
   retryAfterOf,
@@ -11,3 +12,11 @@ export {
   type UpstreamTier,
   UpstreamUnavailableError,
 } from "./errors";
+export type {
+  FxUpstream,
+  PlatformUpstream,
+  PriceUpstream,
+  TokenMetaUpstream,
+  TokenRefIndexUpstream,
+  TokenUpstream,
+} from "./market";

@@ -1,5 +1,6 @@
-import { defineConnector, PerpEquity, PerpPosition, Spot } from "@folio/connectors-basic";
+import { PerpEquity, PerpPosition, Spot } from "@folio/connectors-basic";
 import { z } from "zod";
+import { defineConnector } from "../../connector";
 import { binanceAccountCreds, binanceProvider } from "./provider";
 
 const BINANCE_LOGO = "https://assets.coingecko.com/markets/images/52/large/binance.jpg";

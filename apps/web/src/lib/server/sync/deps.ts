@@ -7,7 +7,7 @@ import {
   selectProvider,
   validateCredentials,
 } from "@folio/connectors";
-import type { Balance, ProviderNeeds } from "@folio/connectors-basic";
+import type { Balance } from "@folio/connectors-basic";
 import { type AccountSafe, Database, type DbRequest, type WriteSnapshotInput } from "@folio/db";
 import { Oracle, type OracleServices } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
@@ -21,7 +21,7 @@ import {
   SnapshotStore as SyncSnapshotStore,
   TokenOracle,
 } from "@folio/sync";
-import type { UpstreamError } from "@folio/upstream-basic";
+import type { UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
 import { Context, Effect, Layer } from "effect";
 import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";
@@ -38,7 +38,7 @@ const fetchViaConnector = (
   account: AccountSafe,
   stored: Record<string, string>,
   seeds: SeedCollector,
-): Effect.Effect<FetchOutcome, UpstreamError | SyncDepError, ProviderNeeds> =>
+): Effect.Effect<FetchOutcome, UpstreamError | SyncDepError, UpstreamNeeds> =>
   Effect.gen(function* () {
     const specs = manifest.account.creds as unknown as InputSpec[]; // same {key,type} shape
     if (!isComplete(specs, stored)) return { status: "needs-credentials" } satisfies FetchOutcome;
@@ -133,7 +133,7 @@ export const makeSyncServices = (
     const request = yield* Effect.context<DbRequest>();
     // Capture oracle services so they don't leak into this service's `R`.
     const oracle = yield* Effect.context<OracleServices | DbRequest>();
-    const http = yield* Effect.provide(Effect.context<ProviderNeeds>(), FolioHttpClient);
+    const http = yield* Effect.provide(Effect.context<UpstreamNeeds>(), FolioHttpClient);
     const only = scope?.only ?? null;
     // Read once per round, lazily: on-chain-only rounds never revalue.
     let mode: ValuationMode | undefined;

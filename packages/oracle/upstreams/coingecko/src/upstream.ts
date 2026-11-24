@@ -6,8 +6,8 @@ import type {
   TokenRef,
   UpstreamToken,
 } from "@folio/oracle-basic";
-import { TokenUpstream } from "@folio/oracle-basic/ports";
 import type { UpstreamError } from "@folio/upstream-basic";
+import { TokenUpstream } from "@folio/upstream-basic/ports";
 import { Clock, Effect, Layer } from "effect";
 import { IDS_PER_REQUEST, MARKETS_PER_PAGE, UPSTREAM_ID, VS_USD } from "./constants";
 import { closeOver, type Needs } from "./layer";

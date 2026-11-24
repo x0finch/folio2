@@ -1,6 +1,6 @@
 import type { DbRequest, TokenPriceStore, TokenStore } from "@folio/db";
 import { INFO_TTL_MS, normalizeSymbol, PRICE_TTL_MS } from "@folio/oracle-basic";
-import type { TokenUpstream } from "@folio/oracle-basic/ports";
+import type { TokenUpstream } from "@folio/upstream-basic/ports";
 import { Effect } from "effect";
 import { logDegraded } from "./swr";
 

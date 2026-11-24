@@ -2,7 +2,7 @@ import type { CacheStore, DbRequest } from "@folio/db";
 import { DatabaseForOracle } from "@folio/db";
 import type { PlatformMeta } from "@folio/oracle-basic";
 import { PLATFORM_NEG_TTL_MS, PLATFORM_TTL_MS } from "@folio/oracle-basic";
-import { PlatformUpstream } from "@folio/oracle-basic/ports";
+import { PlatformUpstream } from "@folio/upstream-basic/ports";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { degradeTo } from "./tokens/swr";
 

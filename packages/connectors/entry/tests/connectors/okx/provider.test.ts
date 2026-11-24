@@ -1,5 +1,5 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import type { ProviderNeeds } from "@folio/connectors-basic";
+import type { UpstreamNeeds } from "@folio/upstream-basic";
 import { isRetryable, type UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
@@ -43,11 +43,11 @@ const ctx = (creds: Record<string, string> = CREDS, providerCreds: Record<string
     creds: providerCreds,
   }) as unknown as Ctx;
 
-const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, ProviderNeeds>) =>
+const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, UpstreamNeeds>) =>
   runClient(stub, effect);
 const failing = (
   stub: HttpStub,
-  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+  effect: Effect.Effect<unknown, UpstreamError, UpstreamNeeds>,
 ): Promise<UpstreamError> => runClient(stub, Effect.flip(effect));
 
 describe("fetchBalances", () => {

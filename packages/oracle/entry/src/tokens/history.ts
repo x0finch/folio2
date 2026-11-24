@@ -1,7 +1,7 @@
 import type { CacheStore, DbRequest, TokenPriceStore, TokenStore } from "@folio/db";
 import type { TokenPricePoint } from "@folio/oracle-basic";
 import { dayBucketOf, MS_PER_DAY } from "@folio/oracle-basic";
-import type { TokenUpstream } from "@folio/oracle-basic/ports";
+import type { TokenUpstream } from "@folio/upstream-basic/ports";
 import { Clock, Effect, Option } from "effect";
 import { type DailyFillReport, fillDaily } from "../daily-fill";
 

@@ -1,26 +1,23 @@
-import type { UpstreamError } from "@folio/upstream-basic";
+import type {
+  PlatformMeta,
+  RefIndexFetch,
+  TokenPrice,
+  TokenPricePoint,
+  TokenRef,
+  UpstreamToken,
+} from "@folio/oracle-basic";
 import type { Effect } from "effect";
-import type { PlatformMeta } from "./platform";
-import type { TokenPrice, TokenPricePoint, TokenRef, TokenRefIndexRow } from "./types";
+import type { UpstreamError } from "./errors";
 
 // Upstream ports (network), split by capability. The contract layer does not know who the upstream is: the implementation is injected as a
 // Layer, so there is no apiKey, endpoint or DTO here; each upstream translates our chain identifiers into its own addressing. Prices are always USD.
-// Errors reuse the four tagged errors of `@folio/client-core` (credentials / rate-limited / unreachable / unreadable): the consumer handles them
-// the same way (degrade to the local old value), and catching by tag means "upstream down" is swallowed while our own bugs still blow up.
+// Errors are the six `UpstreamError` tiers: the consumer degrades to the local old value on any of them, and catching by tag means
+// "upstream down" is swallowed while our own bugs still blow up.
 // `R` is `never`: the adapter's Layer provides the client and `HttpClient` itself, so no `Outbound` leaks into the service layer.
-// Only `import type { Effect }`, as in stores.ts: this package is value-imported by the client.
 
-// Id the adapter reports, same as `BalanceProvider.id` (lowercase slug); it is the namer of the tokenRefs it produces and the global map's `namer` column.
+// Id the adapter reports, same as `BalanceUpstream.id` (lowercase slug); it is the namer of the tokenRefs it produces and the global map's `namer` column.
 interface UpstreamIdentity {
   readonly id: string;
-}
-
-// The current upstream's naming identity: `id` plus its curated table. A separate port, not a face of `TokenUpstream`: mint needs these two
-// and "no network on the write path" is a type fact, so depending on the whole `TokenUpstream` would wire the read path's network face in.
-// `overrides`: symbol to this upstream's coin id (majors + known collisions), wins over market-cap rank; it holds one vendor's ids, so the adapter supplies it.
-export interface Namer {
-  readonly id: string;
-  readonly overrides: Readonly<Record<string, string>>;
 }
 
 // Catalogue / discovery face: top-N warm + keyword search (both need the full catalogue).
@@ -72,24 +69,4 @@ export interface FxUpstream extends UpstreamIdentity {
 export interface PlatformUpstream extends UpstreamIdentity {
   // Each chain yields a short slug; one with a numeric chainId also yields `evm:<id>` (both platformKey forms covered).
   fetchChains(): Effect.Effect<PlatformMeta[], UpstreamError>;
-}
-
-// A token as upstream gives it: its own naming + metadata + (maybe) price. Unlike `TokenInfo` it is not in the db yet, so no internal id and `ref` is non-empty.
-// `marketCapRank` is independent of `price`: markets gives both, but `/search` gives rank without price, so rank must sit at this top level.
-// The display side (picker badge) always reads it here.
-export interface UpstreamToken {
-  ref: TokenRef;
-  symbol: string;
-  name: string;
-  logo?: string;
-  marketCapRank?: number;
-  price?: TokenPrice;
-}
-
-// Result of pulling the whole map. A mismatch must be reported: a chain we asked for missing from upstream's platform table would
-// leave that chain's tokens with no price or logo and no error (a silent failure needs an outlet).
-export interface RefIndexFetch {
-  rows: TokenRefIndexRow[];
-  unmatchedPlatforms: string[]; // chains we asked for that upstream lacks: warn
-  skipped: number; // chains upstream has that we do not track: a plain count, normal and large
 }

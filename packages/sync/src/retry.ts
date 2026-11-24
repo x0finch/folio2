@@ -1,5 +1,5 @@
-import type { ProviderNeeds } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
+import type { UpstreamNeeds } from "@folio/upstream-basic";
 import {
   isRetryable,
   retryAfterOf,
@@ -56,7 +56,7 @@ const retryPolicy = Schedule.exponential(Duration.millis(RETRY_BASE_MS)).pipe(
 const once = (
   account: AccountSafe,
   stored: Record<string, string>,
-): Effect.Effect<FetchOutcome, FetchError, BalanceSource | ProviderNeeds> =>
+): Effect.Effect<FetchOutcome, FetchError, BalanceSource | UpstreamNeeds> =>
   Effect.flatMap(BalanceSource, (source) => source.fetch(account, stored)).pipe(
     // Timeout maps to unreachable (retryable), keeping the error channel UpstreamError.
     Effect.timeoutOrElse({
@@ -72,5 +72,5 @@ const once = (
 export const fetchBalancesWithRetry = (
   account: AccountSafe,
   stored: Record<string, string>,
-): Effect.Effect<FetchOutcome, FetchError, BalanceSource | ProviderNeeds> =>
+): Effect.Effect<FetchOutcome, FetchError, BalanceSource | UpstreamNeeds> =>
   Effect.retry(once(account, stored), retryPolicy);

@@ -1,7 +1,8 @@
-import { type CredField, Defi, defineConnector, Spot } from "@folio/connectors-basic";
+import { type CredField, Defi, Spot } from "@folio/connectors-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { defineConnector } from "../src/connector";
 import { buildRegistry, getConnector, registry, selectProvider } from "../src/registry";
 
 // A sample connector built in place (spot + defi subset) to verify registry assembly (buildRegistry/getConnector/selectProvider).

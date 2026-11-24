@@ -1,5 +1,6 @@
 import type { CoinGeckoConfig } from "@folio/coingecko-client";
-import type { FxUpstream, Namer, PlatformUpstream, TokenUpstream } from "@folio/oracle-basic/ports";
+import type { Namer } from "@folio/oracle-basic/ports";
+import type { FxUpstream, PlatformUpstream, TokenUpstream } from "@folio/upstream-basic/ports";
 import type { Layer } from "effect";
 import { fxUpstreamOn } from "./fx";
 import { coinGeckoNamerLayer, transport } from "./layer";

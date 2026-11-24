@@ -4,8 +4,8 @@ import {
   type BinanceCreds,
   make as makeBinanceClient,
 } from "@folio/binance-client";
-import type { BalanceProvider, CredField, Note, ProviderNeeds } from "@folio/connectors-basic";
-import type { UpstreamError } from "@folio/upstream-basic";
+import type { CredField, Note } from "@folio/connectors-basic";
+import type { BalanceUpstream, UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
 import { Effect, Fiber, Result } from "effect";
 import { z } from "zod";
 import { bestEffortVerdict } from "../../upstream";
@@ -55,7 +55,7 @@ interface Wallet {
     client: BinanceClientApi,
     creds: BinanceCreds,
     prices: Fiber.Fiber<Record<string, number>, UpstreamError>,
-  ) => Effect.Effect<BinanceRow[], UpstreamError, ProviderNeeds>;
+  ) => Effect.Effect<BinanceRow[], UpstreamError, UpstreamNeeds>;
 }
 
 const spot: Wallet = {
@@ -156,11 +156,11 @@ export const verdict = (
 // gate's state is module-level, so rebuilding the client doesn't reset rate-limit buckets.
 const withClient = <A, E>(
   creds: Record<string, unknown>,
-  use: (client: BinanceClientApi) => Effect.Effect<A, E, ProviderNeeds>,
-): Effect.Effect<A, E, ProviderNeeds> =>
+  use: (client: BinanceClientApi) => Effect.Effect<A, E, UpstreamNeeds>,
+): Effect.Effect<A, E, UpstreamNeeds> =>
   Effect.scoped(Effect.flatMap(makeBinanceClient(configFrom(creds)), use));
 
-export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountCreds> = {
+export const binanceProvider: BalanceUpstream<BinanceRow, typeof binanceAccountCreds> = {
   id: PROVIDER_ID,
   label: "Binance",
   // Not real credentials: env-injected base URL overrides. Not shown in forms, encrypted or exported.

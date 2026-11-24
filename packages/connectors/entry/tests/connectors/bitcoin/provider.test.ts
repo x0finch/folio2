@@ -1,7 +1,7 @@
 import type { ScriptType } from "@folio/bitcoin-derive";
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import { type ProviderNeeds, validateCredentials } from "@folio/connectors-basic";
-import type { UpstreamError } from "@folio/upstream-basic";
+import { validateCredentials } from "@folio/connectors-basic";
+import type { UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { bitcoinAccountCreds, blockbookProvider } from "../../../src/connectors/bitcoin/provider";
@@ -9,10 +9,10 @@ import addressFixture from "./fixtures/address.json";
 import xpubFixture from "./fixtures/xpub.json";
 
 let stub: HttpStub;
-const run = <A>(effect: Effect.Effect<A, UpstreamError, ProviderNeeds>): Promise<A> =>
+const run = <A>(effect: Effect.Effect<A, UpstreamError, UpstreamNeeds>): Promise<A> =>
   runClient(stub, effect);
 const failing = (
-  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+  effect: Effect.Effect<unknown, UpstreamError, UpstreamNeeds>,
 ): Promise<UpstreamError> => runClient(stub, Effect.flip(effect));
 
 // Derivation correctness is covered by @folio/bitcoin-derive's offline vectors.

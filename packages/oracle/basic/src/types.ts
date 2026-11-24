@@ -97,3 +97,23 @@ export interface TokenRefIndexRow {
   chainRef: TokenRef; // on-chain address: evm:<chainId>/contract:<addr> / <slug>/contract:<addr>
   upstreamRef: TokenRef; // upstream's whole name for it: coingecko/issued:bitcoin
 }
+
+// A token as upstream gives it: its own naming + metadata + (maybe) price. Unlike `TokenInfo` it is not in the db yet, so no internal id and `ref` is non-empty.
+// `marketCapRank` is independent of `price`: markets gives both, but `/search` gives rank without price, so rank must sit at this top level.
+// The display side (picker badge) always reads it here.
+export interface UpstreamToken {
+  ref: TokenRef;
+  symbol: string;
+  name: string;
+  logo?: string;
+  marketCapRank?: number;
+  price?: TokenPrice;
+}
+
+// Result of pulling the whole map. A mismatch must be reported: a chain we asked for missing from upstream's platform table would
+// leave that chain's tokens with no price or logo and no error (a silent failure needs an outlet).
+export interface RefIndexFetch {
+  rows: TokenRefIndexRow[];
+  unmatchedPlatforms: string[]; // chains we asked for that upstream lacks: warn
+  skipped: number; // chains upstream has that we do not track: a plain count, normal and large
+}

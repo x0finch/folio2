@@ -1,6 +1,6 @@
-import type { Balance, ProviderNeeds } from "@folio/connectors-basic";
+import type { Balance } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
-import type { UpstreamError } from "@folio/upstream-basic";
+import type { UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
 import { Context, type Effect, Layer, Logger, References } from "effect";
 import type { SyncDepError } from "./errors";
 import type { FetchOutcome, SyncLogger } from "./types";
@@ -23,7 +23,7 @@ export class BalanceSource extends Context.Service<
     readonly fetch: (
       account: AccountSafe,
       stored: Record<string, string>,
-    ) => Effect.Effect<FetchOutcome, UpstreamError | SyncDepError, ProviderNeeds>;
+    ) => Effect.Effect<FetchOutcome, UpstreamError | SyncDepError, UpstreamNeeds>;
   }
 >()("sync/BalanceSource") {}
 
@@ -52,13 +52,13 @@ export class TokenOracle extends Context.Service<
   }
 >()("sync/TokenOracle") {}
 
-// All capabilities orchestration needs. `ProviderNeeds` (outbound HTTP) is declared, not provided, so tests can swap it.
+// All capabilities orchestration needs. `UpstreamNeeds` (outbound HTTP) is declared, not provided, so tests can swap it.
 export type SyncServices =
   | AccountStore
   | BalanceSource
   | SnapshotStore
   | TokenOracle
-  | ProviderNeeds;
+  | UpstreamNeeds;
 
 // Level threshold is All: filtering belongs to the injected logger, and Effect's default Info would eat `debug`.
 // Test-only forwarder: lets cases assert which log, level and fields were emitted.

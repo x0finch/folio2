@@ -1,7 +1,6 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import type { ProviderNeeds } from "@folio/connectors-basic";
 import { RabbySigner, type SignRequest } from "@folio/rabby-client";
-import type { UpstreamError } from "@folio/upstream-basic";
+import type { UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
@@ -46,7 +45,7 @@ const ctx = (address = ADDR, providerCreds: Record<string, string> = {}): Ctx =>
 // Rabby has a gate (limit=1), so with several requests the virtual clock must be advanced or the second waits forever:
 // fork, repeatedly advance a bit + flush microtasks, join. The clock is virtual (no real time); microtasks are flushed because the fake
 // egress uses `Promise.resolve`, which TestClock does not govern.
-const drive = <A, E>(effect: Effect.Effect<A, E, ProviderNeeds>) =>
+const drive = <A, E>(effect: Effect.Effect<A, E, UpstreamNeeds>) =>
   Effect.gen(function* () {
     const fiber = yield* Effect.forkChild(effect);
     for (let i = 0; i < 20; i++) {
@@ -56,11 +55,11 @@ const drive = <A, E>(effect: Effect.Effect<A, E, ProviderNeeds>) =>
     return yield* Fiber.join(fiber);
   });
 
-const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, ProviderNeeds>) =>
+const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, UpstreamNeeds>) =>
   runClient(stub, drive(effect.pipe(Effect.provideService(RabbySigner, fakeSign))));
 const failing = (
   stub: HttpStub,
-  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+  effect: Effect.Effect<unknown, UpstreamError, UpstreamNeeds>,
 ): Promise<UpstreamError> =>
   runClient(stub, drive(Effect.flip(effect).pipe(Effect.provideService(RabbySigner, fakeSign))));
 

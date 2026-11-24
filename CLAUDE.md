@@ -11,7 +11,7 @@ Self-hosted crypto portfolio tracker: on-chain wallets, Bitcoin, CEX, perp DEX a
 TanStack Start + Vite on Cloudflare Workers; D1 + Drizzle; better-auth; Effect 4, pinned `~4.1` (`effect/http` `HttpClient` for outbound); pnpm monorepo; TypeScript 7 strict; Vitest 4; Biome; knip; Wrangler 4 (`wrangler.jsonc`).
 
 ## Architecture rules
-- Contract-first: every provider implements `BalanceProvider` (`@folio/connectors-basic`).
+- Contract-first: every upstream implements a port from `@folio/upstream-basic` (`BalanceUpstream`, `PriceUpstream`, …) and fails only with its six `UpstreamError` tiers.
 - Test-first: adapters get tests against recorded fixtures (`tests/fixtures/`); parsers get golden tests. Tests live in each package's `tests/`.
 - Packages split by "who we talk to / how we translate": one request-layer package per upstream (`packages/clients/<x>`, `@folio/<x>-client`, `createXxxClient(config)`); all adapters in `@folio/connectors` under `src/connectors/<id>/`. Never per-provider packages.
 - `@folio/db` exports only user-scoped ops via one `Database` service (`(yield* Database).accounts.list()`); reference data via one `Oracle`. Methods take no user param — ops read `CurrentUser` when they run; only `apps/web/src/lib/server/runtime.ts` provides it. Any table with an owner is user-scoped; only `global_token_ref_index` and `token_daily_prices` aren't.

@@ -1,8 +1,9 @@
 import type { CacheStore, DbRequest } from "@folio/db";
 import { DatabaseForOracle } from "@folio/db";
-import type { TokenCandidate, TokenMetaUpstream } from "@folio/oracle-basic";
+import type { TokenCandidate } from "@folio/oracle-basic";
 import { DEFAULT_TOP_N, normalizeSymbol } from "@folio/oracle-basic";
-import { TokenUpstream } from "@folio/oracle-basic/ports";
+import type { TokenMetaUpstream } from "@folio/upstream-basic";
+import { TokenUpstream } from "@folio/upstream-basic/ports";
 import { Context, Effect, Layer } from "effect";
 import { type WarmRow, warmBlob } from "./warm";
 

@@ -1,12 +1,7 @@
 import { BitcoinDeriveError, blockbookXpubParam, SCRIPT_TYPES } from "@folio/bitcoin-derive";
 import { type BlockbookClientApi, make as makeBlockbookClient } from "@folio/blockbook-client";
-import type {
-  BalanceProvider,
-  CredField,
-  Note,
-  ProviderNeeds,
-  Spot,
-} from "@folio/connectors-basic";
+import type { CredField, Note, Spot } from "@folio/connectors-basic";
+import type { BalanceUpstream, UpstreamNeeds } from "@folio/upstream-basic";
 import { UpstreamAuthError, type UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { z } from "zod";
@@ -81,7 +76,7 @@ const fromXpub = (
   client: BlockbookClientApi,
   ext: string,
   scriptType: string | undefined,
-): Effect.Effect<{ balances: Spot[]; note: Note[] }, UpstreamError, ProviderNeeds> =>
+): Effect.Effect<{ balances: Spot[]; note: Note[] }, UpstreamError, UpstreamNeeds> =>
   Effect.suspend(() => {
     const script = effectiveScript(ext, scriptType);
     return client.xpub(blockbookXpubParam(ext, script)).pipe(
@@ -99,7 +94,7 @@ const fromXpub = (
 const fromAddress = (
   client: BlockbookClientApi,
   address: string,
-): Effect.Effect<{ balances: Spot[]; note: Note[] }, UpstreamError, ProviderNeeds> =>
+): Effect.Effect<{ balances: Spot[]; note: Note[] }, UpstreamError, UpstreamNeeds> =>
   client.address(address).pipe(
     Effect.map((res) => {
       const pendingSats = toSats(res.unconfirmedBalance);
@@ -110,7 +105,7 @@ const fromAddress = (
     }),
   );
 
-export const blockbookProvider: BalanceProvider<
+export const blockbookProvider: BalanceUpstream<
   Spot,
   typeof bitcoinAccountCreds,
   typeof providerCreds
