@@ -1,6 +1,6 @@
 import type { Note, PerpEquity, PerpPosition, Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { formatAmount } from "../note-format";
+import { formatAmount } from "@folio/upstreams";
 import { MARGIN_ASSET, PROVIDER_ID, QUOTE_ASSET, QUOTE_SUFFIXES, STABLECOINS } from "./constants";
 
 export type BinanceRow = Spot | PerpEquity | PerpPosition;

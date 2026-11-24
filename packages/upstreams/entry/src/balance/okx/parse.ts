@@ -1,4 +1,6 @@
 import type { Note, Spot } from "@folio/connectors-basic";
+import { tokenRef } from "@folio/oracle-ref";
+import { formatAmount, formatWhole } from "../../runtime/note-format";
 import type {
   OkxDetail,
   OkxFundingAsset,
@@ -6,16 +8,13 @@ import type {
   OkxSavingsRow,
   OkxStakingOrder,
   OkxValuationResponse,
-} from "@folio/okx-client";
-import { tokenRef } from "@folio/oracle-ref";
-import { formatAmount, formatWhole } from "../note-format";
-import { EARN_RESIDUAL_MIN_USD, OKX_EARN_LOGO, PROVIDER_ID, STABLECOINS } from "./constants";
+} from "./api";
+import { EARN_RESIDUAL_MIN_USD, ID, OKX_EARN_LOGO, STABLECOINS } from "./constants";
 
 // amount = cashBal, not eq: for coins used as futures margin, eq includes unrealized PnL.
 // price = eqUsd / eq (market price, independent of PnL). Frozen coins get a "Frozen" note.
-const fmtAmount = formatAmount;
 
-export function parseBalances(details: OkxDetail[]): Spot[] {
+export function parseBalances(details: readonly OkxDetail[]): Spot[] {
   const out: Spot[] = [];
   for (const d of details ?? []) {
     const ccy = d.ccy;
@@ -33,14 +32,14 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
       price,
       value: price != null ? amount * price : 0,
       kind: "spot",
-      tokenRef: tokenRef.issued(PROVIDER_ID, ccy.trim().toUpperCase()),
+      tokenRef: tokenRef.issued(ID, ccy.trim().toUpperCase()),
     };
     if (frozen > 0) {
       const pct = amount > 0 ? Math.round((frozen / amount) * 100) : 0;
       row.note = {
         title: "Frozen",
         icon: "warning",
-        content: `${fmtAmount(frozen)} ${ccy} · ${pct}%`,
+        content: `${formatAmount(frozen)} ${ccy} · ${pct}%`,
       };
     }
     out.push(row);
@@ -51,7 +50,7 @@ export function parseBalances(details: OkxDetail[]): Spot[] {
 // Funding and earn endpoints have no USD prices; reuse the trading account's implied prices (no
 // extra request). Coins not found there (and not stablecoins) stay at value 0 for the oracle.
 export type PriceHint = Record<string, number>;
-export function buildPriceHint(details: OkxDetail[]): PriceHint {
+export function buildPriceHint(details: readonly OkxDetail[]): PriceHint {
   const hint: PriceHint = {};
   for (const d of details ?? []) {
     if (!d.ccy) continue;
@@ -68,7 +67,7 @@ function priceOf(symbol: string, hint: PriceHint): number | undefined {
 }
 
 // amount = `bal` (includes frozen).
-export function parseFunding(assets: OkxFundingAsset[], hint: PriceHint): Spot[] {
+export function parseFunding(assets: readonly OkxFundingAsset[], hint: PriceHint): Spot[] {
   const out: Spot[] = [];
   for (const a of assets ?? []) {
     const ccy = a.ccy;
@@ -82,7 +81,7 @@ export function parseFunding(assets: OkxFundingAsset[], hint: PriceHint): Spot[]
       price,
       value: price != null ? amount * price : 0,
       kind: "spot",
-      tokenRef: tokenRef.issued(PROVIDER_ID, ccy.trim().toUpperCase()),
+      tokenRef: tokenRef.issued(ID, ccy.trim().toUpperCase()),
       note: { title: "Funding", icon: "info", content: "Funding wallet", group: "funding" },
     });
   }
@@ -101,12 +100,12 @@ function earnRow(ccy: string, amount: number, content: string, hint: PriceHint):
     price,
     value: price != null ? amount * price : 0,
     kind: "spot",
-    tokenRef: tokenRef.issued(PROVIDER_ID, ccy.trim().toUpperCase()),
+    tokenRef: tokenRef.issued(ID, ccy.trim().toUpperCase()),
     note: { title: "Earn", icon: "info", content, group: "earn" },
   };
 }
 
-export function parseSavings(rows: OkxSavingsRow[], hint: PriceHint): Spot[] {
+export function parseSavings(rows: readonly OkxSavingsRow[], hint: PriceHint): Spot[] {
   const out: Spot[] = [];
   for (const r of rows ?? []) {
     const ccy = r.ccy;
@@ -119,7 +118,7 @@ export function parseSavings(rows: OkxSavingsRow[], hint: PriceHint): Spot[] {
 
 // On-chain earn coins sit in the protocol, not the trading account, so there's no double count
 // (liquid staking tokens like OKSOL show up under trading instead).
-export function parseStaking(orders: OkxStakingOrder[], hint: PriceHint): Spot[] {
+export function parseStaking(orders: readonly OkxStakingOrder[], hint: PriceHint): Spot[] {
   const out: Spot[] = [];
   for (const o of orders ?? []) {
     const label = o.protocol?.trim() || "Staking";
@@ -140,7 +139,7 @@ const fmtUsd = (n: number): string => `$${formatWhole(Math.round(n))}`;
 // counts toward net worth — but only when trustworthy: no unpriced earn items and above threshold.
 export function earnResidualRow(
   earnBucketUsd: number,
-  earnItems: Spot[],
+  earnItems: readonly Spot[],
   hint: PriceHint,
 ): Spot | undefined {
   let valued = 0;
@@ -162,7 +161,7 @@ export function earnResidualRow(
     value: residual,
     selfPrice: 1,
     kind: "spot",
-    tokenRef: tokenRef.custom(PROVIDER_ID, "EARN-UNCATEGORIZED"),
+    tokenRef: tokenRef.custom(ID, "EARN-UNCATEGORIZED"),
     note: {
       title: "Earn (Uncategorized)",
       icon: "info",
@@ -196,12 +195,4 @@ function perpFallbackNote(): Note {
     icon: "warning",
     content: "Futures uPnL isn't included yet — coming when the perp path ships",
   };
-}
-
-// Only reached for permanent failures (transient ones already failed the account).
-export function bucketFailureNote(failed: { name: string; auth: boolean }[]): Note {
-  const names = failed.map((f) => f.name).join(" / ");
-  const anyAuth = failed.some((f) => f.auth);
-  const tail = anyAuth ? "check the API key's permissions" : "couldn't be read this round";
-  return { title: "Buckets not synced", icon: "warning", content: `${names} — ${tail}` };
 }

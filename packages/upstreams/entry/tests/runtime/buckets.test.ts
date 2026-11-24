@@ -1,7 +1,7 @@
 import type { UpstreamError } from "@folio/upstream-basic";
-import { Result } from "effect";
+import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
-import { bestEffortVerdict } from "../src/upstream";
+import { bestEffortVerdict, failedBucketsNote, fetchBuckets } from "../../src/runtime/buckets";
 
 // Verdict for multi-bucket best-effort fetches, shared by binance / okx / bybit: each splits an account into isolated buckets fetched
 // concurrently, and on failure must answer one question: hand this round to retry, or degrade to a partial snapshot.
@@ -73,5 +73,48 @@ describe("bestEffortVerdict", () => {
   it("no buckets at all: best effort (an empty account is not a failure)", () => {
     const v = bestEffortVerdict([]);
     expect(Result.isSuccess(v)).toBe(true);
+  });
+});
+
+describe("fetchBuckets", () => {
+  const fail = (tag: string) => Effect.fail(err(tag));
+
+  it("degrades: successes by name, failed buckets named with whether it was a permission", async () => {
+    const out = await Effect.runPromise(
+      fetchBuckets({ Trading: Effect.succeed(1), Savings: fail(AUTH), Staking: fail(SHAPE) }),
+    );
+    expect(out.ok).toEqual({ Trading: 1 });
+    expect(out.failed).toEqual([
+      { name: "Savings", auth: true },
+      { name: "Staking", auth: false },
+    ]);
+  });
+
+  it("fails with the verdict's error", async () => {
+    const out = await Effect.runPromise(
+      Effect.flip(fetchBuckets({ Trading: Effect.succeed(1), Funding: fail(DOWN) })),
+    );
+    expect(out._tag).toBe(DOWN);
+  });
+});
+
+describe("failedBucketsNote", () => {
+  it("nothing failed: no note", () => {
+    expect(failedBucketsNote("Buckets not synced", [])).toBeUndefined();
+  });
+
+  it("names every failed bucket; a permission failure asks to check the key", () => {
+    const failed = [
+      { name: "Savings", auth: true },
+      { name: "Staking", auth: false },
+    ];
+    expect(failedBucketsNote("Buckets not synced", failed)).toEqual({
+      title: "Buckets not synced",
+      icon: "warning",
+      content: "Savings / Staking — check the API key's permissions",
+    });
+    expect(failedBucketsNote("Wallets not synced", [failed[1]])?.content).toBe(
+      "Staking — couldn't be read this round",
+    );
   });
 });

@@ -6,7 +6,7 @@ import {
   parseFunding,
   parseSavings,
   parseStaking,
-} from "../../../src/connectors/okx/parse";
+} from "../../../src/balance/okx/parse";
 import balance from "./fixtures/balance.json";
 import expected from "./fixtures/expected-balances.json";
 import expectedFunding from "./fixtures/expected-funding-balances.json";

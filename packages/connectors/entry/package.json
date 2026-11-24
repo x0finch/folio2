@@ -16,7 +16,6 @@
     "@folio/bitcoin-derive": "workspace:*",
     "@folio/bybit-client": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
-    "@folio/okx-client": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/upstream-basic": "workspace:*",
     "@folio/upstreams": "workspace:*",

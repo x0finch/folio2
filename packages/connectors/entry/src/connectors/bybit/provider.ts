@@ -7,9 +7,9 @@ import {
 } from "@folio/bybit-client";
 import type { CredField, Note, Spot } from "@folio/connectors-basic";
 import type { BalanceUpstream, UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
+import { bestEffortVerdict } from "@folio/upstreams";
 import { Effect } from "effect";
 import { z } from "zod";
-import { bestEffortVerdict } from "../../upstream";
 import { EARN_CATEGORIES, PROVIDER_ID } from "./constants";
 import {
   bucketFailureNote,

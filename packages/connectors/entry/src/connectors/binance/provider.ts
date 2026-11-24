@@ -6,9 +6,9 @@ import {
 } from "@folio/binance-client";
 import type { CredField, Note } from "@folio/connectors-basic";
 import type { BalanceUpstream, UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
+import { bestEffortVerdict } from "@folio/upstreams";
 import { Effect, Fiber, Result } from "effect";
 import { z } from "zod";
-import { bestEffortVerdict } from "../../upstream";
 import { PROVIDER_ID } from "./constants";
 import {
   type BinanceRow,

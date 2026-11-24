@@ -1,7 +1,7 @@
 import type { BybitCoin, BybitEarnPosition, BybitFundingCoin } from "@folio/bybit-client";
 import type { Note, Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { formatAmount, formatCents } from "../note-format";
+import { formatAmount, formatCents } from "@folio/upstreams";
 import { PROVIDER_ID, STABLECOINS } from "./constants";
 
 // amount = walletBalance (cash), not equity, which includes futures uPnL. value = Bybit's own

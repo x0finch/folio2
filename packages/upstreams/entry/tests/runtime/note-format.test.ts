@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAmount, formatCents, formatWhole } from "../../src/connectors/note-format";
+import { formatAmount, formatCents, formatWhole } from "../../src/runtime/note-format";
 
 // These replace the per-parse `n.toLocaleString("en-US", { … })` (which boots ICU on first use in each isolate, see note-format.ts). Note text goes into
 // snapshots and goldens and must not change by a single character, so Intl is the reference: hand-picked edges (rounding 5, carry chains,
