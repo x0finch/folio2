@@ -1,7 +1,7 @@
-import { runClient } from "@folio/client-core/testing";
 import { CoinGeckoClient, type CoinGeckoConfig } from "@folio/coingecko-client";
 import { Namer } from "@folio/oracle-basic/ports";
 import { FxUpstream, PlatformUpstream, TokenUpstream } from "@folio/upstream-basic/ports";
+import { runClient } from "@folio/upstreams/testing";
 import { Effect, Layer } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { coinGeckoUpstreamLayers } from "../src/upstreams";

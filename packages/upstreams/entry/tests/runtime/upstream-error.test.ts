@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { HttpFailure, SigningFailure } from "../src/errors";
-import { classifyFailure } from "../src/upstream-error";
+import { HttpFailure, SigningFailure } from "../../src/runtime/errors";
+import { classifyFailure } from "../../src/runtime/upstream-error";
 
 // Default classification, shared by every client; upstream quirks live in each client's `catchTag`.
 const classify = classifyFailure({ upstream: "acme" });

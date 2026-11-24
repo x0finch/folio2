@@ -1,4 +1,4 @@
-import { maybe } from "@folio/client-core";
+import { maybe } from "@folio/upstreams";
 import { Schema } from "effect";
 
 // Minimal response shapes (fields we read). Numbers arrive as strings to avoid float precision loss.

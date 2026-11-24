@@ -1,11 +1,6 @@
-import type { Outbound } from "@folio/client-core";
-import {
-  type HttpStub,
-  httpStub,
-  jsonResponse as json,
-  runClient,
-} from "@folio/client-core/testing";
 import type { UpstreamError } from "@folio/upstream-basic";
+import type { Outbound } from "@folio/upstreams";
+import { type HttpStub, httpStub, jsonResponse as json, runClient } from "@folio/upstreams/testing";
 import { Duration, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
@@ -30,7 +25,7 @@ function stub(reply: (url: URL) => Response | Promise<Response>) {
 
 // Construction needs a Scope (the gate): built inside a scope, used, then dropped.
 // The gate always uses the `memory` tier, Effect's official implementation with the bucket bound to the scope and one per make, so cases are isolated.
-// Production uses `isolated`, whose algorithm behaviour is tested in `@folio/client-core`.
+// Production uses `isolated`, whose algorithm behaviour is tested in `@folio/upstreams`.
 const withClient = <A, E>(
   fn: HttpStub,
   use: (client: CoinstatsClientApi) => Effect.Effect<A, E, Outbound>,
@@ -112,7 +107,7 @@ describe("blockchains", () => {
 });
 
 describe("rate limiting: both endpoints pass the gate", () => {
-  // This verifies structure, not the algorithm (the gate itself is tested in `@folio/client-core`).
+  // This verifies structure, not the algorithm (the gate itself is tested in `@folio/upstreams`).
   // The `memory` tier is the official token bucket: limit 2 / 1250ms refills a token every 625ms; the first 2 requests burst and the 3rd waits for a token.
   const settledAfter = (
     ms: number,

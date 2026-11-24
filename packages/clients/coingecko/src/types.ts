@@ -1,4 +1,4 @@
-import { maybe } from "@folio/client-core";
+import { maybe } from "@folio/upstreams";
 import { Schema } from "effect";
 
 // CoinGecko response DTOs: only the fields this repo's consumers read (partial). Types derive from the schema, so an upstream

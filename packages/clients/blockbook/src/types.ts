@@ -1,4 +1,4 @@
-import { maybe } from "@folio/client-core";
+import { maybe } from "@folio/upstreams";
 import { Schema } from "effect";
 
 // Trezor Blockbook v2 responses (only the fields used). Amounts are always satoshi strings. Types derive from the schema, so an

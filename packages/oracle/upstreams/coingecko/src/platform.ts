@@ -1,8 +1,8 @@
-import type { Outbound } from "@folio/client-core";
 import type { CoinGeckoClient } from "@folio/coingecko-client";
 import type { PlatformMeta } from "@folio/oracle-basic";
 import type { UpstreamError } from "@folio/upstream-basic";
 import { PlatformUpstream } from "@folio/upstream-basic/ports";
+import type { Outbound } from "@folio/upstreams";
 import { Effect, Layer } from "effect";
 import { EVM_NAMER_PREFIX, UPSTREAM_ID } from "./constants";
 import { closeOver, type Needs } from "./layer";

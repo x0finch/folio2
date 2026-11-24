@@ -12,11 +12,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/client-core": "workspace:*",
     "@folio/coingecko-client": "workspace:*",
     "@folio/oracle-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/upstream-basic": "workspace:*",
+    "@folio/upstreams": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

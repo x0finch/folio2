@@ -1,4 +1,4 @@
-import { maybe } from "@folio/client-core";
+import { maybe } from "@folio/upstreams";
 import { Schema } from "effect";
 
 // Minimal shapes of the Bybit v5 endpoint responses (only the fields used). Types derive from the schema.

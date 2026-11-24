@@ -2,26 +2,26 @@
 // `@folio/upstream-basic` tiers). Retry policy lives in `@folio/sync`, around a whole fetch incl. its
 // timeout; retrying here too would multiply attempts.
 
-export { hmacSha256 } from "./crypto";
-export { HttpFailure, type HttpFailureKind, SigningFailure, summaryOf } from "./errors";
+export { hmacSha256 } from "./runtime/crypto";
+export { HttpFailure, type HttpFailureKind, SigningFailure, summaryOf } from "./runtime/errors";
 export {
   type HttpConfig,
   makeRequester,
   type Outbound,
   type Requester,
   type RequestOptions,
-} from "./http";
-export { FolioHttpClient } from "./http-client";
+} from "./runtime/http";
+export { FolioHttpClient } from "./runtime/http-client";
 export {
   make as makeRateLimit,
   type RateLimitOptions,
   type RateLimitScope,
   RateLimitScopeOverride,
-} from "./ratelimit";
-export { maybe } from "./schema";
-export { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "./slot-cursor";
+} from "./runtime/ratelimit";
+export { maybe } from "./runtime/schema";
+export { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "./runtime/slot-cursor";
 export {
   type StaleTolerantCache,
   type StaleTolerantCacheOptions,
   staleTolerantCache,
-} from "./stale-cache";
+} from "./runtime/stale-cache";

@@ -1,7 +1,7 @@
-import { FolioHttpClient, type Outbound } from "@folio/client-core";
 import { CoinGeckoClient, type CoinGeckoConfig } from "@folio/coingecko-client";
 import { Namer } from "@folio/oracle-basic/ports";
 import type { UpstreamError } from "@folio/upstream-basic";
+import { FolioHttpClient, type Outbound } from "@folio/upstreams";
 import { Effect, Layer } from "effect";
 import { OVERRIDES, UPSTREAM_ID } from "./constants";
 

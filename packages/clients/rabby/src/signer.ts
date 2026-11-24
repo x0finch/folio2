@@ -1,4 +1,4 @@
-import type { SigningFailure } from "@folio/client-core";
+import type { SigningFailure } from "@folio/upstreams";
 import { Context, Effect, Option } from "effect";
 
 export type SignRequest = (

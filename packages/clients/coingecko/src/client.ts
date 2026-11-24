@@ -1,5 +1,5 @@
-import { makeRateLimit, makeRequester, type Outbound, type Requester } from "@folio/client-core";
 import type { UpstreamError } from "@folio/upstream-basic";
+import { makeRateLimit, makeRequester, type Outbound, type Requester } from "@folio/upstreams";
 import { Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import {
   CG_BASE_FREE,

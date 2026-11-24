@@ -1,5 +1,5 @@
 /// <reference path="./vendor.d.ts" />
-import { SigningFailure, summaryOf } from "@folio/client-core";
+import { SigningFailure, summaryOf } from "@folio/upstreams";
 import { Effect } from "effect";
 import RABBY_WASM from "../vendor/rabby_sign.wasm";
 import type { RabbySignature } from "../vendor/sign-patched.cjs";

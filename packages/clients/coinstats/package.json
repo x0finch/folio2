@@ -12,8 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/client-core": "workspace:*",
     "@folio/upstream-basic": "workspace:*",
+    "@folio/upstreams": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

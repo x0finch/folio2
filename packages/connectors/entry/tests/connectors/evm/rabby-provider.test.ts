@@ -1,6 +1,6 @@
-import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
 import { RabbySigner, type SignRequest } from "@folio/rabby-client";
 import type { UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
+import { type HttpStub, httpStub, runClient } from "@folio/upstreams/testing";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";

@@ -1,5 +1,5 @@
-import { makeRateLimit, makeRequester, type Outbound, type Requester } from "@folio/client-core";
 import type { UpstreamError } from "@folio/upstream-basic";
+import { makeRateLimit, makeRequester, type Outbound, type Requester } from "@folio/upstreams";
 import { Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import { chainsCacheFor, parseChainIds } from "./chains";
 import {
@@ -70,7 +70,7 @@ export function make(
     const keyed = (apiKey: string) =>
       Effect.succeed({ Authorization: basicAuth(apiKey), accept: "application/json" });
 
-    // The cache is bucketed by baseUrl and lives at module level (client-core's stale-cache: a Scope is reset every request).
+    // The cache is bucketed by baseUrl and lives at module level (the runtime's stale-cache: a Scope is reset every request).
     const chainsCache = chainsCacheFor(baseUrl);
 
     return {

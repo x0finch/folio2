@@ -1,5 +1,5 @@
-import { makeRequester, type Outbound } from "@folio/client-core";
 import type { UpstreamError } from "@folio/upstream-basic";
+import { makeRequester, type Outbound } from "@folio/upstreams";
 import { Context, Effect, Layer } from "effect";
 import { CLEARINGHOUSE_TYPE, HYPERLIQUID_API_BASE, INFO_PATH, UPSTREAM } from "./constants";
 import { ClearinghouseState } from "./types";

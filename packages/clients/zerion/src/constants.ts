@@ -30,5 +30,5 @@ export const POSITIONS_QUERY = {
 export const RATE_LIMIT_PER_SEC = 8;
 export const RATE_LIMIT_BURST = 8;
 
-// Gate key: the key's name, not its value (see client-core `RateLimitOptions.key`); one global key, so all accounts share this queue.
+// Gate key: the key's name, not its value (see `RateLimitOptions.key` in `@folio/upstreams`); one global key, so all accounts share this queue.
 export const RATE_LIMIT_KEY = "zerion:api-key";

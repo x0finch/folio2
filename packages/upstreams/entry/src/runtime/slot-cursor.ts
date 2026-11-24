@@ -13,7 +13,7 @@ export interface SlotCache {
 
 // Optional service (`R` stays clean). Production falls back to `globalThis.caches`.
 export class SlotCacheOverride extends Context.Service<SlotCacheOverride, SlotCache>()(
-  "client-core/SlotCacheOverride",
+  "upstreams/SlotCacheOverride",
 ) {}
 
 const CACHE_NAME = "folio-ratelimit";

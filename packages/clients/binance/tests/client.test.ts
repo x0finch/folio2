@@ -1,11 +1,6 @@
-import type { Outbound } from "@folio/client-core";
-import {
-  type HttpStub,
-  httpStub,
-  jsonResponse as json,
-  runClient,
-} from "@folio/client-core/testing";
 import type { UpstreamError } from "@folio/upstream-basic";
+import type { Outbound } from "@folio/upstreams";
+import { type HttpStub, httpStub, jsonResponse as json, runClient } from "@folio/upstreams/testing";
 import { Clock, Duration, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
@@ -50,7 +45,7 @@ function stub(reply: (url: URL) => Response | Promise<Response>) {
 
 // Constructing the client is itself an Effect (the gate needs a Scope), so each case builds it in a scope, uses it and drops it.
 // The gate always uses the `memory` tier, Effect's official implementation with the bucket bound to the scope and one per make, so cases are isolated.
-// Production uses `isolated` (cross-isolate cursor), whose algorithm behaviour is tested in `@folio/client-core`; here only the structure
+// Production uses `isolated` (cross-isolate cursor), whose algorithm behaviour is tested in `@folio/upstreams`; here only the structure
 // (which endpoints pass the gate and which deliberately do not).
 // Under TestClock `Clock.currentTimeMillis` starts at 0, so the signing string is deterministic and can be checked against the reference.
 const withClient = <A, E>(
@@ -217,7 +212,7 @@ describe("error classification", () => {
   };
 
   // The one binance-specific classification (its `override`): the default rules would class 400 as "upstream's fault" and retry it, which is useless
-  // and repeats a wrong credential; binance treats repeated auth failures as probing. The rest check the default rules do work here; the rules are tested in `@folio/client-core`.
+  // and repeats a wrong credential; binance treats repeated auth failures as probing. The rest check the default rules do work here; the rules are tested in `@folio/upstreams`.
   it("400 gives a credentials problem (binance uses 400 for a rejected signed request)", async () => {
     expect((await failWith({ status: 400 }))._tag).toBe("UpstreamAuthError");
   });
@@ -262,7 +257,7 @@ describe("error classification", () => {
 });
 
 describe("rate limiting: which endpoints pass the gate", () => {
-  // This verifies structure, not the algorithm (the gate itself is tested in `@folio/client-core`): does the public endpoint pass the gate,
+  // This verifies structure, not the algorithm (the gate itself is tested in `@folio/upstreams`): does the public endpoint pass the gate,
   // and is the signed endpoint deliberately not gated.
   // The `memory` tier is the official token bucket: limit 6 / 15s refills a token every 2500ms; the first 6 requests burst and the 7th waits.
   const settledAfter = (

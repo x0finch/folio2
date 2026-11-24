@@ -1,5 +1,4 @@
 import { env } from "cloudflare:workers";
-import { FolioHttpClient } from "@folio/client-core";
 import {
   type ConnectorId,
   registry as connectorRegistry,
@@ -8,6 +7,7 @@ import {
   validateCredentials,
 } from "@folio/connectors";
 import { isRetryable, retryAfterOf, type UpstreamError } from "@folio/upstream-basic";
+import { FolioHttpClient } from "@folio/upstreams";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
 import { platformLogoUrl } from "@/lib/core/logo";
 import type { InputSpec } from "@/lib/server/creds";

@@ -1,4 +1,4 @@
-import { maybe } from "@folio/client-core";
+import { maybe } from "@folio/upstreams";
 import { Schema } from "effect";
 
 // Minimal shape of Rabby (DeBank backend) responses: only the fields we use. api.rabby.io has no public contract, so this is deliberately narrow:

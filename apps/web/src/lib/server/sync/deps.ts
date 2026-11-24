@@ -1,5 +1,4 @@
 import { env } from "cloudflare:workers";
-import { FolioHttpClient } from "@folio/client-core";
 import {
   type ConnectorManifest,
   registry as connectorRegistry,
@@ -22,6 +21,7 @@ import {
   TokenOracle,
 } from "@folio/sync";
 import type { UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
+import { FolioHttpClient } from "@folio/upstreams";
 import { Context, Effect, Layer } from "effect";
 import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";

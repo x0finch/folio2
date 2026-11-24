@@ -98,9 +98,6 @@ importers:
       '@cloudflare/vite-plugin':
         specifier: ^1.26.0
         version: 1.42.3(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))(workerd@1.20260625.1)(wrangler@4.105.0(@cloudflare/workers-types@4.20260626.1))
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../../packages/clients/core
       '@folio/connectors':
         specifier: workspace:*
         version: link:../../packages/connectors/entry
@@ -131,6 +128,9 @@ importers:
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../packages/upstreams/basic
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../packages/upstreams/entry
       '@fontsource-variable/geist':
         specifier: ^5.2.9
         version: 5.2.9
@@ -273,12 +273,12 @@ importers:
 
   packages/clients/binance:
     dependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../core
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../upstreams/basic
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -314,12 +314,12 @@ importers:
 
   packages/clients/blockbook:
     dependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../core
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../upstreams/basic
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -333,12 +333,12 @@ importers:
 
   packages/clients/bybit:
     dependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../core
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../upstreams/basic
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -352,12 +352,12 @@ importers:
 
   packages/clients/coingecko:
     dependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../core
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../upstreams/basic
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -371,28 +371,12 @@ importers:
 
   packages/clients/coinstats:
     dependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../core
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../upstreams/basic
-      effect:
-        specifier: 'catalog:'
-        version: 4.1.5
-    devDependencies:
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 4.1.9(@types/node@22.20.0)(@vitest/coverage-istanbul@4.1.9)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
-  packages/clients/core:
-    dependencies:
-      '@folio/upstream-basic':
+      '@folio/upstreams':
         specifier: workspace:*
-        version: link:../../upstreams/basic
+        version: link:../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -406,12 +390,12 @@ importers:
 
   packages/clients/hyperliquid:
     dependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../core
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../upstreams/basic
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -425,12 +409,12 @@ importers:
 
   packages/clients/okx:
     dependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../core
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../upstreams/basic
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -444,12 +428,12 @@ importers:
 
   packages/clients/rabby:
     dependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../core
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../upstreams/basic
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -463,12 +447,12 @@ importers:
 
   packages/clients/zerion:
     dependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../core
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../upstreams/basic
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -510,9 +494,6 @@ importers:
       '@folio/bybit-client':
         specifier: workspace:*
         version: link:../../clients/bybit
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../../clients/core
       '@folio/coinstats-client':
         specifier: workspace:*
         version: link:../../clients/coinstats
@@ -541,6 +522,9 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3
     devDependencies:
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -649,9 +633,6 @@ importers:
 
   packages/oracle/upstreams/coingecko:
     dependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../../../clients/core
       '@folio/coingecko-client':
         specifier: workspace:*
         version: link:../../../clients/coingecko
@@ -664,6 +645,9 @@ importers:
       '@folio/upstream-basic':
         specifier: workspace:*
         version: link:../../../upstreams/basic
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../../../upstreams/entry
       effect:
         specifier: 'catalog:'
         version: 4.1.5
@@ -677,9 +661,6 @@ importers:
 
   packages/sync:
     dependencies:
-      '@folio/client-core':
-        specifier: workspace:*
-        version: link:../clients/core
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../connectors/basic
@@ -696,6 +677,9 @@ importers:
         specifier: 'catalog:'
         version: 4.1.5
     devDependencies:
+      '@folio/upstreams':
+        specifier: workspace:*
+        version: link:../upstreams/entry
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -760,6 +744,22 @@ importers:
       '@folio/oracle-basic':
         specifier: workspace:*
         version: link:../../oracle/basic
+      effect:
+        specifier: 'catalog:'
+        version: 4.1.5
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.9(@types/node@22.20.0)(@vitest/coverage-istanbul@4.1.9)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/upstreams/entry:
+    dependencies:
+      '@folio/upstream-basic':
+        specifier: workspace:*
+        version: link:../basic
       effect:
         specifier: 'catalog:'
         version: 4.1.5

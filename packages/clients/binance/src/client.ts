@@ -1,11 +1,11 @@
+import { UpstreamAuthError, type UpstreamError } from "@folio/upstream-basic";
 import {
   hmacSha256,
   makeRateLimit,
   makeRequester,
   type Outbound,
   type Requester,
-} from "@folio/client-core";
-import { UpstreamAuthError, type UpstreamError } from "@folio/upstream-basic";
+} from "@folio/upstreams";
 import { Clock, Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import {
   ACCOUNT_PATH,

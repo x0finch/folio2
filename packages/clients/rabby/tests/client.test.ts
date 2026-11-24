@@ -1,11 +1,6 @@
-import { type Outbound, SigningFailure } from "@folio/client-core";
-import {
-  type HttpStub,
-  httpStub,
-  jsonResponse as json,
-  runClient,
-} from "@folio/client-core/testing";
 import type { UpstreamError } from "@folio/upstream-basic";
+import { type Outbound, SigningFailure } from "@folio/upstreams";
+import { type HttpStub, httpStub, jsonResponse as json, runClient } from "@folio/upstreams/testing";
 import { Duration, Effect } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";

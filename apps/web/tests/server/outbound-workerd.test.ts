@@ -1,4 +1,4 @@
-import { FolioHttpClient, makeRequester } from "@folio/client-core";
+import { FolioHttpClient, makeRequester } from "@folio/upstreams";
 import { Effect, Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 

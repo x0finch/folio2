@@ -1,11 +1,11 @@
+import type { UpstreamError } from "@folio/upstream-basic";
 import {
   hmacSha256,
   makeRequester,
   type Outbound,
   type Requester,
   type SigningFailure,
-} from "@folio/client-core";
-import type { UpstreamError } from "@folio/upstream-basic";
+} from "@folio/upstreams";
 import { Clock, Context, Effect, Layer, type Schema } from "effect";
 import {
   ASSET_VALUATION_PATH,

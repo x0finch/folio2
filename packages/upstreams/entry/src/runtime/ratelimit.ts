@@ -26,7 +26,7 @@ export interface RateLimitOptions {
 export class RateLimitScopeOverride extends Context.Service<
   RateLimitScopeOverride,
   RateLimitScope
->()("client-core/RateLimitScopeOverride") {}
+>()("upstreams/RateLimitScopeOverride") {}
 
 // Process-wide fallback scope, test-only (setter exported from `/testing`). For tests of real app
 // wiring where `runPromise` happens inside the code under test and nothing can be provided.

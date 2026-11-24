@@ -1,5 +1,5 @@
-import { FolioHttpClient } from "@folio/client-core";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
+import { FolioHttpClient } from "@folio/upstreams";
 import { Effect, Layer, Logger } from "effect";
 import { depError } from "../src/errors";
 import {

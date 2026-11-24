@@ -20,6 +20,6 @@ export const API_KEY_HEADER = "X-API-KEY";
 export const RATE_LIMIT_PER_SEC = 1.6;
 export const RATE_LIMIT_BURST = 2;
 
-// Gate key: the key's name, not its value (a value would go into logs, Map keys and cached URLs; see client-core `RateLimitOptions.key`).
+// Gate key: the key's name, not its value (a value would go into logs, Map keys and cached URLs; see `RateLimitOptions.key` in `@folio/upstreams`).
 // Clients built per chain share one queue, since they spend the same key's quota.
 export const RATE_LIMIT_KEY = "coinstats:api-key";

@@ -1,7 +1,7 @@
 import type { ScriptType } from "@folio/bitcoin-derive";
-import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
 import type { UpstreamNeeds } from "@folio/upstream-basic";
 import { isRetryable, type UpstreamError } from "@folio/upstream-basic";
+import { type HttpStub, httpStub, runClient } from "@folio/upstreams/testing";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { blockbookProvider } from "../../../src/connectors/bitcoin/provider";

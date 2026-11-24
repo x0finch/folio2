@@ -1,5 +1,5 @@
-import { makeRequester, type Outbound, type Requester } from "@folio/client-core";
 import { type UpstreamError, UpstreamUnavailableError } from "@folio/upstream-basic";
+import { makeRequester, type Outbound, type Requester } from "@folio/upstreams";
 import { Context, Effect, Layer, type Schema } from "effect";
 import {
   BLOCKBOOK_BASES,

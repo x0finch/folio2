@@ -1,9 +1,9 @@
 import { Effect, Exit, Fiber, Layer, Schema, Tracer } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { describe, expect, it } from "vitest";
-import { SigningFailure } from "../src/errors";
-import { makeRequester } from "../src/http";
-import { httpStub, jsonResponse as json, runClient } from "../src/testing";
+import { SigningFailure } from "../../src/runtime/errors";
+import { makeRequester } from "../../src/runtime/http";
+import { httpStub, jsonResponse as json, runClient } from "../../src/runtime/testing";
 
 // Transport tests use a permissive schema; validation has its own block below.
 const ANY = Schema.Unknown;

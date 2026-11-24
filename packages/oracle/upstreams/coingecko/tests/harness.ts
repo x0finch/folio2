@@ -1,7 +1,7 @@
-import type { Outbound } from "@folio/client-core";
-import { type HttpStub, httpStub, jsonResponse, runClient } from "@folio/client-core/testing";
 import { CoinGeckoClient, type CoinGeckoConfig } from "@folio/coingecko-client";
 import type { UpstreamError } from "@folio/upstream-basic";
+import type { Outbound } from "@folio/upstreams";
+import { type HttpStub, httpStub, jsonResponse, runClient } from "@folio/upstreams/testing";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 

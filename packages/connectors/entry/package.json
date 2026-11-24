@@ -16,7 +16,6 @@
     "@folio/bitcoin-derive": "workspace:*",
     "@folio/blockbook-client": "workspace:*",
     "@folio/bybit-client": "workspace:*",
-    "@folio/client-core": "workspace:*",
     "@folio/coinstats-client": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
     "@folio/hyperliquid-client": "workspace:*",
@@ -28,6 +27,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@folio/upstreams": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

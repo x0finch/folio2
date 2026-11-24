@@ -1,6 +1,6 @@
-import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
 import type { UpstreamNeeds } from "@folio/upstream-basic";
 import { isRetryable, type UpstreamError } from "@folio/upstream-basic";
+import { type HttpStub, httpStub, runClient } from "@folio/upstreams/testing";
 import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import type { BinanceRow } from "../../../src/connectors/binance/parse";

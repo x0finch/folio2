@@ -7,8 +7,8 @@ import {
   type RateLimitOptions,
   RateLimitScopeOverride,
   setScopeDefaultForTests,
-} from "../src/ratelimit";
-import { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "../src/slot-cursor";
+} from "../../src/runtime/ratelimit";
+import { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "../../src/runtime/slot-cursor";
 
 // Timing asserts run on TestClock, never the wall clock. Both scopes run our GCRA; `memory` keeps
 // its cursor private to the gate, `isolated` shares it by key. Its cursors are module-level per key, so each

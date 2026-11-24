@@ -1,6 +1,6 @@
-import type { Outbound } from "@folio/client-core";
 import { CoinGeckoClient, type CoinGeckoClientApi } from "@folio/coingecko-client";
 import { isRetryable, retryAfterOf, type UpstreamError } from "@folio/upstream-basic";
+import type { Outbound } from "@folio/upstreams";
 import { Duration, Effect, Schedule } from "effect";
 import { RETRY_ATTEMPTS, RETRY_BASE_MS, RETRY_MAX_WAIT_MS } from "./constants";
 
