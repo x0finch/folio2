@@ -4,9 +4,9 @@ import {
   recommendedScript,
   type ScriptType,
 } from "@folio/bitcoin-derive";
-import type { XpubToken } from "@folio/blockbook-client";
 import type { Note, NoteRow, Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import type { XpubToken } from "./api";
 import { EXT_PUBKEY_RE, SATS_PER_BTC } from "./constants";
 
 interface BtcAddress {

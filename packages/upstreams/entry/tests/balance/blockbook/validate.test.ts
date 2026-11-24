@@ -1,10 +1,10 @@
 import type { ScriptType } from "@folio/bitcoin-derive";
 import type { UpstreamNeeds } from "@folio/upstream-basic";
 import { isRetryable, type UpstreamError } from "@folio/upstream-basic";
-import { type HttpStub, httpStub, runClient } from "@folio/upstreams/testing";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { blockbookProvider } from "../../../src/connectors/bitcoin/provider";
+import { blockbookBalance } from "../../../src/balance/blockbook/upstream";
+import { type HttpStub, httpStub, runClient } from "../../../src/runtime/testing";
 import xpubBasicFixture from "./fixtures/xpub-basic.json";
 
 // Rejected creds / unparseable xpub → `false`; unreachable upstream → error channel for retry.
@@ -36,7 +36,7 @@ const failing = (
 describe("validateAccount", () => {
   it("address: hits /address/, 200 → true", async () => {
     const stub = httpStub(() => json({ address: ADDR, balance: "0", unconfirmedBalance: "0" }));
-    expect(await run(stub, blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })))).toBe(
+    expect(await run(stub, blockbookBalance.validateAccount(ctx({ addressOrXpub: ADDR })))).toBe(
       true,
     );
     expect(stub.calls[0].request.url.pathname).toContain("/address/");
@@ -45,7 +45,7 @@ describe("validateAccount", () => {
   // A real recorded basic response: it has no `unconfirmedBalance` (only tokens+ details do).
   it("xpub: hits /xpub/ asking only for basic details", async () => {
     const stub = httpStub(() => json(xpubBasicFixture.response));
-    expect(await run(stub, blockbookProvider.validateAccount(ctx({ addressOrXpub: ZPUB84 })))).toBe(
+    expect(await run(stub, blockbookBalance.validateAccount(ctx({ addressOrXpub: ZPUB84 })))).toBe(
       true,
     );
     expect(stub.calls[0].request.url.pathname).toContain("/xpub/");
@@ -54,17 +54,14 @@ describe("validateAccount", () => {
 
   it("rejected credentials (403) → false, not the error channel", async () => {
     const stub = httpStub(() => json({}, 403));
-    expect(await run(stub, blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })))).toBe(
+    expect(await run(stub, blockbookBalance.validateAccount(ctx({ addressOrXpub: ADDR })))).toBe(
       false,
     );
   });
 
   it("all nodes failing (5xx) → error channel (retryable), not false", async () => {
     const stub = httpStub(() => json({}, 500));
-    const err = await failing(
-      stub,
-      blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })),
-    );
+    const err = await failing(stub, blockbookBalance.validateAccount(ctx({ addressOrXpub: ADDR })));
     expect(err._tag).toBe("UpstreamUnavailableError");
     expect(isRetryable(err)).toBe(true);
   });
@@ -72,17 +69,14 @@ describe("validateAccount", () => {
   it("permanent server rejection (400) → not retryable", async () => {
     // An invalid xpub gets the same 400 from every node; a 4xx won't change on retry.
     const stub = httpStub(() => json({}, 400));
-    const err = await failing(
-      stub,
-      blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })),
-    );
+    const err = await failing(stub, blockbookBalance.validateAccount(ctx({ addressOrXpub: ADDR })));
     expect(isRetryable(err)).toBe(false);
   });
 
   it("invalid extended key (junk) → false, fails before any request", async () => {
     const stub = httpStub(() => json({}));
     expect(
-      await run(stub, blockbookProvider.validateAccount(ctx({ addressOrXpub: "zpubGARBAGE" }))),
+      await run(stub, blockbookBalance.validateAccount(ctx({ addressOrXpub: "zpubGARBAGE" }))),
     ).toBe(false);
     expect(stub.calls).toHaveLength(0);
   });

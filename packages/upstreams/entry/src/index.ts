@@ -2,6 +2,7 @@
 // `@folio/upstream-basic` tiers). Retry policy lives in `@folio/sync`, around a whole fetch incl. its
 // timeout; retrying here too would multiply attempts.
 
+export { blockbookBalance } from "./balance/blockbook/upstream";
 export { coinstatsBalance } from "./balance/coinstats/upstream";
 export { hyperliquidBalance } from "./balance/hyperliquid/upstream";
 export { hmacSha256 } from "./runtime/crypto";

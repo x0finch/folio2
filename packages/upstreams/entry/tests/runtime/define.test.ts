@@ -70,4 +70,30 @@ describe("defineUpstream", () => {
     expect(sent).toBe(2); // the burst; the third waits one spacing
     expect(stub.calls).toHaveLength(4);
   });
+
+  it("nodes: base first, then mirrors; the override replaces them all", async () => {
+    const mirrored = defineUpstream({
+      id: "mirrored",
+      label: "Mirrored",
+      base: "https://a.test",
+      mirrors: ["https://b.test"],
+      baseOverride: "MIRRORED_BASE",
+    });
+    const stub = httpStub(() => json({}));
+    await runClient(
+      stub,
+      Effect.gen(function* () {
+        const call = yield* mirrored.connect({});
+        for (const node of call.nodes) yield* node("/x", ANY);
+        const pinned = yield* mirrored.connect({ MIRRORED_BASE: "http://127.0.0.1:9" });
+        expect(pinned.nodes).toHaveLength(1);
+        yield* pinned.nodes[0]("/x", ANY);
+      }),
+    );
+    expect(stub.calls.map((c) => c.request.url.href)).toEqual([
+      "https://a.test/x",
+      "https://b.test/x",
+      "http://127.0.0.1:9/x",
+    ]);
+  });
 });

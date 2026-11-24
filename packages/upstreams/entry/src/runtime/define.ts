@@ -23,7 +23,9 @@ export interface UpstreamSpec<K extends string = string, O extends string = neve
   readonly id: string; // lowercase slug; also the `upstream` field of every error it raises
   readonly label: string;
   readonly base: string;
-  // Deployment env var that replaces `base` (a proxy for a geo-blocked egress, a local fake).
+  // Interchangeable nodes serving the same API; how to move between them is the upstream's call.
+  readonly mirrors?: readonly string[];
+  // Deployment env var that replaces `base` and every mirror (a proxy for a geo-blocked egress, a local fake).
   readonly baseOverride?: string;
   // Deployment env var names. A missing required key fails with `auth` before any request.
   readonly keys?: readonly K[];
@@ -43,6 +45,8 @@ type Keys<K extends string, O extends string> = Readonly<Record<K, string>> &
 export interface Call<K extends string = string, O extends string = never> {
   readonly request: Requester;
   readonly via: (limit: string) => Requester;
+  // One requester per node, `base` first, under the default limit; just the override when set.
+  readonly nodes: readonly Requester[];
   readonly keys: Keys<K, O>;
 }
 
@@ -128,12 +132,13 @@ export function defineUpstream<const K extends string = never, const O extends s
     Effect.gen(function* () {
       const keys = yield* resolveKeys(env);
       const keyed = optional.some((name) => name in keys) || required.length > 0;
-      const baseUrl = (spec.baseOverride && stringOf(env, spec.baseOverride)) || spec.base;
+      const override = spec.baseOverride && stringOf(env, spec.baseOverride);
+      const bases = override ? [override] : [spec.base, ...(spec.mirrors ?? [])];
       const fixed = {
         ...(spec.userAgent ? { "user-agent": spec.userAgent } : {}),
         ...spec.headers?.(keys),
       };
-      const requesterFor = (limit: RateLimit | undefined): Requester =>
+      const requesterFor = (limit: RateLimit | undefined, baseUrl = bases[0]): Requester =>
         makeRequester({
           baseUrl,
           upstream: spec.id,
@@ -141,16 +146,22 @@ export function defineUpstream<const K extends string = never, const O extends s
           limit,
           rateLimitedStatuses: spec.rateLimitedStatuses,
         });
-      const names = Object.keys(spec.limits ?? {});
+      const limits = new Map<string, RateLimit | undefined>();
+      for (const name of Object.keys(spec.limits ?? {})) {
+        limits.set(name, yield* gateFor(name, keyed));
+      }
       const gates = new Map<string, Requester>();
-      for (const name of names) gates.set(name, requesterFor(yield* gateFor(name, keyed)));
+      for (const [name, limit] of limits) gates.set(name, requesterFor(limit));
       const request = gates.get("default") ?? requesterFor(undefined);
+      const nodes = bases.map((base, i) =>
+        i === 0 ? request : requesterFor(limits.get("default"), base),
+      );
       const via = (name: string): Requester => {
         const gated = gates.get(name);
         if (!gated) throw new Error(`${spec.id}: no limit named ${name}`);
         return gated;
       };
-      return { request, via, keys } satisfies Call<K, O>;
+      return { request, via, nodes, keys } satisfies Call<K, O>;
     });
 
   return { ...spec, connect, envNames };

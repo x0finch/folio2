@@ -14,7 +14,6 @@
   "dependencies": {
     "@folio/binance-client": "workspace:*",
     "@folio/bitcoin-derive": "workspace:*",
-    "@folio/blockbook-client": "workspace:*",
     "@folio/bybit-client": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
     "@folio/okx-client": "workspace:*",

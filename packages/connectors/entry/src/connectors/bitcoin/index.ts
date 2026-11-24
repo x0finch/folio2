@@ -1,6 +1,7 @@
 import { Spot } from "@folio/connectors-basic";
+import { blockbookBalance } from "@folio/upstreams";
 import { defineConnector } from "../../connector";
-import { bitcoinAccountCreds, blockbookProvider } from "./provider";
+import { bitcoinAccountCreds } from "./creds";
 
 const BTC_LOGO = "https://assets.coingecko.com/coins/images/1/large/bitcoin.png";
 
@@ -9,7 +10,7 @@ export const bitcoin = defineConnector({
   label: "Bitcoin",
   logo: BTC_LOGO,
   account: { creds: bitcoinAccountCreds },
-  balance: { schema: Spot, providers: [blockbookProvider] },
+  balance: { schema: Spot, providers: [blockbookBalance] },
   // Emits confirmed amounts only (value 0); priced at market.
   valuation: "mark-to-market",
 });

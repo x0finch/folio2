@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@folio/bitcoin-derive": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/upstream-basic": "workspace:*",
