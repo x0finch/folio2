@@ -8,7 +8,7 @@ Self-hosted crypto portfolio tracker: on-chain wallets, Bitcoin, CEX, perp DEX a
 - Comments only say what the code can't: the *why* behind a non-obvious choice (platform limits, upstream quirks, workarounds, invariants). One or two lines. No restating code, no history, no issue/PR refs. Prefer a better name over a comment. Tool directives (`biome-ignore`, `/// <reference>`, `@ts-expect-error`) stay.
 
 ## Stack
-TanStack Start + Vite on Cloudflare Workers; D1 + Drizzle; better-auth; Effect 3 (`@effect/platform` `HttpClient` for outbound); pnpm monorepo; TypeScript 7 strict; Vitest 4; Biome; knip; Wrangler 4 (`wrangler.jsonc`).
+TanStack Start + Vite on Cloudflare Workers; D1 + Drizzle; better-auth; Effect 4, pinned `~4.1` (`effect/http` `HttpClient` for outbound); pnpm monorepo; TypeScript 7 strict; Vitest 4; Biome; knip; Wrangler 4 (`wrangler.jsonc`).
 
 ## Architecture rules
 - Contract-first: every provider implements `BalanceProvider` (`@folio/connectors-basic`).
@@ -36,12 +36,12 @@ TanStack Start + Vite on Cloudflare Workers; D1 + Drizzle; better-auth; Effect 3
 - Prefer mature libraries (must run on Workers, maintained, worth it, no conflicts).
 - Factories and closures, not classes (Effect services excepted). No logic-free wrappers. Guard clauses.
 - Read `cloudflare:workers` env at call time, never at module load.
-- Outside Effect, call global `fetch` directly (method-call fetch throws `Illegal invocation` on workerd); mock with `vi.spyOn(globalThis, "fetch")`. Inside Effect, use `HttpClient` (keeps the abort signal).
+- Outside Effect, call global `fetch` directly (method-call fetch throws `Illegal invocation` on workerd); mock with `vi.spyOn(globalThis, "fetch")`. Inside Effect, use `HttpClient` (keeps the abort signal); `FolioHttpClient` reads the global `fetch` per call, so the same spy works.
 
 ### apps/web boundaries
 - Client code value-imports only contract packages (`@folio/connectors-basic`, `@folio/oracle-basic`). Effect Tags go in subpaths (`/ports`) so `effect` stays out of the client bundle.
 - `cloudflare:workers` / node built-ins in client-imported modules only inside `createServerFn` handlers.
-- `lib/core` pure client-callable; `lib/hooks`, `lib/i18n`, `lib/queries` client-only; `lib/server/<resource>/index.ts` is the server-fn surface (`createServerFn().middleware([requireAuth]).validator(Input).handler(runEffect(handleX))`); the rest of `lib/server` is server-only. No files at the top of `lib/`.
+- `lib/core` pure client-callable; `lib/hooks`, `lib/i18n`, `lib/queries` client-only; `lib/server/<resource>/index.ts` is the server-fn surface (`createServerFn().middleware([requireAuth]).validator(Input).handler(runEffect(handleX))`, `handleX = serverFn("handleX")(…)` so the timing log has its name); the rest of `lib/server` is server-only. No files at the top of `lib/`.
 - Handlers return Effects; `runtime.ts` runs them and supplies the user.
 - Node-tested pure logic never shares a file with a handler.
 - Keep a page's pieces together; shared dirs only for genuinely generic parts.
@@ -62,9 +62,9 @@ TanStack Start + Vite on Cloudflare Workers; D1 + Drizzle; better-auth; Effect 3
 - Swappable things (HTTP, cache, signer) are services, not config fields; no callbacks in config.
 - Use `Layer.sync`, not `Layer.succeed(tag, make())`. No `Scope` without a resource.
 - Service signatures never expose their dependencies (capture context at build), except `DbRequest`.
-- Derive service types from the implementation; `class X extends Effect.Service<X>()(...)`; annotate method return types. Name with role suffix (`Store`, `Upstream`, `Source`, `Client`); never `Resolver`.
+- Derive service types from the implementation: `class X extends Context.Service<X>()("pkg/X", { make })` with `static readonly layer = Layer.effect(this, this.make)`; the shape type is `X["Service"]`; annotate method return types. Name with role suffix (`Store`, `Upstream`, `Source`, `Client`); never `Resolver`.
 - Errors split by what the consumer must distinguish; match `_tag`; unhandled → defect. `NotFound` covers "not yours".
-- Degrade with typed `catchAll` + `logWarning`, never blanket try/catch. Retry whole business operations in `@folio/sync`.
+- Degrade with typed `catch` / `catchTag` + `logWarning`, never blanket try/catch. Retry whole business operations in `@folio/sync`.
 - Isolate-level layers build only closures; anything holding I/O (connections, `RateLimiter`, `Cache`) is per-request.
 - `HttpClient` spans record full URLs/headers by default — record by allowlist and test what's absent.
 
@@ -72,7 +72,7 @@ TanStack Start + Vite on Cloudflare Workers; D1 + Drizzle; better-auth; Effect 3
 - Don't unit-test vendored beUI. Scenario tests (`apps/web/tests/server/scenarios.test.ts`) assert what was stored, its values, and what the screen shows; break the covered line to confirm the test goes red.
 - `apps/web`: `*.test.ts` → node, `*.test.tsx` → jsdom.
 - Never assert wall-clock time; use fake timers / `TestClock`.
-- `@effect/vitest` can't be installed (vitest 4 + Effect 3).
+- No `@effect/vitest`: 4.x needs vitest 5, and `@cloudflare/vitest-pool-workers` still needs vitest 4. Use `TestClock` from `effect/testing`.
 
 ## Platform gotchas
 - Root vitest `test.projects` globs config files (`packages/**/vitest.config.ts`), not dirs.
