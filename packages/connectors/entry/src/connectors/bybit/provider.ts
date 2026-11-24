@@ -7,15 +7,15 @@ import {
 } from "@folio/bybit-client";
 import type {
   BalanceProvider,
-  ConnectorError,
   CredField,
   Note,
   ProviderNeeds,
   Spot,
 } from "@folio/connectors-basic";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { z } from "zod";
-import { asConnector, bestEffortVerdict } from "../../upstream";
+import { bestEffortVerdict } from "../../upstream";
 import { EARN_CATEGORIES, PROVIDER_ID } from "./constants";
 import {
   bucketFailureNote,
@@ -44,20 +44,20 @@ interface Bucket {
   readonly rows: (
     client: BybitClientApi,
     creds: BybitCreds,
-  ) => Effect.Effect<unknown, ConnectorError, ProviderNeeds>;
+  ) => Effect.Effect<unknown, UpstreamError, ProviderNeeds>;
 }
 
 const UNIFIED: Bucket = {
   name: "Unified",
-  rows: (c, creds) => asConnector(c.walletBalance(creds)),
+  rows: (c, creds) => c.walletBalance(creds),
 };
 const FUNDING: Bucket = {
   name: "Funding",
-  rows: (c, creds) => asConnector(c.fundingBalances(creds)),
+  rows: (c, creds) => c.fundingBalances(creds),
 };
 const EARN: readonly Bucket[] = EARN_CATEGORIES.map((e) => ({
   name: `Earn (${e.label})`,
-  rows: (c, creds) => asConnector(c.earnPositions(creds, e.category)),
+  rows: (c, creds) => c.earnPositions(creds, e.category),
 }));
 const BUCKETS: readonly Bucket[] = [UNIFIED, FUNDING, ...EARN];
 
@@ -130,7 +130,7 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
             bucketFailureNote(
               failed.map((f) => ({
                 name: f.bucket.name,
-                auth: f.result._tag === "Failure" && f.result.failure._tag === "ConnectorAuthError",
+                auth: f.result._tag === "Failure" && f.result.failure._tag === "UpstreamAuthError",
               })),
             ),
           );
@@ -145,9 +145,9 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
   // Bybit signals bad credentials as HTTP 200 + retCode 1000x; the client maps that to auth.
   validateAccount: (ctx) =>
     withClient(ctx.creds, (client) =>
-      asConnector(client.walletBalance(ctx.account.creds)).pipe(
+      client.walletBalance(ctx.account.creds).pipe(
         Effect.as(true),
-        Effect.catchTag("ConnectorAuthError", () => Effect.succeed(false)),
+        Effect.catchTag("UpstreamAuthError", () => Effect.succeed(false)),
       ),
     ),
 };

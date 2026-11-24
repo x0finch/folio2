@@ -1,5 +1,6 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import type { ConnectorError, ProviderNeeds } from "@folio/connectors-basic";
+import type { ProviderNeeds } from "@folio/connectors-basic";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { zerionProvider } from "../../../src/connectors/evm/zerion-provider";
@@ -37,12 +38,12 @@ const ctx = (providerCreds: Record<string, string> = PROVIDER_CREDS): Ctx =>
     creds: providerCreds,
   }) as unknown as Ctx;
 
-const run = <A>(stub: HttpStub, effect: Effect.Effect<A, ConnectorError, ProviderNeeds>) =>
+const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, ProviderNeeds>) =>
   runClient(stub, effect);
 const failing = (
   stub: HttpStub,
-  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
-): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
+  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+): Promise<UpstreamError> => runClient(stub, Effect.flip(effect));
 
 describe("fetchBalances", () => {
   // This must be first: the chain mapping is cached 24h in the client at module level (on CF Workers a Scope would reset it every request).
@@ -52,7 +53,7 @@ describe("fetchBalances", () => {
     // from the canonical one and pollute the token index. Failing means nothing is produced; the whole round retries.
     const stub = upstream({ "/v1/chains": () => json({}, { status: 500 }) });
     const err = await failing(stub, zerionProvider.fetchBalances(ctx()));
-    expect(err._tag).toBe("ConnectorUnavailableError");
+    expect(err._tag).toBe("UpstreamUnavailableError");
   });
 
   it("positions and chain mapping fetched concurrently, output matches the golden", async () => {
@@ -81,7 +82,7 @@ describe("fetchBalances", () => {
   it("no provider key configured: a credentials problem, and no request at all", async () => {
     const stub = upstream();
     const err = await failing(stub, zerionProvider.fetchBalances(ctx({})));
-    expect(err._tag).toBe("ConnectorAuthError");
+    expect(err._tag).toBe("UpstreamAuthError");
     expect(stub.calls).toHaveLength(0);
   });
 });
@@ -104,7 +105,7 @@ describe("validateAccount", () => {
     expect(await run(denied, zerionProvider.validateAccount(ctx()))).toBe(false);
     const down = httpStub(() => json({}, { status: 503 }));
     expect((await failing(down, zerionProvider.validateAccount(ctx())))._tag).toBe(
-      "ConnectorUnavailableError",
+      "UpstreamUnavailableError",
     );
   });
 });

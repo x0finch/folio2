@@ -1,6 +1,5 @@
 import type {
   BalanceProvider,
-  ConnectorError,
   CredField,
   Note,
   ProviderNeeds,
@@ -13,9 +12,10 @@ import {
   type OkxCreds,
   type OkxDetail,
 } from "@folio/okx-client";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { z } from "zod";
-import { asConnector, bestEffortVerdict } from "../../upstream";
+import { bestEffortVerdict } from "../../upstream";
 import { PROVIDER_ID } from "./constants";
 import {
   bucketFailureNote,
@@ -49,21 +49,21 @@ interface Bucket {
   readonly rows: (
     client: OkxClientApi,
     creds: OkxCreds,
-  ) => Effect.Effect<unknown, ConnectorError, ProviderNeeds>;
+  ) => Effect.Effect<unknown, UpstreamError, ProviderNeeds>;
 }
 
-const TRADING: Bucket = { name: "Trading", rows: (c, creds) => asConnector(c.balance(creds)) };
+const TRADING: Bucket = { name: "Trading", rows: (c, creds) => c.balance(creds) };
 const FUNDING: Bucket = {
   name: "Funding",
-  rows: (c, creds) => asConnector(c.fundingBalances(creds)),
+  rows: (c, creds) => c.fundingBalances(creds),
 };
 const SAVINGS: Bucket = {
   name: "Savings",
-  rows: (c, creds) => asConnector(c.savingsBalance(creds)),
+  rows: (c, creds) => c.savingsBalance(creds),
 };
 const STAKING: Bucket = {
   name: "Staking",
-  rows: (c, creds) => asConnector(c.stakingOrders(creds)),
+  rows: (c, creds) => c.stakingOrders(creds),
 };
 
 // Valuation and positions aren't balance sources, so they don't count toward "all failed".
@@ -104,8 +104,8 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
               { concurrency: "unbounded" },
             ),
             // Soft signals: failure just drops their notes this round.
-            Effect.result(asConnector(client.assetValuation(creds))),
-            Effect.result(asConnector(client.positions(creds))),
+            Effect.result(client.assetValuation(creds)),
+            Effect.result(client.positions(creds)),
           ],
           { concurrency: "unbounded" },
         );
@@ -138,7 +138,7 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
             bucketFailureNote(
               failed.map((f) => ({
                 name: f.bucket.name,
-                auth: f.result._tag === "Failure" && f.result.failure._tag === "ConnectorAuthError",
+                auth: f.result._tag === "Failure" && f.result.failure._tag === "UpstreamAuthError",
               })),
             ),
           );
@@ -170,9 +170,9 @@ export const okxProvider: BalanceProvider<Spot, typeof okxAccountCreds> = {
   // OKX signals bad credentials as HTTP 200 + code 50xxx; the client maps those to auth.
   validateAccount: (ctx) =>
     withClient(ctx.creds, (client) =>
-      asConnector(client.balance(ctx.account.creds)).pipe(
+      client.balance(ctx.account.creds).pipe(
         Effect.as(true),
-        Effect.catchTag("ConnectorAuthError", () => Effect.succeed(false)),
+        Effect.catchTag("UpstreamAuthError", () => Effect.succeed(false)),
       ),
     ),
 };

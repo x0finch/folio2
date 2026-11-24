@@ -6,9 +6,8 @@ import {
   type RequestOptions,
   type SigningFailure,
   staleTolerantCache,
-  type UpstreamError,
-  UpstreamUnavailableError,
 } from "@folio/client-core";
+import { type UpstreamError, UpstreamUnavailableError } from "@folio/upstream-basic";
 import { Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import {
   CACHE_TOKEN_LIST_PATH,

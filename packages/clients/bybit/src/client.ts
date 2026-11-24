@@ -4,8 +4,8 @@ import {
   type Outbound,
   type Requester,
   type SigningFailure,
-  type UpstreamError,
 } from "@folio/client-core";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Clock, Context, Effect, Layer, type Schema } from "effect";
 import {
   ACCOUNT_TYPE_FUND,

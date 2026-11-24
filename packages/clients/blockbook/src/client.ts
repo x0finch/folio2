@@ -1,10 +1,5 @@
-import {
-  makeRequester,
-  type Outbound,
-  type Requester,
-  type UpstreamError,
-  UpstreamUnavailableError,
-} from "@folio/client-core";
+import { makeRequester, type Outbound, type Requester } from "@folio/client-core";
+import { type UpstreamError, UpstreamUnavailableError } from "@folio/upstream-basic";
 import { Context, Effect, Layer, type Schema } from "effect";
 import {
   BLOCKBOOK_BASES,
@@ -56,13 +51,9 @@ let cursor = 0;
 // Whether an error should move on to the next node. The criterion is blockbook's own, not generic retryability: is it this node or the request?
 //   rate-limited by this node / node unreachable (network, 5xx): switch; invalid xpub (4xx): do not (four nodes give the same 4xx);
 //   credentials rejected / unreadable response: do not.
-// Not "is it retryable": `UpstreamUnavailableError` covers network failure, 5xx and 4xx, and the 4xx must not switch; `status` tells them apart.
-const shouldTryNextBase = (error: UpstreamError): boolean => {
-  if (error._tag === "UpstreamRateLimitError") return true;
-  if (error._tag !== "UpstreamUnavailableError") return false;
-  // No status means it never left (network failure): switch. With a status, only 5xx switches.
-  return error.status === undefined || error.status >= 500;
-};
+// Another node may answer a rate limit or an outage; a refused request (bad xpub) fails the same everywhere.
+const shouldTryNextBase = (error: UpstreamError): boolean =>
+  error._tag === "UpstreamRateLimitError" || error._tag === "UpstreamUnavailableError";
 
 export function make(config: BlockbookConfig = {}): BlockbookClientApi {
   const bases = config.bases?.length ? config.bases : BLOCKBOOK_BASES;

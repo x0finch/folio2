@@ -1,5 +1,6 @@
-import type { Balance, ConnectorError, ProviderNeeds } from "@folio/connectors-basic";
+import type { Balance, ProviderNeeds } from "@folio/connectors-basic";
 import type { AccountRawCreds, AccountSafe, WriteSnapshotInput } from "@folio/db";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Context, type Effect, Layer, Logger, References } from "effect";
 import type { SyncDepError } from "./errors";
 import type { FetchOutcome, SyncLogger } from "./types";
@@ -22,7 +23,7 @@ export class BalanceSource extends Context.Service<
     readonly fetch: (
       account: AccountSafe,
       stored: Record<string, string>,
-    ) => Effect.Effect<FetchOutcome, ConnectorError, ProviderNeeds>;
+    ) => Effect.Effect<FetchOutcome, UpstreamError | SyncDepError, ProviderNeeds>;
   }
 >()("sync/BalanceSource") {}
 

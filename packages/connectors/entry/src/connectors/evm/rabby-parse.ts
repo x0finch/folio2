@@ -1,6 +1,7 @@
-import { ConnectorUnavailableError, type Defi, type Spot } from "@folio/connectors-basic";
+import type { Defi, Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import type { RabbyProtocol, RabbyToken } from "@folio/rabby-client";
+import { UpstreamUnavailableError } from "@folio/upstream-basic";
 import type { z } from "zod";
 import { DUST_USD } from "./constants";
 
@@ -15,8 +16,10 @@ function refOf(token: RabbyToken, chainIds: Record<string, number>): string {
   const chain = token.chain;
   const chainId = chain ? chainIds[chain] : undefined;
   if (chainId === undefined) {
-    throw new ConnectorUnavailableError({
-      message: `rabby: no chainId for chain '${chain ?? "?"}' (${token.symbol ?? "?"})`,
+    throw new UpstreamUnavailableError({
+      upstream: "rabby",
+      where: "(chain list)",
+      cause: `no chainId for chain '${chain ?? "?"}'`,
     });
   }
   const namer = `evm:${chainId}`;

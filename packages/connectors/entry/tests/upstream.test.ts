@@ -1,15 +1,15 @@
-import type { ConnectorError } from "@folio/connectors-basic";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Result } from "effect";
 import { describe, expect, it } from "vitest";
 import { bestEffortVerdict } from "../src/upstream";
 
 // Verdict for multi-bucket best-effort fetches, shared by binance / okx / bybit: each splits an account into isolated buckets fetched
 // concurrently, and on failure must answer one question: hand this round to retry, or degrade to a partial snapshot.
-const err = (tag: string) => ({ _tag: tag }) as unknown as ConnectorError;
-const AUTH = "ConnectorAuthError"; // permission not granted: waiting does not help
-const SHAPE = "ConnectorFailure"; // upstream changed shape: waiting does not help
-const LIMIT = "ConnectorRateLimitError"; // rate limited: waiting helps
-const DOWN = "ConnectorUnavailableError"; // upstream down: waiting helps
+const err = (tag: string) => ({ _tag: tag }) as unknown as UpstreamError;
+const AUTH = "UpstreamAuthError"; // permission not granted: waiting does not help
+const SHAPE = "UpstreamParseError"; // upstream changed shape: waiting does not help
+const LIMIT = "UpstreamRateLimitError"; // rate limited: waiting helps
+const DOWN = "UpstreamUnavailableError"; // upstream down: waiting helps
 
 const ok = (name: string) => ({ name, result: Result.succeed(name) });
 const ko = (name: string, tag: string) => ({ name, result: Result.fail(err(tag)) });

@@ -4,9 +4,8 @@ import {
   makeRequester,
   type Outbound,
   type Requester,
-  UpstreamAuthError,
-  type UpstreamError,
 } from "@folio/client-core";
+import { UpstreamAuthError, type UpstreamError } from "@folio/upstream-basic";
 import { Clock, Context, Duration, Effect, Layer, Schema, type Scope } from "effect";
 import {
   ACCOUNT_PATH,

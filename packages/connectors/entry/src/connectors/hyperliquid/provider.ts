@@ -1,17 +1,12 @@
-import type {
-  BalanceProvider,
-  ConnectorError,
-  CredField,
-  ProviderNeeds,
-} from "@folio/connectors-basic";
+import type { BalanceProvider, CredField, ProviderNeeds } from "@folio/connectors-basic";
 import {
   type ClearinghouseState,
   type HyperliquidClientApi,
   make as makeClient,
 } from "@folio/hyperliquid-client";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { z } from "zod";
-import { asConnector } from "../../upstream";
 import { EVM_ADDRESS_RE } from "./constants";
 import { PROVIDER_ID, parseClearinghouseState, type Row } from "./parse";
 
@@ -64,12 +59,12 @@ export const hyperliquidProvider: BalanceProvider<
   validateAccount: (ctx) =>
     state(clientFor(ctx.creds), ctx.account.creds.address).pipe(
       Effect.as(true),
-      Effect.catchTag("ConnectorAuthError", () => Effect.succeed(false)),
+      Effect.catchTag("UpstreamAuthError", () => Effect.succeed(false)),
     ),
 };
 
 const state = (
   client: HyperliquidClientApi,
   address: string,
-): Effect.Effect<ClearinghouseState, ConnectorError, ProviderNeeds> =>
-  asConnector(client.clearinghouseState(address));
+): Effect.Effect<ClearinghouseState, UpstreamError, ProviderNeeds> =>
+  client.clearinghouseState(address);

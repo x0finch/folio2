@@ -1,5 +1,5 @@
-import { UpstreamAuthError, UpstreamRateLimitError } from "@folio/client-core";
 import { InvalidInput, NotFound } from "@folio/db";
+import { UpstreamAuthError, UpstreamRateLimitError } from "@folio/upstream-basic";
 import { Cause, Effect, Exit } from "effect";
 import { describe, expect, it } from "vitest";
 import { toError } from "@/lib/server/errors";

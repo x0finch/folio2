@@ -1,9 +1,10 @@
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Clock, Effect, Schema, type SchemaIssue } from "effect";
 import { HttpClient, type HttpClientError, HttpClientRequest } from "effect/http";
-import { HttpFailure, type SigningFailure } from "./errors";
+import { HttpFailure, type HttpFailureKind, type SigningFailure } from "./errors";
 import { disableBuiltInTracing } from "./http-client";
 import type { RateLimit } from "./ratelimit";
-import { classifyFailure, type UpstreamError } from "./upstream-error";
+import { classifyFailure } from "./upstream-error";
 
 // Thin HTTP layer: rate-limit → send → classify the failure. Retries are the caller's
 // `Effect.retry`: it reruns the whole effect, so each retry re-queues at the gate.
@@ -20,6 +21,14 @@ function parseRetryAfter(header: string | undefined, now: number): number | unde
 }
 
 const DEFAULT_RATE_LIMITED = [429];
+const GEO_BLOCKED_STATUS = 451;
+const REQUEST_TIMEOUT_STATUS = 408;
+
+const kindOfStatus = (status: number): HttpFailureKind => {
+  if (status === GEO_BLOCKED_STATUS) return "blocked";
+  if (status >= 400 && status < 500 && status !== REQUEST_TIMEOUT_STATUS) return "refused";
+  return "upstream";
+};
 
 export interface RequestOptions {
   readonly query?: Record<string, string | number | undefined>; // undefined keys are skipped
@@ -156,7 +165,11 @@ export function makeRequester(config: HttpConfig): Requester {
           return yield* new HttpFailure({ kind: "auth", where, status: res.status });
         }
         if (res.status === 404 && options?.notFoundAsNull) return null;
-        return yield* new HttpFailure({ kind: "upstream", where, status: res.status });
+        return yield* new HttpFailure({
+          kind: kindOfStatus(res.status),
+          where,
+          status: res.status,
+        });
       }
 
       const body = yield* res.json.pipe(

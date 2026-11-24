@@ -1,5 +1,6 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import { type ConnectorError, isRetryable, type ProviderNeeds } from "@folio/connectors-basic";
+import type { ProviderNeeds } from "@folio/connectors-basic";
+import { isRetryable, type UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { hyperliquidProvider } from "../../../src/connectors/hyperliquid/provider";
@@ -22,12 +23,12 @@ const ctx = (address = ADDR, providerCreds: Record<string, string> = {}): Ctx =>
     creds: providerCreds,
   }) as unknown as Ctx;
 
-const run = <A>(stub: HttpStub, effect: Effect.Effect<A, ConnectorError, ProviderNeeds>) =>
+const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, ProviderNeeds>) =>
   runClient(stub, effect);
 const failing = (
   stub: HttpStub,
-  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
-): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
+  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+): Promise<UpstreamError> => runClient(stub, Effect.flip(effect));
 
 describe("fetchBalances", () => {
   it("POST /info, with type and user in the body, then parses", async () => {
@@ -65,14 +66,14 @@ describe("fetchBalances", () => {
   it("5xx gives unreachable (retryable)", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     const err = await failing(stub, hyperliquidProvider.fetchBalances(ctx()));
-    expect(err._tag).toBe("ConnectorUnavailableError");
+    expect(err._tag).toBe("UpstreamUnavailableError");
     expect(isRetryable(err)).toBe(true);
   });
 
   it("429 gives rate-limited (retryable)", async () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     const err = await failing(stub, hyperliquidProvider.fetchBalances(ctx()));
-    expect(err._tag).toBe("ConnectorRateLimitError");
+    expect(err._tag).toBe("UpstreamRateLimitError");
   });
 });
 
@@ -103,6 +104,6 @@ describe("validateAccount", () => {
   it("unreachable goes through the error channel, not squashed into false", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     const err = await failing(stub, hyperliquidProvider.validateAccount(ctx()));
-    expect(err._tag).toBe("ConnectorUnavailableError");
+    expect(err._tag).toBe("UpstreamUnavailableError");
   });
 });

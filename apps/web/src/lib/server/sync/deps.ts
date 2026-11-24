@@ -7,13 +7,7 @@ import {
   selectProvider,
   validateCredentials,
 } from "@folio/connectors";
-import {
-  type Balance,
-  type ConnectorError,
-  ConnectorFailure,
-  fromProviderError,
-  type ProviderNeeds,
-} from "@folio/connectors-basic";
+import type { Balance, ProviderNeeds } from "@folio/connectors-basic";
 import { type AccountSafe, Database, type DbRequest, type WriteSnapshotInput } from "@folio/db";
 import { Oracle, type OracleServices } from "@folio/oracle";
 import type { ValuationMode } from "@folio/oracle-basic";
@@ -27,6 +21,7 @@ import {
   SnapshotStore as SyncSnapshotStore,
   TokenOracle,
 } from "@folio/sync";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Context, Effect, Layer } from "effect";
 import type { InputSpec } from "@/lib/server/creds";
 import { isComplete, openCreds } from "@/lib/server/creds";
@@ -36,30 +31,30 @@ import { isSyncableAccount } from "./status";
 // Server-only (imports cloudflare:workers): reached from server fn handlers, which the client
 // bundle strips, and from the cron.
 // Stays an Effect end to end: a Promise hop would cut the sync timeout/interrupt off from the
-// provider. Decrypt / validate failures map to non-retryable.
+// provider. Decrypt / validate failures are our own steps, never retried.
 const fetchViaConnector = (
   cid: string,
   manifest: ConnectorManifest,
   account: AccountSafe,
   stored: Record<string, string>,
   seeds: SeedCollector,
-): Effect.Effect<FetchOutcome, ConnectorError, ProviderNeeds> =>
+): Effect.Effect<FetchOutcome, UpstreamError | SyncDepError, ProviderNeeds> =>
   Effect.gen(function* () {
     const specs = manifest.account.creds as unknown as InputSpec[]; // same {key,type} shape
     if (!isComplete(specs, stored)) return { status: "needs-credentials" } satisfies FetchOutcome;
     const plain = yield* Effect.tryPromise({
       try: () => openCreds(specs, stored, env.SECRETS_KEY),
-      catch: fromProviderError,
+      catch: (e) => depError("readCreds", e),
     });
     // Validate again before fetching: a malformed identifier fails fast as non-retryable instead of
     // hitting the upstream for a 4xx and retrying.
     const validated = yield* Effect.tryPromise({
       try: () => validateCredentials(manifest.account.creds, plain),
-      catch: fromProviderError,
+      catch: (e) => depError("readCreds", e),
     });
     const provider = selectProvider(manifest);
     if (!provider) {
-      return yield* new ConnectorFailure({ message: `no provider for connector ${cid}` });
+      return yield* depError("resolveSource", `no provider for connector ${cid}`);
     }
     // Inject only the global keys the provider declares (least privilege).
     const providerCreds: Record<string, string> = {};
@@ -173,9 +168,7 @@ export const makeSyncServices = (
           const cid = account.connectorId;
           const manifest = getConnector(connectorRegistry, cid);
           if (!manifest) {
-            return Effect.fail(
-              new ConnectorFailure({ message: `no connector for connectorId ${cid}` }),
-            );
+            return Effect.fail(depError("resolveSource", `no connector for connectorId ${cid}`));
           }
           // Per-user upstream concurrency is capped by the runner (one job at a time).
           return fetchViaConnector(cid, manifest, account, stored, seeds);

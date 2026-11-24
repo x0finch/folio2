@@ -1,4 +1,3 @@
-import type { UpstreamError } from "@folio/client-core";
 import type { CoinGeckoConfig } from "@folio/coingecko-client";
 import type {
   RefIndexFetch,
@@ -8,6 +7,7 @@ import type {
   UpstreamToken,
 } from "@folio/oracle-basic";
 import { TokenUpstream } from "@folio/oracle-basic/ports";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Clock, Effect, Layer } from "effect";
 import { IDS_PER_REQUEST, MARKETS_PER_PAGE, UPSTREAM_ID, VS_USD } from "./constants";
 import { closeOver, type Needs } from "./layer";

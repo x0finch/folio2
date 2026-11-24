@@ -1,5 +1,6 @@
-import { ConnectorUnavailableError, type Defi, type Spot } from "@folio/connectors-basic";
+import type { Defi, Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
+import { UpstreamUnavailableError } from "@folio/upstream-basic";
 import type { ZerionPositionsResponse } from "@folio/zerion-client";
 
 export type Row = Spot | Defi;
@@ -29,8 +30,10 @@ export function parsePositions(
     const chainId = chain ? chainIds[chain] : undefined;
     if (chainId === undefined) {
       // Retryable: the chain list is cached for 24h, so a missing chain is usually just stale.
-      throw new ConnectorUnavailableError({
-        message: `zerion: no chainId for chain '${chain ?? "?"}' (${symbol})`,
+      throw new UpstreamUnavailableError({
+        upstream: "zerion",
+        where: "(chain list)",
+        cause: `no chainId for chain '${chain ?? "?"}'`,
       });
     }
     const isDefi = a.position_type !== "wallet" || Boolean(a.protocol);

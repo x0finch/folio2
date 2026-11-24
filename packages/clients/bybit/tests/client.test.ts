@@ -1,10 +1,11 @@
-import type { Outbound, UpstreamError } from "@folio/client-core";
+import type { Outbound } from "@folio/client-core";
 import {
   type HttpStub,
   httpStub,
   jsonResponse as json,
   runClient,
 } from "@folio/client-core/testing";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { BybitClient, type BybitClientApi, type BybitConfig, make } from "../src/client";

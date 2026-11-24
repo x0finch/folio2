@@ -1,5 +1,6 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import { type ConnectorError, isRetryable, type ProviderNeeds } from "@folio/connectors-basic";
+import type { ProviderNeeds } from "@folio/connectors-basic";
+import { isRetryable, type UpstreamError } from "@folio/upstream-basic";
 import { Effect, Result } from "effect";
 import { describe, expect, it } from "vitest";
 import type { BinanceRow } from "../../../src/connectors/binance/parse";
@@ -49,24 +50,24 @@ const ctx = (
     creds: providerCreds,
   }) as unknown as Ctx;
 
-const run = <A>(stub: HttpStub, effect: Effect.Effect<A, ConnectorError, ProviderNeeds>) =>
+const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, ProviderNeeds>) =>
   runClient(stub, effect);
 
 const failing = (
   stub: HttpStub,
-  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
-): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
+  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+): Promise<UpstreamError> => runClient(stub, Effect.flip(effect));
 
 // Fed data directly to pin the verdict's own edges, notably the same-error-object rule.
 describe("verdict", () => {
-  const err = (tag: string) => ({ _tag: tag }) as unknown as ConnectorError;
+  const err = (tag: string) => ({ _tag: tag }) as unknown as UpstreamError;
   const row = (symbol: string): BinanceRow =>
     ({ symbol, amount: 1, value: 1, kind: "spot" }) as BinanceRow;
   const ok = (name: string, symbols: string[]) => ({
     wallet: { name },
     result: Result.succeed(symbols.map(row)),
   });
-  const ko = (name: string, e: ConnectorError) => ({ wallet: { name }, result: Result.fail(e) });
+  const ko = (name: string, e: UpstreamError) => ({ wallet: { name }, result: Result.fail(e) });
 
   it("all succeed → merges every balance, no note", () => {
     const v = verdict([ok("Spot", ["BTC"]), ok("Funding", ["USDT"])], Result.succeed({}));
@@ -79,7 +80,7 @@ describe("verdict", () => {
 
   it("partial failure (wallet's own error) → still succeeds; note names it with a reason", () => {
     const v = verdict(
-      [ok("Spot", ["BTC"]), ko("Earn", err("ConnectorAuthError"))],
+      [ok("Spot", ["BTC"]), ko("Earn", err("UpstreamAuthError"))],
       Result.succeed({}),
     );
     expect(Result.isSuccess(v)).toBe(true);
@@ -92,7 +93,7 @@ describe("verdict", () => {
 
   it("partial failure that isn't a permission error → note doesn't suggest checking permissions", () => {
     const v = verdict(
-      [ok("Spot", ["BTC"]), ko("Earn", err("ConnectorFailure"))],
+      [ok("Spot", ["BTC"]), ko("Earn", err("UpstreamParseError"))],
       Result.succeed({}),
     );
     expect(Result.isSuccess(v)).toBe(true);
@@ -103,7 +104,7 @@ describe("verdict", () => {
   });
 
   it("a wallet died on the price table (same error object) → fails with the price table's error", () => {
-    const priceErr = err("ConnectorRateLimitError");
+    const priceErr = err("UpstreamRateLimitError");
     const v = verdict(
       [ok("USDⓈ-M Futures", ["USDT"]), ko("Spot", priceErr)],
       Result.fail(priceErr),
@@ -113,16 +114,16 @@ describe("verdict", () => {
   });
 
   it("partial transient failure (rate limit / timeout / 5xx) → fails whole for retry, no partial snapshot", () => {
-    const transient = err("ConnectorUnavailableError");
+    const transient = err("UpstreamUnavailableError");
     const v = verdict([ok("Spot", ["BTC"]), ko("Funding", transient)], Result.succeed({}));
     expect(Result.isFailure(v)).toBe(true);
     if (Result.isFailure(v)) expect(v.failure).toBe(transient);
   });
 
   it("transient mixed with auth → fails with the transient one (it's the reason to retry)", () => {
-    const transient = err("ConnectorRateLimitError");
+    const transient = err("UpstreamRateLimitError");
     const v = verdict(
-      [ok("Spot", ["BTC"]), ko("Earn", err("ConnectorAuthError")), ko("Funding", transient)],
+      [ok("Spot", ["BTC"]), ko("Earn", err("UpstreamAuthError")), ko("Funding", transient)],
       Result.succeed({}),
     );
     expect(Result.isFailure(v)).toBe(true);
@@ -131,19 +132,19 @@ describe("verdict", () => {
 
   it("price table down but no wallet died on it → not collateral; wallet's own error rules", () => {
     // Same tag, different object → not collateral.
-    const own = err("ConnectorRateLimitError");
+    const own = err("UpstreamRateLimitError");
     const v = verdict(
       [ok("USDⓈ-M Futures", ["USDT"]), ko("Spot", own)],
-      Result.fail(err("ConnectorRateLimitError")),
+      Result.fail(err("UpstreamRateLimitError")),
     );
     expect(Result.isFailure(v)).toBe(true);
     if (Result.isFailure(v)) expect(v.failure).toBe(own);
   });
 
   it("everything failed → fails with the first wallet's error", () => {
-    const first = err("ConnectorUnavailableError");
+    const first = err("UpstreamUnavailableError");
     const v = verdict(
-      [ko("Spot", first), ko("Funding", err("ConnectorUnavailableError"))],
+      [ko("Spot", first), ko("Funding", err("UpstreamUnavailableError"))],
       Result.succeed({}),
     );
     expect(Result.isFailure(v)).toBe(true);
@@ -172,11 +173,11 @@ describe("fetchBalances", () => {
   it("429 → rate limit; 401 → auth", async () => {
     const limited = httpStub(() => json({}, { status: 429, headers: { "retry-after": "2" } }));
     expect((await failing(limited, binanceProvider.fetchBalances(ctx())))._tag).toBe(
-      "ConnectorRateLimitError",
+      "UpstreamRateLimitError",
     );
     const denied = httpStub(() => json({}, { status: 401 }));
     expect((await failing(denied, binanceProvider.fetchBalances(ctx())))._tag).toBe(
-      "ConnectorAuthError",
+      "UpstreamAuthError",
     );
   });
 
@@ -267,7 +268,7 @@ describe("fetchBalances", () => {
     });
     const err = await failing(stub, binanceProvider.fetchBalances(ctx()));
 
-    expect(err._tag).toBe("ConnectorRateLimitError");
+    expect(err._tag).toBe("UpstreamRateLimitError");
     expect(isRetryable(err)).toBe(true);
   });
 
@@ -306,7 +307,7 @@ describe("fetchBalances", () => {
   it("everything fails → failure, never an empty snapshot over existing balances", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     const err = await failing(stub, binanceProvider.fetchBalances(ctx()));
-    expect(err._tag).toBe("ConnectorUnavailableError");
+    expect(err._tag).toBe("UpstreamUnavailableError");
     expect(isRetryable(err)).toBe(true);
   });
 
@@ -357,14 +358,14 @@ describe("validateAccount", () => {
   it("429 → rate limit (retryable), not collapsed to false", async () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     const err = await failing(stub, binanceProvider.validateAccount(ctx()));
-    expect(err._tag).toBe("ConnectorRateLimitError");
+    expect(err._tag).toBe("UpstreamRateLimitError");
     expect(isRetryable(err)).toBe(true);
   });
 
   it("5xx → upstream unavailable (retryable)", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     const err = await failing(stub, binanceProvider.validateAccount(ctx()));
-    expect(err._tag).toBe("ConnectorUnavailableError");
+    expect(err._tag).toBe("UpstreamUnavailableError");
     expect(isRetryable(err)).toBe(true);
   });
 });

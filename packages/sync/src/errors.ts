@@ -1,9 +1,16 @@
 import { Data } from "effect";
 
-// Failure types by injected capability. Balance-fetch failures are `ConnectorError`; the other five share one type, split by `step`.
+// Failures of our own steps, split by `step`. Upstream failures stay `UpstreamError`.
 
 // No factory: wrapping would widen `_tag` to string and break Effect.catchTag.
-export type SyncDepStep = "listAccounts" | "listRawCreds" | "writeSnapshot" | "mint" | "revalue";
+export type SyncDepStep =
+  | "listAccounts"
+  | "listRawCreds"
+  | "readCreds"
+  | "resolveSource"
+  | "writeSnapshot"
+  | "mint"
+  | "revalue";
 
 export class SyncDepError extends Data.TaggedError("SyncDepError")<{
   readonly step: SyncDepStep;
@@ -15,6 +22,6 @@ export function depError(step: SyncDepStep, cause: unknown): SyncDepError {
   return new SyncDepError({ step, message: messageOf(cause), cause });
 }
 
-export function messageOf(err: unknown): string {
+function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }

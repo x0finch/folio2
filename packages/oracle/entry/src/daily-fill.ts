@@ -1,6 +1,6 @@
-import type { UpstreamError } from "@folio/client-core";
 import type { CacheStore, DbRequest } from "@folio/db";
 import { DAILY_FILL_DAYS_PER_CALL, dayBucketOf } from "@folio/oracle-basic";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Clock, Effect, Option, Result, Schema } from "effect";
 import { logDegraded } from "./tokens/swr";
 

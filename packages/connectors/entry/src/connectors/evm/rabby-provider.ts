@@ -2,7 +2,6 @@ import type { BalanceProvider, CredField, ProviderNeeds } from "@folio/connector
 import { make as makeRabbyClient, type RabbyClientApi } from "@folio/rabby-client";
 import { Effect } from "effect";
 import { z } from "zod";
-import { asConnector } from "../../upstream";
 import type { evmAccountCreds } from "./creds";
 import { parseProtocols, parseTokens, type Row } from "./rabby-parse";
 
@@ -39,9 +38,9 @@ export const rabbyProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof 
         // Deliberately sequential (Effect.all's default): sync already runs ~6 accounts at once,
         // and 3 concurrent calls each would hit rabby's rate limit.
         const [chainIds, tokens, protocols] = yield* Effect.all([
-          asConnector(client.chainIds),
-          asConnector(client.tokens(address)),
-          asConnector(client.protocols(address)),
+          client.chainIds,
+          client.tokens(address),
+          client.protocols(address),
         ]);
         return {
           balances: [...parseTokens(tokens, chainIds), ...parseProtocols(protocols, chainIds)],
@@ -51,9 +50,9 @@ export const rabbyProvider: BalanceProvider<Row, typeof evmAccountCreds, typeof 
 
   validateAccount: (ctx) =>
     withRabby(ctx.creds, (client) =>
-      asConnector(client.totalBalance(ctx.account.creds.address)).pipe(
+      client.totalBalance(ctx.account.creds.address).pipe(
         Effect.as(true),
-        Effect.catchTag("ConnectorAuthError", () => Effect.succeed(false)),
+        Effect.catchTag("UpstreamAuthError", () => Effect.succeed(false)),
       ),
     ),
 };

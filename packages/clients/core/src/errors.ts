@@ -5,7 +5,9 @@ export type HttpFailureKind =
   | "network" // never left (DNS / offline / fetch threw)
   | "rate-limited" // 429 by default; binance also uses 418
   | "auth" // 401 / 403
-  | "upstream" // any other non-2xx
+  | "blocked" // 451: the upstream refuses this egress region
+  | "refused" // any other 4xx: the request itself is wrong
+  | "upstream" // 5xx, 408
   | "parse"; // body isn't valid JSON or fails the schema
 
 export class HttpFailure extends Data.TaggedError("HttpFailure")<{

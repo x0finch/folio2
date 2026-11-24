@@ -3,7 +3,7 @@ import {
   type UpstreamError,
   UpstreamParseError,
   UpstreamUnavailableError,
-} from "@folio/client-core";
+} from "@folio/upstream-basic";
 import { AUTH_ERROR_CODES, RET_CODE_OK } from "./constants";
 import type { BybitEnvelope } from "./types";
 

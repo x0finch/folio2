@@ -1,4 +1,3 @@
-import type { UpstreamError } from "@folio/client-core";
 import type { CacheEntry, CacheStore, DbRequest, TokenPriceStore } from "@folio/db";
 import { DatabaseForOracle } from "@folio/db";
 import type { TokenPricePoint, TokenRef } from "@folio/oracle-basic";
@@ -11,6 +10,7 @@ import {
 } from "@folio/oracle-basic";
 import { FxUpstream, TokenUpstream } from "@folio/oracle-basic/ports";
 import { tokenRef } from "@folio/oracle-ref";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import { type DailyFillReport, fillDaily } from "./daily-fill";
 import { degradeTo } from "./tokens/swr";

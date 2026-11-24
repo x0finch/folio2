@@ -1,9 +1,6 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import {
-  type ConnectorError,
-  type ProviderNeeds,
-  validateCredentials,
-} from "@folio/connectors-basic";
+import { type ProviderNeeds, validateCredentials } from "@folio/connectors-basic";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -29,12 +26,12 @@ const ctx = (providerCreds: Record<string, string> = { COINSTATS_API_KEY: KEY })
     creds: providerCreds,
   }) as unknown as Ctx;
 
-const run = <A>(stub: HttpStub, effect: Effect.Effect<A, ConnectorError, ProviderNeeds>) =>
+const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, ProviderNeeds>) =>
   runClient(stub, effect);
 const failing = (
   stub: HttpStub,
-  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
-): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
+  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+): Promise<UpstreamError> => runClient(stub, Effect.flip(effect));
 
 describe("factory: one adapter service for three chains", () => {
   it("base override takes effect, no default host left; unset goes to the official host", async () => {
@@ -75,7 +72,7 @@ describe("fetchBalances", () => {
   it("no provider key configured: a credentials problem, and no request at all", async () => {
     const stub = httpStub(() => json([]));
     const err = await failing(stub, createCoinstatsProvider("solana").fetchBalances(ctx({})));
-    expect(err._tag).toBe("ConnectorAuthError");
+    expect(err._tag).toBe("UpstreamAuthError");
     expect(stub.calls).toHaveLength(0);
   });
 
@@ -83,11 +80,11 @@ describe("fetchBalances", () => {
     const limited = httpStub(() => json({}, { status: 429 }));
     expect(
       (await failing(limited, createCoinstatsProvider("solana").fetchBalances(ctx())))._tag,
-    ).toBe("ConnectorRateLimitError");
+    ).toBe("UpstreamRateLimitError");
     const denied = httpStub(() => json({}, { status: 401 }));
     expect(
       (await failing(denied, createCoinstatsProvider("solana").fetchBalances(ctx())))._tag,
-    ).toBe("ConnectorAuthError");
+    ).toBe("UpstreamAuthError");
   });
 });
 
@@ -111,7 +108,7 @@ describe("validateAccount", () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     expect(
       (await failing(stub, createCoinstatsProvider("solana").validateAccount(ctx())))._tag,
-    ).toBe("ConnectorUnavailableError");
+    ).toBe("UpstreamUnavailableError");
   });
 });
 

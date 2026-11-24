@@ -1,5 +1,5 @@
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Clock, Effect, Semaphore } from "effect";
-import type { UpstreamError } from "./upstream-error";
 
 // TTL cache for near-static data (chain slug → chainId) that falls back to the stale value when a
 // refresh fails and coalesces concurrent misses into one fetch.

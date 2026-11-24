@@ -16,6 +16,7 @@
     "@folio/connectors-basic": "workspace:*",
     "@folio/db": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
+    "@folio/upstream-basic": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

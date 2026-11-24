@@ -1,6 +1,7 @@
 import type { ScriptType } from "@folio/bitcoin-derive";
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import { type ConnectorError, isRetryable, type ProviderNeeds } from "@folio/connectors-basic";
+import type { ProviderNeeds } from "@folio/connectors-basic";
+import { isRetryable, type UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { blockbookProvider } from "../../../src/connectors/bitcoin/provider";
@@ -25,12 +26,12 @@ const ctx = (input: { addressOrXpub: string; scriptType?: ScriptType }) =>
     creds: {},
   }) as never;
 
-const run = <A>(stub: HttpStub, effect: Effect.Effect<A, ConnectorError, ProviderNeeds>) =>
+const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, ProviderNeeds>) =>
   runClient(stub, effect);
 const failing = (
   stub: HttpStub,
-  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
-): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
+  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+): Promise<UpstreamError> => runClient(stub, Effect.flip(effect));
 
 describe("validateAccount", () => {
   it("address: hits /address/, 200 → true", async () => {
@@ -64,7 +65,7 @@ describe("validateAccount", () => {
       stub,
       blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })),
     );
-    expect(err._tag).toBe("ConnectorUnavailableError");
+    expect(err._tag).toBe("UpstreamUnavailableError");
     expect(isRetryable(err)).toBe(true);
   });
 

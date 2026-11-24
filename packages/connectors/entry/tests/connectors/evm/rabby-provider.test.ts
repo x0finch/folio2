@@ -1,6 +1,7 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import type { ConnectorError, ProviderNeeds } from "@folio/connectors-basic";
+import type { ProviderNeeds } from "@folio/connectors-basic";
 import { RabbySigner, type SignRequest } from "@folio/rabby-client";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
@@ -55,12 +56,12 @@ const drive = <A, E>(effect: Effect.Effect<A, E, ProviderNeeds>) =>
     return yield* Fiber.join(fiber);
   });
 
-const run = <A>(stub: HttpStub, effect: Effect.Effect<A, ConnectorError, ProviderNeeds>) =>
+const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, ProviderNeeds>) =>
   runClient(stub, drive(effect.pipe(Effect.provideService(RabbySigner, fakeSign))));
 const failing = (
   stub: HttpStub,
-  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
-): Promise<ConnectorError> =>
+  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+): Promise<UpstreamError> =>
   runClient(stub, drive(Effect.flip(effect).pipe(Effect.provideService(RabbySigner, fakeSign))));
 
 describe("fetchBalances", () => {
@@ -109,7 +110,7 @@ describe("fetchBalances", () => {
   it("429 gives rate-limited (retryable)", async () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     expect((await failing(stub, rabbyProvider.fetchBalances(ctx())))._tag).toBe(
-      "ConnectorRateLimitError",
+      "UpstreamRateLimitError",
     );
   });
 });
@@ -129,7 +130,7 @@ describe("validateAccount", () => {
   it("5xx goes through the error channel, not squashed into false", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     expect((await failing(stub, rabbyProvider.validateAccount(ctx())))._tag).toBe(
-      "ConnectorUnavailableError",
+      "UpstreamUnavailableError",
     );
   });
 });

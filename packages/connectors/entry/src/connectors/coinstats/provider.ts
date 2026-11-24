@@ -1,15 +1,13 @@
 import { type CoinstatsClientApi, make as makeCoinstatsClient } from "@folio/coinstats-client";
-import {
-  type BalanceProvider,
-  ConnectorAuthError,
-  type ConnectorError,
-  type CredField,
-  type FetchContext,
-  type ProviderNeeds,
+import type {
+  BalanceProvider,
+  CredField,
+  FetchContext,
+  ProviderNeeds,
 } from "@folio/connectors-basic";
+import { UpstreamAuthError, type UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { z } from "zod";
-import { asConnector } from "../../upstream";
 import { COINSTATS_API_KEY, PROVIDER_ID } from "./constants";
 import { parseBalances, type Row } from "./parse";
 
@@ -50,21 +48,27 @@ const withClient = <A, E>(
 };
 
 // A missing env key is a credentials problem (retrying won't help), not a request to fire.
-const apiKeyOf = (ctx: CoinstatsCtx): Effect.Effect<string, ConnectorError> => {
+const apiKeyOf = (ctx: CoinstatsCtx): Effect.Effect<string, UpstreamError> => {
   const apiKey = ctx.creds[COINSTATS_API_KEY];
   return apiKey
     ? Effect.succeed(apiKey)
-    : Effect.fail(new ConnectorAuthError({ message: `${COINSTATS_API_KEY} not configured` }));
+    : Effect.fail(
+        new UpstreamAuthError({
+          upstream: PROVIDER_ID,
+          where: "(config)",
+          cause: `${COINSTATS_API_KEY} not configured`,
+        }),
+      );
 };
 
 const balanceOf = (
   connectionId: string,
   ctx: CoinstatsCtx,
-): Effect.Effect<Row[], ConnectorError, ProviderNeeds> =>
+): Effect.Effect<Row[], UpstreamError, ProviderNeeds> =>
   apiKeyOf(ctx).pipe(
     Effect.flatMap((apiKey) =>
       withClient(ctx.creds, (client) =>
-        asConnector(client.balance({ connectionId, address: ctx.account.creds.address, apiKey })),
+        client.balance({ connectionId, address: ctx.account.creds.address, apiKey }),
       ),
     ),
     // Coins without a chain fall back to connectionId (including sui's "sui-wallet").
@@ -86,7 +90,7 @@ export function createCoinstatsProvider(
     validateAccount: (ctx) =>
       balanceOf(connectionId, ctx).pipe(
         Effect.as(true),
-        Effect.catchTag("ConnectorAuthError", () => Effect.succeed(false)),
+        Effect.catchTag("UpstreamAuthError", () => Effect.succeed(false)),
       ),
   };
 }

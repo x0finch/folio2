@@ -1,4 +1,4 @@
-import type { UpstreamError } from "@folio/client-core";
+import type { UpstreamError } from "@folio/upstream-basic";
 import type { Effect } from "effect";
 import type { PlatformMeta } from "./platform";
 import type { TokenPrice, TokenPricePoint, TokenRef, TokenRefIndexRow } from "./types";

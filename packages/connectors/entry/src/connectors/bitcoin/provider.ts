@@ -1,19 +1,15 @@
 import { BitcoinDeriveError, blockbookXpubParam, SCRIPT_TYPES } from "@folio/bitcoin-derive";
 import { type BlockbookClientApi, make as makeBlockbookClient } from "@folio/blockbook-client";
-import type { UpstreamError } from "@folio/client-core";
-import {
-  type BalanceProvider,
-  ConnectorAuthError,
-  type ConnectorError,
-  ConnectorFailure,
-  type CredField,
-  type Note,
-  type ProviderNeeds,
-  type Spot,
+import type {
+  BalanceProvider,
+  CredField,
+  Note,
+  ProviderNeeds,
+  Spot,
 } from "@folio/connectors-basic";
+import { UpstreamAuthError, type UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { z } from "zod";
-import { fromUpstreamError } from "../../upstream";
 import { BTC_ADDRESS_RE, EXT_PUBKEY_FULL_RE } from "./constants";
 import {
   buildBtcNote,
@@ -64,27 +60,19 @@ const clientFor = (creds: Record<string, unknown>): BlockbookClientApi => {
     : defaultClient;
 };
 
-// Unlike `asConnector`: a server 4xx (e.g. an invalid xpub) is permanent, since every node will
-// return the same thing, so don't retry it.
-const asBitcoin = <A, R>(
-  effect: Effect.Effect<A, UpstreamError, R>,
-): Effect.Effect<A, ConnectorError, R> =>
-  Effect.mapError(effect, (error) =>
-    error._tag === "UpstreamUnavailableError" &&
-    error.status !== undefined &&
-    error.status >= 400 &&
-    error.status < 500
-      ? new ConnectorFailure({ message: error.message, cause: error })
-      : fromUpstreamError(error),
-  );
-
 // An unparseable extended key is a local credentials failure, not an upstream one.
 const derivationIsCredentials = <A, R>(
-  effect: Effect.Effect<A, ConnectorError, R>,
-): Effect.Effect<A, ConnectorError, R> =>
+  effect: Effect.Effect<A, UpstreamError, R>,
+): Effect.Effect<A, UpstreamError, R> =>
   Effect.catchDefect(effect, (defect) =>
     defect instanceof BitcoinDeriveError
-      ? Effect.fail(new ConnectorAuthError({ message: defect.message, cause: defect }))
+      ? Effect.fail(
+          new UpstreamAuthError({
+            upstream: "blockbook",
+            where: "(derive)",
+            cause: defect.message,
+          }),
+        )
       : Effect.die(defect),
   );
 
@@ -93,10 +81,10 @@ const fromXpub = (
   client: BlockbookClientApi,
   ext: string,
   scriptType: string | undefined,
-): Effect.Effect<{ balances: Spot[]; note: Note[] }, ConnectorError, ProviderNeeds> =>
+): Effect.Effect<{ balances: Spot[]; note: Note[] }, UpstreamError, ProviderNeeds> =>
   Effect.suspend(() => {
     const script = effectiveScript(ext, scriptType);
-    return asBitcoin(client.xpub(blockbookXpubParam(ext, script))).pipe(
+    return client.xpub(blockbookXpubParam(ext, script)).pipe(
       Effect.map((res) => {
         const pendingSats = toSats(res.unconfirmedBalance);
         const { addresses, receive } = buildXpubMeta(ext, script, res.tokens ?? []);
@@ -111,8 +99,8 @@ const fromXpub = (
 const fromAddress = (
   client: BlockbookClientApi,
   address: string,
-): Effect.Effect<{ balances: Spot[]; note: Note[] }, ConnectorError, ProviderNeeds> =>
-  asBitcoin(client.address(address)).pipe(
+): Effect.Effect<{ balances: Spot[]; note: Note[] }, UpstreamError, ProviderNeeds> =>
+  client.address(address).pipe(
     Effect.map((res) => {
       const pendingSats = toSats(res.unconfirmedBalance);
       return {
@@ -147,16 +135,14 @@ export const blockbookProvider: BalanceProvider<
     const client = clientFor(ctx.creds);
     const probe = Effect.suspend(() =>
       isExtendedPubkey(id)
-        ? asBitcoin(
-            client.xpubSummary(
-              blockbookXpubParam(id, effectiveScript(id, ctx.account.creds.scriptType)),
-            ),
+        ? client.xpubSummary(
+            blockbookXpubParam(id, effectiveScript(id, ctx.account.creds.scriptType)),
           )
-        : asBitcoin(client.address(id)),
+        : client.address(id),
     );
     return derivationIsCredentials(probe).pipe(
       Effect.as(true),
-      Effect.catchTag("ConnectorAuthError", () => Effect.succeed(false)),
+      Effect.catchTag("UpstreamAuthError", () => Effect.succeed(false)),
     );
   },
 };

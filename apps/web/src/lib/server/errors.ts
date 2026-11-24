@@ -1,5 +1,5 @@
-import type { UpstreamError } from "@folio/client-core";
 import type { InvalidInput, NotFound } from "@folio/db";
+import type { UpstreamError } from "@folio/upstream-basic";
 
 // Failures a handler may surface, and the single mapping to a client-readable message.
 

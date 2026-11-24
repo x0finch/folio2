@@ -14,8 +14,9 @@
   "dependencies": {
     "@folio/client-core": "workspace:*",
     "@folio/coingecko-client": "workspace:*",
-    "@folio/oracle-ref": "workspace:*",
     "@folio/oracle-basic": "workspace:*",
+    "@folio/oracle-ref": "workspace:*",
+    "@folio/upstream-basic": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

@@ -1,8 +1,8 @@
 import type { Outbound } from "@folio/client-core";
+import type { UpstreamError } from "@folio/upstream-basic";
 import type { Effect } from "effect";
 import type { z } from "zod";
 import type { Balance } from "./balance";
-import type { ConnectorError } from "./connector-error";
 import type { CredField, CredsOf } from "./creds";
 import type { Note } from "./note";
 
@@ -30,13 +30,13 @@ export interface BalanceProvider<
   // and TestClock.
   fetchBalances(
     ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>,
-  ): Effect.Effect<{ balances: B[]; note?: Note[] }, ConnectorError, ProviderNeeds>;
+  ): Effect.Effect<{ balances: B[]; note?: Note[] }, UpstreamError, ProviderNeeds>;
   // Succeeds with `false` only when the upstream rejects the credentials or they're malformed.
   // Unreachable upstream (429 / 5xx / network / bad response) goes to the error channel so callers
   // can retry; collapsing it to `false` would show a transient 429 as "bad credentials".
   validateAccount(
     ctx: FetchContext<CredsOf<AC>, CredsOf<PC>>,
-  ): Effect.Effect<boolean, ConnectorError, ProviderNeeds>;
+  ): Effect.Effect<boolean, UpstreamError, ProviderNeeds>;
 }
 
 // authoritative (default): the provider's USD value is trusted and enrichment doesn't reprice it.

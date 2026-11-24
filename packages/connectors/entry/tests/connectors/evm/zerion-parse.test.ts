@@ -23,6 +23,6 @@ describe("parsePositions (golden: fixtures in → fixture out)", () => {
 
   it("chain mapping missing: throws (failing means nothing is produced, never the slug fallback form)", () => {
     // A position's chain absent from the chainIds mapping cannot yield a canonical evm:<id>, so it throws UPSTREAM_ERROR (retryable).
-    expect(() => parsePositions(positions, {})).toThrow(/no chainId/);
+    expect(() => parsePositions(positions, {})).toThrow(/zerion unavailable at \(chain list\)/);
   });
 });

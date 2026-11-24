@@ -1,47 +1,16 @@
-import { Data, Match } from "effect";
+import {
+  UpstreamAuthError,
+  UpstreamBlockedError,
+  type UpstreamError,
+  UpstreamParseError,
+  UpstreamRateLimitError,
+  UpstreamRefusedError,
+  UpstreamUnavailableError,
+} from "@folio/upstream-basic";
+import { Match } from "effect";
 import type { HttpFailure, SigningFailure } from "./errors";
 
-interface Common {
-  readonly upstream: string; // "binance" / "okx" / …
-  readonly where: string; // pathname only; the query may hold secrets
-  readonly status?: number;
-  // A summary string, never an error object: library errors carry signatures and API keys.
-  readonly cause?: string;
-}
-
-// Bad credentials: retrying won't help.
-export class UpstreamAuthError extends Data.TaggedError("UpstreamAuthError")<Common> {}
-
-// Rate limited; `retryAfterMs` is the upstream's hint.
-export class UpstreamRateLimitError extends Data.TaggedError("UpstreamRateLimitError")<
-  Common & { readonly retryAfterMs?: number }
-> {}
-
-// Unreachable or 5xx: retryable.
-export class UpstreamUnavailableError extends Data.TaggedError(
-  "UpstreamUnavailableError",
-)<Common> {}
-
-// Response shape changed: not retryable.
-export class UpstreamParseError extends Data.TaggedError("UpstreamParseError")<Common> {}
-
-export type UpstreamError =
-  | UpstreamAuthError
-  | UpstreamRateLimitError
-  | UpstreamUnavailableError
-  | UpstreamParseError;
-
-// For raw client errors; `@folio/connectors-basic` has the counterpart for `ConnectorError`.
-export const isRetryable: (error: UpstreamError) => boolean = Match.type<UpstreamError>().pipe(
-  Match.tag("UpstreamRateLimitError", "UpstreamUnavailableError", () => true),
-  Match.tag("UpstreamAuthError", "UpstreamParseError", () => false),
-  Match.exhaustive,
-);
-
-export const retryAfterOf = (error: UpstreamError): number | undefined =>
-  error._tag === "UpstreamRateLimitError" ? error.retryAfterMs : undefined;
-
-export interface ClassifyOptions {
+interface ClassifyOptions {
   readonly upstream: string;
 }
 
@@ -65,6 +34,8 @@ export const classifyFailure =
         "rate-limited",
         () => new UpstreamRateLimitError({ upstream, where, status, retryAfterMs }),
       ),
+      Match.when("blocked", () => new UpstreamBlockedError(base)),
+      Match.when("refused", () => new UpstreamRefusedError(base)),
       Match.when("parse", () => new UpstreamParseError(base)),
       Match.whenOr("network", "upstream", () => new UpstreamUnavailableError(base)),
       Match.exhaustive,

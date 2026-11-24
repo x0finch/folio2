@@ -1,4 +1,4 @@
-import { UpstreamAuthError, type UpstreamError } from "@folio/client-core";
+import { UpstreamAuthError, type UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { SIGNED_REQUEST_REJECTED_STATUS } from "./constants";
 
@@ -10,7 +10,7 @@ export const UPSTREAM = "binance";
 export const rejectedSignatureIsAuth = <A, R>(
   effect: Effect.Effect<A, UpstreamError, R>,
 ): Effect.Effect<A, UpstreamError, R> =>
-  Effect.catchTag(effect, "UpstreamUnavailableError", (failure) =>
+  Effect.catchTag(effect, "UpstreamRefusedError", (failure) =>
     Effect.fail(
       failure.status === SIGNED_REQUEST_REJECTED_STATUS
         ? new UpstreamAuthError({

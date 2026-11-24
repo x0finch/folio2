@@ -1,4 +1,4 @@
-import type { UpstreamError } from "@folio/client-core";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Effect, Option } from "effect";
 
 // SWR + degradation, only in this file: read local, judge stale, fetch, write back; upstream down serves the old value.

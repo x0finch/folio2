@@ -1,5 +1,3 @@
-import type { UpstreamError } from "@folio/client-core";
-import { UpstreamUnavailableError } from "@folio/client-core";
 import type {
   CacheEntry,
   CacheStore,
@@ -31,6 +29,7 @@ import type {
 } from "@folio/oracle-basic";
 import * as Ports from "@folio/oracle-basic/ports";
 import { parseTokenRef } from "@folio/oracle-ref";
+import { type UpstreamError, UpstreamUnavailableError } from "@folio/upstream-basic";
 import { Clock, Effect, Layer, Logger, Option, References } from "effect";
 import { TestClock } from "effect/testing";
 import type { OraclePorts, OracleServices } from "../src";

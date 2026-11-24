@@ -1,14 +1,8 @@
-import {
-  type BalanceProvider,
-  ConnectorAuthError,
-  type ConnectorError,
-  type CredField,
-  type ProviderNeeds,
-} from "@folio/connectors-basic";
+import type { BalanceProvider, CredField, ProviderNeeds } from "@folio/connectors-basic";
+import { UpstreamAuthError, type UpstreamError } from "@folio/upstream-basic";
 import { make as makeZerionClient, type ZerionClientApi } from "@folio/zerion-client";
 import { Effect } from "effect";
 import { z } from "zod";
-import { asConnector } from "../../upstream";
 import type { evmAccountCreds } from "./creds";
 import { parsePositions, type Row } from "./zerion-parse";
 
@@ -24,11 +18,17 @@ const withZerion = <A, E>(
 ): Effect.Effect<A, E, ProviderNeeds> => Effect.scoped(Effect.flatMap(makeZerionClient(), use));
 
 // A missing env key is a credentials problem, not a request to fire.
-const zerionKeyOf = (creds: Record<string, string>): Effect.Effect<string, ConnectorError> => {
+const zerionKeyOf = (creds: Record<string, string>): Effect.Effect<string, UpstreamError> => {
   const apiKey = creds[ZERION_API_KEY];
   return apiKey
     ? Effect.succeed(apiKey)
-    : Effect.fail(new ConnectorAuthError({ message: `${ZERION_API_KEY} not configured` }));
+    : Effect.fail(
+        new UpstreamAuthError({
+          upstream: "zerion",
+          where: "(config)",
+          cause: `${ZERION_API_KEY} not configured`,
+        }),
+      );
 };
 
 export const zerionProvider: BalanceProvider<
@@ -50,8 +50,8 @@ export const zerionProvider: BalanceProvider<
           // rather than write a snapshot with non-canonical refs.
           Effect.all(
             [
-              asConnector(client.positions({ address: ctx.account.creds.address, apiKey })),
-              asConnector(client.chainIds(apiKey)),
+              client.positions({ address: ctx.account.creds.address, apiKey }),
+              client.chainIds(apiKey),
             ],
             { concurrency: "unbounded" },
           ).pipe(
@@ -67,11 +67,9 @@ export const zerionProvider: BalanceProvider<
   validateAccount: (ctx) =>
     zerionKeyOf(ctx.creds).pipe(
       Effect.flatMap((apiKey) =>
-        withZerion((client) =>
-          asConnector(client.portfolio({ address: ctx.account.creds.address, apiKey })),
-        ),
+        withZerion((client) => client.portfolio({ address: ctx.account.creds.address, apiKey })),
       ),
       Effect.as(true),
-      Effect.catchTag("ConnectorAuthError", () => Effect.succeed(false)),
+      Effect.catchTag("UpstreamAuthError", () => Effect.succeed(false)),
     ),
 };

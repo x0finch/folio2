@@ -1,5 +1,6 @@
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import { type ConnectorError, isRetryable, type ProviderNeeds } from "@folio/connectors-basic";
+import type { ProviderNeeds } from "@folio/connectors-basic";
+import { isRetryable, type UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { bybitProvider } from "../../../src/connectors/bybit/provider";
@@ -43,12 +44,12 @@ const ctx = (creds: Record<string, string> = CREDS, providerCreds: Record<string
     creds: providerCreds,
   }) as unknown as Ctx;
 
-const run = <A>(stub: HttpStub, effect: Effect.Effect<A, ConnectorError, ProviderNeeds>) =>
+const run = <A>(stub: HttpStub, effect: Effect.Effect<A, UpstreamError, ProviderNeeds>) =>
   runClient(stub, effect);
 const failing = (
   stub: HttpStub,
-  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
-): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
+  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+): Promise<UpstreamError> => runClient(stub, Effect.flip(effect));
 
 describe("fetchBalances", () => {
   it("all buckets concurrently (unified / funding / earn): merged into spot; earn gets note.group by category", async () => {
@@ -102,7 +103,7 @@ describe("fetchBalances", () => {
   it("all buckets fail (429 on every endpoint): failure, no empty snapshot overwriting", async () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     expect((await failing(stub, bybitProvider.fetchBalances(ctx())))._tag).toBe(
-      "ConnectorRateLimitError",
+      "UpstreamRateLimitError",
     );
   });
 
@@ -156,14 +157,14 @@ describe("validateAccount", () => {
   it("a non-credentials retCode goes through the error channel, not squashed into false", async () => {
     const stub = httpStub(() => json({ retCode: 10016, retMsg: "server error" }));
     expect((await failing(stub, bybitProvider.validateAccount(ctx())))._tag).toBe(
-      "ConnectorUnavailableError",
+      "UpstreamUnavailableError",
     );
   });
 
   it("429 gives rate-limited (retryable)", async () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     expect((await failing(stub, bybitProvider.validateAccount(ctx())))._tag).toBe(
-      "ConnectorRateLimitError",
+      "UpstreamRateLimitError",
     );
   });
 });

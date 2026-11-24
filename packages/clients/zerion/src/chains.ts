@@ -1,4 +1,5 @@
-import { staleTolerantCache, UpstreamUnavailableError } from "@folio/client-core";
+import { staleTolerantCache } from "@folio/client-core";
+import { UpstreamUnavailableError } from "@folio/upstream-basic";
 import { CHAINS_CACHE_TTL_MS, CHAINS_PATH, UPSTREAM } from "./constants";
 import type { ZerionChainsResponse } from "./types";
 

@@ -1,10 +1,7 @@
 import type { ScriptType } from "@folio/bitcoin-derive";
 import { type HttpStub, httpStub, runClient } from "@folio/client-core/testing";
-import {
-  type ConnectorError,
-  type ProviderNeeds,
-  validateCredentials,
-} from "@folio/connectors-basic";
+import { type ProviderNeeds, validateCredentials } from "@folio/connectors-basic";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { bitcoinAccountCreds, blockbookProvider } from "../../../src/connectors/bitcoin/provider";
@@ -12,11 +9,11 @@ import addressFixture from "./fixtures/address.json";
 import xpubFixture from "./fixtures/xpub.json";
 
 let stub: HttpStub;
-const run = <A>(effect: Effect.Effect<A, ConnectorError, ProviderNeeds>): Promise<A> =>
+const run = <A>(effect: Effect.Effect<A, UpstreamError, ProviderNeeds>): Promise<A> =>
   runClient(stub, effect);
 const failing = (
-  effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
-): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
+  effect: Effect.Effect<unknown, UpstreamError, ProviderNeeds>,
+): Promise<UpstreamError> => runClient(stub, Effect.flip(effect));
 
 // Derivation correctness is covered by @folio/bitcoin-derive's offline vectors.
 const ADDR = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
@@ -191,11 +188,11 @@ describe("blockbookProvider.fetchBalances — error mapping", () => {
   it("429 → rate limit; 500 (every node) → upstream unavailable", async () => {
     mockBlockbook({ status: 429 });
     expect(await failing(blockbookProvider.fetchBalances(ctx()))).toMatchObject({
-      _tag: "ConnectorRateLimitError",
+      _tag: "UpstreamRateLimitError",
     });
     mockBlockbook({ status: 500 });
     expect(await failing(blockbookProvider.fetchBalances(ctx()))).toMatchObject({
-      _tag: "ConnectorUnavailableError",
+      _tag: "UpstreamUnavailableError",
     });
   });
 

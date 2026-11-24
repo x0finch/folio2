@@ -4,16 +4,11 @@ import {
   type BinanceCreds,
   make as makeBinanceClient,
 } from "@folio/binance-client";
-import type {
-  BalanceProvider,
-  ConnectorError,
-  CredField,
-  Note,
-  ProviderNeeds,
-} from "@folio/connectors-basic";
+import type { BalanceProvider, CredField, Note, ProviderNeeds } from "@folio/connectors-basic";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Effect, Fiber, Result } from "effect";
 import { z } from "zod";
-import { asConnector, bestEffortVerdict } from "../../upstream";
+import { bestEffortVerdict } from "../../upstream";
 import { PROVIDER_ID } from "./constants";
 import {
   type BinanceRow,
@@ -59,14 +54,14 @@ interface Wallet {
   readonly rows: (
     client: BinanceClientApi,
     creds: BinanceCreds,
-    prices: Fiber.Fiber<Record<string, number>, ConnectorError>,
-  ) => Effect.Effect<BinanceRow[], ConnectorError, ProviderNeeds>;
+    prices: Fiber.Fiber<Record<string, number>, UpstreamError>,
+  ) => Effect.Effect<BinanceRow[], UpstreamError, ProviderNeeds>;
 }
 
 const spot: Wallet = {
   name: "Spot",
   rows: (client, creds, prices) =>
-    Effect.all([asConnector(client.spotAccount(creds)), Fiber.join(prices)]).pipe(
+    Effect.all([client.spotAccount(creds), Fiber.join(prices)]).pipe(
       Effect.map(([account, priceMap]) => parseAccountBalances(account, priceMap)),
     ),
 };
@@ -74,14 +69,13 @@ const spot: Wallet = {
 // Futures report USD themselves, so this wallet doesn't join the price table.
 const usdmFutures: Wallet = {
   name: "USDⓈ-M Futures",
-  rows: (client, creds) =>
-    asConnector(client.usdmAccount(creds)).pipe(Effect.map(parseFuturesAccount)),
+  rows: (client, creds) => client.usdmAccount(creds).pipe(Effect.map(parseFuturesAccount)),
 };
 
 const coinmFutures: Wallet = {
   name: "COIN-M Futures",
   rows: (client, creds, prices) =>
-    Effect.all([asConnector(client.coinmAccount(creds)), Fiber.join(prices)]).pipe(
+    Effect.all([client.coinmAccount(creds), Fiber.join(prices)]).pipe(
       Effect.map(([account, priceMap]) => parseCoinmFuturesAccount(account, priceMap)),
     ),
 };
@@ -89,7 +83,7 @@ const coinmFutures: Wallet = {
 const funding: Wallet = {
   name: "Funding",
   rows: (client, creds, prices) =>
-    Effect.all([asConnector(client.fundingAssets(creds)), Fiber.join(prices)]).pipe(
+    Effect.all([client.fundingAssets(creds), Fiber.join(prices)]).pipe(
       Effect.map(([assets, priceMap]) => parseFundingAssets(assets, priceMap)),
     ),
 };
@@ -98,11 +92,7 @@ const funding: Wallet = {
 const earn: Wallet = {
   name: "Earn",
   rows: (client, creds, prices) =>
-    Effect.all([
-      asConnector(client.earnFlexible(creds)),
-      asConnector(client.earnLocked(creds)),
-      Fiber.join(prices),
-    ]).pipe(
+    Effect.all([client.earnFlexible(creds), client.earnLocked(creds), Fiber.join(prices)]).pipe(
       Effect.map(([flexible, locked, priceMap]) =>
         parseEarnPositions({ rows: flexible }, { rows: locked }, priceMap),
       ),
@@ -128,13 +118,13 @@ const walletFailureNote = (failed: readonly { name: string; auth: boolean }[]): 
 // futures-only key still syncs.
 export interface WalletOutcome {
   readonly wallet: { readonly name: string };
-  readonly result: Result.Result<BinanceRow[], ConnectorError>;
+  readonly result: Result.Result<BinanceRow[], UpstreamError>;
 }
 
 export const verdict = (
   outcomes: readonly WalletOutcome[],
-  priceTable: Result.Result<unknown, ConnectorError>,
-): Result.Result<{ balances: BinanceRow[]; note?: Note[] }, ConnectorError> => {
+  priceTable: Result.Result<unknown, UpstreamError>,
+): Result.Result<{ balances: BinanceRow[]; note?: Note[] }, UpstreamError> => {
   // Regardless of retryability: the dependent wallets got no data either way.
   if (Result.isFailure(priceTable)) {
     const collateral = outcomes.some(
@@ -154,7 +144,7 @@ export const verdict = (
           walletFailureNote(
             failed.map((o) => ({
               name: o.wallet.name,
-              auth: Result.isFailure(o.result) && o.result.failure._tag === "ConnectorAuthError",
+              auth: Result.isFailure(o.result) && o.result.failure._tag === "UpstreamAuthError",
             })),
           ),
         ]
@@ -201,7 +191,7 @@ export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountC
         const creds = ctx.account.creds;
 
         // Forked first: the ticker is rate-gated by egress IP and must not hold up signed calls.
-        const prices = yield* Effect.forkChild(asConnector(client.tickerPrices));
+        const prices = yield* Effect.forkChild(client.tickerPrices);
 
         // `either` + `all` rather than `partition`: each outcome keeps its wallet, whose name the
         // failure note needs.
@@ -225,9 +215,9 @@ export const binanceProvider: BalanceProvider<BinanceRow, typeof binanceAccountC
   // reject the account.
   validateAccount: (ctx) =>
     withClient(ctx.creds, (client) =>
-      asConnector(client.spotAccount(ctx.account.creds)).pipe(
+      client.spotAccount(ctx.account.creds).pipe(
         Effect.as(true),
-        Effect.catchTag("ConnectorAuthError", () => Effect.succeed(false)),
+        Effect.catchTag("UpstreamAuthError", () => Effect.succeed(false)),
       ),
     ),
 };

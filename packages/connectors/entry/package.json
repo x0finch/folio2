@@ -23,6 +23,7 @@
     "@folio/okx-client": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/rabby-client": "workspace:*",
+    "@folio/upstream-basic": "workspace:*",
     "@folio/zerion-client": "workspace:*",
     "zod": "catalog:"
   },

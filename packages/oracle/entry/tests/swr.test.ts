@@ -1,4 +1,4 @@
-import { UpstreamRateLimitError } from "@folio/client-core";
+import { UpstreamRateLimitError } from "@folio/upstream-basic";
 import { Effect, Option } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { swr } from "../src/tokens/swr";

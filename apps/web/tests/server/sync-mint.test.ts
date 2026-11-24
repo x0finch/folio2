@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
-import { type Balance, ConnectorFailure } from "@folio/connectors-basic";
+import type { Balance } from "@folio/connectors-basic";
+import { UpstreamUnavailableError } from "@folio/upstream-basic";
 import { Option } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { dbFor, globalDb, oracleDbFor } from "./db-effect";
@@ -246,10 +247,10 @@ describe("per-account independent persistence still holds", () => {
     const accounts = await dbFor(USER).accounts.list();
     const of = (id: string) => accounts.find((a) => a.id === id) as never;
 
-    // Two accounts in the same round: the bad one's fetch fails (a `ConnectorError` on the error channel) -> syncAccount
+    // Two accounts in the same round: the bad one's fetch fails (an `UpstreamError` on the error channel) -> syncAccount
     // settles it as ok:false, writes nothing, doesn't throw; the good one still persists with its token_id.
     const [badRes, goodRes] = await syncRound(USER, [
-      { account: of(bad), fail: new ConnectorFailure({ message: "provider down" }) },
+      { account: of(bad), fail: new UpstreamUnavailableError({ upstream: "acme", where: "/t" }) },
       { account: of(good), balances: [bal(USDC_ETH, "USDC")] },
     ]);
     expect(badRes.ok).toBe(false);

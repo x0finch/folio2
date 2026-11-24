@@ -1,6 +1,6 @@
-import type { UpstreamError } from "@folio/client-core";
 import { type DbClient, GlobalDatabase, type RefIndexDiffCounts } from "@folio/db";
 import { TokenUpstream } from "@folio/oracle-basic/ports";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Clock, Context, Effect, Layer, type Option } from "effect";
 
 // Maintenance facade for the global ref-index table. Not part of `oracleLayer`: it has no user, so the caller provides

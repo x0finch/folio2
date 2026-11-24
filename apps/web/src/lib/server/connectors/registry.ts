@@ -7,7 +7,7 @@ import {
   selectProvider,
   validateCredentials,
 } from "@folio/connectors";
-import { type ConnectorError, isRetryable, retryAfterOf } from "@folio/connectors-basic";
+import { isRetryable, retryAfterOf, type UpstreamError } from "@folio/upstream-basic";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
 import { platformLogoUrl } from "@/lib/core/logo";
 import type { InputSpec } from "@/lib/server/creds";
@@ -22,7 +22,7 @@ const VALIDATE_RETRY_BASE_MS = 200;
 const validateRetryPolicy = Schedule.exponential(Duration.millis(VALIDATE_RETRY_BASE_MS)).pipe(
   // ① Retry only retryable errors, and give up if the upstream's suggested wait exceeds our cap: clamping would likely
   //    hit 429 again, and surfacing the error beats a hung form (opposite of sync's clamp, deliberately).
-  Schedule.while(({ input }: Schedule.Metadata<Duration.Duration, ConnectorError>) => {
+  Schedule.while(({ input }: Schedule.Metadata<Duration.Duration, UpstreamError>) => {
     if (!isRetryable(input)) return false;
     const suggested = retryAfterOf(input);
     return suggested === undefined || suggested <= VALIDATE_RETRY_MAX_WAIT_MS;

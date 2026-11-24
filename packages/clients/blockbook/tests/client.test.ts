@@ -1,10 +1,11 @@
-import type { Outbound, UpstreamError } from "@folio/client-core";
+import type { Outbound } from "@folio/client-core";
 import {
   type HttpStub,
   httpStub,
   jsonResponse as json,
   runClient,
 } from "@folio/client-core/testing";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import {
@@ -153,10 +154,9 @@ describe('multi-endpoint: switching node is this upstream\'s "retry"', () => {
   });
 
   it("4xx does not switch: an invalid xpub would get the same 400 from four nodes", async () => {
-    // Told apart by status: the "unreachable" class covers network failure, 5xx and 4xx, and only the first two are worth switching for.
     const { fn, calls } = stub(() => json({ error: "invalid xpub" }, { status: 400 }));
     const err = await failing(fn, (c) => c.xpub("garbage"), { bases: basesOf(4) });
-    expect(err._tag).toBe("UpstreamUnavailableError");
+    expect(err._tag).toBe("UpstreamRefusedError");
     expect(calls).toHaveLength(1); // the three wasted round trips did not happen
   });
 

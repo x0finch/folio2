@@ -4,6 +4,7 @@ packages:
   - "packages/connectors/*"
   - "packages/oracle/*"
   - "packages/oracle/upstreams/*"
+  - "packages/upstreams/*"
   - "apps/*"
 
 # A dependency used by 2+ packages is written here once; packages say `catalog:`.

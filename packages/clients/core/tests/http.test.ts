@@ -104,10 +104,14 @@ describe("makeRequester", () => {
     }
   });
 
-  it("any other non-2xx → upstream unavailable", async () => {
-    expect((await failing(() => json({}, { status: 503 }), req()("/v1/t", ANY)))._tag).toBe(
-      "UpstreamUnavailableError",
-    );
+  it("5xx and 408 → unavailable; 451 → blocked; any other 4xx → refused", async () => {
+    const tagOf = async (status: number) =>
+      (await failing(() => json({}, { status }), req()("/v1/t", ANY)))._tag;
+    expect(await tagOf(503)).toBe("UpstreamUnavailableError");
+    expect(await tagOf(408)).toBe("UpstreamUnavailableError");
+    expect(await tagOf(451)).toBe("UpstreamBlockedError");
+    expect(await tagOf(400)).toBe("UpstreamRefusedError");
+    expect(await tagOf(422)).toBe("UpstreamRefusedError");
   });
 
   it("404 + notFoundAsNull → null (not a failure), and the return type includes null", async () => {
@@ -118,7 +122,7 @@ describe("makeRequester", () => {
     );
     expect(out).toBeNull();
     // Without the flag a 404 is still a failure.
-    expect((await failing(reply, req()("/v1/t", ANY)))._tag).toBe("UpstreamUnavailableError");
+    expect((await failing(reply, req()("/v1/t", ANY)))._tag).toBe("UpstreamRefusedError");
   });
 
   it("non-JSON response → parse error", async () => {

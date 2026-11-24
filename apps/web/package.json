@@ -46,6 +46,7 @@
     "@folio/oracle-upstream-coingecko": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/ui": "workspace:*",
+    "@folio/upstream-basic": "workspace:*",
     "@fontsource-variable/geist": "^5.2.9",
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@fontsource-variable/newsreader": "^5.2.10",
