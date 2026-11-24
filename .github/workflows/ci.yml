@@ -63,8 +63,7 @@ jobs:
 
   # Stays its own job, and earns its own minute: it needs a browser and a real server, neither of
   # which the job above wants, and it is the only one that can't run on a 2-core box in under a
-  # minute anyway. Runs the WebAuthn ceremonies that mocks structurally cannot cover — see
-  # apps/web/playwright.config.ts and #354.
+  # minute anyway. Runs the WebAuthn ceremonies that mocks structurally cannot cover.
   e2e:
     runs-on: ubuntu-latest
     steps:
