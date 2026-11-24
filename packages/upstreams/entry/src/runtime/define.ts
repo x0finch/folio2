@@ -27,6 +27,8 @@ export interface UpstreamSpec<K extends string = string, O extends string = neve
   readonly mirrors?: readonly string[];
   // Deployment env var that replaces `base` and every mirror (a proxy for a geo-blocked egress, a local fake).
   readonly baseOverride?: string;
+  // The same API on other domains (binance's futures), each with its own override.
+  readonly hosts?: Readonly<Record<string, Host>>;
   // Deployment env var names. A missing required key fails with `auth` before any request.
   readonly keys?: readonly K[];
   readonly optionalKeys?: readonly O[];
@@ -38,6 +40,11 @@ export interface UpstreamSpec<K extends string = string, O extends string = neve
   readonly rateLimitedStatuses?: readonly number[];
 }
 
+interface Host {
+  readonly base: string;
+  readonly baseOverride?: string;
+}
+
 type Keys<K extends string, O extends string> = Readonly<Record<K, string>> &
   Readonly<Partial<Record<O, string>>>;
 
@@ -45,6 +52,8 @@ type Keys<K extends string, O extends string> = Readonly<Record<K, string>> &
 export interface Call<K extends string = string, O extends string = never> {
   readonly request: Requester;
   readonly via: (limit: string) => Requester;
+  // A named host from the spec, under the default limit.
+  readonly host: (name: string) => Requester;
   // One requester per node, `base` first, under the default limit; just the override when set.
   readonly nodes: readonly Requester[];
   // The base requests go to (the override when set); scopes caches per endpoint.
@@ -77,7 +86,7 @@ export interface Upstream<K extends string = string, O extends string = never>
   readonly connect: (
     env: Readonly<Record<string, unknown>>,
   ) => Effect.Effect<Call<K, O>, UpstreamAuthError>;
-  // Env names the app must inject: keys and the base override, never anything else.
+  // Env names the app must inject: keys and base overrides, never anything else.
   readonly envNames: readonly string[];
 }
 
@@ -91,7 +100,11 @@ export function defineUpstream<const K extends string = never, const O extends s
 ): Upstream<K, O> {
   const required = spec.keys ?? [];
   const optional = spec.optionalKeys ?? [];
-  const envNames = [...required, ...optional, ...(spec.baseOverride ? [spec.baseOverride] : [])];
+  const hosts = Object.entries(spec.hosts ?? {});
+  const overrides = [spec.baseOverride, ...hosts.map(([, host]) => host.baseOverride)].filter(
+    (name) => name !== undefined,
+  );
+  const envNames = [...required, ...optional, ...overrides];
 
   const resolveKeys = (
     env: Readonly<Record<string, unknown>>,
@@ -163,7 +176,21 @@ export function defineUpstream<const K extends string = never, const O extends s
         if (!gated) throw new Error(`${spec.id}: no limit named ${name}`);
         return gated;
       };
-      return { request, via, nodes, base: bases[0], keys } satisfies Call<K, O>;
+      const hostRequesters = new Map(
+        hosts.map(([name, h]) => [
+          name,
+          requesterFor(
+            limits.get("default"),
+            (h.baseOverride && stringOf(env, h.baseOverride)) || h.base,
+          ),
+        ]),
+      );
+      const host = (name: string): Requester => {
+        const requester = hostRequesters.get(name);
+        if (!requester) throw new Error(`${spec.id}: no host named ${name}`);
+        return requester;
+      };
+      return { request, via, host, nodes, base: bases[0], keys } satisfies Call<K, O>;
     });
 
   return { ...spec, connect, envNames };

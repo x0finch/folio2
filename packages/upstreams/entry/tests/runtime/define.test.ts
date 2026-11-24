@@ -98,4 +98,35 @@ describe("defineUpstream", () => {
       "http://127.0.0.1:9/x",
     ]);
   });
+
+  it("named hosts: each to its own base, or to its own override, and declared as env", async () => {
+    const split = defineUpstream({
+      id: "split",
+      label: "Split",
+      base: "https://api.split.test",
+      hosts: {
+        futures: { base: "https://fapi.split.test", baseOverride: "SPLIT_FAPI_BASE" },
+        plain: { base: "https://plain.split.test" },
+      },
+    });
+    expect(split.envNames).toEqual(["SPLIT_FAPI_BASE"]);
+    const stub = httpStub(() => json({}));
+    await runClient(
+      stub,
+      Effect.gen(function* () {
+        const call = yield* split.connect({});
+        yield* call.host("futures")("/x", ANY);
+        yield* call.host("plain")("/x", ANY);
+        const proxied = yield* split.connect({ SPLIT_FAPI_BASE: "http://127.0.0.1:9/f" });
+        yield* proxied.host("futures")("/x", ANY);
+        yield* proxied.request("/x", ANY);
+      }),
+    );
+    expect(stub.calls.map((c) => c.request.url.href)).toEqual([
+      "https://fapi.split.test/x",
+      "https://plain.split.test/x",
+      "http://127.0.0.1:9/f/x",
+      "https://api.split.test/x",
+    ]);
+  });
 });

@@ -13,21 +13,18 @@ const ANY_STRING = Schema.toStandardSchemaV1(Schema.String);
 
 // The env names the app injects, as the port's `creds`. Values are never validated here: a missing
 // key surfaces as `auth` from `connect`.
-const envCreds = (upstream: Upstream<string, string>): readonly CredField[] => [
-  ...[...(upstream.keys ?? []), ...(upstream.optionalKeys ?? [])].map(
-    (key): CredField => ({ key, type: "secret", label: key, validator: ANY_STRING }),
-  ),
-  ...(upstream.baseOverride
-    ? [
-        {
-          key: upstream.baseOverride,
-          type: "public",
-          label: upstream.baseOverride,
-          validator: ANY_STRING,
-        } as const,
-      ]
-    : []),
-];
+const envCreds = (upstream: Upstream<string, string>): readonly CredField[] => {
+  const keys = new Set<string>([...(upstream.keys ?? []), ...(upstream.optionalKeys ?? [])]);
+  // Anything else is a base override: public, so never encrypted or exported.
+  return upstream.envNames.map(
+    (key): CredField => ({
+      key,
+      type: keys.has(key) ? "secret" : "public",
+      label: key,
+      validator: ANY_STRING,
+    }),
+  );
+};
 
 // One line per call, by allowlist: upstream, capability, outcome tier and row count.
 const outcomeOf = (exit: Exit.Exit<unknown, UpstreamError>): string => {

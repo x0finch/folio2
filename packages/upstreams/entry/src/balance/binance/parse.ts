@@ -1,28 +1,22 @@
 import type { Note, PerpEquity, PerpPosition, Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { formatAmount } from "@folio/upstreams";
-import { MARGIN_ASSET, PROVIDER_ID, QUOTE_ASSET, QUOTE_SUFFIXES, STABLECOINS } from "./constants";
+import { formatAmount } from "../../runtime/note-format";
+import type {
+  CoinmAccount,
+  EarnFlexibleRow,
+  EarnLockedRow,
+  FundingAsset,
+  FuturesAccount,
+  SpotAccount,
+} from "./api";
+import { ID, MARGIN_ASSET, QUOTE_ASSET, QUOTE_SUFFIXES, STABLECOINS } from "./constants";
 
 export type BinanceRow = Spot | PerpEquity | PerpPosition;
 
 // Binance balances carry quantities only, no USD: value from public tickers as `${asset}USDT`.
 
-interface BinanceBalance {
-  asset?: string;
-  free?: string;
-  locked?: string;
-}
-interface BinanceAccount {
-  balances?: readonly BinanceBalance[];
-}
-
-const fmtAmount = formatAmount;
-
 // amount = free + locked. A coin with locked > 0 gets a "Locked" note in its own units.
-export function parseAccountBalances(
-  account: BinanceAccount,
-  prices: Record<string, number>,
-): Spot[] {
+export function parseAccountBalances(account: SpotAccount, prices: Record<string, number>): Spot[] {
   const out: Spot[] = [];
   for (const b of account.balances ?? []) {
     const asset = b.asset;
@@ -41,36 +35,19 @@ export function parseAccountBalances(
       price,
       value: usdValue,
       kind: "spot",
-      tokenRef: tokenRef.issued(PROVIDER_ID, asset.trim().toUpperCase()),
+      tokenRef: tokenRef.issued(ID, asset.trim().toUpperCase()),
     };
     if (locked > 0) {
       const pct = amount > 0 ? Math.round((locked / amount) * 100) : 0;
       row.note = {
         title: "Locked",
         icon: "warning",
-        content: `${fmtAmount(locked)} ${asset} · ${pct}%`,
+        content: `${formatAmount(locked)} ${asset} · ${pct}%`,
       };
     }
     out.push(row);
   }
   return out;
-}
-
-interface FuturesPosition {
-  symbol?: string;
-  positionAmt?: string;
-  entryPrice?: string;
-  unrealizedProfit?: string;
-  leverage?: string;
-  notional?: string;
-  isolated?: boolean;
-  positionInitialMargin?: string;
-}
-interface FuturesAccount {
-  totalMarginBalance?: string; // wallet balance + unrealized PnL
-  totalPositionInitialMargin?: string;
-  maxWithdrawAmount?: string;
-  positions?: readonly FuturesPosition[];
 }
 
 function coinFromSymbol(symbol: string): string {
@@ -93,7 +70,7 @@ export function parseFuturesAccount(account: FuturesAccount): (PerpEquity | Perp
     amount: equity,
     value: equity,
     kind: "perp_equity",
-    tokenRef: tokenRef.issued(PROVIDER_ID, MARGIN_ASSET),
+    tokenRef: tokenRef.issued(ID, MARGIN_ASSET),
     meta: {
       withdrawable: Number(account.maxWithdrawAmount ?? 0),
       totalMarginUsed: Number(account.totalPositionInitialMargin ?? 0),
@@ -111,7 +88,7 @@ export function parseFuturesAccount(account: FuturesAccount): (PerpEquity | Perp
       amount: amt,
       value: 0,
       kind: "perp_position",
-      tokenRef: tokenRef.issued(PROVIDER_ID, coin),
+      tokenRef: tokenRef.issued(ID, coin),
       meta: {
         coin,
         side: amt >= 0 ? "long" : "short",
@@ -126,27 +103,6 @@ export function parseFuturesAccount(account: FuturesAccount): (PerpEquity | Perp
     });
   }
   return out;
-}
-
-interface CoinmAsset {
-  asset?: string;
-  marginBalance?: string; // in the coin, not USD
-  maxWithdrawAmount?: string;
-  positionInitialMargin?: string;
-}
-interface CoinmPosition {
-  symbol?: string;
-  positionAmt?: string; // contracts, not coins
-  entryPrice?: string;
-  unrealizedProfit?: string; // in the coin
-  leverage?: string;
-  notional?: string; // in the coin
-  isolated?: boolean;
-  positionInitialMargin?: string;
-}
-interface CoinmAccount {
-  assets?: readonly CoinmAsset[];
-  positions?: readonly CoinmPosition[];
 }
 
 // BTCUSD_PERP / BTCUSD_251226 → BTC
@@ -192,7 +148,7 @@ export function parseCoinmFuturesAccount(
       amount: amt,
       value: 0,
       kind: "perp_position",
-      tokenRef: tokenRef.issued(PROVIDER_ID, coin),
+      tokenRef: tokenRef.issued(ID, coin),
       meta: {
         coin,
         side: amt >= 0 ? "long" : "short",
@@ -213,19 +169,11 @@ export function parseCoinmFuturesAccount(
       amount: equityUsd,
       value: equityUsd,
       kind: "perp_equity",
-      tokenRef: tokenRef.issued(PROVIDER_ID, MARGIN_ASSET),
+      tokenRef: tokenRef.issued(ID, MARGIN_ASSET),
       meta: { withdrawable: withdrawableUsd, totalMarginUsed: marginUsedUsd, totalNtlPos },
     },
     ...posRows,
   ];
-}
-
-interface FundingAsset {
-  asset?: string;
-  free?: string;
-  locked?: string;
-  freeze?: string;
-  withdrawing?: string;
 }
 
 export function parseFundingAssets(
@@ -249,29 +197,18 @@ export function parseFundingAssets(
       price,
       value: price != null ? amount * price : 0,
       kind: "spot",
-      tokenRef: tokenRef.issued(PROVIDER_ID, asset.trim().toUpperCase()),
+      tokenRef: tokenRef.issued(ID, asset.trim().toUpperCase()),
       note: { title: "Funding", icon: "info", content: "Funding wallet", group: "funding" },
     });
   }
   return out;
 }
 
-interface EarnFlexibleRow {
-  asset?: string;
-  totalAmount?: string;
-  latestAnnualPercentageRate?: string; // decimal, e.g. "0.05"
-}
-interface EarnLockedRow {
-  asset?: string;
-  amount?: string;
-  apy?: string; // decimal
-  redeemDate?: number | string; // ms epoch
-}
 interface EarnFlexible {
-  rows?: readonly EarnFlexibleRow[];
+  readonly rows?: readonly EarnFlexibleRow[];
 }
 interface EarnLocked {
-  rows?: readonly EarnLockedRow[];
+  readonly rows?: readonly EarnLockedRow[];
 }
 
 const apyPct = (rate: string | number | undefined): string =>
@@ -299,7 +236,7 @@ export function parseEarnPositions(
       price,
       value: price != null ? amount * price : 0,
       kind: "spot",
-      tokenRef: tokenRef.issued(PROVIDER_ID, asset.trim().toUpperCase()),
+      tokenRef: tokenRef.issued(ID, asset.trim().toUpperCase()),
       note,
     });
   };

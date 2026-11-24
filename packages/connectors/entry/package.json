@@ -12,10 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/binance-client": "workspace:*",
     "@folio/bitcoin-derive": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
-    "@folio/oracle-ref": "workspace:*",
     "@folio/upstream-basic": "workspace:*",
     "@folio/upstreams": "workspace:*",
     "zod": "catalog:"

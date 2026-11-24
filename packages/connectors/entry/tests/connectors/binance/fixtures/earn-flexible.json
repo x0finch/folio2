@@ -1,6 +1,0 @@
-{
-  "rows": [
-    { "asset": "USDT", "totalAmount": "1000", "latestAnnualPercentageRate": "0.05" },
-    { "asset": "DUST", "totalAmount": "0", "latestAnnualPercentageRate": "0.02" }
-  ]
-}
