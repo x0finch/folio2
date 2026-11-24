@@ -5,7 +5,6 @@ import { formatMoney } from "@/lib/core/format-number";
 import { usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
 import { type AllocSlice, OTHERS_KEY } from "./allocation";
 
-// 分配饼图 + 图例(Insights)。配色走 shadcn 图表 token(--chart-1..5,循环),不写死颜色。
 const COLORS = [
   "var(--chart-1)",
   "var(--chart-2)",
@@ -56,7 +55,7 @@ export function AllocationPie({ slices }: { slices: AllocSlice[] }) {
             <span className="text-muted-foreground text-xs">
               {total > 0 ? Math.round((d.value / total) * 100) : 0}%
             </span>
-            {/* 遮每格美元值,留占比%(ADR 0052:遮金额,留占比/图表)。 */}
+            {/* Hide amounts, keep percentages. */}
             <span className="w-24 text-right font-medium">
               <Sensitive>{usd(d.value)}</Sensitive>
             </span>

@@ -3,25 +3,20 @@ import { Check, CornerDownLeft, ListChecks, Settings2, Trash2, X } from "lucide-
 import { type KeyboardEvent, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 
-// 「打标签」的标签输入框(ADR 0034,照本 epic 定稿的可视化稿)。**纯展示 + 本地交互态**(draft / manage /
-// 删除确认),不含任何服务端逻辑 —— attach/detach/create/rename/delete 全经 props 回调,由 AccountTagsModal
-// 接线。这样它可复用、可单测,且乐观更新的责任集中在调用方(memory:行为经 hook/props 复用,不包组件)。
-
 interface TagInputItem {
   id: string;
-  name: string; // 纯名字(不含 `#`)—— `#` 只在渲染时贴
-  attached: boolean; // 本账户是否已打
-  accountCount: number; // 打了这个 Tag 的账户数(删除确认文案用)
-  pending?: boolean; // 新建的乐观占位:样子与常规 chip 一致,但还没有真 id → 不接受点击/改名/删除
+  name: string; // plain name, without `#`
+  attached: boolean;
+  accountCount: number; // for the delete-confirm copy
+  pending?: boolean; // optimistic placeholder without a real id: not clickable / renamable / deletable
 }
 
-// 用户可能顺手把 `#` 也敲进去(界面到处显 `#name`)→ 吞掉前导 `#` 再存,库里永远是纯名字。
-// **先 trim 再剥**,且剥完再 trim:粘进来的 " #cold" 若先剥,`^#+` 压根匹配不上(首字符是空格),
-// `#` 就跟着进库了;"# cold" 则要剥完再 trim 掉中间那个空格。
+// Strips a leading `#` the user may type, so the DB only ever holds plain names. Trim before and
+// after: " #cold" must lose its space first, and "# cold" its inner space after.
 const stripHash = (raw: string) => raw.trim().replace(/^#+/, "").trim();
 
 export interface TagInputProps {
-  subtitle?: string; // 账户名(标题下方)
+  subtitle?: string;
   items: TagInputItem[];
   onToggle: (tagId: string, next: boolean) => void;
   onCreate: (name: string) => void;
@@ -49,9 +44,9 @@ export function TagInput({
   const commit = () => {
     const name = stripHash(draft);
     if (!name) return;
-    // 输入已存在的名(忽略大小写)= 复用并打上,而非新建;否则新建(调用方会自动打到本账户)。
+    // An existing name (case-insensitive) is reused and attached rather than created.
     const existing = items.find((i) => i.name.toLowerCase() === name.toLowerCase());
-    // 命中的是还在飞的新建占位 → 它本就会被打上,重复提交只会撞唯一索引报错,这里直接吞掉。
+    // A still-in-flight placeholder will be attached anyway; resubmitting would hit the unique index.
     if (existing?.pending) {
       setDraft("");
       return;
@@ -63,13 +58,13 @@ export function TagInput({
   };
 
   const onInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    // 中文输入法组字中,Enter 是「确认候选词」而非提交 —— isComposing 时放行,别误建标签。
+    // Enter while composing (IME) confirms a candidate, not a submit.
     if (e.nativeEvent.isComposing) return;
     if (e.key === "Enter") {
       e.preventDefault();
       commit();
     } else if (e.key === "Backspace" && draft === "") {
-      // 空退格:取消最后一个已打上的 Tag(标签输入框的老习惯)。
+      // Empty backspace detaches the last attached tag.
       const lastAttached = [...items].reverse().find((i) => i.attached);
       if (lastAttached) onToggle(lastAttached.id, false);
     }
@@ -115,9 +110,8 @@ export function TagInput({
               aria-pressed={item.attached}
               disabled={item.pending}
               onClick={() => onToggle(item.id, !item.attached)}
-              // max-w-full + 内层 truncate:名字可以很长(用户随便打),chip 不能撑破 flex-wrap 容器 —— 满
-              // 一行就到此为止、超出走省略号。truncate 必须落在内层文字上,挂在这层 flex 容器上不生效。
-              // 名字看全走「管理」页(那里是 input,可完整读写)。
+              // max-w-full + inner truncate: long names must ellipsize instead of breaking the flex-wrap
+              // container (truncate has no effect on this flex wrapper).
               className={cn(
                 "flex max-w-full items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors",
                 item.attached
@@ -136,8 +130,7 @@ export function TagInput({
             )}
             style={{ minWidth: "7rem" }}
           >
-            {/* 固定 `#` 导引:告诉用户「这里输的是标签」,但它不是输入内容 —— 用户打纯文字,
-                多敲的 `#` 在 commit 时被 stripHash 吞掉。 */}
+            {/* Fixed `#` lead-in; typed `#` is stripped by stripHash on commit. */}
             <span aria-hidden className="shrink-0 text-muted-foreground text-sm">
               #
             </span>
@@ -188,16 +181,15 @@ function ManageList({
   t: ReturnType<typeof useTranslations<"Tags">>;
   tc: ReturnType<typeof useTranslations<"Common">>;
 }) {
-  // 无卡片、无描边:各行共享 SharedLayoutBg 的 hover 高亮垫底(UI 微调),去掉行首色点。
-  // SharedLayoutBg 会把每个子元素的 children 再套一层 block <div z-10>,故真正的 flex 行放在**内层**一格,
-  // 否则 input 与删除钮会被那层 block 拆成上下两行(实测坑)。
+  // SharedLayoutBg wraps each child in a block <div z-10>, so the flex row lives in the inner element,
+  // otherwise the input and delete button split onto two lines.
   return (
     <SharedLayoutBg className="min-h-24 gap-0.5" inset={8}>
       {items.map((item) => (
         <div key={item.id}>
           {confirmingId === item.id ? (
             <div className="flex items-center gap-2 px-2 py-2">
-              {/* title / subtitle 两行:标题说删哪个,副标题说影响面 —— 不再挤成一段长句折行。 */}
+              {/* title says what is deleted, subtitle the impact */}
               <div className="min-w-0 flex-1">
                 <div className="truncate text-foreground text-sm">
                   {t("removeTitle", { name: `#${item.name}` })}
@@ -206,7 +198,7 @@ function ManageList({
                   {t("removeSubtitle", { count: item.accountCount })}
                 </div>
               </div>
-              {/* 二次确认用图标钮:叉 = 取消,勾 = 确认删除(destructive 色)。 */}
+              {/* cancel / confirm-delete icon buttons */}
               <button
                 type="button"
                 aria-label={tc("cancel")}
@@ -229,20 +221,20 @@ function ManageList({
             </div>
           ) : (
             <div className="flex items-center gap-2.5 px-2 py-1">
-              {/* 与打标签输入框同款固定 `#` 导引:改名同样只输纯名字,多敲的 `#` 被吞。 */}
+              {/* Same fixed `#` lead-in as the input. */}
               <span aria-hidden className="pl-2 text-muted-foreground text-sm">
                 #
               </span>
               <input
                 key={`${item.id}:${item.name}`}
                 defaultValue={item.name}
-                disabled={item.pending} // 占位还没有真 id,改名/删除都无从谈起
+                disabled={item.pending} // no real id yet
                 onBlur={(e) => {
                   const next = stripHash(e.target.value);
                   if (next && next !== item.name) onRename(item.id, next);
                 }}
                 onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing) return; // 输入法组字中不提交改名
+                  if (e.nativeEvent.isComposing) return;
                   if (e.key === "Enter") e.currentTarget.blur();
                 }}
                 className="-ml-1.5 h-8 flex-1 rounded-md bg-transparent px-1 text-foreground text-sm outline-none focus:bg-muted"

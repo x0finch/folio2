@@ -6,18 +6,13 @@ import { json, stubOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
 import { freshUser } from "../_kit/user";
 
-// 合并进 tokens/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
+// Runs inside tokens/index.test.ts: each vitest file re-evaluates the whole import graph in workerd (~9s/file), so cases are merged per directory.
 describe("tokens/list-fiat-options", () => {
-  // #527 · listFiatOptions
-  //
-  // 以前这组全是 skip:handler 经 `getRequestHeaders()` 读请求语言,这套 workers 配置里 import 不进来。
-  // 语言改成调用方传参之后(界面语言住浏览器,ADR 0049 补记)那道墙没了。
-  // 「按语言给名字」那半的细节另有 `tests/fiat-options.test.ts`;这里测的是 handler 自己那半 ——
-  // 顺带把汇率贴上去,以及取不到时怎么降级。
+  // Takes the language from the caller (the UI language lives in the browser); how names are localized is covered by `tests/fiat-options.test.ts`.
+  // This covers the handler's own half: attaching rates, and degrading when they're unavailable.
   const USER = "h-tok-fiat";
 
-  // 上游以 BTC 为基准:value = 1 BTC 值多少该币种。KRW 故意不给 —— 「上游没收录」那一档。
+  // The upstream is BTC-based: value = how much of the currency 1 BTC is worth. KRW is deliberately absent (the "not covered upstream" case).
   const RATES = {
     rates: {
       btc: { value: 1, type: "crypto" },
@@ -29,7 +24,7 @@ describe("tokens/list-fiat-options", () => {
   const bySymbol = <T extends { symbol: string }>(options: readonly T[], symbol: string) =>
     options.find((o) => o.symbol === symbol);
 
-  // 汇率只由队列的 `fx` 活暖(FOL-88),handler 自己只读缓存 —— 要带价的用例先跑一条。
+  // Rates are warmed only by the queue's `fx` job and the handler reads only the cache, so cases needing rates run one first.
   const warmFx = () =>
     Effect.runPromise(
       consumeMessage({
@@ -46,7 +41,7 @@ describe("tokens/list-fiat-options", () => {
   });
 
   describe("listFiatOptions", () => {
-    it("locale 是 zh → 名字是中文", async () => {
+    it("locale is zh -> names are Chinese", async () => {
       stubOutbound([["/exchange_rates", () => json(RATES)]]);
       const out = await call(USER, handleListFiatOptions({ locale: "zh" }));
       expect(bySymbol(out, "EUR")?.name).toBe(
@@ -54,14 +49,14 @@ describe("tokens/list-fiat-options", () => {
       );
     });
 
-    it("认不出的 locale → 回落默认语言(码是调用方可改的输入)", async () => {
+    it("unrecognized locale -> falls back to the default language (the code is caller-editable input)", async () => {
       stubOutbound([["/exchange_rates", () => json(RATES)]]);
       const junk = await call(USER, handleListFiatOptions({ locale: "x".repeat(64) }));
       const en = await call(USER, handleListFiatOptions({ locale: "en" }));
       expect(junk.map((o) => o.name)).toEqual(en.map((o) => o.name));
     });
 
-    it("某个法币取不到汇率 → 只缺那一项,不是整批失败", async () => {
+    it("a currency with no rate -> only that item is missing, not the whole batch", async () => {
       stubOutbound([["/exchange_rates", () => json(RATES)]]);
       await warmFx();
       const out = await call(USER, handleListFiatOptions({ locale: "en" }));
@@ -71,12 +66,12 @@ describe("tokens/list-fiat-options", () => {
       expect((bySymbol(out, "EUR") as { price?: number }).price).toBeDefined();
     });
 
-    it("汇率上游整个挂了 → 选项照样给,界面还能选", async () => {
+    it("rate upstream is entirely down -> options still returned, the UI can still pick", async () => {
       stubOutbound([["/exchange_rates", () => json({ error: "down" }, 503)]]);
       await warmFx();
       const out = await call(USER, handleListFiatOptions({ locale: "en" }));
       expect(out.length).toBeGreaterThan(1);
-      // USD 恒 1 不靠上游;其余没价。
+      // USD is always 1 and needs no upstream; the rest have no price.
       expect((bySymbol(out, "EUR") as { price?: number }).price).toBeUndefined();
     });
   });

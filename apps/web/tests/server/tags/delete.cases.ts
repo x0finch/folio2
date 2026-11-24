@@ -7,15 +7,13 @@ import { blockOutbound } from "../_kit/outbound";
 import { call, readTabStrip } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 tags/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
+// Runs inside tags/index.test.ts: each vitest file re-evaluates the whole import graph in workerd (~9s/file), so cases are merged per directory.
 describe("tags/delete", () => {
-  // #527 · deleteTag
   const USER = "h-tags-delete";
 
   const seed = async (userId: string) => {
     const pf = await db(userId).portfolios.ensureDefault();
-    const tag = await db(userId).tags.create({ portfolioId: pf.id, name: "长期" });
+    const tag = await db(userId).tags.create({ portfolioId: pf.id, name: "Long-term" });
     return { pf, tag };
   };
 
@@ -26,10 +24,18 @@ describe("tags/delete", () => {
   });
 
   describe("deleteTag", () => {
-    it("删一个正挂在两个账户上的 → tag 没了,两个账户还在,只是不再有这个标", async () => {
+    it("deleting a tag attached to two accounts -> tag gone, both accounts remain, just without the tag", async () => {
       const { pf, tag } = await seed(USER);
-      const a = await db(USER).accounts.create({ connectorId: "manual", label: "甲", creds: null });
-      const b = await db(USER).accounts.create({ connectorId: "manual", label: "乙", creds: null });
+      const a = await db(USER).accounts.create({
+        connectorId: "manual",
+        label: "Alpha",
+        creds: null,
+      });
+      const b = await db(USER).accounts.create({
+        connectorId: "manual",
+        label: "Beta",
+        creds: null,
+      });
       await db(USER).portfolios.assignAccount(a.id, pf.id);
       await db(USER).portfolios.assignAccount(b.id, pf.id);
       await db(USER).tags.attach(a.id, tag.id);
@@ -38,23 +44,26 @@ describe("tags/delete", () => {
       await call(USER, handleDeleteTag({ tagId: tag.id }));
 
       expect(await call(USER, handleListAccountTags())).toEqual([]);
-      expect((await db(USER).accounts.list()).map((x) => x.label).sort()).toEqual(["乙", "甲"]);
+      expect((await db(USER).accounts.list()).map((x) => x.label).sort()).toEqual([
+        "Alpha",
+        "Beta",
+      ]);
     });
 
-    it("同一个 tagId 再删一次 → 静默幂等,结果跟第一次一样", async () => {
+    it("deleting the same tagId again -> silently idempotent, same result as the first time", async () => {
       const { tag } = await seed(USER);
 
       await call(USER, handleDeleteTag({ tagId: tag.id }));
-      await call(USER, handleDeleteTag({ tagId: tag.id })); // 不抛
+      await call(USER, handleDeleteTag({ tagId: tag.id })); // does not throw
 
       expect(await call(USER, handleListTags())).toEqual([]);
     });
 
-    it("有个首页 pin 正指着这个 tag → 删完 tab 条不出现指向空气的 tab", async () => {
+    it("a home pin points at this tag -> after deletion the tab strip has no tab pointing at nothing", async () => {
       const { pf, tag } = await seed(USER);
       const acc = await db(USER).accounts.create({
         connectorId: "manual",
-        label: "甲",
+        label: "Alpha",
         creds: null,
       });
       await db(USER).portfolios.assignAccount(acc.id, pf.id);
@@ -63,20 +72,22 @@ describe("tags/delete", () => {
 
       await call(USER, handleDeleteTag({ tagId: tag.id }));
 
-      // pin 行随 tag 级联删除(`tab_pins.tag_id` 是 ON DELETE CASCADE),所以 tab 条上直接没有它 ——
-      // 不是「留着一个名字为空的 pin」。这条正是要钉住这个级联。
+      // The pin row is cascade-deleted with the tag (`tab_pins.tag_id` is ON DELETE CASCADE), so the tab strip simply lacks it,
+      // rather than keeping a pin with an empty name; this pins that cascade.
       expect((await readTabStrip(USER, {})).pins).toEqual([]);
     });
 
-    it("删别人的 tagId → 对方那个 tag 一根毛都没掉", async () => {
+    it("deleting someone else's tagId -> their tag loses nothing", async () => {
       const theirs = await seed(otherUser(USER));
 
       await call(USER, handleDeleteTag({ tagId: theirs.tag.id }));
 
-      expect((await call(otherUser(USER), handleListTags())).map((t) => t.name)).toEqual(["长期"]);
+      expect((await call(otherUser(USER), handleListTags())).map((t) => t.name)).toEqual([
+        "Long-term",
+      ]);
     });
 
-    it("tagId 空串 → schema 拒", () => {
+    it("empty tagId -> rejected by schema", () => {
       expect(DeleteTagInput.safeParse({ tagId: "" }).success).toBe(false);
     });
   });

@@ -5,11 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "@/lib/i18n/messages";
 import { settingsKeys } from "@/lib/queries/keys";
 
-// 设置页「数据」卡:导出链接 + 导入文件。
-// 导入是一次真写库,所以要钉住**什么时候直接写、什么时候先问**:
-// ① 库确认是空的 → 选完文件直接导;② 库里有数据 → 先弹「合并进已有数据?」,取消就不发请求;
-// ③ 统计还没到(不知道空不空)→ 按「可能非空」处理,同样先问 —— 不在未知时直接写入。
-// 以及导入的结果(条数 / 服务端原样的错误文本)要显示给用户。
 const { getDataStats } = vi.hoisted(() => ({ getDataStats: vi.fn() }));
 
 vi.mock("@/lib/server/settings", () => ({
@@ -49,7 +44,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   document.body.innerHTML = "";
   vi.stubGlobal("fetch", fetchMock);
-  // 统计永远停在路上:要「已知」的用例自己 setQueryData,其余就是「还不知道」。
   getDataStats.mockImplementation(() => new Promise(() => {}));
 });
 
@@ -57,8 +51,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("导出", () => {
-  it("导出是指向 /api/export 的下载链接", () => {
+describe("export", () => {
+  it("export is a download link to /api/export", () => {
     mount({ hasData: true });
     const link = screen.getByRole("link", { name: "Export data" });
     expect(link.getAttribute("href")).toBe("/api/export");
@@ -66,8 +60,8 @@ describe("导出", () => {
   });
 });
 
-describe("导入", () => {
-  it("库是空的 → 选完文件直接 POST 到 /api/import,显示导入条数", async () => {
+describe("import", () => {
+  it("empty library: picking a file POSTs straight to /api/import and shows the imported count", async () => {
     fetchMock.mockResolvedValue(okResponse({ imported: { accounts: 2, snapshots: 5 } }));
     const { pick } = mount({ hasData: false });
 
@@ -78,7 +72,7 @@ describe("导入", () => {
     expect(screen.queryByText("Import into existing data?")).toBeNull();
   });
 
-  it("库里有数据 → 先问,确认后才导", async () => {
+  it("library has data: asks first, imports only after confirming", async () => {
     fetchMock.mockResolvedValue(okResponse({ imported: { accounts: 1, snapshots: 0 } }));
     const { pick } = mount({ hasData: true });
 
@@ -92,7 +86,7 @@ describe("导入", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/import", { method: "POST", body: FILE });
   });
 
-  it("库里有数据 → 取消就不发请求", async () => {
+  it("library has data: cancelling sends no request", async () => {
     const { pick } = mount({ hasData: true });
 
     pick(FILE);
@@ -103,7 +97,7 @@ describe("导入", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("统计还没到 → 按「可能非空」先问,不直接写", async () => {
+  it("stats not loaded yet: asks as if possibly non-empty, does not write directly", async () => {
     const { pick } = mount();
 
     pick(FILE);
@@ -112,7 +106,7 @@ describe("导入", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("服务端拒绝 → 原样显示它的错误文本", async () => {
+  it("server rejects: shows its error text verbatim", async () => {
     fetchMock.mockResolvedValue({
       ok: false,
       text: async () => "bad line 3: unknown kind",
@@ -124,7 +118,7 @@ describe("导入", () => {
     await screen.findByText("bad line 3: unknown kind");
   });
 
-  it("导入在飞时按钮禁用并显示进行中", async () => {
+  it("while the import is in flight the button is disabled and shows progress", async () => {
     fetchMock.mockImplementation(() => new Promise(() => {}));
     const { pick } = mount({ hasData: false });
 

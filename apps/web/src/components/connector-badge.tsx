@@ -4,9 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { connectorLabelFallback } from "@/lib/core/logo";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
 
-// connector 徽章:统一的 muted 小标(仅 shadcn 设计 token,不用任意色值)。列表行与详情头共用。
-// 展示名来自 registry 目录;未到位回落 connectorLabelFallback。
-// className:调用方按上下文微调 —— 如列表行传 group-hover:bg-background,让徽章在 hover pill(bg-muted)上不与之融为一体。
+// className lets callers tweak per context, e.g. `group-hover:bg-background` so the badge
+// doesn't blend into a hover pill.
 export function ConnectorBadge({
   connectorId,
   className,

@@ -4,8 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMediaQuery } from "../src/lib/hooks/use-media-query";
 
-// 按视口 / 指针能力切布局的 hook:首帧 false、挂载后反映真实匹配;
-// 没有 matchMedia 的环境保持 false 不抛。jsdom 没有 matchMedia,这里补一个可控的假实现。
+// jsdom has no matchMedia; a controllable fake is installed.
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -53,7 +52,7 @@ afterEach(() => {
 });
 
 describe("useMediaQuery", () => {
-  it("首帧是 false(与服务端一致),挂载后换成真实匹配", () => {
+  it("is false on first render and reflects the real match after mount", () => {
     fakeMatchMedia("(min-width: 768px)");
     lists.get("(min-width: 768px)")!.matches = true;
     mount("(min-width: 768px)");
@@ -61,7 +60,7 @@ describe("useMediaQuery", () => {
     expect(seen.at(-1)).toBe(true);
   });
 
-  it("没有 matchMedia 时恒为 false,不抛", () => {
+  it("stays false without matchMedia and does not throw", () => {
     vi.stubGlobal("matchMedia", undefined);
     mount("(d)");
     expect(seen.every((v) => v === false)).toBe(true);

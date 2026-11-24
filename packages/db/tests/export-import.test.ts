@@ -13,9 +13,7 @@ const snapshotsOf = forDomain((db) => db.snapshots);
 
 const accounts = forDomain((db) => db.accounts);
 
-// 导出/导入 v3 的 db 支持(#204):listTokensForExport(带 ref)、listManualActivityByUser(扁平跨账户),
-// 以及 A 方案的 find-or-create 一族(importToken/importAccount/importSnapshot/
-// importManualActivity)—— 各按内容自然键去重,让反复导入/合并幂等。对着真 D1 跑(约束/唯一索引真生效)。
+// DB support for export/import v3: listTokensForExport (with ref), listManualActivityByUser (flat across accounts), and the find-or-create family (importToken / importAccount / importSnapshot / importManualActivity), each deduping on a natural content key so repeat imports/merges are idempotent. Real D1.
 
 const USER_A = "u-a";
 const USER_B = "u-b";
@@ -44,7 +42,7 @@ beforeEach(async () => {
 const refKey = (r: { namer: string; localName: string }) => `${r.namer}/${r.localName}`;
 
 describe("listTokensForExport", () => {
-  it("导出 Token,ref 嵌在里头;空用户 → []", async () => {
+  it("exports Tokens with the ref embedded; an empty user gives []", async () => {
     expect(await transferOf(USER_A).listTokensForExport()).toEqual([]);
     const id = await transferOf(USER_A).importToken(
       { symbol: "USDC", name: "USD Coin", logo: "u.png", providerLogo: "p.png", marketCapRank: 7 },
@@ -65,14 +63,14 @@ describe("listTokensForExport", () => {
     );
   });
 
-  it("按用户隔离", async () => {
+  it("isolated per user", async () => {
     await transferOf(USER_A).importToken({ symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
     expect(await transferOf(USER_B).listTokensForExport()).toEqual([]);
   });
 });
 
 describe("importToken —— find-or-create", () => {
-  it("空库 → 新建一行,返回新 id", async () => {
+  it("an empty db creates a row and returns the new id", async () => {
     const id = await transferOf(USER_A).importToken({ symbol: "USDC", name: "USD Coin" }, [
       USDC_CGK,
     ]);
@@ -82,7 +80,7 @@ describe("importToken —— find-or-create", () => {
     expect(rows[0]!.symbol).toBe("USDC");
   });
 
-  it("ref 已存在 → 复用那行,不新建(空库重映射的对面情形)", async () => {
+  it("an existing ref reuses that row without creating one (the counterpart of remapping into an empty db)", async () => {
     const id1 = await transferOf(USER_A).importToken({ symbol: "USDC", name: "USD Coin" }, [
       USDC_CGK,
     ]);
@@ -93,7 +91,7 @@ describe("importToken —— find-or-create", () => {
     expect(await getDb(env).select().from(tokens).where(eq(tokens.userId, USER_A))).toHaveLength(1);
   });
 
-  it("复用时把缺的 ref 补挂到已有 Token", async () => {
+  it("on reuse, attaches the missing refs to the existing Token", async () => {
     const id1 = await transferOf(USER_A).importToken({ symbol: "USDC", name: "USD Coin" }, [
       USDC_CGK,
     ]);
@@ -106,7 +104,7 @@ describe("importToken —— find-or-create", () => {
     expect(new Set(refs.map(refKey))).toEqual(new Set([refKey(USDC_CGK), refKey(USDC_ETH)]));
   });
 
-  it("无 ref 的 Token(理论边界)→ 照样建行", async () => {
+  it("a Token with no ref (theoretical edge) still creates a row", async () => {
     const id = await transferOf(USER_A).importToken({ symbol: "FOO", name: "Foo" }, []);
     expect((await getDb(env).select().from(tokens).where(eq(tokens.id, id)))[0]!.symbol).toBe(
       "FOO",
@@ -114,8 +112,8 @@ describe("importToken —— find-or-create", () => {
   });
 });
 
-describe("importAccount —— find-or-create(自然键 = connectorId+platform+label+creds)", () => {
-  it("同内容再导 → 复用,不新建;created 标志正确", async () => {
+describe("importAccount: find-or-create (natural key = connectorId+platform+label+creds)", () => {
+  it("importing the same content again reuses it without creating; the created flag is right", async () => {
     const input = {
       connectorId: "evm" as const,
       platform: "evm:1",
@@ -130,19 +128,19 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
     expect(await accounts(USER_A).list()).toHaveLength(1);
   });
 
-  it("任一自然键字段不同 → 视为新账户", async () => {
+  it("any differing natural-key field makes a new account", async () => {
     const base = { connectorId: "evm" as const, platform: "evm:1", label: "W" };
     await transferOf(USER_A).importAccount({ ...base, creds: JSON.stringify({ address: "0x1" }) });
-    await transferOf(USER_A).importAccount({ ...base, creds: JSON.stringify({ address: "0x2" }) }); // creds 不同
+    await transferOf(USER_A).importAccount({ ...base, creds: JSON.stringify({ address: "0x2" }) }); // different creds
     await transferOf(USER_A).importAccount({
       ...base,
       label: "W2",
       creds: JSON.stringify({ address: "0x1" }),
-    }); // label 不同
+    }); // different label
     expect(await accounts(USER_A).list()).toHaveLength(3);
   });
 
-  it("命中既有、文件说归档而现有未归档 → 对齐成归档", async () => {
+  it("on a match where the file says archived and the existing isn't, aligns to archived", async () => {
     const input = {
       connectorId: "evm" as const,
       platform: "evm:1",
@@ -155,7 +153,7 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
     expect(acc.archivedAt).toBe(1700000000000);
   });
 
-  it("按用户隔离:同内容不同用户各建各的", async () => {
+  it("isolated per user: the same content for different users creates separately", async () => {
     const input = {
       connectorId: "evm" as const,
       platform: "evm:1",
@@ -170,8 +168,8 @@ describe("importAccount —— find-or-create(自然键 = connectorId+platform+l
   });
 });
 
-describe("importSnapshot —— find-or-create(自然键 = account+takenAt)", () => {
-  it("同 (账户,takenAt) 再导 → 整份跳过,不重复写", async () => {
+describe("importSnapshot: find-or-create (natural key = account+takenAt)", () => {
+  it("importing the same (account, takenAt) again skips the whole snapshot without rewriting", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "evm",
       label: "W",
@@ -188,14 +186,14 @@ describe("importSnapshot —— find-or-create(自然键 = account+takenAt)", ()
     expect(a.created).toBe(true);
     expect(b.created).toBe(false);
     expect(await snapshotsOf(USER_A).listByAccount(acc.id)).toHaveLength(1);
-    // 不同 takenAt → 新快照
+    // a different takenAt makes a new snapshot
     await transferOf(USER_A).importSnapshot(acc.id, { ...snap, takenAt: 2000 });
     expect(await snapshotsOf(USER_A).listByAccount(acc.id)).toHaveLength(2);
   });
 });
 
-describe("importManualActivity —— find-or-create(自然键 = 整条内容)", () => {
-  it("同内容再导 → 跳过(不折叠翻倍);任一字段不同 → 新增", async () => {
+describe("importManualActivity: find-or-create (natural key = whole content)", () => {
+  it("the same content again is skipped (no doubling by folding); any differing field adds one", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "M",
@@ -208,12 +206,12 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
     expect(a.created).toBe(true);
     expect(b.created).toBe(false);
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(1);
-    // amount 不同 → 新增一条
+    // a different amount adds one
     await transferOf(USER_A).importManualActivity(acc.id, tk, { ...act, amount: 2 });
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
   });
 
-  it("price/fee/memo 的 null 与有值区分正确(isNull 分支)", async () => {
+  it("null and set price/fee/memo are told apart correctly (isNull branch)", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "M",
@@ -221,18 +219,18 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
     });
     const tk = await transferOf(USER_A).importToken({ symbol: "BTC", name: "Bitcoin" }, [BTC_CGK]);
     const base = { kind: "add" as const, amount: 1, occurredAt: 1000 };
-    await transferOf(USER_A).importManualActivity(acc.id, tk, base); // price/fee/memo 全 null
+    await transferOf(USER_A).importManualActivity(acc.id, tk, base); // price/fee/memo all null
     const dup = await transferOf(USER_A).importManualActivity(acc.id, tk, base);
-    expect(dup.created).toBe(false); // null 内容也能命中
+    expect(dup.created).toBe(false); // null content also hits
     const withPrice = await transferOf(USER_A).importManualActivity(acc.id, tk, {
       ...base,
       price: 1,
     });
-    expect(withPrice.created).toBe(true); // null vs 有值 → 不同
+    expect(withPrice.created).toBe(true); // null vs set: different
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
   });
 
-  it("两笔除 createdAt 外全同 → 是不同事件,都保留(createdAt 进键,防折叠丢量)", async () => {
+  it("two entries identical except createdAt are different events, both kept (createdAt is in the key so folding can't lose amounts)", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "M",
@@ -243,9 +241,9 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
     const a = await transferOf(USER_A).importManualActivity(acc.id, tk, { ...base, createdAt: 5 });
     const b = await transferOf(USER_A).importManualActivity(acc.id, tk, { ...base, createdAt: 9 });
     expect(a.created).toBe(true);
-    expect(b.created).toBe(true); // createdAt 不同 → 不折叠
+    expect(b.created).toBe(true); // different createdAt: no folding
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
-    // 再导同两条 → 都命中、不新增(幂等)。
+    // Importing the same two again: both hit, nothing added (idempotent).
     await transferOf(USER_A).importManualActivity(acc.id, tk, { ...base, createdAt: 5 });
     await transferOf(USER_A).importManualActivity(acc.id, tk, { ...base, createdAt: 9 });
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toHaveLength(2);
@@ -253,7 +251,7 @@ describe("importManualActivity —— find-or-create(自然键 = 整条内容)",
 });
 
 describe("listManualActivityByUser", () => {
-  it("跨账户扁平返回、按 occurred→created 升序、createdAt 保留、按用户隔离", async () => {
+  it("flat across accounts, ordered by occurred then created ascending, createdAt kept, isolated per user", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "manual",
       label: "M",
@@ -276,8 +274,8 @@ describe("listManualActivityByUser", () => {
     });
 
     const out = await manualOf(USER_A).listAllActivity();
-    expect(out.map((a) => a.amount)).toEqual([1, 2]); // 升序
-    expect(out[0]).toMatchObject({ accountId: acc.id, tokenId: tk, createdAt: 5 }); // createdAt 保留
+    expect(out.map((a) => a.amount)).toEqual([1, 2]); // ascending
+    expect(out[0]).toMatchObject({ accountId: acc.id, tokenId: tk, createdAt: 5 }); // createdAt kept
     expect(await manualOf(USER_B).listAllActivity()).toEqual([]);
   });
 });

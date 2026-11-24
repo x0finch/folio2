@@ -9,8 +9,6 @@ import { POLL_INTERVAL, STALE_TIME } from "./constants";
 import type { DataVersionOptions } from "./data-version";
 import { dataVersionKeys, settingsKeys } from "./keys";
 
-// 设置域的读取入口 —— 与 `lib/server/settings` 的三个读取型 server fn 对应。
-
 export const providerKeyStatusQuery = () =>
   queryOptions({
     queryKey: settingsKeys.providerKeys(),
@@ -18,9 +16,8 @@ export const providerKeyStatusQuery = () =>
     staleTime: STALE_TIME.settings,
   });
 
-// 名字带 `valuation` 是历史(第一个字段);它读的其实是 **user_settings 一整行** ——
-// `valuationMode` + `hideBalances`(FOL-75/ADR 0052)。隐私 Provider 与外观卡的开关都从这份读
-// 取 `hideBalances`,不另开第二份读(一行一份缓存)。
+// Named `valuation` for history, but it reads the whole user_settings row (`valuationMode` + `hideBalances`); the privacy
+// provider and the appearance card read `hideBalances` from this same cache entry.
 export const valuationSettingsQuery = () =>
   queryOptions({
     queryKey: settingsKeys.valuation(),
@@ -35,9 +32,7 @@ export const dataStatsQuery = () =>
     staleTime: STALE_TIME.settings,
   });
 
-// 数据版本号(FOL-94,判据与比较在 `data-version.ts`)。它就是用来「每次都问」的 —— 回到页面
-// (`refetchOnWindowFocus` 缺省开)与可见时每分钟一次;`staleTime` 只是几秒的去重窗
-// (`STALE_TIME.dataVersion`),见那里。
+// Polled on purpose: on window focus and once a minute while visible; `staleTime` (`STALE_TIME.dataVersion`) is only a few-second dedupe window.
 export const dataVersionQuery = (): DataVersionOptions => ({
   queryKey: dataVersionKeys.all,
   queryFn: () => getDataVersion(),

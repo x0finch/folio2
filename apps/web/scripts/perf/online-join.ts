@@ -1,11 +1,8 @@
-// perf:cpu:online 的「按名字拆 CPU」:Workers Logs 里,带 `cpuTimeMs` 的调用事件不知道自己是哪个
-// server fn / 哪件后台活;知道名字的是**同一个 requestId** 下我们自己打的那行日志
-// (`server fn` 带 `handler`,运行器 alarm 里 consumer 打的 `job done` / `job failed…` 带 `kind`)。这里把两边按
-// requestId 对上,再按名字出分布。纯函数,online.mjs 取数、tests/perf-online-join.test.ts 钉逻辑。
+// Splits perf:cpu:online CPU by name: in Workers Logs, invocation events with `cpuTimeMs` don't know which server fn / background job they were; our own log line under the same requestId does (`server fn` with `handler`, or the consumer's `job done` / `job failed...` with `kind`). This joins the two by requestId and builds per-name distributions. Pure functions; online.mjs fetches and tests/perf-online-join.test.ts pins the logic.
 //
-// 纯 TS、无 import:online.mjs 经 Node 22.18+ 的类型擦除直接加载它。
+// Plain TS with no imports: online.mjs loads it directly via Node 22.18+ type stripping.
 
-/** 事件接口回来的一条事件里我们用得到的那几个字段。 */
+/** The fields we use from one event returned by the events API. */
 export interface LogEvent {
   $metadata?: { requestId?: string; message?: string };
   $workers?: { cpuTimeMs?: number; outcome?: string };
@@ -24,11 +21,11 @@ interface NamedCpuRow {
 
 export interface NamedCpu {
   rows: NamedCpuRow[];
-  /** 调用事件里对不上名字的条数(名字那行没被抽中,或调用被掐断 —— exceededCpu 时来不及打日志)。 */
+  /** Invocation events without a matching name (the name line wasn't sampled, or the invocation was cut off: exceededCpu leaves no time to log). */
   unmatched: number;
 }
 
-/** 与 report.mjs 的 `quantile` 同一个口径(排序后线性插值)。 */
+/** Same convention as report.mjs's `quantile` (sorted, linear interpolation). */
 function quantile(sorted: readonly number[], q: number): number {
   const i = (sorted.length - 1) * q;
   const lo = Math.floor(i);
@@ -36,10 +33,7 @@ function quantile(sorted: readonly number[], q: number): number {
   return sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
 }
 
-/**
- * `named`:带名字的日志事件;`nameOf` 从一条里取名字(取不到 → 这条不算)。
- * `invocations`:带 `cpuTimeMs` 的调用事件。同一个 requestId 有多行名字时取第一行。
- */
+/** `named`: log events with a name (`nameOf` extracts it; none means the event doesn't count). `invocations`: events with `cpuTimeMs`; with several name lines for one requestId the first wins. */
 export function cpuByName(
   named: readonly LogEvent[],
   invocations: readonly LogEvent[],
@@ -86,9 +80,9 @@ const stringProp = (e: LogEvent, key: string): string | undefined => {
   return typeof v === "string" && v ? v : undefined;
 };
 
-/** `withServerFnTiming`(runtime.ts)打的 `server fn` 行 → handler 名。 */
+/** The `server fn` line from `withServerFnTiming` (runtime.ts) to the handler name. */
 export const handlerOf = (e: LogEvent) => stringProp(e, "handler");
 
-/** consumer(jobs/consume.ts)的 `job done` / `job failed…` 行 → 任务种类。运行器自己的 `job buried…` 不带 kind,不算。 */
+/** The consumer's (jobs/consume.ts) `job done` / `job failed...` lines to the job kind; the runner's own `job buried...` carries no kind and doesn't count. */
 export const jobKindOf = (e: LogEvent) =>
   e.$metadata?.message?.startsWith("job ") ? stringProp(e, "kind") : undefined;

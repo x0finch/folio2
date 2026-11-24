@@ -2,8 +2,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import * as React from "react";
 import { cn } from "@folio/ui/lib/utils";
 
-// 悬浮操作按钮(FAB):右下圆钮,承载主操作(刷新/添加)。复刻 folio-old/components/ui/fab。
-// forwardRef + 透传 props,可作 Base UI Trigger 的 render 目标(如 SheetTrigger render={<Fab/>})。
+// forwardRef + prop passthrough so it can be a Base UI Trigger render target.
 const fabVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium shadow-lg transition-all duration-200 ease-out outline-none transform-gpu cursor-pointer hover:shadow-xl hover:scale-105 hover:-translate-y-0.5 active:scale-95 active:translate-y-0 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {

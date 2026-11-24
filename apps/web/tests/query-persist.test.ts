@@ -17,11 +17,7 @@ import {
   type SignOutChannel,
 } from "@/lib/queries/persist";
 
-// 查询缓存落盘(FOL-94)。生产是 IndexedDB,这里换一个内存的 `PersistStorage` —— 要验的是
-// 「存什么、按谁存、什么时候清」,不是 IndexedDB 本身。
 //
-// 钉的是安全那几条:换人登录不恢复上一个人的;锁屏 / 登出清空并停写(包括节流里挂着的那一次);
-// 只存白名单里的域。
 
 const THROTTLE = 1_000;
 const USER_A = "user-a";
@@ -29,7 +25,6 @@ const USER_B = "user-b";
 
 const OWNER = "owner";
 
-// 内存版 `PersistStorage`:户主标记与记录同住一张表,`clear` 一起抹掉 —— 与 IndexedDB 那份同形。
 const memoryStorage = () => {
   const map = new Map<string, PersistedClient>();
   let owner: string | undefined;
@@ -53,7 +48,6 @@ const memoryStorage = () => {
   return { map, storage, owner: () => owner };
 };
 
-// 假 BroadcastChannel:同一个 hub 上的频道互相送达,不回送给自己;送达是异步的(与真的一样)。
 const channelHub = () => {
   const listeners: { self: object; fn: () => void }[] = [];
   return (): SignOutChannel => {
@@ -87,8 +81,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("存什么", () => {
-  it("白名单:数据域 + 版本号存;同步轮与上游搜索不存", () => {
+describe("what is stored", () => {
+  it("allowlist: data domains + version number stored; sync round and upstream search not stored", () => {
     expect(isPersistedKey(accountKeys.list("pf"))).toBe(true);
     expect(isPersistedKey(dataVersionKeys.all)).toBe(true);
     expect(isPersistedKey(tokenKeys.enrichment())).toBe(true);
@@ -97,13 +91,13 @@ describe("存什么", () => {
     expect(isPersistedKey(tokenKeys.search("btc"))).toBe(false);
   });
 
-  it("按用户一条记录,节流写盘,只写白名单里的", async () => {
+  it("one record per user, throttled disk writes, only the allowlist is written", async () => {
     const qc = new QueryClient();
     await persistence.start(qc, USER_A);
     qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
     qc.setQueryData([...syncKeys.round("pf")], { state: "running" });
 
-    expect(mem.map.size).toBe(0); // 还在节流窗口里
+    expect(mem.map.size).toBe(0);
     await vi.advanceTimersByTimeAsync(THROTTLE);
 
     expect([...mem.map.keys()]).toEqual([`user:${USER_A}`]);
@@ -112,7 +106,7 @@ describe("存什么", () => {
   });
 });
 
-describe("恢复", () => {
+describe("restore", () => {
   const seedA = async () => {
     const qc = new QueryClient();
     await persistence.start(qc, USER_A);
@@ -120,7 +114,7 @@ describe("恢复", () => {
     await vi.advanceTimersByTimeAsync(THROTTLE);
   };
 
-  it("同一个用户重开 → 恢复上次的数据(不经 JSON:缓存里的 Map 原样交给存储)", async () => {
+  it("same user reopens: restores the last data (no JSON: the Map in the cache goes to storage as is)", async () => {
     const qc = new QueryClient();
     await persistence.start(qc, USER_A);
     qc.setQueryData([...tokenKeys.enrichment()], { enriched: new Map([["t", 1]]) });
@@ -133,7 +127,7 @@ describe("恢复", () => {
     });
   });
 
-  it("换人登录 → 不恢复上一个人的,而且把他的记录删掉", async () => {
+  it("another user signs in: the previous user's data is not restored, and their record is deleted", async () => {
     await seedA();
     const qc = new QueryClient();
     await make().start(qc, USER_B);
@@ -142,7 +136,7 @@ describe("恢复", () => {
     expect(mem.map.has(`user:${USER_A}`)).toBe(false);
   });
 
-  it("发了新版(buster 变了)→ 旧形状的缓存整份作废", async () => {
+  it("new release shipped (buster changed): the whole old-shape cache is invalidated", async () => {
     await seedA();
     const qc = new QueryClient();
     await make("build-2").start(qc, USER_A);
@@ -150,7 +144,7 @@ describe("恢复", () => {
     expect(qc.getQueryData([...accountKeys.list("pf")])).toBeUndefined();
   });
 
-  it("锁着开页面(locked)→ 不恢复,并把那份记录删掉", async () => {
+  it("page opened while locked: not restored, and that record is deleted", async () => {
     await seedA();
     const qc = new QueryClient();
     await make().start(qc, USER_A, { locked: true });
@@ -160,32 +154,32 @@ describe("恢复", () => {
   });
 });
 
-describe("锁屏 / 登出", () => {
-  it("锁屏:清盘 + 停写(节流里挂着的那次也不落);解锁接着写", async () => {
+describe("lock screen / sign out", () => {
+  it("lock: wipes storage + stops writing (a throttled pending write does not land either); unlock resumes writing", async () => {
     const qc = new QueryClient();
     await persistence.start(qc, USER_A);
     qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
     await vi.advanceTimersByTimeAsync(THROTTLE);
     expect(mem.map.size).toBe(1);
 
-    qc.setQueryData([...accountKeys.list("pf")], [{ id: "a2" }]); // 节流窗口里挂着一次写
+    qc.setQueryData([...accountKeys.list("pf")], [{ id: "a2" }]);
     await persistence.clear();
     await vi.advanceTimersByTimeAsync(THROTTLE * 2);
     expect(mem.map.size).toBe(0);
-    expect(mem.owner()).toBeUndefined(); // 清盘连户主一起抹
+    expect(mem.owner()).toBeUndefined();
 
     qc.setQueryData([...accountKeys.list("pf")], [{ id: "a3" }]);
     await vi.advanceTimersByTimeAsync(THROTTLE);
-    expect(mem.map.size).toBe(0); // 锁着不写
+    expect(mem.map.size).toBe(0);
 
     persistence.resume(qc);
     qc.setQueryData([...accountKeys.list("pf")], [{ id: "a4" }]);
     await vi.advanceTimersByTimeAsync(THROTTLE);
-    expect(mem.owner()).toBe(USER_A); // 解锁后户主记回来,写才落得下
+    expect(mem.owner()).toBe(USER_A);
     expect(mem.map.has(`user:${USER_A}`)).toBe(true);
   });
 
-  it("登出:清盘 + 忘掉是谁 —— 之后的 resume 什么都不写", async () => {
+  it("sign out: wipes storage + forgets who it was: later resume writes nothing", async () => {
     const qc = new QueryClient();
     await persistence.start(qc, USER_A);
     qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
@@ -194,13 +188,13 @@ describe("锁屏 / 登出", () => {
     await persistence.forget();
     expect(mem.map.size).toBe(0);
 
-    persistence.resume(qc); // 锁屏卸载时的清理会调它
+    persistence.resume(qc);
     qc.setQueryData([...accountKeys.list("pf")], [{ id: "a2" }]);
     await vi.advanceTimersByTimeAsync(THROTTLE);
     expect(mem.map.size).toBe(0);
   });
 
-  it("恢复途中被锁 → 恢复完也不开始写", async () => {
+  it("locked during restore: writing does not start after the restore either", async () => {
     const qc = new QueryClient();
     const started = persistence.start(qc, USER_A);
     await persistence.clear();
@@ -212,13 +206,13 @@ describe("锁屏 / 登出", () => {
   });
 });
 
-describe("锁着的时候导航(review #14)", () => {
-  it("锁屏后同一个用户再走一遍 start(浏览器后退 / 换组合参数)→ 不重新开写;解锁才写", async () => {
+describe("navigating while locked", () => {
+  it("after lock, the same user runs start again (browser back / changed portfolio param): writing does not restart; only unlock writes", async () => {
     const qc = new QueryClient();
     await persistence.start(qc, USER_A);
-    await persistence.clear(); // 锁上
+    await persistence.clear();
 
-    await persistence.start(qc, USER_A, { locked: false }); // 锁标志已被别的标签页解锁清掉也一样
+    await persistence.start(qc, USER_A, { locked: false });
     qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
     await vi.advanceTimersByTimeAsync(THROTTLE * 2);
     expect(mem.map.size).toBe(0);
@@ -229,7 +223,7 @@ describe("锁着的时候导航(review #14)", () => {
     expect(mem.map.has(`user:${USER_A}`)).toBe(true);
   });
 
-  it("锁着开页面 → 之后的导航也不开写,直到解锁", async () => {
+  it("page opened while locked: later navigation does not start writing either, until unlock", async () => {
     const qc = new QueryClient();
     await persistence.start(qc, USER_A, { locked: true });
     await persistence.start(qc, USER_A, { locked: true });
@@ -244,7 +238,7 @@ describe("锁着的时候导航(review #14)", () => {
   });
 });
 
-describe("多个标签页(review #3)", () => {
+describe("multiple tabs", () => {
   const openTabs = async () => {
     const hub = channelHub();
     const a = { qc: new QueryClient(), p: make("build-1", hub()) };
@@ -257,25 +251,24 @@ describe("多个标签页(review #3)", () => {
     return { a, b };
   };
 
-  it("A 登出 → B 停写、清空内存、通知路由;之后 B 的缓存事件写不回盘", async () => {
+  it("A signs out: B stops writing, clears memory, notifies the router; B's later cache events cannot write back to disk", async () => {
     const { a, b } = await openTabs();
     const toLogin = vi.fn();
     b.p.onSignedOutElsewhere(toLogin);
 
-    b.qc.setQueryData([...accountKeys.list("pf")], [{ id: "a2" }]); // B 节流窗口里挂着一次写
+    b.qc.setQueryData([...accountKeys.list("pf")], [{ id: "a2" }]);
     await a.p.forget();
     await vi.advanceTimersByTimeAsync(0);
 
     expect(toLogin).toHaveBeenCalledTimes(1);
     expect(b.qc.getQueryCache().getAll()).toHaveLength(0);
 
-    // B 的版本号轮询失败 / 聚焦重拉:缓存事件照来,盘上仍然没有这个用户。
     b.qc.setQueryData([...accountKeys.list("pf")], [{ id: "a3" }]);
     await vi.advanceTimersByTimeAsync(THROTTLE * 3);
     expect(mem.map.size).toBe(0);
   });
 
-  it("收到广播的那一页后来自己发现会话没了(路由鉴权)→ 不再回送广播", async () => {
+  it("the page that received the broadcast later finds the session gone itself (route auth): does not echo the broadcast", async () => {
     const { a, b } = await openTabs();
     const aHeard = vi.fn();
     a.p.onSignedOutElsewhere(aHeard);
@@ -287,9 +280,9 @@ describe("多个标签页(review #3)", () => {
     expect(aHeard).not.toHaveBeenCalled();
   });
 
-  it("广播还没到(或浏览器不支持)→ 户主检查兜住:A 登出之后 B 挂着的那次写也落不下", async () => {
+  it("broadcast not yet arrived (or browser unsupported): the owner check catches it: B's pending write cannot land after A signs out", async () => {
     const a = { qc: new QueryClient(), p: make() };
-    const b = { qc: new QueryClient(), p: make() }; // 没有频道
+    const b = { qc: new QueryClient(), p: make() };
     await a.p.start(a.qc, USER_A);
     await b.p.start(b.qc, USER_A);
 
@@ -303,8 +296,8 @@ describe("多个标签页(review #3)", () => {
   });
 });
 
-describe("恢复出来的新不新鲜(review #13)", () => {
-  it("版本号担保得了的记成现在;带现价的富化字典保留原来的时间戳", async () => {
+describe("freshness of what was restored", () => {
+  it("what the version number can vouch for is recorded as now; the enrichment dict carrying live prices keeps its original timestamp", async () => {
     vi.setSystemTime(new Date("2026-09-28T18:00:00Z"));
     const qc = new QueryClient();
     await persistence.start(qc, USER_A);
@@ -315,7 +308,7 @@ describe("恢复出来的新不新鲜(review #13)", () => {
     await vi.advanceTimersByTimeAsync(THROTTLE);
     const savedAt = Date.now() - THROTTLE;
 
-    vi.setSystemTime(new Date("2026-09-29T09:00:00Z")); // 第二天早上重开
+    vi.setSystemTime(new Date("2026-09-29T09:00:00Z"));
     const reopened = new QueryClient();
     await make().start(reopened, USER_A);
     const updatedAt = (key: readonly unknown[]) => reopened.getQueryState(key)?.dataUpdatedAt;
@@ -323,18 +316,16 @@ describe("恢复出来的新不新鲜(review #13)", () => {
     expect(updatedAt(accountKeys.list("pf"))).toBe(Date.now());
     expect(updatedAt(portfolioKeys.list())).toBe(Date.now());
     expect(updatedAt(tokenKeys.enrichment())).toBe(savedAt);
-    // 版本号自己也不动 —— 它得照旧过期,挂上时去问服务端。
     expect(updatedAt(dataVersionKeys.all)).toBe(savedAt);
   });
 
-  it("版本号恢复出来一律过期 —— 哪怕它才拉了一秒,还在去重窗里", async () => {
+  it("restored via version number is always stale: even if it was fetched a second ago and is still in the dedupe window", async () => {
     const qc = new QueryClient();
     await persistence.start(qc, USER_A);
     qc.setQueryData([...accountKeys.list("pf")], []);
     qc.setQueryData(dataVersionKeys.all, { version: 7 });
     await vi.advanceTimersByTimeAsync(THROTTLE);
 
-    // 紧接着刷新:节流里最后那次写盘(加完账户之后的那份)没落,盘上是改之前的数据 + 几秒前的号。
     const reopened = new QueryClient();
     await make().start(reopened, USER_A);
     const version = reopened.getQueryCache().find({ queryKey: dataVersionKeys.all, exact: true });
@@ -349,12 +340,11 @@ describe("恢复出来的新不新鲜(review #13)", () => {
     expect(queryFn).toHaveBeenCalledTimes(1);
   });
 
-  it("落盘前已被标失效的(没挂着、只打了标记)→ 恢复后仍旧过期,挂上就重拉(review R2-#1)", async () => {
+  it("marked invalid before being persisted (not mounted, only flagged): still stale after restore, refetches once mounted", async () => {
     const qc = new QueryClient();
     await persistence.start(qc, USER_A);
     qc.setQueryData([...accountKeys.list("pf")], [{ id: "a1" }]);
     qc.setQueryData([...portfolioKeys.list()], { portfolios: [] });
-    // 版本号变了之后的失效:没挂着的查询只被打上标记,不重拉。
     await qc.invalidateQueries({ queryKey: accountKeys.all });
     await vi.advanceTimersByTimeAsync(THROTTLE * 2);
     const saved = mem.map.get(`user:${USER_A}`);
@@ -370,7 +360,6 @@ describe("恢复出来的新不新鲜(review #13)", () => {
     expect(accounts?.state.isInvalidated).toBe(true);
     expect(accounts?.isStaleByTime(15 * 60_000)).toBe(true);
 
-    // 挂上就重拉。
     const queryFn = vi.fn(async () => [{ id: "a1" }, { id: "a2" }]);
     await reopened.fetchQuery({
       queryKey: [...accountKeys.list("pf")],
@@ -378,7 +367,6 @@ describe("恢复出来的新不新鲜(review #13)", () => {
       staleTime: 15 * 60_000,
     });
     expect(queryFn).toHaveBeenCalledTimes(1);
-    // 没被标过的照旧记成新鲜。
     const portfolios = cache.find({ queryKey: portfolioKeys.list(), exact: true });
     expect(portfolios?.isStaleByTime(15 * 60_000)).toBe(false);
   });

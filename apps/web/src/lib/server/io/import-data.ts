@@ -5,11 +5,10 @@ import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 import { categorizeFields } from "@/lib/server/creds";
 import { createImporter, type ImportCounts, type ImportDeps, parseImportLine } from "./import";
 
-// POST /api/import —— 流式读 NDJSON 重建账户/分组/历史(单遍 + id 重映射)。
-// CEX 账户(有 secret 输入、导出已剥密钥)→ encCredentials=null = 缺凭据态,待补录。
+// POST /api/import: streams NDJSON to rebuild accounts / history in one pass with id remapping. Accounts with secrets
+// import with encCredentials=null (missing credentials, to be completed).
 
-// `request`:这次请求的连接与用户(ADR 0054)。`ImportDeps` 的 `R` 是 `never`,所以 db 的 op
-// 在这里各自 provide 进去 —— 与 `transfer` 一样,是建导入器那一刻已解析好的东西。
+// `request` is the request's connection and user; `ImportDeps`' `R` is `never`, so db ops get it provided here.
 const depsFrom = (
   transfer: Database["transfer"],
   specs: ConnectorRegistry["specs"],
@@ -85,6 +84,5 @@ export const importData = Effect.fn("importData")(function* (
   );
 });
 
-// 导入结果计数由 /api/import 回给 UI(见 -settings/data-card)。形状的事实源在 ./import,
-// 但客户端只该认「这条 API 返回什么」,所以从这里转出。
+// Re-exported so clients depend on what the API returns; the shape's source is ./import.
 export type { ImportCounts };

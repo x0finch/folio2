@@ -1,38 +1,21 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { accountKeys, portfolioKeys, settingsKeys, syncKeys, tagKeys, tokenKeys } from "./keys";
 
-// 刷新映射表:**一个写操作的语义 → 它改动了哪些 key 前缀**。
-//
-// 为什么是一张表而不是各调用点自己写 key 数组(ADR 0038):定向刷新的全部风险都在「漏刷」上,
-// 而漏刷**不报错** —— 只表现为「改了东西画面不变」。散在二十几个调用点里的 key 数组没法审:
-// 加一个新查询时,你得回去逐个想「谁应该刷到我」。收成一张表之后,这件事只在一个地方做,
-// review 时一眼扫得完,而调用点只写自己知道的那件事:「我刚干了什么」。
-//
-// 语义命名用 `<域>.<动作>`。**跨域影响写成多条前缀**,别只写自己那个域 ——
-// 比如账户增删同时改账户域与组合域(总额、走势),只刷账户域会让总览停在旧数字。
-//
-// **加一条 / 改一条时的判据,只有一句:这次写之后,服务端哪些读会返回不同的东西?**
-// 不是「这个操作归哪个域管」。两者常常不一样,而差出来的那部分正好是漏刷:
-// 账户写归账户域,却把同步摘要和 `dataStats` 一起改了;移动账户归组合域,却顺手删了标签关联。
-// 判断方法是往下追一层到 `lib/server/*` 与 `packages/db` 的写实现,看它到底动了哪些表 /
-// 哪些读会因此变 —— 光看调用点的名字看不出来。
-//
-// FOL-59:前缀对齐原子资源键 —— 快照(`portfolio.snapshots`)、富化(`tokens.enrichment`)等,
-// 不再刷已删除的胖读键(`overview` / `holdings`)。
+// Refresh map: a write's semantics -> the key prefixes it changes. A missed refresh raises no error and only
+// shows as a screen that doesn't update, so the prefixes live in one reviewable table and call sites only say what they did.
+// Names are `<domain>.<action>`. List cross-domain effects too (account add/remove also changes the portfolio domain's
+// totals). The test for each entry: which server reads return something different after this write? Trace into
+// `lib/server/*` and `packages/db` to see which tables change; the call-site name doesn't show it.
+// Prefixes align with atom keys (`portfolio.snapshots`, `tokens.enrichment`), not the removed fat reads.
 export const REFRESH_MAP = {
   /**
-   * 一轮同步前进了一格 / 跑完了。**失败也算**:同步本身可能仍在队列里跑,
-   * 而且部分账户的快照可能已经落库了。
-   *
-   * 刷:快照原料、账户列表(页头摘要与「立即同步」账户集)、富化现价。
-   *
-   * **不刷同步域本身。** 这个事件是轮查询自己读到新进度时发的(`useSyncRound`),轮就是此刻刚读到的
-   * 那一份 —— 再把它标旧,等于每前进一格立刻多一发 `getSyncRound`;发起回包刚落进缓存(那是更新的
-   * 一份)时,紧跟着的那发 GET 还会把它换掉。轮还在跑,轮询自己会接着读。
+   * A sync round advanced or finished (failure counts too: sync may still run in the queue and some snapshots may be stored).
+   * Refreshes snapshot atoms, the account list and enrichment prices, but NOT the sync domain: this event fires when the
+   * round query itself read new progress, so marking it stale would cost an extra `getSyncRound` per step.
    */
   "sync.round": [portfolioKeys.snapshotsPrefix(), accountKeys.all, tokenKeys.enrichment()],
 
-  /** 抽屉里的「单独同步」。改的东西和一轮同步一样,只是范围小 —— 前缀是同一批。 */
+  /** The drawer's single-account sync: same prefixes as a round, smaller scope. */
   "account.sync": [
     syncKeys.all,
     portfolioKeys.snapshotsPrefix(),
@@ -41,14 +24,10 @@ export const REFRESH_MAP = {
   ],
 
   /**
-   * 账户与手记资产的增删改:新建 / 更新 / 归档 / 删除账户、替换凭据,以及手记代币与手记活动的增删改。
-   *
-   * 账户行本身 + 同步轮次(页头摘要) + dataStats + 手记法币身份。
-   *
-   * **快照也要刷**:手记账户从不同步(ADR 0018),它的余额是 `getSnapshots` 读时经
-   * `injectManualSnapshots` 现算的 —— 不像链上/CEX 账户要等下一轮同步才落库。所以在
-   * manual-tokens-panel 改/加/删手记持仓(走的正是 `account.write`)后不刷快照的话,首页总额、
-   * 账户页那一行、insights 分布图都会停在旧数,纯手记组合更是永远没有可同步账户来带一把。
+   * Account and manual-asset writes (create / update / archive / delete, credential replace, manual tokens / activities):
+   * account rows, sync round, dataStats, manual fiat identity. Snapshots too: manual accounts never sync, their
+   * balances are computed at read time by `injectManualSnapshots`, so skipping them leaves home totals, account rows and
+   * insights stale.
    */
   "account.write": [
     accountKeys.all,
@@ -59,9 +38,7 @@ export const REFRESH_MAP = {
     portfolioKeys.snapshotsPrefix(),
   ],
 
-  /**
-   * 归档 / 解归档:封存快照(manual) + 解 pin —— 在 `account.write` 那批之上再多刷一条 tab 条。
-   */
+  /** Archive / unarchive: `account.write`'s prefixes plus the tab strip (sealed manual snapshot, unpin). */
   "account.archive": [
     accountKeys.all,
     syncKeys.all,
@@ -73,53 +50,28 @@ export const REFRESH_MAP = {
   ],
 
   /**
-   * 标签的新建 / 改名 / 删除,以及给账户打标签 / 摘标签。
-   *
-   * **标签域要刷**:标签定义与账户关联变了,徽标、标签选择器、tab 条的每档小计(客户端按
-   * 标签关联 + 缓存的总览现算)都跟着变。
-   *
-   * 首页总览已改原子 query(FOL-56):tag pin 内容在浏览器按 `accountTagLinks` 收窄账户,
-   * 不必 invalidate 快照键 —— 只刷标签域即可。
+   * Tag create / rename / delete and tagging accounts. Refreshes the tag domain only: badges, the picker and tab-strip
+   * subtotals follow, and the overview is composed in the browser from `accountTagLinks`, so snapshot keys stay valid.
    */
   "tag.write": [tagKeys.all],
 
   /**
-   * 新建 / 改名 / 删除组合、设默认组合、把账户移到别的组合 —— 清单、归属、两边的总览与走势都可能变。
-   *
-   * **要连标签域一起刷。** Tag 归属 Portfolio,所以组合域的两处写会**连带删掉标签关联**:
-   * 移动账户时 `portfolioStore.move` 显式 `delete(accountTags)`(账户不能挂别的组合的 Tag),
-   * 删组合时 tags 经外键 cascade 清掉。只刷组合域的话,账户行的徽标和抽屉里的标签选择器
-   * 会继续显示服务端**已经删掉**的标签 —— 幽灵标签,而且不报错。
-   *
-   * **账户域与同步域也要刷**(ADR 0047 之后新欠的账):账户页那几份数据现在是**服务端按组合筛好的**,
-   * 移动账户 / 删组合(成员退回默认)直接改了「哪个组合里有哪些账户」—— 不刷的话,被移走的账户
-   * 还留在旧组合的列表里,「移到组合」的绿勾也画在旧组合上。改造前这条靠「刷组合域 → 归属表变 →
-   * 客户端重筛」兜着,归属表不下发之后那条路没有了。页头的同步摘要(`N / M` 与清单)同理 ——
-   * 它在服务端按组合收口更早(#530),账户/快照键失效后面板跟着变。
+   * Portfolio create / rename / delete, set default, move account. Also refresh the tag domain: tags belong to a portfolio,
+   * and moving an account (`portfolioStore.move` deletes `accountTags`) or deleting a portfolio (FK cascade) removes tag
+   * links, so otherwise ghost tags remain with no error. Also the account and sync domains: account data is filtered
+   * per portfolio on the server, so membership changes must reload them and the header sync summary.
    */
   "portfolio.write": [portfolioKeys.all, tagKeys.all, accountKeys.all, syncKeys.all],
 
-  /**
-   * 自定义 Tab 的新建 / 改目标 / 删除。**只刷 tab 条,不刷总览** ——
-   * 增删一个 Tab 不改任何余额,连带把昂贵的总览拉一遍是白花钱。
-   */
+  /** Custom tab create / retarget / delete. Tab strip only: tabs change no balance, so refetching the overview is waste. */
   "portfolio.pin.write": [portfolioKeys.tabs()],
 
-  // 切展示币种 / 界面语言**不在这张表里**:两者都存在浏览器(ADR 0049 补记),而且都进了查询键
-  // (`preferenceKeys.currency(code)` / `tokenKeys.fiatOptions(locale)`)—— 换值就是换键,
-  // 没有一份旧数据需要标记为旧。
+  // Display currency / UI language aren't here: both live in the browser and are in query keys, so a new value is a new key.
 
-  /**
-   * 改估值口径(self-first / source-first)。它是**读时重估**,所以历史不用重算,
-   * 但总览、走势、账户持仓的现值全部按新口径重来 —— 口径本身在 settings query 里,
-   * 富化字典与快照原料不变,但浏览器合并会重算。
-   */
+  /** Valuation mode change: read-time revaluation, so history isn't recomputed, but overview / trend / holdings values recompute in the browser. */
   "settings.valuation": [settingsKeys.valuation()],
 
-  /**
-   * 导入数据。这是唯一一条**什么都可能变**的写:账户、快照、标签、组合全在里面,
-   * 所以老老实实把每个域都列上 —— 这里省一个前缀就是一处「导完了某一块画面不动」。
-   */
+  /** Import: anything may change, so every domain is listed; omitting one leaves a block of the screen stale. */
   "settings.data": [
     settingsKeys.all,
     syncKeys.all,
@@ -130,9 +82,8 @@ export const REFRESH_MAP = {
   ],
 
   /**
-   * **服务端的数据版本号变了**(FOL-94):别的标签页 / 设备 / 后台同步写过了,而本页不知道写的是什么。
-   * 所以和导入一样什么都可能变 —— 前缀与 `settings.data` 同一批。本页自己的写照旧走上面各条
-   * 定向刷新;版本号那一路随后也会看到号变了、再刷一次(见 `data-version.ts` 的取舍)。
+   * The server's data version changed (another tab / device / background sync wrote): anything may change, so the same
+   * prefixes as `settings.data`. This page's own writes still use the targeted entries above (see `data-version.ts`).
    */
   "data.changed": [
     settingsKeys.all,
@@ -146,10 +97,8 @@ export const REFRESH_MAP = {
 
 export type RefreshEvent = keyof typeof REFRESH_MAP;
 
-// 调用点只写语义。返回 Promise 以便需要「等刷新落地」的调用点 await(比如撤 optimistic overlay 前)。
-//
-// `invalidateQueries` 默认只重拉**当前挂载在用**的查询,其余仅标记为旧 —— 所以不需要按当前页收窄,
-// 刷一个域的整个前缀天然按页收敛。
+// Returns a Promise so callers can await the refresh (e.g. before removing an optimistic overlay).
+// `invalidateQueries` only refetches mounted queries and marks the rest stale, so no per-page narrowing is needed.
 export const invalidateFor = (queryClient: QueryClient, event: RefreshEvent): Promise<void> =>
   Promise.all(
     REFRESH_MAP[event].map((queryKey) => queryClient.invalidateQueries({ queryKey })),

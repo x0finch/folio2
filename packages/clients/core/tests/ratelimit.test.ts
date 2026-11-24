@@ -21,20 +21,15 @@ import {
 } from "../src/ratelimit";
 import { SLOT_URL_PREFIX, type SlotCache, SlotCacheOverride } from "../src/slot-cursor";
 
-// 时序断言全部走 `TestClock` —— **不断言墙钟**(CODING.md)。
-//
-// **两档分开测,因为它们是两个实现**:`memory` 是 Effect 官方的 token-bucket(我们只验「确实委托
-// 过去了」,官方算法不重复验);`isolated` 是本包为跨 isolate 写的 GCRA,那才是要细测的。
-//
-// `isolated` 的游标按 key 存在模块级(刻意的,见 slot-cursor.ts),所以**每个 case 用不同的 key**
-// 来隔离 —— 不提供 reset 开关。
+// Timing asserts run on TestClock, never the wall clock. `memory` delegates to Effect (only the
+// delegation is checked); `isolated` is our GCRA. Its cursors are module-level per key, so each
+// case uses a distinct key.
 
 let seq = 0;
 const freshKey = () => `test:${seq++}`;
 
-// 起一个 fiber 跑 task,推进 ms 毫秒,回「已经跑完了吗」。
-// **`ms` 为 0 也要 adjust** —— 它顺带把调度让出去,不然刚 fork 的 fiber 一步都没跑过,poll 必然是
-// None,「立刻放行」那几条就永远断言失败。
+// Forks the task, advances `ms`, reports whether it finished. Adjust even for 0 ms: it yields,
+// otherwise the fresh fiber never runs and the poll is always None.
 const settledAfter = (
   options: Omit<RateLimitOptions, "key"> & { key?: string },
   ms: number,
@@ -56,44 +51,41 @@ const settledAfter = (
 const nTimes = (n: number) => (gate: RateLimiter.RateLimiter) =>
   Effect.all(Array.from({ length: n }, (_, i) => gate(Effect.succeed(i))));
 
-describe("scope: memory —— 委托给官方实现", () => {
-  // **显式选档。** 默认是 `isolated`(生产的样子),而这几条测的是 memory 档的行为本身 ——
-  // 不写死的话它们会跟着默认值漂,曾经就是这样:默认从 memory 改成 isolated 时,下面
-  // 「桶绑在 scope 上」那条立刻挂了(isolated 的游标刻意跨 make 共享)。
-  it("前 limit 发满额突发", async () => {
+describe("scope: memory — delegates to the built-in", () => {
+  // Explicit scope: the default is `isolated`, whose cursor is shared across `make` calls.
+  it("first `limit` requests burst at full quota", async () => {
     expect(
       await settledAfter({ limit: 5, interval: "1 seconds", scope: "memory" }, 0, nTimes(5)),
     ).toBe(true);
   });
 
-  it("第 limit+1 发等一个令牌(官方 token-bucket:interval/limit)", async () => {
+  it("request limit+1 waits one token (built-in token-bucket: interval/limit)", async () => {
     const opts = { limit: 5, interval: "1 seconds", scope: "memory" } as const;
     expect(await settledAfter(opts, 199, nTimes(6))).toBe(false);
     expect(await settledAfter(opts, 200, nTimes(6))).toBe(true);
   });
 
-  it("桶绑在 scope 上 —— 每次 make 一份,天然隔离(同 key 也不串)", async () => {
+  it("bucket is bound to the scope — each make is isolated (even with the same key)", async () => {
     const opts = { key: "fixed", limit: 1, interval: "1 seconds", scope: "memory" } as const;
-    // 同一个 key 连做两次,第二次仍是满额:memory 档不跨 make 共享。
     expect(await settledAfter(opts, 0, nTimes(1))).toBe(true);
     expect(await settledAfter(opts, 0, nTimes(1))).toBe(true);
   });
 });
 
-describe("scope: isolated —— GCRA 时隙游标", () => {
+describe("scope: isolated — GCRA slot cursor", () => {
   const iso = (over: Partial<RateLimitOptions> = {}) =>
     ({ limit: 1, interval: "125 millis", scope: "isolated", ...over }) as const;
 
-  it("头一发立刻放行", async () => {
+  it("first request passes immediately", async () => {
     expect(await settledAfter(iso(), 0, nTimes(1))).toBe(true);
   });
 
-  it("limit=1 时第二发等一个间距", async () => {
+  it("with limit=1 the second request waits one spacing", async () => {
     expect(await settledAfter(iso(), 124, nTimes(2))).toBe(false);
     expect(await settledAfter(iso(), 125, nTimes(2))).toBe(true);
   });
 
-  it("突发额度 = (limit-1) 个间距", async () => {
+  it("burst = (limit-1) spacings", async () => {
     const o = iso({ limit: 5, interval: "1 seconds" });
     expect(await settledAfter(o, 0, nTimes(5))).toBe(true);
     expect(await settledAfter(iso({ limit: 5, interval: "1 seconds" }), 199, nTimes(6))).toBe(
@@ -102,30 +94,28 @@ describe("scope: isolated —— GCRA 时隙游标", () => {
     expect(await settledAfter(iso({ limit: 5, interval: "1 seconds" }), 200, nTimes(6))).toBe(true);
   });
 
-  it("游标跨 make 调用共享(同 key)—— 这正是 memory 档做不到的那件事", async () => {
+  it("cursor is shared across make calls (same key) — what memory can't do", async () => {
     const key = freshKey();
     const o = iso({ key });
-    // 第一次 make 花掉这一发,第二次 make 拿到的是被推过的游标 → 要等。
-    expect(await settledAfter(o, 0, nTimes(1))).toBe(true); // 时隙 0,游标推到 125
-    expect(await settledAfter(o, 0, nTimes(1))).toBe(false); // 时隙 125,要等;游标推到 250
-    expect(await settledAfter(o, 250, nTimes(1))).toBe(true); // 时隙 250
+    expect(await settledAfter(o, 0, nTimes(1))).toBe(true); // slot 0, cursor → 125
+    expect(await settledAfter(o, 0, nTimes(1))).toBe(false); // slot 125, waits; cursor → 250
+    expect(await settledAfter(o, 250, nTimes(1))).toBe(true); // slot 250
   });
 
-  it("不同 key 各有一份额度", async () => {
+  it("different keys have separate quotas", async () => {
     expect(await settledAfter(iso(), 0, nTimes(1))).toBe(true);
-    expect(await settledAfter(iso(), 0, nTimes(1))).toBe(true); // 新 key
+    expect(await settledAfter(iso(), 0, nTimes(1))).toBe(true); // new key
   });
 
-  it("闲置过后突发额度自动补满(不惩罚闲置)", async () => {
+  it("burst refills after idling (idle time is not penalized)", async () => {
     const key = freshKey();
     const o = iso({ key, limit: 2, interval: "100 millis" });
-    expect(await settledAfter(o, 0, nTimes(2))).toBe(true); // 花掉突发
-    expect(await settledAfter(o, 10_000, nTimes(2))).toBe(true); // 闲很久后又能连发
+    expect(await settledAfter(o, 0, nTimes(2))).toBe(true); // spend the burst
+    expect(await settledAfter(o, 10_000, nTimes(2))).toBe(true); // long idle → burst again
   });
 
-  it("重试加在闸外面时,每次重试都重新排队", async () => {
-    // 相对迁移前的**语义变化点**:老版把 retry 收进 http 包、靠包自己保证「闸在重试内层」;
-    // 现在重试由调用方加在外面,而 `Effect.retry` 重跑的是整个 effect(闸在里面)—— 自动成立。
+  it("retry outside the gate re-queues every attempt", async () => {
+    // `Effect.retry` reruns the whole effect, gate included.
     const flaky = () => {
       let n = 0;
       return (gate: RateLimiter.RateLimiter) =>
@@ -138,15 +128,14 @@ describe("scope: isolated —— GCRA 时隙游标", () => {
           ),
         );
     };
-    // 三次尝试 = 第 2、3 发各等一个间距。
+    // Three attempts = attempts 2 and 3 each wait one spacing.
     expect(await settledAfter(iso({ key: freshKey() }), 249, flaky())).toBe(false);
     expect(await settledAfter(iso({ key: freshKey() }), 250, flaky())).toBe(true);
   });
 });
 
-describe("scope: isolated —— 跨 isolate 共享游标", () => {
-  // 假 Cache API:一个 Map。用 `SlotCacheOverride` 注入 —— 它是**可选服务**(`Effect.serviceOption`
-  // 读),所以不 provide 时 `R` 通道也是干净的,生产回退到 `globalThis.caches`。
+describe("scope: isolated — cursor shared across isolates", () => {
+  // Fake Cache API (a Map), injected via the optional `SlotCacheOverride`.
   const fakeCache = (seed?: { key: string; slotAt: number }) => {
     const store = new Map<string, string>();
     if (seed) store.set(SLOT_URL_PREFIX + encodeURIComponent(seed.key), String(seed.slotAt));
@@ -159,9 +148,9 @@ describe("scope: isolated —— 跨 isolate 共享游标", () => {
     return { cache, store };
   };
 
-  it("冷启时读回别人的进度 —— 新 isolate 不再开局满额突发", async () => {
+  it("cold start reads others' progress — a new isolate gets no fresh burst", async () => {
     const key = freshKey();
-    // 别的 isolate 已经把游标推到 5 秒后。TestClock 从 0 起 → 本 isolate 该等到那时候。
+    // Another isolate pushed the cursor to 5s; TestClock starts at 0 → wait until then.
     const { cache } = fakeCache({ key, slotAt: 5000 });
     const o = { limit: 1, interval: "125 millis", scope: "isolated", key } as const;
     expect(await settledAfter(o, 4999, nTimes(1), cache)).toBe(false);
@@ -171,7 +160,7 @@ describe("scope: isolated —— 跨 isolate 共享游标", () => {
     expect(await settledAfter(o2, 5000, nTimes(1), again.cache)).toBe(true);
   });
 
-  it("抢完把新游标播出去", async () => {
+  it("publishes the new cursor after a grab", async () => {
     const key = freshKey();
     const { cache, store } = fakeCache();
     await settledAfter(
@@ -181,10 +170,10 @@ describe("scope: isolated —— 跨 isolate 共享游标", () => {
       cache,
     );
     const written = store.get(SLOT_URL_PREFIX + encodeURIComponent(key));
-    expect(Number(written)).toBe(125); // tat(0) + 一个间距
+    expect(Number(written)).toBe(125); // tat(0) + one spacing
   });
 
-  it("缓存读写炸了不影响放行 —— 限速器不该是新的故障源", async () => {
+  it("cache read/write failures don't block — the limiter must not become a failure source", async () => {
     const broken: SlotCache = {
       match: () => Promise.reject(new Error("cache down")),
       put: () => Promise.reject(new Error("cache down")),
@@ -194,12 +183,9 @@ describe("scope: isolated —— 跨 isolate 共享游标", () => {
   });
 });
 
-describe("scope: isolated —— 并发", () => {
-  // 抢时隙那一步的原子性是这个实现的核心断言(slot-cursor.ts 写着「并发 fiber 各拿一个不同的
-  // 游标」),而上面所有 case 用的 `Effect.all` **默认是顺序执行**(concurrency 1)—— 验不到它。
-  // 这一组显式开并发。
+describe("scope: isolated — concurrency", () => {
+  // `Effect.all` is sequential by default, so the slot-grab atomicity needs explicit concurrency.
 
-  // 每发记下它真正被放行的时刻。
   const stamped = (seen: number[]) => (gate: RateLimiter.RateLimiter) =>
     Effect.all(
       Array.from({ length: 5 }, () =>
@@ -208,7 +194,7 @@ describe("scope: isolated —— 并发", () => {
       { concurrency: "unbounded" },
     );
 
-  it("5 个 fiber 并发抢 —— 各拿一个不同的时隙,间距不塌", async () => {
+  it("5 concurrent fibers each get a distinct slot; spacing holds", async () => {
     const seen: number[] = [];
     const key = freshKey();
     await Effect.gen(function* () {
@@ -218,13 +204,13 @@ describe("scope: isolated —— 并发", () => {
       yield* Fiber.join(fiber);
     }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
 
-    // limit=1 → 间距 125ms、突发 0。5 发应落在 0 / 125 / 250 / 375 / 500。
+    // limit=1 → 125ms spacing, no burst: 0 / 125 / 250 / 375 / 500.
     expect([...seen].sort((a, b) => a - b)).toEqual([0, 125, 250, 375, 500]);
-    // 关键:没有两发撞在同一个时隙上(撞了就是闸漏了)。
+    // No two on the same slot (that would be a leak).
     expect(new Set(seen).size).toBe(5);
   });
 
-  it("带突发额度时:前 limit 发同时放行,其余排开", async () => {
+  it("with a burst: the first `limit` pass together, the rest are spaced", async () => {
     const seen: number[] = [];
     const key = freshKey();
     await Effect.gen(function* () {
@@ -234,19 +220,17 @@ describe("scope: isolated —— 并发", () => {
       yield* Fiber.join(fiber);
     }).pipe(Effect.scoped, Effect.provide(TestContext.TestContext), Effect.runPromise);
 
-    // 间距 100ms、突发 200ms → 前 3 发在 0,之后每 100ms 一发。
+    // 100ms spacing, 200ms burst → first 3 at 0, then one every 100ms.
     expect([...seen].sort((a, b) => a - b)).toEqual([0, 0, 0, 100, 200]);
   });
 });
 
-describe("scope: isolated —— 冷启并发(真实场景:新 isolate 同时同步多个账户)", () => {
-  it("首发就并发时,seed 读回的共享进度对所有 fiber 都生效", async () => {
-    // seed 是**异步**的(要读 Cache API,中间会让出)。若它对并发者不形成屏障,先跑到「抢」那一步
-    // 的 fiber 会拿着还没被 seed 抬起来的游标 —— 于是新 isolate 一冷启就漏一批出去,而这正是
-    // 装 `isolated` 档要防的那件事。
+describe("scope: isolated — concurrent cold start (new isolate syncing many accounts)", () => {
+  it("seeded shared progress applies to every fiber when the first grabs are concurrent", async () => {
+    // seed is async; if it isn't a barrier, early fibers grab an un-seeded cursor and leak a burst.
     const key = `${freshKey()}-cold`;
     const store = new Map<string, string>();
-    // 别的 isolate 已经把游标推到 5 秒后。
+    // Another isolate pushed the cursor to 5s.
     store.set(SLOT_URL_PREFIX + encodeURIComponent(key), "5000");
     const cache: SlotCache = {
       match: async (u) => (store.has(u) ? new Response(store.get(u)) : undefined),
@@ -275,30 +259,28 @@ describe("scope: isolated —— 冷启并发(真实场景:新 isolate 同时同
       Effect.runPromise,
     );
 
-    // 一发都不许早于别人已经占到的 5000。
+    // None may pass before the 5000 already taken elsewhere.
     expect(Math.min(...seen)).toBeGreaterThanOrEqual(5000);
     expect(new Set(seen).size).toBe(5);
   });
 });
 
-describe("这一档不支持什么,要说出来", () => {
-  it('`algorithm: "fixed-window"` 在 isolated 档**构造时就炸**,不是静默忽略', async () => {
-    // 这一档顶着官方 `RateLimiter` 的类型,而那个类型允许传 `algorithm` —— 于是「类型说支持、
-    // 运行时悄悄不管」就成了最难查的那种坑(复审第 4 条)。GCRA 是 token-bucket 的连续时间版,
-    // 一个游标表达不了 fixed-window,那就在构造时说清楚。
+describe("unsupported options fail loudly", () => {
+  it('`algorithm: "fixed-window"` dies at construction in the isolated scope', async () => {
+    // The type allows `algorithm`; one GCRA cursor can't express fixed-window.
     const exit = await Effect.runPromiseExit(
       Effect.scoped(
         make({ key: "fw-test", limit: 2, interval: "1 seconds", algorithm: "fixed-window" }),
       ),
     );
     expect(Exit.isFailure(exit)).toBe(true);
-    // 是 defect(配错了,不是运行时故障)—— 错误消息要说清「换哪一档」,不然读到的人还得去翻源码。
+    // A defect (misconfiguration); the message must name the scope to switch to.
     const message = Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "";
     expect(message).toContain("token-bucket");
     expect(message).toContain("memory scope");
   });
 
-  it("token-bucket(和不传)照常能建", async () => {
+  it("token-bucket (or omitted) builds normally", async () => {
     for (const algorithm of ["token-bucket", undefined] as const) {
       const gate = await Effect.runPromise(
         Effect.scoped(make({ key: `tb-${algorithm}`, limit: 2, interval: "1 seconds", algorithm })),
@@ -308,14 +290,13 @@ describe("这一档不支持什么,要说出来", () => {
   });
 });
 
-describe("none 档:直接放行", () => {
-  // 给「这个文件测的不是限频」的测试用 —— 上游 adapter 的翻页 / 分块一个用例就要打十几发,
-  // 而 `memory` 档在突发额度用完后会停下来等,`TestClock` 又不会自己走 → 测试挂死。
-  it("超过额度也不等,一个 TestClock 时刻内全部跑完", async () => {
+describe("scope: none — pass-through", () => {
+  // Once the burst is spent `memory` waits on a TestClock that never moves → hung test.
+  it("doesn't wait past the quota; all finish at one TestClock instant", async () => {
     const done = await Effect.gen(function* () {
       const gate = yield* make({ key: freshKey(), limit: 1, interval: "1 minutes" });
       const at: number[] = [];
-      // 额度是「每分钟 1 发」,而这里连打 5 发一次都不推进时钟。
+      // Quota is 1/minute; fire 5 without advancing the clock.
       for (let i = 0; i < 5; i++) at.push(yield* gate(Clock.currentTimeMillis));
       return at;
     }).pipe(
@@ -325,16 +306,16 @@ describe("none 档:直接放行", () => {
       Effect.runPromise,
     );
     expect(done).toHaveLength(5);
-    expect(new Set(done).size).toBe(1); // 一发都没等
+    expect(new Set(done).size).toBe(1); // none waited
   });
 
-  it("进程级默认档也能选到它 —— 没有 provide 位置的测试靠这个", async () => {
+  it("selectable via the process-wide default (for tests with nowhere to provide)", async () => {
     setScopeDefaultForTests("none");
     try {
       const gate = await Effect.runPromise(
         Effect.scoped(make({ key: freshKey(), limit: 1, interval: "1 minutes" })),
       );
-      // 不传 scope、也不 provide 服务,拿到的仍是放行档。
+      // No scope, no service → still pass-through.
       const at = await Effect.runPromise(
         Effect.provide(
           Effect.gen(function* () {
@@ -351,7 +332,7 @@ describe("none 档:直接放行", () => {
     }
   });
 
-  it("服务优先于进程级默认 —— 两者都在时听 provide 的那个", async () => {
+  it("the service beats the process-wide default", async () => {
     setScopeDefaultForTests("none");
     try {
       const key = freshKey();
@@ -367,7 +348,7 @@ describe("none 档:直接放行", () => {
           Effect.provide(TestContext.TestContext),
         ),
       );
-      // 真被拦住了 → 说明听的是服务给的 `isolated`,不是进程级的 `none`。
+      // Actually gated → the service's `isolated` won over the process-wide `none`.
       expect(started).toBe(true);
     } finally {
       setScopeDefaultForTests(undefined);

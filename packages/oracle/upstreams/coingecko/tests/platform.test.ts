@@ -10,7 +10,7 @@ const ASSET_PLATFORMS = [
     image: { small: "https://cgk/arbitrum.jpg" },
   },
   { id: "solana", chain_identifier: null, name: "Solana", image: { small: "https://cgk/sol.jpg" } },
-  { id: "no-image", chain_identifier: 999 }, // 无 name / image → 降级
+  { id: "no-image", chain_identifier: 999 }, // no name / image: degrades
 ];
 
 const chains = async () =>
@@ -24,7 +24,7 @@ const chains = async () =>
   );
 
 describe("fetchChains", () => {
-  it("一条链产短形 slug;有数字 chainId 再产 evm:<id>,两条同名同图", async () => {
+  it("one chain yields the short slug; with a numeric chainId also evm:<id>, same name and image", async () => {
     const byKey = await chains();
 
     expect(byKey.get("arbitrum-one")).toEqual({
@@ -34,14 +34,14 @@ describe("fetchChains", () => {
     });
     expect(byKey.get("evm:42161")).toMatchObject({ name: "Arbitrum One" });
     expect(byKey.get("solana")).toMatchObject({ name: "Solana" });
-    expect(byKey.has("evm:")).toBe(false); // chain_identifier 为 null → 不产 evm 键
+    expect(byKey.has("evm:")).toBe(false); // null chain_identifier yields no evm key
   });
 
-  it("上游没给名字 → 用它的 id;没给图 → 不带 logo", async () => {
+  it("falls back to the id when upstream gives no name; omits logo when no image", async () => {
     const byKey = await chains();
 
     expect(byKey.get("no-image")?.name).toBe("no-image");
     expect(byKey.get("no-image")?.logo).toBeUndefined();
-    expect(byKey.has("evm:999")).toBe(true); // 仍然两个键都产
+    expect(byKey.has("evm:999")).toBe(true); // both keys still produced
   });
 });

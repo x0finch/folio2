@@ -10,10 +10,7 @@ import { blockOutbound } from "../_kit/outbound";
 import { call, callExit, failureOf } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 portfolios/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("portfolios/move-account", () => {
-  // #527 · moveAccountToPortfolio
   const USER = "h-pfs-move";
 
   const whereIs = async (userId: string, accountId: string) =>
@@ -39,7 +36,7 @@ describe("portfolios/move-account", () => {
   });
 
   describe("moveAccountToPortfolio", () => {
-    it("移过去 → 归属变了,原 Portfolio 里没它了", async () => {
+    it("move → membership changes, gone from the source portfolio", async () => {
       const { def, target, account } = await seed(USER);
 
       await call(
@@ -51,7 +48,7 @@ describe("portfolios/move-account", () => {
       expect(await whereIs(USER, account.id)).not.toBe(def.id);
     });
 
-    it("带 newName 移 → 新建一个 Portfolio 并落进去", async () => {
+    it("move with newName → new portfolio created and used", async () => {
       const { account } = await seed(USER);
 
       await call(USER, handleMoveAccountToPortfolio({ accountId: account.id, newName: "新仓" }));
@@ -62,7 +59,7 @@ describe("portfolios/move-account", () => {
       expect(await whereIs(USER, account.id)).toBe(made?.id);
     });
 
-    it("移到它已经在的那个 → 幂等,不是报错", async () => {
+    it("move to its current portfolio → idempotent, not an error", async () => {
       const { def, account } = await seed(USER);
 
       await call(
@@ -74,13 +71,12 @@ describe("portfolios/move-account", () => {
       expect(await db(USER).portfolios.listMemberships()).toHaveLength(1);
     });
 
-    it("portfolioId 和 newName 都不给 → schema 拒", () => {
+    it("neither portfolioId nor newName → schema rejects", () => {
       expect(MoveAccountInput.safeParse({ accountId: "a" }).success).toBe(false);
     });
 
-    it("两个都给 → newName 赢,新建那个才是落脚点", async () => {
-      // 代码已定优先级(`data.newName ? 新建 : portfolioId`),这条把它钉住 —— 否则将来有人
-      // 「顺手」换成 portfolioId 优先,界面上会变成「点了新建却落进了旧仓」。
+    it("both given → newName wins", async () => {
+      // Pins the precedence; flipping it would file the account into the old portfolio on "create new".
       const { target, account } = await seed(USER);
 
       await call(
@@ -99,7 +95,7 @@ describe("portfolios/move-account", () => {
       expect(await whereIs(USER, account.id)).not.toBe(target.id);
     });
 
-    it("目标 Portfolio 是别人的 → NotFound,账户不许落到别人名下", async () => {
+    it("target portfolio belongs to someone else → NotFound, account not moved", async () => {
       const { def, account } = await seed(USER);
       const theirs = await seed(otherUser(USER));
 

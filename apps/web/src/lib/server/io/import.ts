@@ -3,23 +3,16 @@ import { Effect } from "effect";
 import { SEMI_PREFIX } from "@/lib/server/creds";
 import { EXPORT_VERSION } from "./export";
 
-// 纯导入逻辑(无 server-only import → 可单测,DB 经 deps 注入)。
-// 单遍处理 NDJSON 记录;导出顺序保证 token→account→snapshot→manualActivity,
-// 故引用某 id 的记录出现时,其 id map 已就绪。
-//
-// **合并式导入,幂等**(#204,A 方案):每类实体按**内容自然键** find-or-create(见 db 的 import* op)——
-// token 按 ref、账户按 (connectorId+platform+label+creds)、快照按 (account,takenAt)、
-// 手记活动按整条内容。命中既有 → 复用(其新 id 记进映射表),没有 → 建新行。于是:**反复导入同一文件
-// 结果不变(不翻倍),导入不同文件则合并进来**。全程用新 id、按 userId 作用域去重,多用户安全。
-//
-// v3(#204):文件自带 Token 行(其 ref 嵌在里头)与手记账本;快照余额按 token_id(旧 id → 经 tokenMap 重映射)。
-// **不兼容旧文件** —— 版本闸只收 v3,v1/v2 明确报「太旧」。
-// 凭据(P6.6.1):重建存库 creds map —— public 字段真值原样;semi 字段(导出已打码)写成 `semi_<key>`
-// 占位待补录;secret 文件里没有 → 不写。
+// Pure import logic (no server-only imports, unit-testable; DB via injected deps). Single pass over NDJSON; the export
+// order guarantees id maps exist before records reference them. Merge-style and idempotent: each entity is
+// find-or-create by its content natural key (token by ref, account by connectorId+platform+label+creds, snapshot by
+// account+takenAt, activity by whole content), so re-importing a file doesn't double and a different file merges.
+// Only v3 is accepted (older files report "too old"). Creds: public as-is; semi (masked in export) stored as
+// `semi_<key>` placeholders awaiting completion; secrets aren't in the file.
 
 export class ImportError extends Error {}
 
-// 按暴露级别分类某 connector 的输入字段(由 route 用 registry 派生注入)。
+// Input fields of a connector by exposure level (injected by the route from the registry).
 interface InputKinds {
   publicKeys: string[];
   semiKeys: string[];
@@ -27,14 +20,14 @@ interface InputKinds {
 }
 
 interface ImportSnapshotBalance {
-  tokenId?: string; // 身份锚(由 apply 经 tokenMap 重映射后传入);#244 起 DB 必填
+  tokenId?: string; // anchor (remapped via tokenMap by apply); required in the DB
   amount: number;
   usdValue: number;
   kind: BalanceKind;
   selfPrice?: number;
   platform?: string;
   meta?: Record<string, unknown>;
-  note?: Note; // balance 级 note
+  note?: Note; // balance-level note
 }
 
 interface ImportActivity {
@@ -47,7 +40,7 @@ interface ImportActivity {
   createdAt?: number;
 }
 
-// 所有 import* 都是 find-or-create(按各自的内容自然键去重),让反复导入 / 合并幂等。
+// Every import* is find-or-create by its own content natural key, so re-import / merge is idempotent.
 export interface ImportDeps {
   categorize(connectorId: string): InputKinds;
   importToken(
@@ -78,8 +71,7 @@ export interface ImportDeps {
   ): Effect.Effect<void>;
 }
 
-// 一次导入各类实体的写入计数。**路由把它原样回给客户端**(`{ imported: counts }`),
-// 故导出:设置页导入复用它当返回类型(见 data-card),不另起一份。
+// Write counts per entity; the route returns it as-is, and the settings import reuses it as the return type.
 export interface ImportCounts {
   tokens: number;
   accounts: number;
@@ -87,7 +79,7 @@ export interface ImportCounts {
   activities: number;
 }
 
-// 解析一行 NDJSON → 记录对象;空行/坏 JSON → null(流式读会有不完整行,调用方按需缓冲)。
+// One NDJSON line -> record; empty / bad JSON -> null (streamed reads yield incomplete lines; callers buffer).
 export function parseImportLine(line: string): Record<string, unknown> | null {
   const s = line.trim();
   if (!s) return null;
@@ -109,7 +101,7 @@ const asRefs = (v: unknown): { namer: string; localName: string }[] =>
     : [];
 
 export function createImporter(deps: ImportDeps) {
-  const tokenMap = new Map<string, string>(); // 导出 token id → 新建 id
+  const tokenMap = new Map<string, string>(); // exported token id -> new id
   const accountMap = new Map<string, string>();
   const counts: ImportCounts = {
     tokens: 0,
@@ -119,19 +111,16 @@ export function createImporter(deps: ImportDeps) {
   };
   let metaSeen = false;
 
-  // **一条记录 = 一个 effect**(#394 T7)。四个写口都在 `R` 通道上(由路由那一次装配供上),
-  // 所以整条导入 —— 读流、解析、写库 —— 从头到尾一个 effect,一次装配。
-  // 以前是 `async apply` 里 `await deps.xxx()`,而那四个 dep 各自经过渡门面各装一次 layer:
-  // 一个几万行的导入文件就是几万次装配。
+  // One record = one effect: the four write ops are in `R` (provided once by the route), so the whole import is one effect with one assembly.
   const apply = (rec: Record<string, unknown>): Effect.Effect<void, ImportError> =>
     Effect.gen(function* () {
       if (rec.type === "meta") {
         const v = rec.version;
         if (v !== EXPORT_VERSION) {
-          // 只收当前版本;旧文件明确报「太旧」而不是崩(#204)。
+          // Only the current version; older files get a clear "too old" instead of a crash.
           const hint =
             typeof v === "number" && v < EXPORT_VERSION
-              ? `导出文件太旧(v${v}),本版本只支持 v${EXPORT_VERSION};请用新版本重新导出`
+              ? `export file too old (v${v}); this version only supports v${EXPORT_VERSION}; re-export with a newer version`
               : `unsupported export version: ${String(v)}(expected v${EXPORT_VERSION})`;
           return yield* Effect.fail(new ImportError(hint));
         }
@@ -164,7 +153,7 @@ export function createImporter(deps: ImportDeps) {
           const connectorId = String(rec.connectorId);
           const fileCreds = (rec.creds as Record<string, string> | undefined) ?? {};
           const { publicKeys, semiKeys } = deps.categorize(connectorId);
-          // 重建存库 map:public 真值原样;semi(导出已打码)写 `semi_<key>` 占位待补录;secret 文件里没有。
+          // Rebuild the stored map: public as-is; semi (masked in export) as `semi_<key>` placeholder; secrets absent from the file.
           const stored: Record<string, string> = {};
           for (const [k, v] of Object.entries(fileCreds)) {
             if (publicKeys.includes(k)) stored[k] = v;
@@ -172,11 +161,11 @@ export function createImporter(deps: ImportDeps) {
           }
           const created = yield* deps.importAccount({
             connectorId,
-            // v3 线格式字段名为 `platform`(v2 是 network);库里那一列 #203 起叫 platform。
+            // v3 wire field is `platform` (v2 called it network).
             platform: typeof rec.platform === "string" ? rec.platform : undefined,
             label: String(rec.label ?? ""),
             creds: JSON.stringify(stored),
-            // 归档态随文件带进 find-or-create(见 importAccount:命中既有则对齐归档)。
+            // Archived state goes into find-or-create (importAccount aligns an existing match).
             archivedAt: typeof rec.archivedAt === "number" ? rec.archivedAt : undefined,
           });
           if (typeof rec.id === "string") accountMap.set(rec.id, created.id);
@@ -187,8 +176,8 @@ export function createImporter(deps: ImportDeps) {
           const accountId = accountMap.get(String(rec.accountId));
           if (accountId) {
             const rawBalances = Array.isArray(rec.balances) ? rec.balances : [];
-            // 余额的 token_id 是导出侧旧 id → 经 tokenMap 重映射;映射不到的行丢弃(#244 起 token_id 必填,
-            // 且合法 v3 文件里每条余额的 token 都在前面导出过 → 恒能映射)。
+            // The balance's token_id is an export-side id remapped via tokenMap; unmappable rows are dropped (token_id is required
+            // and a valid v3 file exports every token first).
             const balances: ImportSnapshotBalance[] = rawBalances.flatMap((b) => {
               const oldId = typeof b.tokenId === "string" ? b.tokenId : undefined;
               const tokenId = oldId ? tokenMap.get(oldId) : undefined;

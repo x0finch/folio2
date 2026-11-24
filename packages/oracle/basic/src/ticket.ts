@@ -1,32 +1,14 @@
 import { formatTokenRef, normalizeNamer, parseTokenRef, type TokenRef } from "@folio/oracle-ref";
 
-// **票**(ticket)—— 一条 tokenRef 交给浏览器时的形状:base64url 编过的不透明串。
-//
-// 为什么不直接把 ref 发过去。选币下拉里的每一项都得带上「用户点的是哪个币」,而那个答案
-// 今天长成 `coingecko/usd-coin`。原样发出去,前端就多知道了两件不该它管的事:当前上游是谁,
-// 以及它的 id 长什么样 —— 于是迟早会有人在组件里 `split("/")`,换源那天就地爆炸。
-// 编一层之后前端只能**原样搬运**:点中什么就把那串还回来,解释权在服务端。
-//
-// **它不是加密、不是签名、也不是权限。** base64url 谁都能解开、也谁都能自己编一张。
-// 所以「这是我们发出去的那张票」只能靠**内容自证**:它的命名者必须就是当前那位 ——
-// 这就是 `decode` 为什么收 `namer`,而且是必填参数(可选的话总有一天有人忘了传)。
-//
-// 缺了这一句会怎样:手编一张 `<随便什么>/issued:<随便什么>` 塞进手记的表单,mint 那边
-// 「命名者不匹配 → 映射表查不到 → `hasTrustedSymbol(issued)` 为真 → 走 symbol 那一档」,
-// 于是**用户手敲的 symbol 又变成了可信线索** —— #223 刚收紧掉的正是这件事。
-// `issued` 的含义是「命名者为这个标识负责」,而在这道门上没人核对过那个命名者我们认不认识。
-//
-// **只比命名者就够了**,不必再挑形状:命名者对上之后,四种形状在 mint 里各有各的正常去处
-// (`contract` / `custom` 被 symbol 闸挡住,`issued` 走它该走的锚那一档)。
-//
-// 风险量级要说清:能编这张票的只有账号本人(server fn 有同源 CSRF 闸,别的站点构造不出来),
-// 而他在选币下拉里点一下就能合法拿到同样结果。所以这不是安全洞 —— 补它的理由是
-// **服务端的保证不该依赖客户端守规矩**,而这一句的成本就是一次比较。
-//
-// 收到票之后照样要过 mint 那条正常的路,而 mint 本身就是 per-user 的 ——
-// 拿别人的票也只会在自己库里建自己的行。
-//
-// 用 base64url 而不是裸 base64:票要进 URL 查询串(选币取价那个 GET),`+` / `/` 得转义。
+// A ticket is a tokenRef handed to the browser: an opaque base64url string, so the front end only carries it back and cannot
+// learn the current upstream or its id shape (someone would `split("/")` and break on a source change).
+// It is not encryption, a signature or authorisation: anyone can decode or forge one, so "this is a ticket we issued" is
+// proven by content: its namer must be the current one, hence `decode` takes `namer` as a required parameter. Without the check, a
+// hand-forged `<any>/issued:<any>` would turn a user-typed symbol into a trusted hint at mint (`hasTrustedSymbol(issued)`).
+// Comparing the namer suffices; the four shapes each have a normal destination in mint. Only the account owner can forge one
+// (same-origin CSRF guard) and the picker gives the same result legitimately, so this is no security hole: it keeps the
+// server's guarantee from depending on a well-behaved client. A received ticket still goes through mint, which is per-user.
+// base64url rather than base64: tickets go in URL query strings, where `+` and `/` would need escaping.
 
 const B64URL = /^[A-Za-z0-9_-]+$/;
 
@@ -47,16 +29,10 @@ export const tokenTicket = {
     return toB64Url(ref);
   },
 
-  // 解不开 / 不是合规 ref / 命名者不在 `namer` 之内 → 一律 undefined。**调用方必须处理这一档** ——
-  // 票是从网络上来的,当不合规的输入对待,而不是当自己刚编出来的东西。
-  //
-  // `namer` 可给**一组**:我们如今在不止一位命名者下发票 —— 当前上游(coingecko)发加密币的票,
-  // `fiat` 发法币的票(ADR 0025 / #272)。两者都是「我们发出去的那张」,收到时都得放行。传一组
-  // 就是「命名者必须是其中之一」;单个仍照旧收(`string` 分支)。挡的仍是那件事:别家命名者
-  // (`evil/issued:x`)不在集合里 → 不收,否则手编的票会让用户敲的 symbol 重新变成可信线索(#223)。
-  //
-  // 回的是**规范形**(不是原样回抛):这条 ref 会被直接拿去 mint、落进 `token_refs`,
-  // 而表里只能有规范形 —— 否则 `CoinGecko/ISSUED:x` 和 `coingecko/issued:x` 就是两行。
+  // Undecodable / not a valid ref / namer not in `namer` gives undefined; the caller must handle it, since a ticket comes from the network.
+  // `namer` may be a set: tickets are issued under more than one namer (the current upstream for crypto, `fiat` for fiat); a set
+  // means "namer must be one of these". Another namer (`evil/issued:x`) is rejected so a forged ticket cannot make a typed symbol trusted.
+  // Returns the canonical form (it goes straight into mint and `token_refs`, which hold canonical forms only).
   decode(ticket: string, namer: string | readonly string[]): TokenRef | undefined {
     if (!ticket || !B64URL.test(ticket)) return undefined;
     let raw: string;
@@ -67,7 +43,7 @@ export const tokenTicket = {
     }
     const parsed = parseTokenRef(raw);
     if (parsed.kind === "unknown") return undefined;
-    // 命名者按规范形比 —— 两边都过 parse/normalize,不拿原串比大小写。
+    // Namers are compared in canonical form, not by raw string case.
     const allowed = (typeof namer === "string" ? [namer] : namer).map(normalizeNamer);
     if (!allowed.includes(parsed.namer)) return undefined;
     return formatTokenRef(parsed);

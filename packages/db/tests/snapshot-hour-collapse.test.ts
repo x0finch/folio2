@@ -5,21 +5,19 @@ import { getDb } from "../src/connect";
 import { user } from "../src/schema/auth";
 import { forDomain } from "./effect";
 
-// 同步落的快照按钟点折叠(#461):同账户、同一个钟点里只留最后一份。理由见
-// `SnapshotStore.write` 的文档注释。
+// Snapshots from sync collapse per clock hour: for one account, only the last in an hour is kept.
 //
-// **为什么这组非真 D1 不可**:折叠靠的是「一个 batch 里先删后插」+ 外键的 ON DELETE CASCADE ——
-// 前者的原子性、后者会不会真的连余额行一起带走,都只有真库答得了。假 db 上这两条永远是绿的。
+// Needs real D1: the delete-then-insert batch atomicity and ON DELETE CASCADE removing balance rows can't be proven on a fake db.
 const snapshotsOf = forDomain((db) => db.snapshots);
 const accountsOf = forDomain((db) => db.accounts);
 
 const USER = "user-collapse";
 const OTHER = "user-collapse-other";
 const HOUR = 3_600_000;
-// 一个整点(1_800_000_000_000 不是整点,这里取它所在钟点的起点),好把「同钟点/跨钟点」写清楚。
+// A top-of-hour instant (1_800_000_000_000 isn't one, so take the start of its hour) to make same/different hour explicit.
 const H0 = Math.floor(1_800_000_000_000 / HOUR) * HOUR;
 
-// pool-workers 此版本不隔离每个测试的存储 —— 删 user 行(级联清掉 accounts/snapshots/...)再插回。
+// pool-workers doesn't isolate storage per test: delete the user row (cascades accounts/snapshots/...) and re-insert.
 async function resetUser(userId: string): Promise<void> {
   const db = getDb(env);
   await db.delete(user).where(eq(user.id, userId));
@@ -43,7 +41,7 @@ const account = (label: string, userId = USER) =>
     .create({ connectorId: "bitcoin", label, creds: null })
     .then((a) => a.id);
 
-/** 写一张快照,`balances` 条数由 `holdings` 决定(用来看级联有没有把余额行带走)。 */
+/** Writes one snapshot; `holdings` sets the balance row count (to see whether the cascade removed them). */
 const write = (
   accountId: string,
   takenAt: number,
@@ -59,7 +57,7 @@ const write = (
         amount: 1,
         usdValue: totalUsd / holdings,
         kind: "spot" as const,
-        tokenId: `tok-${i}`, // 只要非空(列 NOT NULL,无外键);这组不关心币的身份
+        tokenId: `tok-${i}`, // any non-empty value (NOT NULL, no FK); identity is irrelevant here
       })),
     },
     { collapseSameHour: collapse },
@@ -71,8 +69,8 @@ const count = async (sql: string): Promise<number> =>
 const snapshotRows = () => count("SELECT COUNT(*) AS n FROM snapshots");
 const balanceRows = () => count("SELECT COUNT(*) AS n FROM snapshot_balances");
 
-describe("按钟点折叠", () => {
-  it("同一钟点内再写一次 → 只剩后写那份", async () => {
+describe("hour collapse", () => {
+  it("writing again within the same hour leaves only the later one", async () => {
     const acc = await account("a");
     await write(acc, H0 + 5 * 60_000, 100);
     await write(acc, H0 + 35 * 60_000, 200);
@@ -83,21 +81,19 @@ describe("按钟点折叠", () => {
     expect(row.takenAt).toBe(H0 + 35 * 60_000);
   });
 
-  it("被折掉那份的余额行一起走(靠 ON DELETE CASCADE,不是手动删)", async () => {
-    // 折叠只删 `snapshots` 一张表。余额行若不跟着走就成了永远读不到的孤儿 —— 每小时攒一批,
-    // 而省空间正是这件事的动机之一。
+  it("the collapsed snapshot's balance rows go with it (via ON DELETE CASCADE, not a manual delete)", async () => {
+    // Collapse deletes only `snapshots`; balance rows that stayed would be unreadable orphans piling up hourly.
     const acc = await account("cascade");
     await write(acc, H0 + 1000, 100, { holdings: 3 });
     expect(await balanceRows()).toBe(3);
 
     await write(acc, H0 + 2000, 100, { holdings: 2 });
     expect(await snapshotRows()).toBe(1);
-    expect(await balanceRows()).toBe(2); // 旧那 3 条没了,只剩新的 2 条
+    expect(await balanceRows()).toBe(2); // the old 3 are gone, only the new 2 remain
   });
 
-  it("跨钟点不折叠 —— 差一毫秒也算两个钟点", async () => {
-    // 按**绝对钟点**切(与读侧同一种切法),不是「距上一张一小时内」:59:59.999 与下一个 00:00.000
-    // 只差 1 ms,却分属两个桶,两份都得留着。
+  it("different hours don't collapse: one millisecond apart is two hours", async () => {
+    // Cut by absolute hour (as the read side does), not "within an hour of the previous": 59:59.999 and the next 00:00.000 are 1ms apart but separate buckets.
     const acc = await account("edge");
     await write(acc, H0 + HOUR - 1, 100);
     await write(acc, H0 + HOUR, 200);
@@ -105,8 +101,8 @@ describe("按钟点折叠", () => {
     expect(await snapshotRows()).toBe(2);
   });
 
-  it("**默认不折叠** —— 不给开关就照旧追加", async () => {
-    // 默认值是这个改动的安全面:导入(`importSnapshot`)转手调的就是这个方法,它恢复的是历史事实。
+  it("does not collapse by default: without the flag it appends as before", async () => {
+    // Import (`importSnapshot`) calls this method and restores historical facts, so the default must not collapse.
     const acc = await account("append");
     await write(acc, H0 + 1000, 100, { collapse: false });
     await write(acc, H0 + 2000, 200, { collapse: false });
@@ -114,19 +110,19 @@ describe("按钟点折叠", () => {
     expect(await snapshotRows()).toBe(2);
   });
 
-  it("只折叠同一个账户 —— 别的账户同钟点那份不许动", async () => {
+  it("collapses only the same account: another account's same-hour snapshot is untouched", async () => {
     const a = await account("a");
     const b = await account("b");
     await write(a, H0 + 1000, 100);
     await write(b, H0 + 1000, 50);
     await write(a, H0 + 2000, 300);
 
-    expect(await snapshotRows()).toBe(2); // a 的一份 + b 的一份
+    expect(await snapshotRows()).toBe(2); // one of a, one of b
     const [rowB] = await snapshotsOf(USER).listByAccount(b);
     expect(rowB.totalUsd).toBe(50);
   });
 
-  it("不跨用户 —— 别人同钟点的快照一个都不许碰", async () => {
+  it("does not cross users: another user's same-hour snapshots are untouched", async () => {
     const theirs = await account("theirs", OTHER);
     await write(theirs, H0 + 1000, 70, { userId: OTHER });
 
@@ -134,12 +130,12 @@ describe("按钟点折叠", () => {
     await write(mine, H0 + 1000, 100);
     await write(mine, H0 + 2000, 200);
 
-    expect(await snapshotRows()).toBe(2); // 我的一份 + 他的一份
+    expect(await snapshotRows()).toBe(2); // mine and theirs
     const [rowTheirs] = await snapshotsOf(OTHER).listByAccount(theirs);
     expect(rowTheirs.totalUsd).toBe(70);
   });
 
-  it("返回的是新那份的 id,旧 id 已经不在库里了", async () => {
+  it("returns the new snapshot's id; the old id is gone", async () => {
     const acc = await account("ids");
     const first = await write(acc, H0 + 1000, 100);
     const second = await write(acc, H0 + 2000, 200);
@@ -149,7 +145,7 @@ describe("按钟点折叠", () => {
     expect(row.id).toBe(second);
   });
 
-  it("总览读到的是折叠后那份", async () => {
+  it("the overview reads the collapsed snapshot", async () => {
     const acc = await account("latest");
     await write(acc, H0 + 1000, 100, { holdings: 2 });
     await write(acc, H0 + 2000, 250, { holdings: 1 });

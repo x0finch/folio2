@@ -1,40 +1,40 @@
 import { describe, expect, it } from "vitest";
 import { valuate } from "../src/valuate";
 
-// 估值优先级真值表(Phase 3)。amount=10 固定,验 unit 选取 + value=amount×unit。
+// Valuation priority truth table; amount=10 fixed, checks unit selection + value=amount x unit.
 describe("valuate", () => {
-  describe("self-first(默认)", () => {
-    it("有自带价 + 有源价 → 用自带", () => {
+  describe("self-first (default)", () => {
+    it("own price + source price: uses own", () => {
       expect(valuate(10, 2, 3, "self-first")).toEqual({ unitPrice: 2, value: 20 });
     });
-    it("无自带价 → 源价补", () => {
+    it("no own price: source fills in", () => {
       expect(valuate(10, undefined, 3, "self-first")).toEqual({ unitPrice: 3, value: 30 });
     });
-    it("有自带价、无源价 → 用自带", () => {
+    it("own price, no source price: uses own", () => {
       expect(valuate(10, 2, undefined, "self-first")).toEqual({ unitPrice: 2, value: 20 });
     });
-    it("都无 → undefined(调用方保留原值)", () => {
+    it("neither: undefined (the caller keeps the original value)", () => {
       expect(valuate(10, undefined, undefined, "self-first")).toBeUndefined();
     });
   });
 
-  describe("source-first(开关开启)", () => {
-    it("有源价 + 有自带价 → 用源", () => {
+  describe("source-first (switch on)", () => {
+    it("source price + own price: uses source", () => {
       expect(valuate(10, 2, 3, "source-first")).toEqual({ unitPrice: 3, value: 30 });
     });
-    it("无源价 → 自带兜底", () => {
+    it("no source price: own as fallback", () => {
       expect(valuate(10, 2, undefined, "source-first")).toEqual({ unitPrice: 2, value: 20 });
     });
-    it("有源价、无自带 → 用源", () => {
+    it("source price, no own: uses source", () => {
       expect(valuate(10, undefined, 3, "source-first")).toEqual({ unitPrice: 3, value: 30 });
     });
-    it("都无 → undefined", () => {
+    it("neither: undefined", () => {
       expect(valuate(10, undefined, undefined, "source-first")).toBeUndefined();
     });
   });
 
-  it("unit=0 视为有值(不当缺失)", () => {
-    // 0 是合法价(如深度归零的币);?? 只对 null/undefined 兜底,不对 0。
+  it("unit=0 counts as a value (not missing)", () => {
+    // 0 is a legal price (e.g. a token whose depth went to zero); `??` falls back only for null/undefined, not 0.
     expect(valuate(10, 0, 5, "self-first")).toEqual({ unitPrice: 0, value: 0 });
   });
 });

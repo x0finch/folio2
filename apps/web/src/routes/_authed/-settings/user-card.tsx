@@ -21,11 +21,9 @@ import { RUNNING_VERSION, stripBuildHash } from "@/lib/pwa/version";
 import { forgetQueryCache } from "@/lib/queries/persist";
 import { SettingRow } from "./setting-row";
 
-// 刷新图标最短旋转时长(ms):让它转一圈,别检查太快时一闪而过。
+// Spin at least one turn so a fast check doesn't just flicker.
 const MIN_SPIN_MS = 700;
 
-// 展示版本:实际在跑的构建版本(见 @/lib/pwa/version 的 RUNNING_VERSION,含 vitest 无 define 的守卫)
-// 去掉 `-g<hash>` 后缀,只留 `v0.14.0-21` 这样的形状;CI 浅克隆无 tag 时是短 hash,原样显示。
 const APP_VERSION = stripBuildHash(RUNNING_VERSION);
 
 export function UserCard({ user }: { user: { name?: string | null; email?: string | null } }) {
@@ -38,8 +36,7 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [checking, setChecking] = useState(false);
 
-  // 手动查更新:图标转一圈(带最短时长,别一闪),查完**无论有没有新版都 toast**。有则「有新版本·更新」
-  // (点走 applyUpdate),无则「已是最新」;共用 id `sw-update`,和运行中自动提示的那条 toast 收敛成一条、不叠。
+  // Always toasts, with the shared `sw-update` id so it merges with the automatic prompt.
   async function onCheckUpdate() {
     if (checking) return;
     setChecking(true);
@@ -48,7 +45,6 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
     const rest = MIN_SPIN_MS - (Date.now() - start);
     if (rest > 0) await new Promise((r) => setTimeout(r, rest));
     setChecking(false);
-    // 共用 service-worker 的那处 toast(同 id、同去重),无则「已是最新」。
     if (found) showUpdateToast({ available: tu("available"), update: tu("update") });
     else toast.success(tu("upToDate"), { id: UPDATE_TOAST_ID });
   }
@@ -62,7 +58,6 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
     },
     onSuccess: async () => {
       clearIdleLockState();
-      // 内存与 IndexedDB 里的查询缓存一起清(FOL-94)。
       await forgetQueryCache(queryClient);
       navigate({ to: "/login" });
     },
@@ -93,7 +88,6 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
           </Button>
         </div>
 
-        {/* 版本行:左「版本」,右版本号 + ghost 刷新(点击转一圈 + 总是 toast)。 */}
         <div className="border-border border-t pt-4">
           <SettingRow label={t("version")}>
             <div className="flex items-center gap-1.5">
@@ -133,8 +127,7 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
   );
 }
 
-// 登录用户身份派生(grill Q4):「自托管」是本地化文案,不进纯函数 → secondary 用 kind 判别。
-// 这是登录的人,不是 Folio 里导入的账户。
+// "Self-hosted" is localized copy, so the pure function returns a kind instead.
 type UserSecondary = { kind: "email"; value: string } | { kind: "selfHosted" };
 
 export function userIdentity(user: { name?: string | null; email?: string | null }): {

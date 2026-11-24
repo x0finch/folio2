@@ -10,24 +10,23 @@ import {
 } from "../src";
 import simplePrice from "./fixtures/simple-price.json";
 
-// CoinGecko 响应 → 契约形状的纯解析。**只有本包认识这些字段名**(ADR 0023)。
-describe("ref 与 coin id 的双向", () => {
-  it("造:coin id 规范为小写 kebab,命名者恒为本 adapter 的 id", () => {
+describe("ref and coin id both ways", () => {
+  it("build: coin id normalised to lowercase kebab, namer is always this adapter's id", () => {
     expect(cgkRef("USD-Coin")).toBe(`${UPSTREAM_ID}/issued:usd-coin`);
   });
 
-  it("取:本源命名的 ref → coin id;别家 / 链上寻址 → undefined", () => {
+  it("parse: own-namer ref gives coin id; foreign / on-chain refs give undefined", () => {
     expect(coinIdOf(`${UPSTREAM_ID}/issued:bitcoin`)).toBe("bitcoin");
-    expect(coinIdOf("evm:1/contract:0xa0b8")).toBeUndefined(); // 链上寻址
-    expect(coinIdOf("coinmarketcap/issued:1")).toBeUndefined(); // 别家发的标识
-    // **左段是本源也不够** —— 右段得是本源「发的标识」那一支,合约地址不是 coin id。
+    expect(coinIdOf("evm:1/contract:0xa0b8")).toBeUndefined(); // on-chain address
+    expect(coinIdOf("coinmarketcap/issued:1")).toBeUndefined(); // foreign issued id
+    // Matching the namer is not enough: the local name must be an `issued:` id, not a contract address.
     expect(coinIdOf(`${UPSTREAM_ID}/contract:0xa0b8`)).toBeUndefined();
     expect(coinIdOf(`${UPSTREAM_ID}/custom:MYCOIN`)).toBeUndefined();
   });
 });
 
 describe("parseMarkets", () => {
-  it("一行 → 元信息 + 价(USD);跳过无 id / 无 symbol 的行", () => {
+  it("one row gives metadata + USD price; skips rows without id / symbol", () => {
     const rows = parseMarkets([
       {
         id: "bitcoin",
@@ -55,28 +54,26 @@ describe("parseMarkets", () => {
 });
 
 describe("parseSearch / parseSimplePrice / parsePriceSeries", () => {
-  it("search:name 缺则回退 symbol;取 large 优先", () => {
+  it("search: falls back to symbol when name is missing; prefers large image", () => {
     const out = parseSearch({ coins: [{ id: "bitcoin", symbol: "btc", large: "l.png" }] });
     expect(out).toEqual([
       { ref: `${UPSTREAM_ID}/issued:bitcoin`, symbol: "btc", name: "btc", logo: "l.png" },
     ]);
   });
 
-  it("search:带上 market_cap_rank(选币下拉的消歧徽标);缺则不带", () => {
+  it("search: carries market_cap_rank (disambiguation badge); omitted when absent", () => {
     const out = parseSearch({
       coins: [
         { id: "usd-coin", symbol: "usdc", name: "USD Coin", large: "l.png", market_cap_rank: 6 },
-        { id: "bridged-usdc", symbol: "usdc", name: "Bridged USDC" }, // 无 rank
+        { id: "bridged-usdc", symbol: "usdc", name: "Bridged USDC" }, // no rank
       ],
     });
     expect(out[0]?.marketCapRank).toBe(6);
     expect(out[1]?.marketCapRank).toBeUndefined();
   });
 
-  // 回的是**录下来的真实响应**:时刻字段叫 `last_updated_at`,**不带** `usd_` 前缀(只有 24h 涨跌带)。
-  // 这里以前手写了 `usd_last_updated_at`,解析也读那个名字 —— 两边错得一致,测试绿着,线上每个价的
-  // `asOf` 都落成了兜底的「取数那一刻」,而不是 CoinGecko 自己说的更新时刻。
-  it("simple/price:按 ref 索引,带 24h 涨跌,时刻用上游给的 last_updated_at(秒→毫秒)", () => {
+  // Recorded real response: the timestamp field is `last_updated_at` without the `usd_` prefix (only 24h change has it).
+  it("simple/price: indexed by ref, with 24h change; timestamp from upstream last_updated_at (seconds to ms)", () => {
     const out = parseSimplePrice(simplePrice.response, 999);
     const btc = simplePrice.response.bitcoin;
     expect(out.get(`${UPSTREAM_ID}/issued:bitcoin`)).toEqual({
@@ -87,13 +84,13 @@ describe("parseSearch / parseSimplePrice / parsePriceSeries", () => {
     expect(out.size).toBe(2);
   });
 
-  it("simple/price:缺 usd 的条目跳过;没给时刻 → 用兜底", () => {
+  it("simple/price: skips entries without usd; missing timestamp falls back", () => {
     const out = parseSimplePrice({ broken: { eur: 1 }, plain: { usd: 2 } }, 999);
     expect(out.has(`${UPSTREAM_ID}/issued:broken`)).toBe(false);
     expect(out.get(`${UPSTREAM_ID}/issued:plain`)?.asOf).toBe(999);
   });
 
-  it("price series:剔非数、按时间升序", () => {
+  it("price series: drops non-numbers, sorts ascending by time", () => {
     expect(
       parsePriceSeries([
         [3, 30],

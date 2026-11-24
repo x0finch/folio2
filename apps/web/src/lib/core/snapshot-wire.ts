@@ -2,17 +2,14 @@ import { Note } from "@folio/connectors-basic";
 import type { BalanceRawRow, SnapshotRawRow } from "@folio/db";
 import type { AccountSnapshotEntry, BalanceView } from "./portfolio";
 
-// 快照原料的**线上形状**(FOL-92):`getSnapshots` 发的是 D1 回来的原样行(位置元组,note / meta 是
-// 未解析的 JSON 字符串),**解析与校验在浏览器这边做** —— 服务端每请求一次只有 10ms CPU,逐行
-// `JSON.parse` + zod `safeParse` + 拼对象都不该花在那儿。浏览器解一次,之后全部消费方(总览、账户页、
-// 同步胶囊)拿到的还是原来那个 `AccountSnapshotEntry[]`,界面一处不变。
+// Raw D1 rows (positional tuples, unparsed JSON): parsing and validation happen in the browser
+// because the Worker only has 10ms CPU per request.
 export interface SnapshotsWire {
   snapshots: SnapshotRawRow[];
   balances: BalanceRawRow[];
 }
 
-// 账户快照的 note 列(JSON 字符串)→ account 级 Note[]。空 / 损坏 / 形状不对 → undefined
-// (与以前服务端 `parseAccountNote` 同口径:一段坏 note 不该让整页打不开)。
+// A corrupt note yields undefined rather than breaking the whole page.
 function parseAccountNote(raw: string | null): Note[] | undefined {
   if (!raw) return undefined;
   try {
@@ -23,7 +20,7 @@ function parseAccountNote(raw: string | null): Note[] | undefined {
   }
 }
 
-/** 线上原料 → 每账户一张快照(顺序与服务端发来的快照行一致)。 */
+/** Preserves the server's snapshot row order. */
 export function snapshotsFromWire(wire: SnapshotsWire): AccountSnapshotEntry[] {
   const byAccount = new Map<string, BalanceView[]>();
   for (const [

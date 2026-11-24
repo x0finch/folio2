@@ -10,22 +10,15 @@ dist/
 .env.*
 !.env.example
 
-.agents/
-skills-lock.json
-# skills CLI symlinks generated into the Claude Code agent dir (point into .agents/)
-.claude/skills/
-# the Eve agent dir the skills CLI also creates (points into .agents/ too)
-agent/
-
 .scratch/
-# Playwright(E2E)—— 报告与失败时的 trace,不入库
+# Playwright reports and failure traces
 test-results/
 playwright-report/
 blob-report/
 .playwright/
 
-# Claude Code agent worktrees(临时工作现场,不是产出;Biome/knip 走 gitignore,不加这行会把它们当仓库代码扫)
+# Biome/knip honour gitignore; without this they scan agent worktrees as repo code
 .claude/worktrees/
 
-# 覆盖率报告(pnpm coverage)
+# pnpm coverage output
 coverage/

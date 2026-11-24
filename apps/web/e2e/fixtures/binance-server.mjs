@@ -1,52 +1,38 @@
-// 假 Binance —— e2e 专用。让「同步」这条链路在不联网的前提下真正跑通并出快照。
-//
-// 为什么需要它:9 个 connector 里只有 manual 不联网,而 manual 被排除在同步之外(ADR 0018)。
-// 其余 8 个都要打外部 API,拿真 provider 跑 e2e 等于把第三方可用性绑进 CI,和这套 e2e 的反 flaky
-// 原则(playwright.config.ts:「重试过了不算过」)直接冲突。
-//
-// 为什么可以只实现两个端点:一个 Binance 账户下的各 Wallet 是**尽力而为**的(ADR 0030)——
-// 某个钱包拉不到不阻断其余,失败收进账户级 Note。所以现货 + 价表就够出快照了,
-// 合约 / 资金 / 理财一律回空结构,账户照样同步成功。
-//
-// 不验签:provider 会带 HMAC,这里收下就回。e2e 要的是「链路通不通」,不是「签名对不对」
-// (签名有单元测试)。
-//
-// 怎么被指过来的:`.dev.vars.test` 把 BINANCE_{API,FAPI,DAPI}_BASE 指到本进程。那是**生产也在用**
-// 的 provider-creds 覆盖开关(#264,出口 IP 被拒时指向代理),不是为测试新开的分支。
-//
-// 谁起它:playwright.config.ts 的 webServer(`node e2e/fixtures/binance-server.mjs`)。因此它是**自己
-// 的进程入口**,没有任何 import 指向它 —— knip.json 里给 apps/web 列了 `entry` 而不是塞 `ignore`:
-// 前者说的是「这是个入口」(真话,而且它内部的死代码照样会被查),后者是「别看这个文件」。
+// Fake Binance for e2e: lets the sync path run end to end and produce snapshots offline.
+// Why: of the 9 connectors only manual stays offline and manual is excluded from sync; the other 8 call external APIs, and running e2e against real
+// providers would bind CI to third-party availability, against this suite's anti-flaky rule (a retried pass doesn't count).
+// Only two endpoints are needed: a Binance account's wallets are best-effort, so a wallet that can't be fetched doesn't block the rest (it becomes an account-level Note);
+// spot + a price table is enough for a snapshot, and futures / funding / earn return empty structures.
+// No signature check: the provider sends an HMAC and this just replies; e2e wants "does the path work", not "is the signature right" (unit-tested).
+// How it's pointed at: `.dev.vars.test` sets BINANCE_{API,FAPI,DAPI}_BASE to this process, the provider-creds override production also uses (proxying when the egress IP is refused).
+// Who starts it: playwright.config.ts's webServer (`node e2e/fixtures/binance-server.mjs`), so it's its own process entry with no import pointing at it;
+// knip.json lists it under `entry` rather than `ignore`, so dead code inside it is still checked.
 
 import { createServer } from "node:http";
 
 const PORT = Number(process.env.FAKE_BINANCE_PORT ?? 3099);
 const COINGECKO_PREFIX = "/coingecko/api/v3";
 
-// —— 可变状态,经 /__control 改 ——
-// 为什么不用启动时的环境变量:一轮测试里**同一个进程要扮演两种上游**。加账户时要快(校验凭据别干等),
-// 量「关标签页」那条时要慢(同步得慢到能在中途插进去)。
-//
-// 更要紧的是 spotBtc:「关掉标签页之后那一轮真的跑完了」这个断言,靠的是**余额在点同步之前被改过** ——
-// 事后读到新数字,就只能是关标签之后才发生的那次抓取写进去的。启动时定死的常量给不了这个。
-// hits 是**只增的收数计数**,给测试当护栏用:本地 `reuseExistingServer` 会复用一个已经开着的 dev
-// server,而那个 server 可能是普通 `pnpm dev` 起的(没有 CLOUDFLARE_ENV=test)—— 它打的是真 Binance。
-// 那种情况下失败信息会很糊(「binance auth failed」),看不出根因是环境没切。数一下收到几个请求,
-// 一句话就能说清。测试可以 POST hits:0 归零。
+// -- mutable state, changed via /__control --
+// One process plays two upstreams in a run: fast when adding accounts (credential validation shouldn't wait) and slow when measuring the "close the tab" case.
+// spotBtc matters most: the "round finished after the tab closed" assertion relies on the balance having been changed before clicking sync, so a new number read later can only
+// come from a fetch after closing; a constant fixed at startup can't do that. hits is an increase-only counter used as a guardrail: locally `reuseExistingServer` may reuse a plain
+// `pnpm dev` server (without CLOUDFLARE_ENV=test) that talks to real Binance, and the failure ("binance auth failed") wouldn't show the environment wasn't switched; counting
+// requests makes it obvious. Tests can POST hits:0 to reset.
 const state = { delayMs: 0, spotBtc: "1.50000000", btcPrice: "60000.00", hits: 0 };
 const NUMERIC_KEYS = new Set(["delayMs", "hits"]);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const routes = () => ({
-  // 现货:一条 BTC 持仓 —— 快照里断言得到,数量可改。
+  // Spot: one BTC holding, asserted in the snapshot; the quantity is changeable.
   "/api/v3/account": { balances: [{ asset: "BTC", free: state.spotBtc, locked: "0.00000000" }] },
-  // 价表:现货估值要它。
+  // Price table: spot valuation needs it.
   "/api/v3/ticker/price": [
     { symbol: "BTCUSDT", price: state.btcPrice },
     { symbol: "ETHUSDT", price: "3000.00" },
   ],
-  // 其余钱包回空 —— 结构合法即可,provider 解析出 0 行。
+  // Other wallets return empty: a valid structure is enough, the provider parses 0 rows.
   "/fapi/v2/account": { totalWalletBalance: "0", assets: [], positions: [] },
   "/dapi/v1/account": { assets: [], positions: [] },
   "/sapi/v1/asset/get-funding-asset": [],
@@ -68,15 +54,15 @@ const readJsonBody = async (req) => {
 createServer(async (req, res) => {
   const path = new URL(req.url, `http://localhost:${PORT}`).pathname;
 
-  // Playwright 的 webServer 探这个判断起没起来。
+  // Playwright's webServer probes this to tell whether it's up.
   if (path === "/ping") {
     res.writeHead(200, { "content-type": "text/plain" });
     res.end("ok");
     return;
   }
 
-  // 控制端点:GET 读当前状态,POST 改。只认已知键 —— 键名拼错要当场报错,
-  // 不能静默无效(那会让一条测试看着在测慢同步,其实一直是 0 延迟)。
+  // Control endpoint: GET reads current state, POST changes it. Only known keys are accepted: a misspelled key must fail on the spot,
+  // not silently do nothing (which would make a test look like it tests slow sync while delay was always 0).
   if (path === "/__control") {
     if (req.method === "POST") {
       const patch = await readJsonBody(req);
@@ -88,10 +74,9 @@ createServer(async (req, res) => {
     return json(res, 200, state);
   }
 
-  // 假 CoinGecko:`.dev.vars.test` 的 `COINGECKO_API_BASE` 指到 `/coingecko/api/v3`。只求**快**:
-  // 本地 Miniflare 串行消费队列,打真 CoinGecko 的刷价任务(e2e 里被拒 + 重试,一条约 12 秒)会
-  // 堵在同步消息前面,「点同步 → 上游 15 秒内收到请求」就超时。回空结果 —— 参考层照旧当「没刷到」
-  // 降级,e2e 本来也不验价格。不计 hits、不吃 delayMs:那两个是给 Binance 那条链路用的。
+  // Fake CoinGecko: `.dev.vars.test`'s `COINGECKO_API_BASE` points at `/coingecko/api/v3`. It only needs to be fast: local Miniflare consumes the queue serially, and real-CoinGecko
+  // price jobs (rejected + retried in e2e, ~12s each) would block ahead of the sync message so "click sync -> upstream gets a request within 15s" times out. Empty results
+  // make the reference layer degrade as "not refreshed" and e2e doesn't verify prices. Doesn't count hits or honor delayMs: those serve the Binance path.
   if (path.startsWith(COINGECKO_PREFIX)) {
     const rest = path.slice(COINGECKO_PREFIX.length);
     return json(res, 200, rest.startsWith("/coins") || rest === "/asset_platforms" ? [] : {});

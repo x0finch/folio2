@@ -2,7 +2,6 @@ import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { z } from "zod";
 
-// 改名(含默认)。
 export const RenamePortfolioInput = z.object({
   portfolioId: z.string().min(1),
   name: z.string().trim().min(1),

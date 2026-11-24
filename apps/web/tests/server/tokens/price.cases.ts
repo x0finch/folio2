@@ -6,13 +6,10 @@ import { json, stubOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
 import { freshUser } from "../_kit/user";
 
-// 合并进 tokens/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
+// Runs inside tokens/index.test.ts: each vitest file re-evaluates the whole import graph in workerd (~9s/file), so cases are merged per directory.
 describe("tokens/price", () => {
-  // #527 · getTokenPrice
-  //
-  // 票是从搜索结果里拿的 —— 这与用户的真实路径一致(先搜、再点、才取价),也避免自己伪造一张
-  // 编码格式可能已经变了的票。
+  // The ticket comes from search results, matching the user's real path (search, click, then price) and avoiding a hand-forged ticket
+  // whose encoding may have changed.
   const USER = "h-tok-price";
 
   const SEARCH = { coins: [{ id: "bitcoin", symbol: "btc", name: "Bitcoin", market_cap_rank: 1 }] };
@@ -29,7 +26,7 @@ describe("tokens/price", () => {
   });
 
   describe("getTokenPrice", () => {
-    it("传一张已知代币的票 → 拿到单价、涨跌与取到的时刻", async () => {
+    it("a known token's ticket -> gets unit price, change and fetch time", async () => {
       const ticket = await ticketOfBtc();
       stubOutbound([["/simple/price", () => json(PRICE)]]);
 
@@ -40,15 +37,15 @@ describe("tokens/price", () => {
       expect(out?.asOf).toBeTruthy();
     });
 
-    it("上游没这个币的价 → 返回 null,不是 0", async () => {
-      // 0 会被界面读成「这个币不值钱」,而事实是「我们不知道」。
+    it("upstream has no price for the coin -> returns null, not 0", async () => {
+      // 0 would read as "this coin is worthless" when the truth is "we don't know".
       const ticket = await ticketOfBtc();
       stubOutbound([["/simple/price", () => json({})]]);
 
       expect(await call(USER, handleGetTokenPrice({ ticket }))).toBeNull();
     });
 
-    it("点中不建行 —— 取价不许在库里落代币行", async () => {
+    it("clicking creates no row -- fetching a price must not persist a token row", async () => {
       const ticket = await ticketOfBtc();
       stubOutbound([["/simple/price", () => json(PRICE)]]);
       const before = await countRows("tokens", USER);
@@ -58,10 +55,10 @@ describe("tokens/price", () => {
       expect(await countRows("tokens", USER)).toBe(before);
     });
 
-    it("票是伪造的 / 解不开 → 不拿它去打上游", async () => {
+    it("forged / undecodable ticket -> never sent upstream", async () => {
       const outbound = stubOutbound([["/simple/price", () => json(PRICE)]]);
 
-      const out = await call(USER, handleGetTokenPrice({ ticket: "这不是一张票" })).catch(
+      const out = await call(USER, handleGetTokenPrice({ ticket: "not a ticket" })).catch(
         () => null,
       );
 
@@ -69,7 +66,7 @@ describe("tokens/price", () => {
       expect(outbound.calls).toEqual([]);
     });
 
-    it("ticket 空串 → schema 拒", () => {
+    it("empty ticket -> rejected by schema", () => {
       expect(TokenPriceInput.safeParse({ ticket: "" }).success).toBe(false);
     });
   });

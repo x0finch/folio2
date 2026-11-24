@@ -36,14 +36,14 @@ const failing = (
   effect: Effect.Effect<unknown, ConnectorError, ProviderNeeds>,
 ): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
 
-describe("工厂:一份适配服务三条链", () => {
-  it("base 覆盖生效,默认 host 一个不留;不设就走官方", async () => {
+describe("factory: one adapter service for three chains", () => {
+  it("base override takes effect, no default host left; unset goes to the official host", async () => {
     const overrides = {
       COINSTATS_API_KEY: KEY,
       COINSTATS_API_BASE: "http://127.0.0.1:3399/coinstats",
     };
     const provider = createCoinstatsProvider("solana");
-    // 声明的 key 正是这里注入后真生效的那两个(app 按声明从 env 注入 ctx.creds);base 覆盖是 public。
+    // The declared keys are the two that really take effect when injected here (the app injects ctx.creds from env per the declaration); the base override is public.
     expect(provider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
     expect(provider.creds.find((f) => f.key === "COINSTATS_API_BASE")?.type).toBe("public");
 
@@ -55,7 +55,7 @@ describe("工厂:一份适配服务三条链", () => {
     expect(plain.startsWith("https://openapiv1.coinstats.app/")).toBe(true);
   });
 
-  it("connectionId 绑定各自那条链(sui → 'sui-wallet')", async () => {
+  it("connectionId binds each chain (sui to 'sui-wallet')", async () => {
     const stub = httpStub(() => json([]));
     await run(stub, createCoinstatsProvider("sui-wallet").fetchBalances(ctx()));
     expect(stub.calls[0].request.url.searchParams.get("connectionId")).toBe("sui-wallet");
@@ -63,7 +63,7 @@ describe("工厂:一份适配服务三条链", () => {
 });
 
 describe("fetchBalances", () => {
-  it("带上 X-API-KEY,解析余额", async () => {
+  it("sends X-API-KEY and parses balances", async () => {
     const stub = httpStub(() => json(solana));
     const { balances } = await run(stub, createCoinstatsProvider("solana").fetchBalances(ctx()));
 
@@ -72,14 +72,14 @@ describe("fetchBalances", () => {
     expect(stub.calls[0].request.url.searchParams.get("address")).toBe(ADDR);
   });
 
-  it("**没配 provider key → 归凭据问题,而且一发都不出网**", async () => {
+  it("no provider key configured: a credentials problem, and no request at all", async () => {
     const stub = httpStub(() => json([]));
     const err = await failing(stub, createCoinstatsProvider("solana").fetchBalances(ctx({})));
     expect(err._tag).toBe("ConnectorAuthError");
     expect(stub.calls).toHaveLength(0);
   });
 
-  it("429 → 限流;401 → 凭据问题", async () => {
+  it("429 gives rate-limited; 401 gives a credentials problem", async () => {
     const limited = httpStub(() => json({}, { status: 429 }));
     expect(
       (await failing(limited, createCoinstatsProvider("solana").fetchBalances(ctx())))._tag,
@@ -92,9 +92,9 @@ describe("fetchBalances", () => {
 });
 
 describe("validateAccount", () => {
-  it("**没配 key → false,一发都不出网**", async () => {
-    // 老那版为它单写了一个 `if (!apiKey) return false` 前置分支。现在没配 key 报的就是
-    // 「凭据问题」,而这条路对凭据问题的答案本来就是 `false` —— 同一件事不必写两遍。
+  it("no key configured: false, and no request at all", async () => {
+    // The old version had an `if (!apiKey) return false` precheck for this. A missing key now reports a credentials problem,
+    // which this path already answers with `false`, so the same thing need not be written twice.
     const stub = httpStub(() => json([]));
     expect(await run(stub, createCoinstatsProvider("solana").validateAccount(ctx({})))).toBe(false);
     expect(stub.calls).toHaveLength(0);
@@ -107,7 +107,7 @@ describe("validateAccount", () => {
     expect(await run(denied, createCoinstatsProvider("solana").validateAccount(ctx()))).toBe(false);
   });
 
-  it("够不到上游 → 走错误通道,不压成 false", async () => {
+  it("unreachable goes through the error channel, not squashed into false", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     expect(
       (await failing(stub, createCoinstatsProvider("solana").validateAccount(ctx())))._tag,
@@ -115,15 +115,15 @@ describe("validateAccount", () => {
   });
 });
 
-// account.creds 校验闸(app 分派桥取数前会跑;三链共享此声明,格式交 API 判定 → 仅非空)。
-describe("account.creds 校验闸", () => {
-  it("接受非空地址(trim 后)", async () => {
+// account.creds validation gate (runs before the app's dispatch bridge fetches; the three chains share this declaration, format left to the API so only non-empty).
+describe("account.creds validation gate", () => {
+  it("accepts a non-empty address (after trim)", async () => {
     await expect(validateCredentials(coinstatsAccountCreds, { address: ADDR })).resolves.toEqual({
       address: ADDR,
     });
   });
 
-  it("拒空 / 缺失地址(→ 桥里即快速非重试失败)", async () => {
+  it("rejects an empty / missing address (a fast non-retryable failure in the bridge)", async () => {
     await expect(validateCredentials(coinstatsAccountCreds, { address: "  " })).rejects.toThrow(
       /address/,
     );

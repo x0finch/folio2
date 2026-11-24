@@ -28,8 +28,7 @@ export const loadAccountHistory = (input: {
     const resolution = historyResolution({ range: input.range, since: input.since });
     const longWindow = resolution === "sampled";
     if (input.connectorId !== MANUAL_CONNECTOR_ID) {
-      // 三档原料同组合曲线(FOL-91):≤ 7 天原始快照,更长读日汇总;1 年 / 全部在 SQL 里按桶封顶
-      // (每账户 ≤ 400 点,FOL-92),min-max 降采样在浏览器做。
+      // ≤ 7d reads raw snapshots, longer windows read daily rollups; 1y/all are bucket-capped in SQL.
       const rows =
         resolution === "sampled"
           ? yield* db.snapshots.listSampledTotalsByAccount(input.accountId, input.since)

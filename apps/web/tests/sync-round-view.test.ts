@@ -2,12 +2,7 @@ import type { SyncRoundAccount, SyncRoundRecord } from "@folio/db";
 import { describe, expect, it } from "vitest";
 import { syncRoundView } from "@/lib/server/sync/status";
 
-// 「这一轮怎么样了」的判读(ADR 0048)。纯函数,喂数据就能断言 —— 它管的是三件容易含混的事:
-//   · 在跑 / 中断 / 收官怎么分(中断 = 未收官且心跳断了,不是另一种失败)
-//   · 三段式口径(synced · failed · need keys 各管各的,谁也不吞谁)
-//   · 「正在同步谁」
 //
-// `now` 是显式参数,不在函数里读时钟:这里要断言「恰好卡在到期那一刻」这种精确边界。
 
 const NOW = 1_700_000_000_000;
 
@@ -32,28 +27,27 @@ const record = (over: Partial<SyncRoundRecord> = {}): SyncRoundRecord => ({
   ...over,
 });
 
-describe("这一轮是什么状态", () => {
-  it("未收官、心跳还在 → 在跑", () => {
+describe("round status", () => {
+  it("not finalized, heartbeat alive: running", () => {
     expect(syncRoundView(record(), NOW).state).toBe("running");
   });
 
-  it("收过官 → 收官(哪怕早就过了保留期)", () => {
+  it("finalized: finished (even long past the retention period)", () => {
     const view = syncRoundView(record({ finishedAt: NOW - 1_000, expiresAt: NOW - 500 }), NOW);
     expect(view.state).toBe("done");
   });
 
-  // worker 死了没人再续心跳。这一条是整个心跳机制存在的理由:没有它,一轮假同步会永远显示「在跑」。
-  it("未收官且心跳断了 → 中断", () => {
+  it("not finalized and heartbeat lost: interrupted", () => {
     expect(syncRoundView(record({ expiresAt: NOW - 1 }), NOW).state).toBe("interrupted");
   });
 
-  it("到期那一刻就算断(`<=`,与开轮的覆盖判据同一条)", () => {
+  it("counts as lost at the expiry instant (`<=`, same rule as the round-opening coverage check)", () => {
     expect(syncRoundView(record({ expiresAt: NOW }), NOW).state).toBe("interrupted");
   });
 });
 
-describe("三段式口径", () => {
-  it("三段各管各的 —— 失败不算已同步,缺凭据也不算失败", () => {
+describe("three-segment counts", () => {
+  it("the three segments are independent: failed is not synced, missing credentials is not failed", () => {
     const view = syncRoundView(
       record({
         finishedAt: NOW,
@@ -72,9 +66,7 @@ describe("三段式口径", () => {
     ]);
   });
 
-  // 第四档:自动轮里数据还新而刻意跳过的(FOL-18 子票 4)。它有结果(算 settled),但既不算
-  // synced 也不算 failed —— 独立一段。
-  it("skipped 单独一段,算进 settled,不掺 synced/failed", () => {
+  it("skipped is its own segment, counts into settled, not mixed into synced/failed", () => {
     const view = syncRoundView(
       record({
         finishedAt: NOW,
@@ -89,11 +81,11 @@ describe("三段式口径", () => {
     expect(view.synced).toBe(1);
     expect(view.skipped).toBe(2);
     expect(view.failed).toEqual([]);
-    expect(view.settled).toBe(3); // 三个都有结果
+    expect(view.settled).toBe(3);
     expect(view.total).toBe(3);
   });
 
-  it("失败缺原话时仍要有一句可显示的 —— 面板不能出现空白行", () => {
+  it("a failure without a message still has a displayable line: the panel never shows a blank row", () => {
     const view = syncRoundView(
       record({ accounts: { "acc-1": account("Binance", { status: "failed" }) } }),
       NOW,
@@ -101,7 +93,7 @@ describe("三段式口径", () => {
     expect(view.failed[0]?.error).toBeTruthy();
   });
 
-  it("`x / N` 数的是「有结果的 / 一共几个」,没轮到的不算", () => {
+  it('`x / N` counts "with a result / total"; accounts not yet reached do not count', () => {
     const view = syncRoundView(
       record({
         accounts: {
@@ -116,20 +108,19 @@ describe("三段式口径", () => {
     expect(view.total).toBe(3);
   });
 
-  // 「整轮没跑起来」是轮头上的一句话,不是某个账户的失败 —— 那时一个账户结果都没有。
-  it("整轮失败那一句原样带出来", () => {
+  it("the whole-round failure message is carried verbatim", () => {
     const view = syncRoundView(record({ finishedAt: NOW, error: "account store exploded" }), NOW);
     expect(view.error).toBe("account store exploded");
     expect(view.failed).toEqual([]);
   });
 
-  it("没有整轮失败 → error 是 null,不是 undefined", () => {
+  it("no whole-round failure: error is null, not undefined", () => {
     expect(syncRoundView(record(), NOW).error).toBeNull();
   });
 });
 
-describe("正在同步谁", () => {
-  it("还没轮到的第一个 —— 轮询看到的就是这个", () => {
+describe("who is syncing", () => {
+  it("first one not yet reached: this is what polling sees", () => {
     const view = syncRoundView(
       record({
         accounts: {
@@ -143,7 +134,7 @@ describe("正在同步谁", () => {
     expect(view.current).toBe("Kraken");
   });
 
-  it("全都有结果了 → 没有「正在同步谁」", () => {
+  it("all have results: nobody is syncing", () => {
     const view = syncRoundView(
       record({ accounts: { "acc-1": account("Binance", { status: "synced" }) } }),
       NOW,
@@ -151,10 +142,7 @@ describe("正在同步谁", () => {
     expect(view.current).toBeNull();
   });
 
-  // 轮中被归档的账户:内核的名单是跑的那一刻现算的,归档的不再出现 —— 它的 settle 永远不来,
-  // 收官后仍是 pending。报告只说真跑过的:把它留在分母里,`9 synced` 对 `10` 永远差一个,
-  // 读起来像少同步了一个来源,而那个来源已经不存在了。
-  it("收官的轮:仍 pending 的从分母剔除,记进 unresolved", () => {
+  it("finalized round: still-pending accounts leave the denominator and go into unresolved", () => {
     const view = syncRoundView(
       record({
         finishedAt: NOW,
@@ -172,7 +160,7 @@ describe("正在同步谁", () => {
     expect(view.unresolved).toBe(1);
   });
 
-  it("在跑的轮:pending 是「还没轮到」,留在分母里,unresolved 是 0", () => {
+  it("running round: pending means not yet reached, stays in the denominator, unresolved is 0", () => {
     const view = syncRoundView(
       record({
         accounts: {
@@ -186,7 +174,7 @@ describe("正在同步谁", () => {
     expect(view.unresolved).toBe(0);
   });
 
-  it("一个账户都没有的一轮 → 分母 0,不炸", () => {
+  it("round with no accounts: denominator 0, no crash", () => {
     const view = syncRoundView(record({ accounts: {}, finishedAt: NOW }), NOW);
     expect(view.total).toBe(0);
     expect(view.settled).toBe(0);

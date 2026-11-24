@@ -39,39 +39,29 @@ import { PlatformService } from "../src/platforms";
 import { TokenService } from "../src/tokens";
 import { CandidateSource } from "../src/tokens/candidates";
 
-// 内存假实现 + **一份共用的测试装配**(下面的 `harness`)—— 各片的测试都注这一套。
-//
-// 之所以是内存而不是真 D1:oracle 这几片**一个字都不碰 schema**,契约本身在这里被钉死,
-// 换真实现时对着它写。
-//
-// 注意假实现里也**没有任何数据源的名字** —— `fakeUpstream()` 的 id 是参数,默认 `"src"`。
-// 服务层的测试因此连「上游是谁」都不知道,这正是 ADR 0023 要的。
-//
-// **时间不再是假实现上的一个 `now` 字段**:全部走 `Clock`,用例内部要推时间就
-// `yield* TestClock.adjust(…)`。以前每个假实现各带一个可变的 `now`,测试要记得两处都改。
-//
-// **只有一条构造路**:所有测试都经 `harness.run` → Tag → Layer,也就是**生产走的那条**。
-// PR #379 的复审里那条「两条构造路,其中一条零测试」在这里不成立。
+// In-memory fakes plus the shared test harness (`harness`, below). In-memory rather than real D1: these slices never touch the schema,
+// so the contract is pinned here. No data source is named in the fakes (`fakeUpstream()`'s id is a parameter, default "src").
+// Time is not a `now` field on fakes: everything goes through `Clock`, use `yield* TestClock.adjust(…)`.
+// One construction path: every test goes `harness.run` to Tag to Layer, the one production uses.
 
 const NOW0 = 1_700_000_000_000;
 export const now0 = NOW0;
 
-// 真 store 的 op 在跑的那一刻从 context 里取连接与用户(ADR 0054),所以契约类型的 `R` 里有
-// `DbRequest`。内存假货两样都不要 —— 它的方法 `R` 是 `never`,于是测试能直接 `runPromise` 它,
-// 而它照样能顶真 store 的位置(`never` 比任何 `R` 都窄)。
+// Real store ops take the connection and user from context at run time, so the contract types carry `DbRequest` in `R`. The fakes need
+// neither: their methods have `R = never`, so tests can `runPromise` them directly and they still stand in for the real store.
 type InMemory<S> = {
   [K in keyof S]: S[K] extends (...args: infer P) => Effect.Effect<infer A, infer E, DbRequest>
     ? (...args: P) => Effect.Effect<A, E>
     : S[K];
 };
 
-// —— per-user:代币行的 info facet + ref 行 ——
+// per-user: token rows' info facet + ref rows
 interface FakeTokenStore extends InMemory<TokenStore> {
   readonly rows: Map<string, TokenInfo>;
   readonly refs: Map<TokenRef, string>;
-  // 历史快照的 token_id —— merge 要把它们一并改指,测试据此验「身份可变、金额不变」。
+  // Token_ids of historical snapshots: merge repoints them too, so tests can verify "identity mutable, amounts unchanged".
   readonly snapshotTokenIds: string[];
-  namer: string; // 判 `linked` 用:哪个命名者算「已认出」
+  namer: string; // for `linked`: which namer counts as "recognised"
 }
 
 function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
@@ -88,7 +78,7 @@ function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
 
     findByRefs: (input) =>
       Effect.sync(() => {
-        // linked = 这个 Token 已经有当前源的 ref 行(真实现里是一次 join)。
+        // linked = this Token already has a ref row for the current source (a join in the real implementation).
         const linked = new Set<string>();
         for (const [ref, id] of refs) if (ref.startsWith(`${store.namer}/`)) linked.add(id);
 
@@ -102,7 +92,7 @@ function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
 
     create: (s: ProviderTokenSeed, newRefs) =>
       Effect.sync(() => {
-        // upsert-then-read:并发下别人可能已经建过了 → 先看这些 ref 有没有主。
+        // upsert-then-read: under concurrency someone may have created it already, so check whether these refs have an owner first.
         for (const ref of newRefs) {
           const existing = refs.get(ref);
           if (existing) {
@@ -112,8 +102,8 @@ function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
         }
         seq += 1;
         const id = `tk_${seq}`;
-        // provider 的图落 providerLogo(备用槽);`logo` 是源那一槽,留给后补。
-        // `ref` = 当前源对它的命名:建行时若挂了本源的 ref 就有,否则 null。
+        // The provider's logo goes to providerLogo (spare slot); `logo` is the source's slot, left for later.
+        // `ref` = the current source's name for it: set if a ref of this source is attached at creation, else null.
         const sourceRef = newRefs.find((r) => r.startsWith(`${store.namer}/`)) ?? null;
         rows.set(id, {
           id,
@@ -121,7 +111,7 @@ function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
           symbol: s.symbol,
           name: s.name ?? s.symbol,
           providerLogo: s.providerLogo,
-          // 建行时就算「该刷了」—— 这一份是连接器报的,上游那份还没覆盖过(与 D1 实现同)。
+          // Counts as "due for refresh" at creation: this info is the connector's, upstream has not overwritten it yet (as in the D1 implementation).
           infoStale: true,
         });
         for (const ref of newRefs) refs.set(ref, id);
@@ -135,7 +125,7 @@ function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
         refs.set(ref, tokenId);
         const row = rows.get(tokenId);
         if (row && ref.startsWith(`${store.namer}/`)) row.ref = ref;
-        // 真加了一条 ref → info 标成该刷(契约在 stores.ts:这是改名的证据)。
+        // A ref was really added: mark info stale (contract in stores.ts: this is evidence of a rename).
         if (row) row.infoStale = true;
         return tokenId;
       }),
@@ -148,11 +138,11 @@ function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
         }
         const src = rows.get(from);
         const dst = rows.get(into);
-        // 旧行的 provider 图是回退链的一档,别随行一起丢。
+        // The old row's provider logo is a fallback-chain tier; do not lose it with the row.
         if (src && dst && !dst.providerLogo && src.providerLogo) {
           dst.providerLogo = src.providerLogo;
         }
-        // 赢家的 info 标成该刷 —— 会合并就说明至少有一边的名字与上游当前叫法不一致。
+        // Mark the winner's info stale: a merge means at least one side's name differs from upstream's current one.
         if (dst) dst.infoStale = true;
         rows.delete(from);
       }),
@@ -176,13 +166,13 @@ function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
       Effect.sync(() => {
         const row = rows.get(tokenId);
         if (!row) return;
-        // 只填空槽 —— 已有值的字段一律不动。
+        // Fill empty slots only; fields with values are untouched.
         if (!row.name && patch.name) row.name = patch.name;
         row.logo ??= patch.logo;
         row.providerLogo ??= patch.providerLogo;
       }),
 
-    // **覆盖**(与 fillInfo 相反)。刷过之后 infoStale 落下 —— 测试据此验「不会每次都白刷」。
+    // Overwrite (opposite of fillInfo). After a refresh infoStale clears, so tests can verify "no wasted refresh every time".
     putInfo: (writes: readonly TokenInfoWrite[]) =>
       Effect.sync(() => {
         for (const w of writes) {
@@ -190,7 +180,7 @@ function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
           if (!row) continue;
           row.symbol = w.symbol;
           row.name = w.name;
-          if (w.logo !== undefined) row.logo = w.logo; // 上游没给图 → 保留原有的
+          if (w.logo !== undefined) row.logo = w.logo; // upstream gave no logo: keep the existing one
           row.infoStale = false;
         }
       }),
@@ -211,12 +201,12 @@ function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
 
 const clone = (row: TokenInfo): TokenInfo => ({ ...row });
 
-// —— per-user:价 facet + 历史日价 ——
+// per-user: price facet + historical daily prices
 interface FakeTokenPriceStore extends InMemory<TokenPriceStore> {
   readonly current: Map<string, { price: TokenPrice; expiresAt: number }>;
   readonly daily: Map<string, Map<number, number>>;
-  // 按 ref 直存的历史日价(与 `daily` 分开:那个键是 tokenId,这个键是 ref —— 真表里两者
-  // 落的是同一张 token_daily_prices,但假实现按调用路径分桶,断言起来才看得清走了哪条)。
+  // Daily history stored directly by ref (separate from `daily`, keyed by tokenId; the real table is one token_daily_prices, but the
+  // fake buckets by call path so assertions show which path was taken).
   readonly dailyByRef: Map<string, Map<number, number>>;
 }
 
@@ -262,7 +252,7 @@ function fakeTokenPriceStore(): FakeTokenPriceStore {
         const out = new Map<string, TokenRecordPrice>();
         for (const id of ids) {
           const hit = current.get(id);
-          // 过期不删,读出带 stale(SWR)。
+          // Expired is not deleted, read with stale (SWR).
           if (hit) out.set(id, { ...hit.price, stale: hit.expiresAt <= now });
         }
         return out;
@@ -290,22 +280,20 @@ function fakeTokenPriceStore(): FakeTokenPriceStore {
   };
 }
 
-// —— 全局映射表 ——
-// 契约来自 `@folio/db` 的那张门票(它没有「谁的」这回事,所以不是参考层的端口)——
-// 取字段类型而不是另抄一份签名。
+// Global ref-index table
+// The contract comes from `@folio/db`'s ticket (no owner, so not a reference-layer port); field types are taken, not re-copied.
 interface FakeGlobalRefIndexStore extends InMemory<GlobalRefIndexStore> {
-  // 测试用它直接塞一条映射(模拟 cron 刷完表)。**不暴露内部键格式** ——
-  // 让测试自己拼键的话,键格式一改测试就静默失配(踩过一次)。
-  // chainRef → 整条 upstreamRef(#228:值是整条,不是裸 id)。
+  // Test helper to insert a mapping directly (simulating cron refreshing the table). Does not expose the internal key format, so a key format change cannot silently mismatch tests.
+  // chainRef to the whole upstreamRef (the value is the whole ref, not a bare id).
   set(upstream: string, chainRef: string, upstreamRef: TokenRef): void;
-  writes: number; // putAll 调用次数(验「整份写一次」而非逐行 upsert)
+  writes: number; // putAll calls (verifies "one whole write", not per-row upserts)
   lookups: number;
 }
 
 const idxKey = (upstream: string, chainRef: string) => `${upstream} ${chainRef}`;
 
 function fakeGlobalRefIndexStore(
-  seed: Record<string, TokenRef> = {}, // chainRef → 整条 upstreamRef
+  seed: Record<string, TokenRef> = {}, // chainRef to the whole upstreamRef
   upstream = "src",
 ): FakeGlobalRefIndexStore {
   const map = new Map<string, TokenRef>();
@@ -335,12 +323,12 @@ function fakeGlobalRefIndexStore(
     putAll: (rows: readonly TokenRefIndexRow[], updatedAt) =>
       Effect.sync(() => {
         store.writes += 1;
-        // 差量计数(#FOL-68):真 store 返回 改/增/删,契约如此,fake 也算一份 —— insert = 之前没有这条键,
-        // update = 有但叫法变了。del 在真表按 upstream 差量,fake 是「按 chainRef 覆盖写」的简化模型,不模拟下架 → 0。
+        // Diff counts: the real store returns changed/added/removed; the fake does too. insert = key absent before, update = present but its name changed.
+        // del is by upstream diff in the real table; the fake overwrites by chainRef and does not simulate delisting, so 0.
         let updated = 0;
         let inserted = 0;
         for (const r of rows) {
-          // upstream 由整条 upstreamRef 解出(与真 store 拆列同理)。
+          // upstream is derived from the whole upstreamRef (same as the real store splitting columns).
           const parts = parseTokenRef(r.upstreamRef);
           if (parts.kind === "unknown") continue;
           const key = idxKey(parts.namer, r.chainRef);
@@ -359,11 +347,11 @@ function fakeGlobalRefIndexStore(
   return store;
 }
 
-// —— per-user KV 缓存 ——
+// per-user KV cache
 interface FakeCacheStore extends InMemory<CacheStore> {
   readonly entries: Map<string, { value: unknown; expiresAt: number }>;
-  writes: number; // 写**批次**数(不是键数)—— 「一个批次写回」那类断言看这个
-  reads: number; // 读**往返**数 —— 「一次读拿全」那类断言看这个
+  writes: number; // write batches (not key count): "one batch write-back" assertions read this
+  reads: number; // read round trips: "one read gets everything" assertions read this
 }
 
 function fakeCacheStore(): FakeCacheStore {
@@ -384,14 +372,14 @@ function fakeCacheStore(): FakeCacheStore {
         return Option.fromNullable(read(key, now));
       }),
 
-    // 一次往返 —— 真实现是一条 `WHERE k IN (…)`,所以这里也只记一次读。
+    // One round trip: the real implementation is one `WHERE k IN (…)`, so one read is counted here too.
     getMany: (keys) =>
       Effect.map(Clock.currentTimeMillis, (now) => {
         store.reads += 1;
         const out = new Map<string, CacheEntry>();
         for (const key of new Set(keys)) {
           const hit = read(key, now);
-          if (hit) out.set(key, hit); // miss 的键不出现(契约如此)
+          if (hit) out.set(key, hit); // missing keys are absent (by contract)
         }
         return out;
       }),
@@ -402,7 +390,7 @@ function fakeCacheStore(): FakeCacheStore {
         entries.set(key, { value, expiresAt: now + ttlMs });
       }),
 
-    // 一个批次 —— 真实现是一次 D1 `batch()`,所以 writes 只加一。
+    // One batch: the real implementation is one D1 `batch()`, so writes goes up by one.
     putMany: (batch) =>
       Effect.map(Clock.currentTimeMillis, (now) => {
         if (batch.length === 0) return;
@@ -413,17 +401,16 @@ function fakeCacheStore(): FakeCacheStore {
   return store;
 }
 
-// —— 上游 ——
-// 失败注入:把 `fail` 设成一个 `UpstreamError`,下一发(以及此后每一发)那个方法就以它失败 ——
-// 测试因此能验「上游挂了怎么降级」,而且是**按类型**挂的,不是抛一个随便的 Error。
+// Upstream
+// Failure injection: set `fail` to an `UpstreamError` and the next call (and every later one) fails with it, so tests verify
+// degradation by type rather than a random thrown Error.
 interface FakeUpstream extends TokenUpstream {
   readonly calls: string[];
   markets: UpstreamToken[];
   searchResults: UpstreamToken[];
   prices: Map<TokenRef, TokenPrice>;
-  series: TokenPricePoint[]; // 缺省 vsCurrency(USD)的历史腿
-  // 按 vsCurrency(大写)的历史腿 —— 法币历史反算取「BTC 在某币种下的价」时用(ADR 0026)。
-  // 命中就用它,否则回退 `series`。
+  series: TokenPricePoint[]; // history leg for the default vsCurrency (USD)
+  // History legs per vsCurrency (uppercase), used when fiat history derives "BTC priced in a currency"; a hit wins, else falls back to `series`.
   seriesByVs: Map<string, TokenPricePoint[]>;
   globalRefIndex: { rows: TokenRefIndexRow[]; unmatchedPlatforms: string[]; skipped: number };
   fail: UpstreamError | undefined;
@@ -458,7 +445,7 @@ function fakeUpstream(id = "src"): FakeUpstream {
         return out;
       }),
 
-    // 上游没收录的 ref 不出现在结果里(契约如此)。
+    // Refs upstream does not list are absent from the result (by contract).
     fetchTokens: (refs) =>
       gate(src, `fetchTokens:${refs.join(",")}`, () =>
         src.markets.filter((t) => refs.includes(t.ref)),
@@ -477,7 +464,7 @@ function fakeUpstream(id = "src"): FakeUpstream {
   return src;
 }
 
-// 记一次调用,然后按 `fail` 决定成功还是失败。
+// Records a call, then succeeds or fails per `fail`.
 const gate = <A>(
   src: { calls: string[]; fail: UpstreamError | undefined },
   call: string,
@@ -488,7 +475,7 @@ const gate = <A>(
     return src.fail ? Effect.fail(src.fail) : Effect.sync(value);
   });
 
-// —— 汇率上游 ——
+// Fx upstream
 interface FakeFxUpstream extends FxUpstream {
   fetches: number;
   rates: Map<string, number>;
@@ -503,8 +490,7 @@ function fakeFxUpstream(rates: Record<string, number> = {}, id = "src"): FakeFxU
     calls: [],
     fail: undefined,
     rates: new Map(Object.entries(rates)),
-    // 汇率的 BTC 反算基,也是 BTC 美元历史腿的缓存键(ADR 0026)。历史腿的取数走代币 upstream 的
-    // fetchPriceSeries,不在 FxUpstream 上;这里只声明基。
+    // BTC base of the derivation and cache key of the BTC/USD history leg. Leg fetches go through the token upstream's fetchPriceSeries, not FxUpstream; only the base is declared here.
     btcRef: `${id}/issued:bitcoin`,
     fetchRates: () =>
       gate(src, "fetchRates", () => {
@@ -515,7 +501,7 @@ function fakeFxUpstream(rates: Record<string, number> = {}, id = "src"): FakeFxU
   return src;
 }
 
-// —— 平台上游 ——
+// Platform upstream
 interface FakePlatformUpstream extends PlatformUpstream {
   fetches: number;
   chains: PlatformMeta[];
@@ -539,19 +525,12 @@ function fakePlatformUpstream(chains: PlatformMeta[] = [], id = "src"): FakePlat
   return src;
 }
 
-// —— 一份共用的测试装配 ——
-//
-// 每个测试文件抄一遍 `provide` 尾巴是本仓踩过的坑(有几个 client 的测试漏了 provide 限频档,
-// 于是偷偷跑在共享游标那一档上、跨用例串味)。所以这里只有一个入口:
-//
-//   const h = harness();
-//   const price = await h.run(Effect.flatMap(TokenService, (t) => t.priceOf("tk_1")));
-//
-// `run` 里做了三件事:provide 全部端口的假实现 + 四个真服务(三个 per-user + 全局维护) +
-// `TestContext`(虚拟时钟),并把时钟拨到 `now0`(固定基准,日桶算得出确定的值)。
-// `GlobalRefIndexService` 不进 `oracleLayer`,但 cron 用例也走这个 harness,所以这里一并装上。
-// 日志也被收下来 —— **降级必须留痕**是这次迁移的一条设计(以前 6 处 `catch {}` 一行痕迹都没有),
-// 而「留痕」只有能断言才算数。
+// Shared test harness
+// Copying the `provide` tail into each test file bit us before (client tests forgot the rate-limit tier and silently ran on the shared
+// cursor tier, leaking across cases), so there is one entry: `const h = harness(); await h.run(Effect.flatMap(TokenService, ...))`.
+// `run` provides fakes of all ports + the four real services (three per-user + global maintenance) + `TestContext` (virtual clock),
+// with the clock at `now0` (fixed base so day buckets are deterministic). Logs are collected too: degradation must leave a trace,
+// and that only counts if it can be asserted.
 interface LogEntry {
   level: string;
   message: string;
@@ -566,9 +545,9 @@ export interface Harness {
   readonly upstream: FakeUpstream;
   readonly fxUpstream: FakeFxUpstream;
   readonly platformUpstream: FakePlatformUpstream;
-  // 这一次 `run` 里落下的日志(按顺序)。
+  // Logs emitted during this `run`, in order.
   readonly logs: LogEntry[];
-  // 跑一个用了参考层的 effect。**测试与生产走同一条构造路**(Tag → Layer)。
+  // Run an effect that uses the reference layer. Tests and production share one construction path (Tag to Layer).
   run<A, E>(
     effect: Effect.Effect<
       A,
@@ -584,16 +563,15 @@ export interface HarnessOpts {
   globalRefIndexSeed?: Record<string, TokenRef>;
   rates?: Record<string, number>;
   chains?: PlatformMeta[];
-  // symbol → 上游 id 的策展小表(`Namer.overrides`)。
+  // symbol to upstream id curated table (`Namer.overrides`).
   overrides?: Readonly<Record<string, string>>;
-  // 顶掉真候选源(mint 的那一组用例要**数**它被问了几次 —— 「有没有走到 symbol 那一档」
-  // 本身就是断言对象)。不给就用真的(读缓存目录)。
+  // Replaces the real candidate source (mint's cases must count how often it is asked: reaching the symbol tier is itself asserted). Real one if omitted.
   candidates?: CandidateSource;
 }
 
-// harness 里的「这次请求」。假 store 不按用户分桶,所以它只是个名字。
+// The "this request" in the harness. Fake stores do not bucket by user, so it is just a name.
 const HARNESS_USER = "harness-user";
-// 假 store 从不碰 D1,这个连接只为满足类型;真有一条查询打到它,`drizzle` 会当场炸。
+// Fake stores never touch D1; this connection only satisfies the types, and a real query would blow up in `drizzle` at once.
 const unreachableD1 = { DB: {} } as DbEnv;
 
 export function harness(opts: HarnessOpts = {}): Harness {
@@ -619,8 +597,8 @@ export function harness(opts: HarnessOpts = {}): Harness {
   );
 
   const ports = Layer.mergeAll(
-    // **本地那几片是 db 的门票,不是端口**(契约就是 db 里那几份实现)。假实现只需覆盖被测
-    // 代码真会碰的字段 —— `GlobalDatabase.accounts` 是 cron 扫用户那条,参考层一处都不碰它。
+    // The local slices are db tickets, not ports (the contract is the db implementations). Fakes only cover fields the code under test
+    // touches; `GlobalDatabase.accounts` is the cron's user scan, which the reference layer never uses.
     Layer.succeed(DatabaseForOracle, {
       tokens: store,
       tokenPrices: prices,
@@ -635,17 +613,14 @@ export function harness(opts: HarnessOpts = {}): Harness {
     Layer.succeed(Ports.PlatformUpstream, platformUpstream),
     Layer.succeed(Ports.Namer, { id: namer, overrides: opts.overrides ?? {} }),
   );
-  // `provideMerge` 而不是 `provide`:端口也一并透出去,于是用例既能拿服务、也能直接拿假端口
-  // (`readPlatforms(h.cache, …)` 那类内部件的单测就是直接用假端口的)。
-  // `CandidateSource.Default` 也透出来:它在 `oracleLayer` 里已被 `TokenService` 吃掉(装配点看不到
-  // 它),但它自己有一组测试(「写路径到底会不会出网」),那组要能直接拿到这个服务。
-  // 默认就用生产那个 `oracleLayer`(整体装配也因此被每个用例覆盖到)。只有当用例要顶掉候选源时
-  // 才手工拼一遍三个服务 —— `oracleLayer` 已经把 `CandidateSource` 吃进去了(那是设计:装配点
-  // 不该看见它),从外面 merge 一个同 Tag 的 layer 谁赢是含糊的,所以这一档明写。
+  // `provideMerge` so ports are also exposed: cases get both services and fake ports (`readPlatforms(h.cache, …)` unit tests use ports directly).
+  // `CandidateSource.Default` is exposed too: `oracleLayer` consumes it, but it has its own tests ("does the write path egress") needing the service.
+  // Defaults to production's `oracleLayer` (so whole-assembly is covered by every case); only when a case replaces the candidate source
+  // are the three services assembled by hand, since merging a same-Tag layer from outside is ambiguous about who wins.
   const services = opts.candidates
     ? Layer.mergeAll(
-        // 聚合 `Oracle` 也要在场(#504 T15):它挂的就是这三个服务本尊,顶掉候选源之后
-        // 仍然必须是同一份 —— 所以 `provideMerge` 这三个,而不是让它自己再建一套。
+        // The aggregate `Oracle` must be present too: it holds these three services themselves, so `provideMerge` them rather than
+        // building a second set after the candidate source is replaced.
         Layer.provideMerge(
           Oracle.Default,
           Layer.mergeAll(
@@ -671,11 +646,11 @@ export function harness(opts: HarnessOpts = {}): Harness {
     logs,
     run: (effect) =>
       Effect.runPromise(
-        // 起点拨到固定基准(日桶算得出确定的值);用例内部要推时间就 `yield* TestClock.adjust(…)`。
+        // Start at the fixed base (deterministic day buckets); cases advance time with `yield* TestClock.adjust(…)`.
         Effect.zipRight(TestClock.setTime(NOW0), effect).pipe(
           Effect.provide(everything),
-          // 一次请求的两样(ADR 0054),与生产的装配点同一个给法。假 store 一样都不读 ——
-          // 给它们是因为参考层方法的 `R` 如实写着「要一个请求」,不给就编译不过。
+          // The two parts of a request, same as production's assembly point. Fake stores read neither; supplied because the layer's
+          // `R` truthfully says "needs a request" and omitting them fails to compile.
           provideCurrentUser(HARNESS_USER),
           provideDbClient(unreachableD1),
           Effect.provide(logger),

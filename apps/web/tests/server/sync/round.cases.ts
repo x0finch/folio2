@@ -14,8 +14,8 @@ import { captureQueue, consumeJob } from "../_kit/queue";
 import { call } from "../_kit/run";
 import { freshUser } from "../_kit/user";
 
-// 开轮 / 读轮(ADR 0048)。对着真 D1 跑,因为这两件事的正确性都在「哪些账户进这一轮」与
-// 「同一个键两边算得一样吗」上 —— 那两条都要真的账户行、真的组合归属。
+// Opening / reading a round, against real D1: correctness hinges on which accounts enter the round and on both sides computing the
+// same key, which need real account rows and portfolio membership.
 
 describe("sync/round", () => {
   const USER = "h-sync-round";
@@ -30,7 +30,7 @@ describe("sync/round", () => {
   const manual = (label: string) =>
     db(USER).accounts.create({ connectorId: "manual", label, creds: null });
 
-  // 断言侧把 `round` 掀成非空:这套用例造不出「行在两句之间被删」那一幕,真走到就该炸给人看。
+  // The assertion side unwraps `round` as non-null: these cases can't produce a row deleted between two statements, and if it happened it should blow up.
   const open = async (portfolioId?: string) => {
     const out = await call(USER, openSyncRound({ portfolioId, trigger: "manual" }));
     if (out.round == null) throw new Error("open returned no round — the row vanished mid-test?");
@@ -44,12 +44,12 @@ describe("sync/round", () => {
     await freshUser(USER);
   });
 
-  describe("开轮", () => {
-    it("名单 = 当前组合内、活跃、非手记 —— 与页头摘要同一条判据", async () => {
+  describe("opening a round", () => {
+    it("list = in the current portfolio, active, non-manual -- same criterion as the page header summary", async () => {
       const live = await cex("Binance spot");
-      const archived = await cex("旧号");
+      const archived = await cex("Old account");
       await db(USER).accounts.setArchived(archived.id, true);
-      await manual("手记");
+      await manual("Manual");
 
       const { round, opened } = await open();
       expect(opened).toBe(true);
@@ -59,10 +59,10 @@ describe("sync/round", () => {
       expect(round.finishedAt).toBeNull();
     });
 
-    it("别的组合里的账户不进这一轮", async () => {
-      const here = await cex("默认组合里的");
-      const there = await cex("看单里的");
-      const watch = await db(USER).portfolios.create({ name: "看单" });
+    it("accounts in another portfolio don't enter this round", async () => {
+      const here = await cex("In default");
+      const there = await cex("In watchlist");
+      const watch = await db(USER).portfolios.create({ name: "Watchlist" });
       await db(USER).portfolios.assignAccount(there.id, watch.id);
 
       const mine = await open();
@@ -71,8 +71,8 @@ describe("sync/round", () => {
       expect(Object.keys(other.round.accounts)).toEqual([there.id]);
     });
 
-    // 第二个设备点同步 / cron 撞上手动:看到的是同一轮,不是被清空重来的一轮。
-    it("活轮还在 → 第二次开轮返回同一轮", async () => {
+    // A second device clicks sync / cron collides with a manual one: it sees the same round, not one cleared and restarted.
+    it("live round still there -> a second open returns the same round", async () => {
       await cex("Binance spot");
       const first = await open();
       const second = await open();
@@ -80,7 +80,7 @@ describe("sync/round", () => {
       expect(second.round.roundId).toBe(first.round.roundId);
     });
 
-    it("心跳 = 开轮那一刻 + 120s", async () => {
+    it("heartbeat = the moment of opening + 120s", async () => {
       await cex("Binance spot");
       const before = Date.now();
       const { round } = await open();
@@ -89,13 +89,13 @@ describe("sync/round", () => {
     });
   });
 
-  describe("读轮", () => {
-    it("这个组合从没开过 → null(不是一个空轮)", async () => {
+  describe("reading a round", () => {
+    it("this portfolio never opened one -> null (not an empty round)", async () => {
       const pf = await db(USER).portfolios.ensureDefault();
       expect(await read(pf.id)).toBeNull();
     });
 
-    it("刚开的一轮 → 在跑,x / N 从 0 起,正在同步的是第一个", async () => {
+    it("a just-opened round -> running, x / N starts at 0, the first one is syncing", async () => {
       await cex("Binance spot");
       await cex("Kraken");
       await open();
@@ -110,10 +110,10 @@ describe("sync/round", () => {
       expect(view?.current).toBe("Binance spot");
     });
 
-    // 开轮对坏 id 退回默认组合(开轮必须落在一个真组合上);读轮**不解析**,直接读键 ——
-    // 这是 1.5s 一发的路,省两条查询,而键本身 user-scoped,坏 id 只会读到空键。
-    // 客户端传来的永远是选择器里真实存在的 id,所以两边在真实流量上落的是同一个键。
-    it("开轮的坏 id 落到默认组合;读轮拿真 id 读得到,拿坏 id 读到空", async () => {
+    // Opening falls back to the default portfolio for a bad id (a round must land on a real portfolio); reading doesn't resolve, it reads the key directly:
+    // this is the 1.5s-polled path, saving two queries, and the key is user-scoped so a bad id only reads an empty key. The client only sends
+    // ids that exist in the selector, so on real traffic both sides land on the same key.
+    it("opening with a bad id lands on the default portfolio; reading with the real id finds it, with the bad id finds empty", async () => {
       await cex("Binance spot");
       const opened = await open("pf-never-existed");
       const def = await db(USER).portfolios.ensureDefault();
@@ -123,10 +123,10 @@ describe("sync/round", () => {
     });
   });
 
-  // `POST /api/sync` 那一轮(FOL-89):**开轮、投消息、即返** —— 这一步一发上游都不打;同步在队列
-  // consumer 里跑(出网被掐掉,所以有凭据的那个必定失败)。测的是接线本身:投了哪些消息、结果逐条落进
-  // 那一轮、三档分对、最后一个收官。
-  describe("手动 / 自动轮(startSyncRound)", () => {
+  // The `POST /api/sync` round: open a round, enqueue messages, return at once, with no upstream calls; sync runs in the queue consumer
+  // (outbound is cut off, so the one with credentials must fail). Tests the wiring: which messages were enqueued, results landing per message
+  // in the round, the three tiers split correctly, the last one closes it out.
+  describe("manual / automatic rounds (startSyncRound)", () => {
     let outbound: Outbound;
     let queue: ReturnType<typeof captureQueue>;
 
@@ -147,7 +147,7 @@ describe("sync/round", () => {
       queue = captureQueue();
     });
 
-    it("开轮即投:一个账户一条 sync-account + 每用户一套参考层活,一发上游都不打", async () => {
+    it("opening enqueues: one sync-account per account + one reference-layer set per user, no upstream calls", async () => {
       const a = await cex("Binance spot");
       const b = await cex("Kraken");
 
@@ -168,7 +168,7 @@ describe("sync/round", () => {
           roundId: round.roundId,
         });
       }
-      // 以前手动同步的收尾(`warmTokens`)在请求里做的那几件,现在各是一条消息,延后规则与 cron 同一份。
+      // The tail work of a manual sync is one message each, with the same delay rules as cron.
       expect(
         queue.sent
           .filter((m) => m.job.kind !== "sync-account")
@@ -180,16 +180,16 @@ describe("sync/round", () => {
         ["platforms", true],
         ["defi-logos", true],
       ]);
-      // 回包是此刻的样子:在跑、一个都还没落账。
+      // The reply is the current state: running, nothing recorded yet.
       expect(round.finishedAt).toBeNull();
       expect(Object.values(round.accounts).map((x) => x.status)).toEqual(["pending", "pending"]);
     });
 
-    it("消费完那几条消息 → 逐个落账、三档分对、最后一个收官", async () => {
+    it("after consuming those messages -> recorded one by one, three tiers split correctly, the last one closes out", async () => {
       const willFail = await cex("Binance spot");
       const noKeys = await db(USER).accounts.create({
         connectorId: "binance",
-        label: "还没填 key",
+        label: "No key yet",
         creds: null,
       });
 
@@ -201,17 +201,17 @@ describe("sync/round", () => {
       expect(view?.settled).toBe(2);
       expect(view?.needsKeys).toBe(1);
       expect(view?.failed.map((f) => f.accountId)).toEqual([willFail.id]);
-      // 上游的原话原样留着 —— 面板那一行不翻译它。
+      // The upstream's own words are kept as is; the panel row doesn't translate them.
       expect(view?.failed[0]?.error).toBeTruthy();
       expect(view?.synced).toBe(0);
       expect(view?.statuses).toEqual({ [willFail.id]: "failed", [noKeys.id]: "needs-keys" });
-      // 逐账户的失败不是「整轮没跑起来」,那一句必须还是空的。
+      // A per-account failure isn't "the whole round failed to start", so that field must stay empty.
       expect(view?.error).toBeNull();
     });
 
-    // 第二个设备点同步 / 连点两下:拿回的是同一轮,不投第二拨消息 —— 否则两拨 consumer 对着
-    // 同一批账户打上游。
-    it("活轮还在 → 原样还回来,不再投消息", async () => {
+    // A second device clicks sync / a double click: it gets back the same round and no second batch of messages is enqueued, or two
+    // consumers would hit the upstream for the same accounts.
+    it("live round still there -> returned as is, no more messages enqueued", async () => {
       await cex("Binance spot");
       const first = await start();
       const sentBefore = queue.sent.length;
@@ -223,11 +223,11 @@ describe("sync/round", () => {
       expect(queue.sent).toHaveLength(sentBefore);
     });
 
-    // 活轮只装一个账户(另一个设备加了账户 / 在详情侧栏点了同步,FOL-89):手动 / 自动那一轮不能原样
-    // 让开 —— 其余账户就这么被漏掉了。与 cron 同一条路(review R2-#2):把缺的拉进那一轮、只投它们。
-    it("活轮只装一个账户 → 把其余账户拉进那一轮、只投它们", async () => {
-      const busy = await cex("正在单独同步的");
-      const other = await cex("其余的");
+    // A live round holds only one account (another device added accounts / clicked sync in the detail sidebar): the manual / automatic round
+    // mustn't just yield, or the rest are missed. Same path as cron: pull the missing ones into that round and enqueue only them.
+    it("a live round holds only one account -> pull the rest into that round and enqueue only them", async () => {
+      const busy = await cex("Syncing alone");
+      const other = await cex("The rest");
       const pf = await db(USER).portfolios.ensureDefault();
       await db(USER).syncRounds.open({
         portfolioId: pf.id,
@@ -241,16 +241,16 @@ describe("sync/round", () => {
 
       expect(opened).toBe(false);
       expect(round.roundId).toBe("single");
-      // 回包是此刻的样子:拉进去的那个已经在名单里了。
+      // The reply is the current state: the pulled-in one is already on the list.
       expect(round.accounts[other.id]?.status).toBe("pending");
       expect(round.accounts[busy.id]?.status).toBe("pending");
       expect(queue.syncJobs().map((j) => [j.roundId, j.accountId])).toEqual([["single", other.id]]);
     });
 
-    it("自动轮撞上单账户的轮 → 拉进去的里头刚同步过的记 skipped、不投", async () => {
-      const busy = await cex("正在单独同步的");
-      const fresh = await cex("刚同步过");
-      const stale = await cex("很久没同步");
+    it("automatic round hits a single-account round -> pulled-in ones just synced are recorded skipped, not enqueued", async () => {
+      const busy = await cex("Syncing alone");
+      const fresh = await cex("Just synced");
+      const stale = await cex("Long unsynced");
       await db(USER).snapshots.write(fresh.id, { takenAt: Date.now(), totalUsd: 1, balances: [] });
       const pf = await db(USER).portfolios.ensureDefault();
       await db(USER).syncRounds.open({
@@ -269,9 +269,9 @@ describe("sync/round", () => {
       expect(queue.syncJobs().map((j) => j.accountId)).toEqual([stale.id]);
     });
 
-    it("撞上单账户的轮、投递失败 → 拉进去的记 failed,那个账户自己的不动", async () => {
-      const busy = await cex("正在单独同步的");
-      const other = await cex("其余的");
+    it("hits a single-account round and enqueue fails -> pulled-in ones recorded failed, that account's own is untouched", async () => {
+      const busy = await cex("Syncing alone");
+      const other = await cex("The rest");
       const pf = await db(USER).portfolios.ensureDefault();
       await db(USER).syncRounds.open({
         portfolioId: pf.id,
@@ -301,18 +301,18 @@ describe("sync/round", () => {
       expect(back?.finishedAt).toBeNull();
     });
 
-    it("空组合 → 当场收官,一条消息都不投", async () => {
-      await manual("手记");
+    it("empty portfolio -> closes out on the spot, no message enqueued", async () => {
+      await manual("Manual");
       const { round } = await start();
       expect(round.finishedAt).not.toBeNull();
       expect(queue.sent).toEqual([]);
     });
 
-    // 自动轮按新鲜度跳过(FOL-18 子票 4):有一张 1 小时内快照的账户被当 skipped 收掉、**不投消息**;
-    // 没快照的照常投(consumer 里出网被掐 → 失败)。手动轮不跳,强制全量。
-    it("自动轮跳过刚同步过的账户;手动轮强制全量", async () => {
-      const fresh = await cex("刚同步过");
-      const stale = await cex("很久没同步");
+    // The automatic round skips by freshness: an account with a snapshot within 1 hour is closed as skipped with **no message**;
+    // ones without a snapshot enqueue as usual (outbound is cut in the consumer -> failure). The manual round never skips and forces everything.
+    it("automatic round skips just-synced accounts; manual round forces all", async () => {
+      const fresh = await cex("Just synced");
+      const stale = await cex("Long unsynced");
       await db(USER).snapshots.write(fresh.id, {
         takenAt: Date.now(),
         totalUsd: 100,
@@ -320,7 +320,7 @@ describe("sync/round", () => {
       });
 
       const auto = await start(true);
-      // 回包已经反映了规划:fresh 那格是 skipped。
+      // The reply already reflects the plan: the fresh cell is skipped.
       expect(auto.round.accounts[fresh.id]?.status).toBe("skipped");
       expect(queue.syncJobs().map((j) => j.accountId)).toEqual([stale.id]);
       await consumeAll();
@@ -330,7 +330,7 @@ describe("sync/round", () => {
       expect(autoView?.failed.map((f) => f.accountId)).toEqual([stale.id]);
 
       queue = captureQueue();
-      const manualRound = await start(); // 上一轮已收官,开得动
+      const manualRound = await start(); // the previous round closed out, so one can open
       expect(manualRound.opened).toBe(true);
       expect(
         queue
@@ -341,9 +341,9 @@ describe("sync/round", () => {
       expect(outbound.calls).toEqual([]);
     });
 
-    // 未来时间戳(时钟偏移)按「新鲜」处理;全都新鲜 → 没有消息要投 → 当场收官,参考层那几条也不投。
-    it("自动轮里全都新鲜 → 当场收官,一条消息都不投", async () => {
-      const future = await cex("时钟偏移到未来");
+    // A future timestamp (clock skew) counts as fresh; all fresh -> no message to enqueue -> closes out on the spot, no reference-layer jobs either.
+    it("automatic round with everything fresh -> closes out on the spot, no message enqueued", async () => {
+      const future = await cex("Clock skewed to future");
       await db(USER).snapshots.write(future.id, {
         takenAt: Date.now() + 60 * 60 * 1000,
         totalUsd: 100,
@@ -357,8 +357,8 @@ describe("sync/round", () => {
       expect(queue.sent).toEqual([]);
     });
 
-    // 上一轮投出去、还没消费的消息,在新一轮开了之后才落到 consumer:它那几笔写落空,新一轮不被改花。
-    it("上一轮的消息写不进新一轮", async () => {
+    // A message from the previous round that reaches the consumer after the new round opened: its writes fall through and the new round isn't corrupted.
+    it("a previous round's message can't write into the new round", async () => {
       await cex("Binance spot");
       const stale = await start();
       const staleJobs = queue.syncJobs();
@@ -378,8 +378,8 @@ describe("sync/round", () => {
       expect(view?.state).toBe("running");
     });
 
-    // 投递炸了:别让面板对着一轮永远不会有人跑的「在跑」干等 120s —— 带一句话收官,再让请求失败。
-    it("投递失败 → 这一轮带着一句话收官,请求失败", async () => {
+    // Enqueue blew up: don't leave the panel waiting 120s on a "running" round nobody will run: close out with a message, then fail the request.
+    it("enqueue failure -> the round closes out with a message, the request fails", async () => {
       await cex("Binance spot");
       const exit = await call(
         USER,

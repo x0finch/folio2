@@ -1,8 +1,7 @@
 import { cn } from "@folio/ui";
 import type { ReactNode } from "react";
 
-// 统计小件:muted xs label + mono 加粗值。hero 三指标与 perp 权益条共用
-// (code review:此前两处 byte-for-byte 重复,排版调整会漏一处)。
+// Small stat: muted xs label + bold mono value, shared by the hero's three metrics and the perp equity bar.
 export function Stat({
   label,
   value,

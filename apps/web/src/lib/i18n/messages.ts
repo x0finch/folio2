@@ -1,5 +1,5 @@
-// i18n 消息(use-intl)。en 为基准;zh 用 `: Messages` 强制同构 —— 缺键/拼错编译期报错。
-// 品牌/链/交易所/币种符号等专有名词与纯示例值(BTC / 0x… / 数字)不翻译。
+// i18n messages (use-intl). `en` is the base; `zh` is typed `: Messages` so missing / misspelled keys fail at compile time.
+// Proper nouns (brands, chains, exchanges, symbols) and pure example values are not translated.
 
 const en = {
   Common: {
@@ -169,8 +169,7 @@ const en = {
     archive: "Archive",
     unarchive: "Unarchive",
     archivedBadge: "Archived",
-    // 归档 = 封存(ADR 0039):数据停在归档那一刻,所以这里是**静态日期**,不是相对时间。
-    // 用相对时间的话它会一天天长下去(「3 个月前同步」),看着像同步坏了。
+    // Archived accounts are sealed at archive time, so this is a static date, not a relative time (which would keep growing).
     sealedAt: "Sealed {when}",
     archivedSection: "Archived ({count})",
     deleteConfirm:
@@ -381,7 +380,7 @@ const en = {
   CustomTabs: {
     overview: "Overview",
     add: "Pin a view",
-    byConnector: "Types", // 段名说的是账户类型(binance / zerion…),不是「连接器」这个内部词
+    byConnector: "Types", // the section names account types, not the internal word "connector"
     byTag: "Tags",
     byAccount: "Accounts",
     noOptions: "Nothing to pin yet",
@@ -390,8 +389,8 @@ const en = {
     empty: "No accounts match this tab yet.",
     actionFailed: "Something went wrong.",
   },
-  // 账户输入的标签/说明,key = ProviderInput.label/desc 的英文源串(en 为同值;zh 给翻译;
-  // 缺失时由 IntlProvider 的 getMessageFallback 回退到 key 本身)。
+  // Account input labels / descriptions, keyed by the English source string of ProviderInput.label/desc; a missing key
+  // falls back to the key itself via IntlProvider's getMessageFallback.
   Inputs: {
     "API Key": "API Key",
     "API Secret": "API Secret",
@@ -842,7 +841,7 @@ const zh: Messages = {
 
 export const messages = { en, zh };
 
-// 让 useTranslations 的键获得自动补全与校验。
+// Gives useTranslations key autocomplete and checking.
 declare global {
   interface IntlMessages extends Messages {}
 }

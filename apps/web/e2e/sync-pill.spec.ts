@@ -7,20 +7,21 @@ import {
   setUpstream,
 } from "./fixtures/sync";
 
-// FOL-96:鼠标一移进同步胶囊,悬停面板就开始弹出 —— 开场那一帧面板内容的可见区域正好就是胶囊那一块,
-// 而内容层压在胶囊上面。于是「移进来立刻点」的那一下:mousedown 落在胶囊、mouseup 落在面板,click
-// 发给了两者的公共祖先,同步没触发。真人也会撞上(移入后约 100ms 内点下去)。
-//
-// 单测造不出来:要的是真浏览器的命中测试 + 弹层动画的真实时序。
-test.describe("同步胶囊", () => {
+// Hovering the sync pill opens the hover panel, whose visible area on the first frame is exactly the pill and layered above it, so a
+// click right after moving in has mousedown on the pill and mouseup on the panel: click goes to their common ancestor and sync doesn't fire
+// (real users hit it within ~100ms of moving in). Unit tests can't reproduce it: it needs real-browser hit testing and the popover animation's real timing.
+test.describe("sync pill", () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test("鼠标移入后立刻点 → 照样发起同步,不被弹出的面板吞掉", async ({ page, request }) => {
+  test("click right after hovering in -> still starts a sync, not swallowed by the opening panel", async ({
+    page,
+    request,
+  }) => {
     await setUpstream(request, { delayMs: 0, spotBtc: "1.50000000" });
     await signUpAndLogin(page);
     await dismissPasskeyPrompt(page);
-    // 掐掉建账户之后那次自动同步:它会让胶囊在测试中途变成「Syncing…」,而在跑的时候点它不发请求
-    // (sync() 在 busy 时直接 return)。这条测的是「点没点上」,不需要先有一轮同步。
+    // Block the automatic sync after account creation: it would turn the pill into "Syncing..." mid-test, and clicking while busy sends no request
+    // (sync() returns when busy). This case tests whether the click lands, so no prior round is needed.
     await blockPostCreateSync(page);
     await page.goto("/accounts");
     await addBinanceAccount(page, "Quick click");
@@ -28,18 +29,18 @@ test.describe("同步胶囊", () => {
 
     const pill = page.getByRole("button", { name: /^(Synced|Needs attention)$/ });
     await expect(pill).toBeVisible();
-    // 先确认页面已补水(hover 能把面板打开),再把光标挪开、等面板收起 —— 下面那一下才是干净的「移入」。
+    // Confirm the page is hydrated (hover can open the panel), then move the cursor away and wait for the panel to close, so the next move-in is clean.
     await hoverSyncPill(page);
     await page.mouse.move(0, 0);
     await expect(pill).toHaveAttribute("aria-expanded", "false", { timeout: 5_000 });
 
     const box = await pill.boundingBox();
-    if (!box) throw new Error("同步胶囊不可见");
+    if (!box) throw new Error("sync pill not visible");
     const synced = page.waitForRequest(
       (r) => r.url().includes("/api/sync") && r.method() === "POST",
       { timeout: 5_000 },
     );
-    // 移进来、立刻按下、松开 —— 中间不等面板开完。
+    // Move in, press and release at once, without waiting for the panel to finish opening.
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
     await page.mouse.up();

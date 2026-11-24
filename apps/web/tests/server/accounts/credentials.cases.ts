@@ -12,19 +12,13 @@ import { blockOutbound } from "../_kit/outbound";
 import { callWithRegistry, callWithRegistryExit } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 accounts/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("accounts/credentials", () => {
-  // #527 · replaceAccountCredentials
-  //
-  // **清单里唯一被标成「值得紧张」的那个 handler**,而在这之前它一条测试都没有:四步
-  // (取账户 → 探活 → 加密 → 落库),碰凭据加密,而失败分支决定用户会不会被锁在自己账户外面。
+  // Validate → seal → write; a bad failure path would lock users out of their own account.
   const USER = "h-acc-creds";
 
   const rawOf = async (userId: string, accountId: string) =>
     (await db(userId).accounts.getRawCreds(accountId)) ?? "";
 
-  /** 建一个缺凭据的 CEX 账户(只填了 apiKey,没有 secret)。 */
   const seedIncomplete = async (userId: string) => {
     const { registry } = await fakeRegistry();
     const account = await db(userId).accounts.create({
@@ -42,7 +36,7 @@ describe("accounts/credentials", () => {
   });
 
   describe("replaceAccountCredentials", () => {
-    it("给缺凭据的账户补齐 → 「凭据不齐」的标记消失", async () => {
+    it("completing missing creds → needsCredentials flag clears", async () => {
       const { account, registry } = await seedIncomplete(USER);
       expect(
         (await callWithRegistry(USER, registry, handleListAccounts()))[0].needsCredentials,
@@ -61,7 +55,7 @@ describe("accounts/credentials", () => {
       expect(listed[0].needsCredentials).toBe(false);
     });
 
-    it("换一把新 key → 落库的是新的,旧的不留残留", async () => {
+    it("replacing the key → new one stored, nothing of the old remains", async () => {
       const { account, registry } = await seedIncomplete(USER);
 
       await callWithRegistry(
@@ -76,7 +70,7 @@ describe("accounts/credentials", () => {
       const raw = await rawOf(USER, account.id);
       expect(raw).toContain("新的 key");
       expect(raw).not.toContain("旧的 key");
-      expect(raw).not.toContain("新的 secret"); // secret 是加密的
+      expect(raw).not.toContain("新的 secret"); // secret is encrypted
       const opened = await openCreds(
         registry.specs.binance ?? [],
         JSON.parse(raw),
@@ -85,9 +79,8 @@ describe("accounts/credentials", () => {
       expect(opened.secret).toBe("新的 secret");
     });
 
-    it("新 key 探活失败 → 旧凭据必须原样保留,不能先删后写把人锁在外面", async () => {
-      // **这条是这个文件存在的理由。** 「先清空再写」的实现在探活失败时会留下一个空凭据的账户:
-      // 用户既同步不了,也看不出原来那把 key 还在不在。
+    it("new key fails probe → old creds kept intact, user not locked out", async () => {
+      // A clear-then-write implementation would leave an account with empty creds here.
       const { account } = await seedIncomplete(USER);
       const before = await rawOf(USER, account.id);
       const { registry } = await fakeRegistry({ validate: validateFails("这把 key 无效") });
@@ -105,7 +98,7 @@ describe("accounts/credentials", () => {
       expect(await rawOf(USER, account.id)).toBe(before);
     });
 
-    it("账户不存在 → 拒,而且不凭空建一条", async () => {
+    it("unknown account → rejected, nothing created", async () => {
       const { registry } = await fakeRegistry();
 
       const exit = await callWithRegistryExit(
@@ -121,7 +114,7 @@ describe("accounts/credentials", () => {
       expect(await callWithRegistry(USER, registry, handleListAccounts())).toEqual([]);
     });
 
-    it("账户是别人的 → 拒,对方那份凭据一个字节没动", async () => {
+    it("someone else's account → rejected, their creds untouched", async () => {
       const theirs = await seedIncomplete(otherUser(USER));
       const before = await rawOf(otherUser(USER), theirs.account.id);
       const { registry } = await fakeRegistry();
@@ -139,9 +132,8 @@ describe("accounts/credentials", () => {
       expect(await rawOf(otherUser(USER), theirs.account.id)).toBe(before);
     });
 
-    it("传了这个 connector 没有的字段名 → 不混进加密那份里", async () => {
-      // seal 只按规格里的字段走,多出来的键会被丢掉 —— 否则库里会长出一堆没人认识的键,
-      // 而 `safeView` 也不知道该怎么处理它们(该打码还是该丢?)。
+    it("field the connector doesn't define → not sealed", async () => {
+      // Seal follows the spec's fields only; unknown keys would leave `safeView` guessing.
       const { account, registry } = await seedIncomplete(USER);
 
       await callWithRegistry(
@@ -156,7 +148,7 @@ describe("accounts/credentials", () => {
       expect(await rawOf(USER, account.id)).not.toContain("我乱加的字段");
     });
 
-    it("手记账户(凭据全是 public)→ 也走同一条路,不因为「不敏感」就跳过校验", async () => {
+    it("manual account (all-public creds) → still validated", async () => {
       const { registry, validated } = await fakeRegistry();
       const account = await db(USER).accounts.create({
         connectorId: "manual",
@@ -173,10 +165,10 @@ describe("accounts/credentials", () => {
         }),
       );
 
-      expect(validated).toHaveLength(1); // 校验被调过
+      expect(validated).toHaveLength(1); // validate was called
     });
 
-    it("凭据值两头带空格 → schema trim 之后才 seal", () => {
+    it("cred values with surrounding spaces → trimmed by schema before sealing", () => {
       const parsed = ReplaceCredentialsInput.parse({
         accountId: "a",
         creds: { apiKey: "  k  " },
@@ -184,7 +176,7 @@ describe("accounts/credentials", () => {
       expect(parsed.creds.apiKey).toBe("k");
     });
 
-    it("accountId 空串 → schema 拒", () => {
+    it("empty accountId → schema rejects", () => {
       expect(ReplaceCredentialsInput.safeParse({ accountId: "", creds: {} }).success).toBe(false);
     });
   });

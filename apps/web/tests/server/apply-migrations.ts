@@ -1,16 +1,10 @@
 import { applyD1Migrations, env } from "cloudflare:test";
 import { setRateLimitScopeForTests } from "@folio/client-core/testing";
 
-// setup 在每个测试存储隔离之外运行,可能多次执行;applyD1Migrations 只应用未应用的迁移,幂等安全。
+// Setup runs outside per-test storage isolation and may run repeatedly; applyD1Migrations is idempotent.
 await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 
-// 限频闸整体放行。**只剩一个消费者**:oracle 那条路上的 CoinGecko client(connector 那边每个
-// 上游都由自己的包测,不经这套)。
-//
-// 为什么要放行:这套测试跑的是**应用的真实接线**,`runPromise` 在被测代码内部,这里够不到那个
-// context —— 换句话说没有 provide 服务的位置,只能设进程级默认档。而闸真等的话这套会从 1 秒
-// 涨到几十秒(无 key 档是每分钟 10 发)。闸本身在 `@folio/client-core` 的单测里用假时钟验过。
-//
-// 这是 `@folio/shared` 的 `bypassRateLimitsForTests` 唯一活下来的用途,换了个更小的形状:
-// 不是「所有闸一律放行」的布尔,而是「不选档时算哪一档」。
+// The tests run the app's real wiring and `runPromise` sits inside the code under test, so there is no
+// place to provide a service: set the process-wide default tier instead. Waiting on the gate would
+// stretch the suite from 1s to tens of seconds (the keyless tier is 10 requests/minute).
 setRateLimitScopeForTests("none");

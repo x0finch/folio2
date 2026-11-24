@@ -4,16 +4,12 @@ import { type DbClient, provideDbClient } from "../src/client";
 import { provideCurrentUser } from "../src/current-user";
 import { Database, DatabaseForOracle, type DbRequest, GlobalDatabase } from "../src/database";
 
-// 这几个 store 的测试共用的装配(#362 第 5 站)。**跑的是生产那条路**:门票 layer → Tag,
-// op 跑的那一刻从 context 里取连接与用户(ADR 0054),底下是真 D1(Miniflare),只有时钟是假的。
+// Shared harness for these stores' tests, running the production path: ticket layer, then Tag, with connection and user read at op time over real D1 (Miniflare); only the clock is fake.
 //
-// 时钟为什么要假:store 的 TTL / stale 判定走 `Clock`(以前是 `opts.now` 一个只有测试会传的
-// 字段),而这些用例要断言「过期戳恰好是 now + ttl」这种精确值 —— 赌墙钟就成了 flaky
-// (CODING.md「别断言墙上时钟」)。
+// The clock is fake because TTL / stale logic uses `Clock` and tests assert exact values like now + ttl.
 export const NOW = 1000;
 
-// 跑一个只差 `DbClient` 的 effect —— 下面三个把手底下都是它。
-// **不出文件**:用例经 `forDomain` / `forGlobal` / `forOracle` 取服务,没有第二条构造路。
+// Runs an effect that needs only `DbClient`; not exported: cases get services via `forDomain` / `forGlobal` / `forOracle`.
 const runDb = <A>(effect: Effect.Effect<A, never, DbClient>, nowMs = NOW): Promise<A> =>
   Effect.runPromise(
     Effect.zipRight(TestClock.setTime(nowMs), effect).pipe(
@@ -22,27 +18,18 @@ const runDb = <A>(effect: Effect.Effect<A, never, DbClient>, nowMs = NOW): Promi
     ),
   );
 
-// 一个服务的 **Promise 把手**:`store.create(…)` 这样直接 await,而不必每句都写
-// `runDb(Effect.flatMap(Tag, (s) => s.create(…)))`。
-//
-// 它只是测试的便利,不是第二条构造路 —— 每次调用底下都是 provide 同一个 layer 再 `runPromise`,
-// 而这些用例本来就是「一次调用 = 一次独立的 D1 操作」那种粒度。
+// Promise handle for a service, so cases can `await store.create(...)` directly.
 type Promisified<S> = {
   [K in keyof S]: S[K] extends (...args: infer A) => Effect.Effect<infer R, infer _E, infer _R>
     ? (...args: A) => Promise<R>
     : S[K];
 };
 
-// 一个领域的把手(ADR 0037 / 0044 / 0054):`forDomain((db) => db.tabPins)` 之后
-// `tabPins(USER_A).create(…)`。门票不按用户各建一份 —— 一份 `Database.Default`,userId 在 op
-// 跑的那一刻从 `CurrentUser` 取。
+// Handle for one domain: `forDomain((db) => db.tabPins)` then `tabPins(USER_A).create(...)`. One `Database.Default` serves all users; userId is read at op time from `CurrentUser`.
 //
-// 用例**只经聚合 `Database` 拿服务**(#504 T5),不再 provide 某个领域自己的 layer 再 yield 它的
-// Tag:那排 Tag 是过渡形状,测试盯着它就等于给退场排一次返工。断言侧看不出区别 —— 这正是
-// 「挂进聚合」这件事要保住的性质。
+// Cases get services only through the aggregate `Database`, not per-domain Tags.
 //
-// 测试**保持 Promise 形状**是有判据的(CODING.md / #391):这些用例测的是「数据落库对不对」——
-// 真 D1、主键冲突、跨用户隔离,跟时序无关。测编排行为的那种才翻 Effect + TestClock。
+// Tests stay Promise-shaped: they check persistence (real D1, key conflicts, cross-user isolation), not timing.
 export const forDomain =
   <S extends object>(pick: (db: Database) => S) =>
   (userId: string, nowMs = NOW): Promisified<S> =>
@@ -52,9 +39,7 @@ export const forDomain =
       nowMs,
     );
 
-// `GlobalDatabase` 的把手 —— 与 `forDomain` 同款,少一个 userId 参数,因为那张门票上的 op
-// 本来就没有「谁的」这回事(全局映射表 / cron 扫用户)。**它拿不到 `CurrentUser`,这不是省事**:
-// 那正是这一半在类型上与 per-user 那半的全部区别。
+// Handle for `GlobalDatabase`: no userId parameter, and it can't reach `CurrentUser`, which is exactly how it differs from the per-user half.
 export const forGlobal =
   <S extends object>(pick: (db: GlobalDatabase) => S) =>
   (nowMs = NOW): Promisified<S> =>
@@ -64,8 +49,7 @@ export const forGlobal =
       nowMs,
     );
 
-// 参考层那张门票的把手。`namer` 是它的构造参数(db 层不预设厂商,#199),所以这里也得给 ——
-// 多数用例用默认的那个,只有测「按命名者点查」的才换。
+// Handle for the oracle ticket; `namer` is a constructor parameter (db has no vendor), and most cases use the default.
 export const forOracle =
   <S extends object>(pick: (db: DatabaseForOracle) => S) =>
   (userId: string, namer: string, nowMs = NOW): Promisified<S> =>
@@ -76,9 +60,7 @@ export const forOracle =
       nowMs,
     );
 
-// 「怎么拿到这个服务」是一个 effect(差门票 `T`),「这次按谁跑」是一个组合子 —— 它吃掉门票和
-// 方法跑起来要的那几样(`U`:per-user 的是连接 + 用户,全局那张只有连接),剩下的 `DbClient`
-// 由 `runDb` 给。把手只管把服务的方法一个个跑成 Promise。
+// Getting the service is an effect (ticket `T`); who it runs as is a combinator that supplies what the methods need (`U`); `runDb` supplies the remaining `DbClient`.
 const promisifiedFrom = <S extends object, T, U>(
   service: Effect.Effect<S, never, T>,
   scope: <A>(effect: Effect.Effect<A, never, T | U>) => Effect.Effect<A, never, DbClient>,

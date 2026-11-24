@@ -6,10 +6,7 @@ import { readAccountHoldingsView } from "../_kit/run";
 import { DAY, seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 portfolio/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("portfolio/account-holdings", () => {
-  // #527 · listAccountHoldings
   const USER = "h-pf-acc-holdings";
   const BTC = "token-btc";
   const ETH = "token-eth";
@@ -24,8 +21,8 @@ describe("portfolio/account-holdings", () => {
     NOW = Date.now();
   });
 
-  describe("按账户持仓(原子合并)", () => {
-    it("三个账户 → 三行,每行的市值等于它自己那些余额之和", async () => {
+  describe("per-account holdings (atomic merge)", () => {
+    it("three accounts → three rows, each valued at its own balances' sum", async () => {
       for (const [label, a, b] of [
         ["甲", 100, 20],
         ["乙", 200, 30],
@@ -47,7 +44,7 @@ describe("portfolio/account-holdings", () => {
       }
     });
 
-    it("手记账户 → 有行、有持仓,来自账本合成", async () => {
+    it("manual account → row with holdings synthesized from the ledger", async () => {
       await seedManualAccount(USER, "手记", { symbol: "BTC", unitPrice: 100, amount: 3 });
 
       const view = await readAccountHoldingsView(USER);
@@ -57,7 +54,7 @@ describe("portfolio/account-holdings", () => {
       expect(view.rows[0].balances[0].amount).toBe(3);
     });
 
-    it("归档账户 → 在列表里但标着归档,值停在封存那一刻", async () => {
+    it("archived account → listed as archived, value frozen at the seal", async () => {
       const acc = await seedAccount(USER, "归档", "bitcoin");
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 777 }]);
       await db(USER).accounts.setArchived(acc.id, true);
@@ -70,7 +67,7 @@ describe("portfolio/account-holdings", () => {
       expect(row?.totalUsd).toBe(777);
     });
 
-    it("从没同步过的账户 → 出现在列表里,余额是空的", async () => {
+    it("never-synced account → listed with empty balances", async () => {
       const acc = await seedAccount(USER, "没同步过", "bitcoin");
 
       const view = await readAccountHoldingsView(USER);
@@ -80,15 +77,14 @@ describe("portfolio/account-holdings", () => {
       expect(row?.balances).toEqual([]);
     });
 
-    it("全新用户 → 空列表,不是报错", async () => {
+    it("new user → empty list, not an error", async () => {
       const view = await readAccountHoldingsView(USER);
 
       expect(view.rows).toEqual([]);
     });
 
-    it("24h 盈亏随持仓一起回:两端相减(现值 − 24 小时前值)", async () => {
-      // FOL-51:盈亏改成两端相减,起点 = 24 小时前那一刻或更早的最近一张(`asOf`)。
-      // 24 小时前那张 100 → 现在 130,账户级与逐行都该是 +30 / +30%。
+    it("24h P&L comes with holdings: now minus 24h ago", async () => {
+      // Baseline is the latest snapshot at or before 24h ago: 100 → 130 is +30 / +30% at both levels.
       const now = floorToHour(NOW);
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, now - DAY, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
@@ -102,8 +98,7 @@ describe("portfolio/account-holdings", () => {
       expect(btc?.gain24h?.amount).toBeCloseTo(30, 6);
     });
 
-    it("新账户(当天建、只有当下快照,无 24h 前基准)→ 盈亏 —(null),不硬算", async () => {
-      // 最终两档口径(取代 FOL-43 那套):没有 24 小时前基准就一律 `—`,新建 / 断线一视同仁。
+    it("new account (no 24h baseline) → P&L null, not forced", async () => {
       const acc = await seedAccount(USER, "新号", "bitcoin");
       await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
 
@@ -113,9 +108,9 @@ describe("portfolio/account-holdings", () => {
       expect(row?.balances.find((b) => b.tokenId === BTC)?.gain24h).toBeNull();
     });
 
-    it("断线超 7 天(窗口内无起点)→ 同样是「无基准」→ 盈亏 —(null),不虚增", async () => {
+    it("offline > 7 days (no baseline in window) → P&L null, not inflated", async () => {
       const acc = await seedAccount(USER, "断线", "bitcoin");
-      // 唯一那张快照在 8 天前(> 7 天窗口)→ 起点空。
+      // The only snapshot is 8 days old (outside the 7-day window) → no baseline.
       await seedSnapshot(USER, acc.id, ago(8 * DAY), [{ tokenId: BTC, amount: 1, usdValue: 130 }]);
 
       const view = await readAccountHoldingsView(USER);
@@ -123,7 +118,7 @@ describe("portfolio/account-holdings", () => {
       expect(row?.gain24h).toBeNull();
     });
 
-    it("归档账户 → 盈亏字段整个省略(undefined)", async () => {
+    it("archived account → P&L field omitted (undefined)", async () => {
       const now = floorToHour(NOW);
       const acc = await seedAccount(USER, "归档", "bitcoin");
       await seedSnapshot(USER, acc.id, now - DAY, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);

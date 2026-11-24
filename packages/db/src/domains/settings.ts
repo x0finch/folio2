@@ -4,12 +4,9 @@ import type { DbClient } from "../client";
 import { userSettings } from "../schema";
 import type { UserSettings, ValuationMode } from "../schema/types";
 
-// 用户设置(Phase 3,#82)。
-
-// 缺省:无行的用户 → self-first(= 旧行为)。db 层不耦合 @folio/oracle,就地写常量。
-// 运行时换价源(active_vendor)已废止(ADR 0014)—— CoinGecko 单源,仅留估值模式。
+// Kept local rather than imported so db doesn't depend on @folio/oracle.
 const DEFAULT_VALUATION_MODE: ValuationMode = "self-first";
-// 隐私开关缺省关(ADR 0052)。无行的用户读出 false;fail-closed 是客户端在设置到达前的事,不是这里。
+// Users without a row read false; failing closed before settings load is the client's job.
 const DEFAULT_HIDE_BALANCES = false;
 
 export interface UserSettingsView {
@@ -19,7 +16,7 @@ export interface UserSettingsView {
 
 export const makeSettingsStore = (client: DbClient, userId: string) => {
   return {
-    /** 读带缺省:无行返默认(不为每个用户强制建行)。 */
+    /** Users without a row get the defaults; no row is created on read. */
     get: (): Effect.Effect<UserSettingsView> =>
       Effect.map(
         client.query((db) => db.select().from(userSettings).where(eq(userSettings.userId, userId))),
@@ -32,7 +29,7 @@ export const makeSettingsStore = (client: DbClient, userId: string) => {
         },
       ),
 
-    /** upsert:只覆盖给定字段(缺省字段首次建行用默认值,后续保持原值)。 */
+    /** Overwrites only the given fields; missing ones take defaults on first insert. */
     update: (patch: {
       valuationMode?: ValuationMode;
       hideBalances?: boolean;

@@ -24,7 +24,7 @@ const mkToken = (o: Partial<Token>): Token => ({
 });
 
 describe("runningOk", () => {
-  it("reduce 从不超支 → ok", () => {
+  it("reduce never overdraws -> ok", () => {
     expect(
       runningOk([
         act({ kind: "set", amount: 5, occurredAt: 1 }),
@@ -33,7 +33,7 @@ describe("runningOk", () => {
     ).toBe(true);
   });
 
-  it("reduce 在其时点超过运行持有 → 不 ok", () => {
+  it("reduce exceeds the running holding at its time -> not ok", () => {
     expect(
       runningOk([
         act({ kind: "set", amount: 2, occurredAt: 1 }),
@@ -42,8 +42,8 @@ describe("runningOk", () => {
     ).toBe(false);
   });
 
-  it("时序按 occurredAt→createdAt(补录在过去 → 顶下水后续 reduce)", () => {
-    // set 5 @t3, reduce 5 @t4 本合法;但补录 reduce 4 @t2(基线 0)→ 该点即超支。
+  it("ordered by occurredAt then createdAt (a backdated entry can push later reduces under)", () => {
+    // set 5 @t3, reduce 5 @t4 is valid; but backdating reduce 4 @t2 (baseline 0) overdraws there.
     expect(
       runningOk([
         act({ kind: "set", amount: 5, occurredAt: 3 }),
@@ -54,17 +54,17 @@ describe("runningOk", () => {
   });
 });
 
-// 认币已经在 mint 那一步做完(#203),这里只比 id。原来这个函数自己有一套「上游 id 优先、
-// 退回同名 symbol」的启发式 —— 那是跟 mint 平行的第二套认币规则,两处一旦漂移就会认出两个答案。
-describe("findToken(只比 mint 给的 id)", () => {
+// Token identity is resolved upstream by mint; this only compares ids. A second symbol-based
+// heuristic here would drift from mint and give two answers.
+describe("findToken (compares mint-issued ids only)", () => {
   const tokens = [mkToken({ id: "a", symbol: "BTC" }), mkToken({ id: "b", symbol: "ETH" })];
 
-  it("按 tokenId 命中", () => {
+  it("matches by tokenId", () => {
     expect(findToken(tokens, { tokenId: "b", symbol: "ETH", unitPrice: 1 })?.id).toBe("b");
   });
 
-  // symbol 相同但 mint 判成了两个币(如山寨合约)→ 绝不并到一起。
-  it("symbol 相同但 id 不同 → 不命中", () => {
+  // Same symbol but mint says two tokens (e.g. a copycat contract) -> never merge.
+  it("same symbol, different id -> no match", () => {
     expect(findToken(tokens, { tokenId: "zzz", symbol: "BTC", unitPrice: 1 })).toBeUndefined();
   });
 });
@@ -78,7 +78,7 @@ describe("planManualBatch", () => {
     ...o,
   });
 
-  it("命中既有持仓 → 只出活动,不重复声明", () => {
+  it("matches an existing holding -> activity only, no duplicate declaration", () => {
     const existing = [mkToken({ id: "tk_btc", symbol: "BTC" })];
     const plan = planManualBatch(existing, [draft({ amount: 2 })]);
     expect(plan.ok).toBe(true);
@@ -97,16 +97,16 @@ describe("planManualBatch", () => {
     ]);
   });
 
-  it("本账户还没持有 → 声明一条,id 用 mint 给的(不自己造)", () => {
+  it("not yet held by this account -> declares one, using the mint-issued id", () => {
     const plan = planManualBatch([], [draft({ amount: 3 })]);
     expect(plan.ok).toBe(true);
     if (!plan.ok) return;
-    // 声明只带 symbol —— 价不在这里,它进的是活动那一侧(价只有账本一个来源)。
+    // The declaration carries only symbol; price lives on the activity (the ledger is its only source).
     expect(plan.declare).toEqual([{ id: "tk_btc", symbol: "BTC" }]);
     expect(plan.activities[0].tokenId).toBe("tk_btc");
   });
 
-  it("同批多条指向同一个币 → 只声明一次(mint 恒给同一个 id)", () => {
+  it("multiple drafts for the same token in one batch -> declared once", () => {
     const plan = planManualBatch(
       [],
       [
@@ -120,7 +120,7 @@ describe("planManualBatch", () => {
     expect(plan.activities.map((a) => a.tokenId)).toEqual(["tk_btc", "tk_btc"]);
   });
 
-  it("整批拒:任一 reduce 在其时点超过运行持有(含顶下水既有 reduce)", () => {
+  it("rejects the whole batch: any reduce over the running holding (including pushed-under existing reduces)", () => {
     const existing = [
       mkToken({
         id: "tk_eth",
@@ -131,7 +131,7 @@ describe("planManualBatch", () => {
         ],
       }),
     ];
-    // 补录一条过去的 reduce 4 @50(基线 0)→ 该 token 时间线超支 → 整批拒。
+    // Backdated reduce 4 @50 (baseline 0) overdraws this token's timeline -> whole batch rejected.
     const plan = planManualBatch(existing, [
       draft({
         token: { tokenId: "tk_eth", symbol: "ETH", unitPrice: 1 },
@@ -145,7 +145,7 @@ describe("planManualBatch", () => {
     expect(plan.symbol).toBe("ETH");
   });
 
-  it("新 draft 在同一 occurredAt 排在既有之后(不误判超支)", () => {
+  it("a new draft at the same occurredAt sorts after existing ones (no false overdraw)", () => {
     const existing = [
       mkToken({
         id: "tk_btc",
@@ -153,7 +153,7 @@ describe("planManualBatch", () => {
         activities: [{ kind: "set", amount: 1, occurredAt: 10, createdAt: 1 }],
       }),
     ];
-    // 同 occurredAt=10 追加 reduce 1:排在既有 set 1 之后 → 运行持有 0,合法。
+    // Appending reduce 1 at occurredAt=10 sorts after the existing set 1 -> holding 0, valid.
     const plan = planManualBatch(existing, [draft({ kind: "reduce", amount: 1, occurredAt: 10 })]);
     expect(plan.ok).toBe(true);
   });

@@ -26,20 +26,19 @@ import {
   perpFallbackNote,
 } from "./parse";
 
-// —— 账户级 creds(AC):apiKey(semi)/ secret(secret)——
 export const bybitAccountCreds = [
   { key: "apiKey", type: "semi", label: "API Key", validator: z.string().trim().min(1) },
   { key: "secret", type: "secret", label: "API Secret", validator: z.string().trim().min(1) },
 ] as const satisfies readonly CredField[];
 
-// —— base URL 覆盖(#264)—— 归适配层,client 只吃不透明的 `{ apiBase }`(ADR 0036 边界决定 2)。
+// Optional proxy base, injected from env like the other CEX overrides.
 const BYBIT_BASE_KEY = "BYBIT_API_BASE";
 const baseFrom = (creds: Record<string, unknown>): string => {
   const v = creds[BYBIT_BASE_KEY];
   return typeof v === "string" && v.trim() ? v.trim() : BYBIT_API_BASE;
 };
 
-// 四个桶(ADR 0032):统一账户 + 资金账户 + 赚币两类。名字进失败 Note,所以和取数绑一起。
+// Names go into the failure note, so they live with the fetch.
 interface Bucket {
   readonly name: string;
   readonly rows: (
@@ -70,8 +69,7 @@ const withClient = <A, E>(
 export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
   id: PROVIDER_ID,
   label: "Bybit",
-  // 无全局 provider key —— 账户自己的 apiKey/secret 即凭据。PC 仅作 env 注入声明(base 覆盖),
-  // 不进 UI 表单、不加密、不导出;值可能含代理密钥 → 不可 echo/log。
+  // Not real credentials: an env-injected base override. May embed a proxy key: never log it.
   creds: [
     {
       key: BYBIT_BASE_KEY,
@@ -86,9 +84,7 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
       Effect.gen(function* () {
         const creds = ctx.account.creds;
 
-        // 各桶**同一把 key 并发**拉。业务码(HTTP 200 + retCode≠0)已经由 client 判成失败。
-        // **perp 兜底不额外打 position/list** —— 统一账户响应自带的 `totalPerpUPL` 非零即有浮盈
-        // 被排除在余额外,零额外请求。
+        // Business errors (HTTP 200 + retCode ≠ 0) are already failures from the client.
         const outcomes = yield* Effect.all(
           BUCKETS.map((bucket) =>
             Effect.either(bucket.rows(client, creds)).pipe(
@@ -98,7 +94,6 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
           { concurrency: "unbounded" },
         );
 
-        // 成败裁定三家 CEX 同一把尺子(瞬时错升级 / 全军覆没),住 ../../upstream。
         const failed = yield* bestEffortVerdict(outcomes);
 
         const bodyOf = <T>(bucket: Bucket): T | undefined => {
@@ -110,8 +105,8 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
           result?: { list?: { coin?: BybitCoin[]; totalPerpUPL?: string }[] };
         }>(UNIFIED)?.result?.list?.[0];
         const coins = list?.coin ?? [];
-        // 统一账户的市价表复用给资金 / 赚币估值(零额外请求)。统一账户失败 → 空表,
-        // 那些币交给 oracle 兜底(value 0)。
+        // Unified-account prices value funding/earn rows; if unified failed the hint is empty and
+        // those rows wait for the oracle.
         const hint = buildPriceHint(coins);
 
         const balances: Spot[] = [
@@ -147,8 +142,7 @@ export const bybitProvider: BalanceProvider<Spot, typeof bybitAccountCreds> = {
       }),
     ),
 
-  // 校验:签名打统一账户余额确认 key + 读权限。凭据被拒 → 成功返回 `false`;
-  // 够不到上游 → 留在错误通道。Bybit 的凭据错是 HTTP 200 + retCode 1000x,client 已判成凭据问题。
+  // Bybit signals bad credentials as HTTP 200 + retCode 1000x; the client maps that to auth.
   validateAccount: (ctx) =>
     withClient(ctx.creds, (client) =>
       asConnector(client.walletBalance(ctx.account.creds)).pipe(

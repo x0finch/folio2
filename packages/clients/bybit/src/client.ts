@@ -32,28 +32,24 @@ import {
 } from "./types";
 
 export interface BybitConfig {
-  // 基址,**当不透明整串用**(远程出口 IP 被 Bybit 按地区拒时由部署方注入代理 base,#264)。
-  // client 不读 env、不知道代理这回事 —— 谁调谁传(ADR 0036 边界决定 2)。
+  // Base URL, used as one opaque string (the deployer injects a proxy base when the egress IP is region-blocked by Bybit).
+  // The client reads no env and knows nothing of proxies: whoever calls passes it.
   readonly apiBase?: string;
 }
 
-// Bybit v5 的请求层。**方法按上游端点组织,吐的是上游形状(DTO)** ——
-// `parse*`、locked 段的 note 文案、`totalPerpUPL` 的兜底信号判断,全在适配层(ADR 0036)。
-//
-// 凭据是**每次调用传**:一个 client 服务多个账户。
-//
-// **不带闸**(见 constants.ts:额度按账户自己那把 key 算,装了拦不到东西),**不自带重试**。
+// Request layer for Bybit v5: methods follow upstream endpoints and return upstream shapes (DTOs); `parse*`, the locked-segment note copy and the
+// `totalPerpUPL` fallback signal are in the adapter. Credentials are passed per call, so one client serves many accounts.
+// No gate (quota is per account's own key, so a gate would block nothing; see constants.ts) and no retry of its own.
 export interface BybitClientApi {
-  // 统一账户(UTA)。每币自带 `usdValue` —— 估值零额外请求。
+  // Unified account (UTA). Each token carries `usdValue`, so valuation needs no extra request.
   readonly walletBalance: (
     creds: BybitCreds,
   ) => Effect.Effect<BybitWalletBalanceResponse, UpstreamError, Outbound>;
-  // 资金账户。
+  // Funding account.
   readonly fundingBalances: (
     creds: BybitCreds,
   ) => Effect.Effect<BybitFundingResponse, UpstreamError, Outbound>;
-  // 赚币持仓。`category` 是 Bybit 的类目名(FlexibleSaving / OnChain)—— 拉哪几个类目、
-  // 各自的展示标签叫什么,是适配层的事。
+  // Earn positions. `category` is Bybit's category name (FlexibleSaving / OnChain); which categories to fetch and their labels are the adapter's call.
   readonly earnPositions: (
     creds: BybitCreds,
     category: string,
@@ -61,18 +57,17 @@ export interface BybitClientApi {
 }
 
 export class BybitClient extends Context.Tag("clients/Bybit")<BybitClient, BybitClientApi>() {
-  // base 可能每账户不同(代理覆盖是 per-account 的)→ Layer 吃 config,由适配层在那一刻 provide。
+  // base may differ per account (proxy override is per-account), so the Layer takes config and the adapter provides it then.
   static readonly layer = (config: BybitConfig = {}): Layer.Layer<BybitClient> =>
     Layer.sync(BybitClient, () => make(config));
 }
 
-// **不是 Effect**:没有闸,构造就是纯的(同 hyperliquid)。别为形状统一而假装需要 Scope。
+// Not an Effect: with no gate, construction is pure (like hyperliquid).
 export function make(config: BybitConfig = {}): BybitClientApi {
-  // Bybit v5 签名:`X-BAPI-SIGN = hex(HMAC-SHA256(secret, timestamp + apiKey + recvWindow + queryString))`。
-  //
-  // **被签的 queryString 必须与实际发出去的一字不差** —— 这里用与 `makeRequester` 完全相同的
-  // 构造方式(`URLSearchParams.set`,跳过 undefined)重建它。两边任何一点出入(顺序、编码、
-  // 空值处理)都会让签名对不上,而 Bybit 只回一句 retCode 10004,查起来很痛。
+  // Bybit v5 signing: `X-BAPI-SIGN = hex(HMAC-SHA256(secret, timestamp + apiKey + recvWindow + queryString))`.
+  // The signed queryString must match what is actually sent byte for byte, so it is rebuilt exactly as `makeRequester` does
+  // (`URLSearchParams.set`, skipping undefined); any difference in order, encoding or empty handling breaks the signature,
+  // and Bybit answers only retCode 10004, which is painful to debug.
   const signedHeaders = (
     creds: BybitCreds,
     query: Record<string, string>,
@@ -82,7 +77,7 @@ export function make(config: BybitConfig = {}): BybitClientApi {
       for (const [k, v] of Object.entries(query)) {
         if (v !== undefined) qs.set(k, String(v));
       }
-      // 走 Effect 的 `Clock` 而不是 `Date.now()`:测试里能用 `TestClock` 钉住,断言签名串确定。
+      // Uses Effect's `Clock` rather than `Date.now()`, so tests can pin it with `TestClock` and assert a deterministic signing string.
       const ts = String(yield* Clock.currentTimeMillis);
       const sign = yield* hmacSha256(
         creds.secret,
@@ -103,11 +98,9 @@ export function make(config: BybitConfig = {}): BybitClientApi {
     upstream: UPSTREAM,
   });
 
-  // **业务错误是 HTTP 200 + retCode ≠ 0,这是这家上游的要点** —— 不查的后果是签名错被当成功、
-  // `result` 为空,最后表现成「这个账户余额是 0」,静默丢数据。
-  //
-  // 查它的位置是**这个唯一的 `get()`**:所有端点都从这里出去,所以漏不掉;而它是看得见的一步,
-  // 不是 core 配置对象上的一个回调字段(那种写法让「一发请求算不算成功」的答案藏在别的包里)。
+  // Business errors are HTTP 200 + retCode != 0: unchecked, a signature error would read as success with empty `result`, i.e. "this
+  // account's balance is 0", silently losing data. Checked in this one `get()` that all endpoints go through, as a visible step rather than a
+  // callback field on a core config object.
   const get = <A extends BybitEnvelope, I>(
     path: string,
     schema: Schema.Schema<A, I>,

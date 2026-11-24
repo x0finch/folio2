@@ -1,52 +1,36 @@
 import { Context, Effect, Option } from "effect";
 
-// `isolated` 档的状态:每个 key 一个**时隙游标**(一个数)。
-//
-// 为什么是一个数:跨 isolate 共享的载体是 Cloudflare Cache API,它只能存值、没有原子读改写。
-// 一个数能存进去,信号量不能 —— 这就是 `isolated` 档用 GCRA 而不是官方那套 semaphore 的原因
-// (见 ratelimit.ts)。
-//
-// **同一 isolate 内抢时隙靠一个 permits=1 的信号量串行化**,不是靠「读写在同一个同步块里」。
-// 后者只保住 `tat` 那一瞬,而它前面的 `seed`(首次要读 Cache API)是**异步**的:不加锁时先跑到抢
-// 那一步的 fiber 会拿着还没被 seed 抬起来的游标 —— 新 isolate 一冷启就漏一批出去,正是这一档要防
-// 的那件事。**这条有测试钉住**(「首发就并发时,seed 读回的共享进度对所有 fiber 都生效」);
-// 迁移前那版 `CacheSlotStore` 是同样的结构、同样的缺陷,只是从没测过并发。
-//
-// 锁只圈住「算时隙」——「等到时隙」在闸那一层、锁外面,所以排队的 fiber 不会互相阻塞。
-//
-// 跨 isolate 的原子性做不到(两个 isolate 会读到同一个游标),也不要求 —— 目标是削峰,漏出去的
-// 那几发由 429 + 重试兜。
+// State for the `isolated` scope: one slot cursor (a number) per key, mirrored to the Cache API
+// so isolates share progress.
+// Within an isolate the whole grab is serialized by a semaphore, not just the `tat` update: the
+// first `seed` is async, and without the lock a cold isolate leaks a burst. Waiting for the slot
+// happens outside the lock. Cross-isolate atomicity is impossible and not required (429 + retry).
 
-// Cache API 的最小形状。
 export interface SlotCache {
   match(request: string): Promise<Response | undefined>;
   put(request: string, response: Response): Promise<void>;
 }
 
-// **可选服务** —— `Effect.serviceOption` 读它,所以 **`R` 通道不受污染**(不 provide 也能跑)。
-// 生产不 provide,回退到 `globalThis.caches`;测试 provide 一份假的来验跨 isolate 的读写行为。
-// 这替掉了「构造器注入 + 模块级单例 + resetForTests」那一套全局可变状态。
+// Optional service (`R` stays clean). Production falls back to `globalThis.caches`.
 export class SlotCacheOverride extends Context.Tag("client-core/SlotCacheOverride")<
   SlotCacheOverride,
   SlotCache
 >() {}
 
 const CACHE_NAME = "folio-ratelimit";
-// 导出给测试:要预置「别的 isolate 已经用掉一段额度」的缓存条目,就得能算出它的 URL。
+// Exported so tests can seed "another isolate already used quota".
 export const SLOT_URL_PREFIX = "https://ratelimit.folio.internal/slot/";
 const URL_PREFIX = SLOT_URL_PREFIX;
 
 export interface SlotCursor {
-  // 把游标往后推 spacingMs,返回**推之前**的值(不早于 now)—— 也就是本次拿到的时隙。
+  // Pushes the cursor by spacingMs; returns the pre-push value (≥ now), i.e. the granted slot.
   readonly advance: (spacingMs: number, now: number) => Effect.Effect<number>;
 }
 
-// 游标按 key 存,**模块级、跨 `make` 调用共享**。CF Workers 上每个请求一次 `runPromise`,
-// 状态放 `Scope` 或 Layer 里就等于每请求重置 —— 那正是要避免的。
+// Module-level on purpose: on Workers, state in a `Scope` or Layer resets every request.
 const cursors = new Map<string, SlotCursor>();
 
-// 测试之间靠**用不同的 key** 隔离,不提供 reset:少一个全局可变开关,也少一条「忘了 reset 就串味」
-// 的路。(node 测试里 `globalThis.caches` 不存在,这一档自动退化成纯内存,不同 key 即完全隔离。)
+// No reset: tests isolate by using distinct keys (in node there is no `caches`, so it's memory-only).
 export function cursorFor(key: string): SlotCursor {
   const found = cursors.get(key);
   if (found) return found;
@@ -57,11 +41,11 @@ export function cursorFor(key: string): SlotCursor {
 
 function makeCursor(key: string): SlotCursor {
   const url = URL_PREFIX + encodeURIComponent(key);
-  // 见文件头:抢时隙整段串行,不只是读写 tat 那一瞬。
+  // Serializes the whole grab, not just the tat update (see top of file).
   const lock = Effect.unsafeMakeSemaphore(1);
   let tat = Number.NEGATIVE_INFINITY;
   let seeded = false;
-  // "unknown" 还没探过写进没进去;"dead" 别再试(不在 Workers 上,或写不生效)。
+  // "unknown": write not probed yet; "dead": not on Workers, or writes don't stick.
   let health: "unknown" | "ok" | "dead" = "unknown";
   let opening: Promise<SlotCache | undefined> | undefined;
 
@@ -72,15 +56,15 @@ function makeCursor(key: string): SlotCursor {
       if (health === "dead") return undefined;
       const caches = (globalThis as { caches?: { open(n: string): Promise<SlotCache> } }).caches;
       if (!caches) {
-        health = "dead"; // 不在 Workers 上(node 测试),不是配错,不喊
+        health = "dead"; // not on Workers (node tests); not a misconfiguration, stay quiet
         return undefined;
       }
       opening ??= caches.open(CACHE_NAME);
       return yield* Effect.promise(() => opening as Promise<SlotCache>);
     });
 
-  // 每个 key 只读一次共享进度 —— 否则每个请求都要付一次缓存查。读一次就够:此后本地那份会一直
-  // 往前推,而它已经不是从零开始的。读炸了当没有 —— 限速器不该是新的故障源。
+  // Read shared progress once per key; afterwards the local cursor only moves forward. A failed
+  // read counts as a miss — the limiter must not become a failure source.
   const seed = (): Effect.Effect<void> =>
     Effect.gen(function* () {
       if (seeded) return;
@@ -93,20 +77,16 @@ function makeCursor(key: string): SlotCursor {
       if (!hit) return;
       const text = yield* Effect.tryPromise(() => hit.text()).pipe(Effect.orElseSucceed(() => ""));
       const shared = Number(text);
-      if (Number.isFinite(shared) && shared > tat) tat = shared; // 只抬不降
+      if (Number.isFinite(shared) && shared > tat) tat = shared; // only ever raise
     });
 
-  // 抢完把新游标播出去。
-  //
-  // **`*.workers.dev` 上 put/match 是静默 no-op**(见 apps/web/DEPLOY.md),所以第一次写完探一下命中,
-  // 不命中就把自己标死并喊一声 —— 不喊的话这一档看着在跑、实际是死的,下次查限流会查错方向。
-  // 用 console.warn 而不是 Effect 的日志:它说的是**部署配错了**,一个 isolate 一次,而这条路径
-  // 没有调用方的日志上下文可用。
+  // On `*.workers.dev` cache put/match are silent no-ops, so probe once after the first write and
+  // warn if it didn't stick; otherwise the gate looks alive while doing nothing.
   const publish = (slotAt: number, spacingMs: number, now: number): Effect.Effect<void> =>
     Effect.gen(function* () {
       const cache = yield* open();
       if (!cache) return;
-      // 存到这个游标过期为止就够了 —— 再往后它只会被 max(tat, now) 抹掉。至少 1 秒(0 = 不可缓存)。
+      // Keep until the cursor expires; at least 1s (max-age=0 means uncacheable).
       const ttlSec = Math.max(1, Math.ceil((slotAt - now + spacingMs) / 1000));
       const wrote = yield* Effect.tryPromise(() =>
         cache.put(
@@ -115,7 +95,7 @@ function makeCursor(key: string): SlotCursor {
         ),
       ).pipe(
         Effect.as(true),
-        // 写不进去无所谓 —— 本地那份已经记下了,退化成每 isolate 一份。
+        // A failed write degrades to per-isolate limiting.
         Effect.orElseSucceed(() => false),
       );
       if (!wrote || health !== "unknown") return;
@@ -135,7 +115,7 @@ function makeCursor(key: string): SlotCursor {
     advance: (spacingMs, now) =>
       lock.withPermits(1)(
         Effect.gen(function* () {
-          yield* seed(); // 异步(首次读 Cache API)—— 正因如此整段才要在锁内
+          yield* seed(); // async on first call — the reason the whole block is locked
           const mine = Math.max(tat, now);
           tat = mine + spacingMs;
           yield* publish(mine + spacingMs, spacingMs, now);

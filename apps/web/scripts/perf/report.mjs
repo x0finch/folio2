@@ -1,10 +1,10 @@
-// 结果 → 一行一端点的表(stdout)。JSON 明细由 cpu.mjs 直接写盘,这里只管给人看的那一份。
+// Results to a one-row-per-endpoint table (stdout). The JSON detail is written by cpu.mjs; this is only the human-readable part.
 
-/** 报表里每个端点列出前几名归属。 */
+/** How many top owners to list per endpoint. */
 const TOP_OWNERS = 4;
-/** 小于它的归属不列(噪声)。 */
+/** Owners below this are not listed (noise). */
 const OWNER_FLOOR_MS = 0.05;
-/** 稀疏样本占 CPU 的比例超过它,就在端点名后标 `*`(p50 / max 只是粗估)。 */
+/** When sparse samples exceed this share of CPU, the endpoint name gets a `*` (p50 / max are rough estimates). */
 const COARSE_FLAG_SHARE = 0.25;
 
 export function quantile(xs, q) {
@@ -18,7 +18,7 @@ export function quantile(xs, q) {
 
 const ms = (x) => (x == null ? "—" : x.toFixed(1));
 
-/** 把「Effect 9.9 · TanStack Start 3.1 · …」压成一格。 */
+/** Squeezes "Effect 9.9 · TanStack Start 3.1 · ..." into one cell. */
 function ownerCell(owners) {
   return owners
     .filter((o) => o.ms >= OWNER_FLOOR_MS)
@@ -29,7 +29,7 @@ function ownerCell(owners) {
 
 /**
  * rows: [{ key, status, expect, meanCpuMs, p50CpuMs, maxCpuMs, procCpuMs?, wallP50Ms, owners }]
- * 超预算的行以 `!` 起头;状态码对不上的在 status 格后面标 `≠<期望>`。
+ * Over-budget rows start with `!`; a status mismatch gets `≠<expected>` after the status cell.
  */
 export function formatTable(rows, { budgetMs, title }) {
   const header = [
@@ -81,9 +81,9 @@ export function formatTable(rows, { budgetMs, title }) {
 }
 
 /**
- * perf:cpu:jobs 的表:一行一个定时任务(或它的 `:first` / `:queue` / `:window`)。
+ * perf:cpu:jobs table: one row per job (or its `:first` / `:queue` / `:window`).
  * rows: [{ key, n, status, ok, result, meanCpuMs, p50CpuMs, maxCpuMs, procCpuMs, wallP50Ms, fetches, owners }]
- * mean/p50/max 是**每次调用**的 CPU(同一行的 n 次之间比);超预算以 `!` 起头,没干成的状态格标 `✗`。
+ * mean/p50/max are CPU per call (compare across the n calls of one row); over-budget rows start with `!`, and an unfinished job's status cell gets `✗`.
  */
 export function formatJobsTable(rows, { budgetMs, title }) {
   const header = [

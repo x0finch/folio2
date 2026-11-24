@@ -1,8 +1,6 @@
 import { Monitor, Moon, Sun } from "lucide-react";
 import { type Theme, useMountedTheme } from "@/lib/hooks/use-theme";
 
-// 主题切换：单 icon 循环 light → dark → system(icon 反映当前态)。选中态用 useMountedTheme(SSR 安全)。
-// 从 login 页抽出，供 AuthShell(登录 / 锁屏)共用。
 const THEME_ORDER: Theme[] = ["light", "dark", "system"];
 const THEME_ICON: Record<Theme, typeof Sun> = { light: Sun, dark: Moon, system: Monitor };
 

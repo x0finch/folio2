@@ -17,28 +17,26 @@ import {
   waitForUpstreamHit,
 } from "./fixtures/sync";
 
-// #372 —— 同步这条链路的端到端补验。
-//
-// 为什么之前一条都没有:e2e 里造不出「能同步成功」的账户 —— 9 个 connector 只有 manual 不联网,
-// 而 manual 被排除在同步之外(ADR 0018)。剩下 8 个都要打外部 API,拿真 provider 跑 e2e 等于把第三方
-// 可用性绑进 CI。破局点是 Binance 的 base URL **生产就可覆盖**(provider creds,#264):指向本地假
-// server 就有了不联网、必定成功、快慢可控的上游,而且走的是生产也在跑的机制,没往生产代码塞测试分支。
-//
-// 要验的核心是 #371 的承诺:**跑和看是分开的 —— 关掉标签页,同步在服务端照样跑完。**
-// ADR 0048 之后这条承诺更强了:连「看」的那一半都不再是一条流,而是对轮记录的轮询,所以关页
-// 之后剩下的是一个与任何连接都无关的后台任务 —— FOL-89 起是一个账户一件的后台活(FOL-100 起由运行器
-// Durable Object 的 alarm 跑;本地由 Miniflare 模拟,alarm 照样会响)。那条之前只有推理,没跑过一轮真同步。
+// End-to-end check of the sync path. An e2e account that syncs successfully was impossible: of the 9 connectors only manual stays offline
+// and manual is excluded from sync, while the other 8 call external APIs (binding CI to third-party availability). The way out: Binance's base URL
+// is overridable in production (provider creds), so pointing it at a local fake server gives an offline, always-succeeding upstream with
+// controllable speed, via a mechanism production also runs, with no test branch in production code.
+// The core promise: running and watching are separate, so closing the tab doesn't stop the sync. Even the watching half is polling of the round
+// record, not a stream, so after the page closes what remains is a background job tied to no connection (one job per account, run by the runner Durable Object's alarm; Miniflare simulates it locally).
 
-/** 快照里有一条数量恰好是 amount 的余额。断言余额数量而不是 totalUsd:数量直接来自 provider,不经重估。 */
+/** A snapshot with a balance whose quantity is exactly amount. Asserts balance quantity, not totalUsd: quantity comes straight from the provider, without revaluation. */
 const holds = (amount: number) => (s: { balances: { amount: number }[] }) =>
   s.balances.some((b) => b.amount === amount);
 
-test.describe("同步一轮", () => {
-  // 默认 30 秒对这组不够:每条都要注册用户、从 UI 加账户(每次创建还往运行器里投一次同步 + 预热)、
-  // 再等一轮同步落库。给整组放宽,而不是让个别条目在拥堵时随机撞穿。
+test.describe("sync round", () => {
+  // The default 30s isn't enough for this group: each case registers a user, adds accounts from the UI (each creation also enqueues a sync + warmup to the
+  // runner), then waits for a round to land. Relax the whole group instead of letting individual cases randomly break through when congested.
   test.describe.configure({ timeout: 120_000 });
 
-  test("点同步 → 全部账户出快照,报「已同步 N 个」", async ({ page, request }) => {
+  test('click sync -> all accounts get snapshots, reports "N synced"', async ({
+    page,
+    request,
+  }) => {
     await setUpstream(request, { delayMs: 0, spotBtc: "1.50000000" });
     await signUpAndLogin(page);
     await dismissPasskeyPrompt(page);
@@ -49,38 +47,57 @@ test.describe("同步一轮", () => {
     const idA = await accountIdByLabel(page, "Spot A");
     const idB = await accountIdByLabel(page, "Spot B");
 
-    // 加账户时 modal 自己会在后台补一次同步(add-account-modal 的 handleDone)。先把那两次等掉,
-    // 否则下面「点一下同步」量到的可能是它们的尾巴。
-    await waitForSnapshot(page, idA, holds(1.5), "Spot A 创建后的首轮同步没落库");
-    await waitForSnapshot(page, idB, holds(1.5), "Spot B 创建后的首轮同步没落库");
+    // The add-account modal runs a background sync itself (add-account-modal's handleDone); wait those two out, or "click sync" below may measure their tail.
+    await waitForSnapshot(
+      page,
+      idA,
+      holds(1.5),
+      "Spot A's first sync after creation didn't persist",
+    );
+    await waitForSnapshot(
+      page,
+      idB,
+      holds(1.5),
+      "Spot B's first sync after creation didn't persist",
+    );
 
-    // 换个数量 —— 这样「有没有新快照」不靠时间戳猜,数字本身就说明是新抓的。
+    // Change the quantity so "is there a new snapshot" doesn't rely on guessing timestamps: the number itself shows it was freshly fetched.
     await setUpstream(request, { spotBtc: "3.25000000" });
 
-    await page.reload(); // 让页头那枚胶囊拿到「都同步过了」的摘要
+    await page.reload(); // so the header pill gets the "all synced" summary
     await clickSyncPill(page);
 
-    // 完成信号在面板里(FOL-32),而这一轮的结果是**服务端事实**(ADR 0048):`POST /api/sync`
-    // 只回一个刚开的轮(0 / 2),「2 已同步」只可能是轮询把收官后的那一轮读回来的 ——
-    // 所以这一条断言本身就是「轮询这条路走通了」的证据。
+    // The completion signal is in the panel and the round's result is server fact: `POST /api/sync` returns only a just-opened round (0 / 2),
+    // so "2 synced" can only come from polling reading back the closed-out round; this assertion itself proves the polling path works.
     await hoverSyncPill(page);
     await expect(page.getByText("2 synced")).toBeVisible({ timeout: 30_000 });
-    await waitForSnapshot(page, idA, holds(3.25), "Spot A 这一轮的快照没落库");
-    await waitForSnapshot(page, idB, holds(3.25), "Spot B 这一轮的快照没落库");
-    // 再钉两下:没有失败区块 + 胶囊收口回「Synced」(这一轮出事会转琥珀「Needs attention」)。
+    await waitForSnapshot(
+      page,
+      idA,
+      holds(3.25),
+      "Spot A's snapshot for this round didn't persist",
+    );
+    await waitForSnapshot(
+      page,
+      idB,
+      holds(3.25),
+      "Spot B's snapshot for this round didn't persist",
+    );
+    // Two more pins: no failure block + the pill settles back to "Synced" (a problem this round would turn it amber "Needs attention").
     await expect(page.getByText("Failed this round")).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^Synced$/ })).toBeVisible({ timeout: 30_000 });
   });
 
-  // 整个 #372 的理由就是这一条。别的挂了都好说,它挂了说明 #371 的核心承诺是假的。
-  //
-  // **这条钉住的是「连接没了,那一轮不受影响」**:`POST /api/sync` 早就回完了,这一轮的每个账户
-  // 是一件后台活(FOL-89),由运行器跑、结果写进库,不是推给某个连接的。这里跑的是真断连 +
-  // 真落库(本地 Miniflare 的真 Durable Object + alarm),单测造不出来。
-  //
-  // 它防得住设计层面的回归(改回拉动式 / 把跑绑在连接或请求上)。**本地与线上不完全同形**:
-  // Miniflare 的 DO 与线上的 CPU 上限不同 —— 别据此以为「绿了就等于线上没问题」(ADR 0058「前提」)。
-  test("同步中途关掉标签页 → 服务端照样把这一轮跑完", async ({ page, context, request }) => {
+  // This case is the reason for the whole file: if it fails, the core promise (running and watching are separate) is false.
+  // It pins "when the connection is gone the round is unaffected": `POST /api/sync` already returned, and each account is a background job run by the runner
+  // with results written to the DB, not pushed to a connection. It runs a real disconnect + real persistence (Miniflare's real Durable Object + alarm), which
+  // unit tests can't. It guards against design regressions (going pull-based / tying the run to a connection or request). Local and production differ: Miniflare's
+  // DO has different CPU limits, so green doesn't mean production is fine.
+  test("close the tab mid-sync -> the server still finishes the round", async ({
+    page,
+    context,
+    request,
+  }) => {
     await setUpstream(request, { delayMs: 0, spotBtc: "1.50000000" });
     await signUpAndLogin(page);
     await dismissPasskeyPrompt(page);
@@ -88,62 +105,58 @@ test.describe("同步一轮", () => {
 
     await addBinanceAccount(page, "Cold spot");
     const accountId = await accountIdByLabel(page, "Cold spot");
-    await waitForSnapshot(page, accountId, holds(1.5), "创建后的首轮同步没落库");
+    await waitForSnapshot(page, accountId, holds(1.5), "first sync after creation didn't persist");
 
-    // 上游改成又慢又不一样:慢到能在中途关标签页,数量变了则事后读到新数字只能是关掉之后写的。
-    // hits 归零,好判断这一轮什么时候真的起跑。
+    // Make the upstream slow and different: slow enough to close the tab midway; the changed quantity means a new number read later was written after closing.
+    // Reset hits to zero so it's clear when the round really starts.
     await setUpstream(request, { delayMs: 4_000, spotBtc: "7.00000000", hits: 0 });
 
     await page.reload();
     await clickSyncPill(page);
-    await waitForUpstreamHit(request); // 服务端在拉上游了,而上游还要 4 秒才回
+    await waitForUpstreamHit(request); // the server is pulling the upstream, which still takes 4 seconds to reply
 
-    // 关掉「看」的那一半。之后一切都只能靠服务端自己跑完。
+    // Close the "watching" half. From here everything depends on the server finishing by itself.
     const closedAt = Date.now();
     await page.close();
 
-    // 换一个页面读(同 context → 同 cookie),证明数据是落库了而不是留在某个页面的内存里。
+    // Read from another page (same context -> same cookie) to prove the data persisted rather than staying in some page's memory.
     const reader = await context.newPage();
     await reader.goto("/accounts");
     const snapshot = await waitForSnapshot(
       reader,
       accountId,
       holds(7),
-      "标签页关掉之后这一轮没跑完 —— #371 的核心承诺没兑现",
+      "the round didn't finish after the tab closed -- the core promise isn't kept",
     );
 
-    // 还要是**关掉之后**写的:takenAt 是写快照那一刻取的(sync/account.ts),不是开跑那一刻。
+    // It must also have been written after closing: takenAt is taken when the snapshot is written (sync/account.ts), not when the run starts.
     expect(
       snapshot.takenAt,
-      `快照 takenAt=${snapshot.takenAt} 不晚于关页时刻 ${closedAt} —— 那它就是关之前写的,证不到东西`,
+      `snapshot takenAt=${snapshot.takenAt} is not later than the close time ${closedAt}, so it was written before closing and proves nothing`,
     ).toBeGreaterThan(closedAt);
   });
 
-  // 上面那条证的是「已经起跑的那一轮不会被掐断」。这条更进一步:**关页之后还会继续领新活。**
-  //
-  // 账户数刻意取 SYNC_CONCURRENCY + 2 —— 就算同时有 SYNC_CONCURRENCY 个在跑(FOL-86 的队列时代的并发上限),
-  // 关页那一刻排在后面的也至少两个**连一个上游请求都还没发出去**。它们事后照样出快照,
-  // 说明服务端不是「把手上的做完就算」,而是把排着的活领到底。FOL-100 起运行器是单线程的(一次 alarm
-  // 一件),「还没轮到」的只会更多,下面那条「≤ 并发上限」照样成立;代价是这一轮跑得慢,等待上限因此放宽。
-  // 这一条单测替代不了:它要的是「浏览器没了,那一轮还在往前推」这个性质在真断连下成立。
-  //
-  // 从 @folio/sync 引常量而不是写死 6:并发上限改了,这条测试跟着改,不会悄悄退化成「8 个全并发」
-  // (那就什么都没测到了)。
+  // The case above shows a round already started isn't cut off; this goes further: it keeps picking up new jobs after the page closes. The account count is
+  // deliberately SYNC_CONCURRENCY + 2: even with SYNC_CONCURRENCY running at once, at least two queued ones at close time haven't sent a single upstream request,
+  // and they still produce snapshots, showing the server drains queued work rather than stopping at what's in hand. The runner is single-threaded (one alarm,
+  // one job), so even more are "not yet up" and "<= concurrency cap" below still holds; the cost is a slower round, hence the relaxed wait cap. Unit tests can't
+  // replace this: it needs the property to hold under a real disconnect. The constant comes from @folio/sync, not hard-coded, so a changed cap changes this case too
+  // instead of quietly degrading into "all 8 concurrent" (which would test nothing).
   const ACCOUNT_COUNT = SYNC_CONCURRENCY + 2;
-  test(`关标签页时还有账户没轮到(${ACCOUNT_COUNT} 个 > 并发 ${SYNC_CONCURRENCY})→ 它们也跑完`, async ({
+  test(`accounts still queued when the tab closes (${ACCOUNT_COUNT} > concurrency ${SYNC_CONCURRENCY}) -> they finish too`, async ({
     page,
     context,
     request,
   }) => {
-    // 八个账户要一个个从 UI 加进去,这条注定是本文件最慢的一条;运行器串行跑八个慢账户也要时间。
+    // Eight accounts are added one by one from the UI, so this is the file's slowest case; the runner running eight slow accounts serially also takes time.
     test.setTimeout(300_000);
     await setUpstream(request, { delayMs: 0, spotBtc: "7.00000000", hits: 0 });
     await signUpAndLogin(page);
     await dismissPasskeyPrompt(page);
     await page.goto("/accounts");
 
-    // 造账户阶段屏蔽创建后的那次后台同步(见 blockPostCreateSync:它慢、会互相堵)。屏蔽之后这八个
-    // 账户在被测那一轮之前**一张快照都没有** —— 断言更干净,不必再想办法排除干扰。
+    // During account creation, block the post-create background sync (see blockPostCreateSync: it's slow and they block each other). With it blocked, these eight
+    // accounts have no snapshot at all before the round under test, so the assertion is cleaner.
     await blockPostCreateSync(page);
     const labels = Array.from({ length: ACCOUNT_COUNT }, (_, i) => `Spot ${i + 1}`);
     for (const label of labels) await addBinanceAccount(page, label);
@@ -153,10 +166,10 @@ test.describe("同步一轮", () => {
     for (const label of labels) ids.push(await accountIdByLabel(page, label));
     expect(
       await snapshotCount(page),
-      "这八个账户此刻本该一张快照都没有(创建后的后台同步已屏蔽)",
+      "these eight accounts should have no snapshot at this point (post-create background sync is blocked)",
     ).toBe(0);
 
-    // 上游拖慢:慢到能在中途关标签页,也慢到排在并发窗口之后的两个账户还没轮到。
+    // Slow the upstream: slow enough to close the tab midway, and for the two accounts behind the concurrency window to not yet be up.
     await setUpstream(request, { delayMs: 3_000, hits: 0 });
 
     await page.reload();
@@ -173,47 +186,42 @@ test.describe("同步一轮", () => {
       reader,
       ids,
       holds(7),
-      `${ACCOUNT_COUNT} 个账户没全部跑完 —— 关页之后服务端就不再领新活了`,
+      `${ACCOUNT_COUNT} accounts didn't all finish -- the server stops taking new jobs after the page closes`,
       180_000,
     );
 
     for (const [i, snapshot] of snapshots.entries()) {
       expect(
         snapshot.takenAt,
-        `${labels[i]} 的快照 takenAt=${snapshot.takenAt} 不晚于关页时刻 ${closedAt}`,
+        `${labels[i]}'s snapshot takenAt=${snapshot.takenAt} is not later than the close time ${closedAt}`,
       ).toBeGreaterThan(closedAt);
     }
 
-    // 「关页之后才发起的请求」这件事,直接问假上游要数。
+    // "Requests started after the page closed": ask the fake upstream for the count directly.
     const finalHits = (await upstream(request)).hits;
     expect(
       hitsAtClose,
-      "关页之后一个新请求都没发出去 —— 那就没有『继续领新活』这回事",
+      "no new request was sent after the page closed -- so there's no such thing as 'keep taking new jobs'",
     ).toBeLessThan(finalHits);
-    // 每个账户一轮打固定几个端点 → 关页那一刻「动过手的账户数」不该超过并发上限,
-    // 也就是至少还有两个连一次都没打。这一步失败通常意味着并发上限变了,本条测试要重新配数。
+    // Each account's round hits a fixed set of endpoints -> the number of "touched" accounts at close time shouldn't exceed the concurrency cap,
+    // i.e. at least two haven't made a single call. Failing here usually means the cap changed and this case needs its numbers reworked.
     const perAccount = finalHits / ACCOUNT_COUNT;
     expect(
       hitsAtClose / perAccount,
-      `关页时已有 ${hitsAtClose / perAccount} 个账户动过上游,超过并发上限 ${SYNC_CONCURRENCY} —— 说明没有「还没轮到」的账户,这条测不到东西了`,
+      `${hitsAtClose / perAccount} accounts had touched the upstream at close time, over the concurrency cap ${SYNC_CONCURRENCY} -- so no account was "not yet up" and this case tests nothing`,
     ).toBeLessThanOrEqual(SYNC_CONCURRENCY);
   });
 });
 
-// 面板怎么念一轮的结果。**直接把 `POST /api/sync` 的回包换掉** —— 服务端不会轻易造出这几种组合
-// (缺凭据的账户、整轮没跑起来、worker 死在半路),而回包就是那一轮此刻的样子,前端拿它直接落缓存。
-//
-// 收官/中断的轮不会再触发轮询(`refetchInterval` 只在「在跑」时开),所以造出来的这一份就是
-// 面板一直读的那一份,不必再去拦 server fn 的地址(那是编译期产物,认不出是哪一个)。
-//
-// **这条成立还要一个前提:没有别的东西去重读这一轮。** FOL-89 起创建后那次后台同步也是一轮,
-// 所以点同步之前这里已经有一份真轮 —— 回包换进来算「进度前进一格」。那一格刷的是数据域、不是轮
-// 本身(`REFRESH_MAP["sync.round"]`);它若把轮也标旧,紧跟着的 GET 就会把回包换回那份真轮,
-// 面板显示「All synced」—— 这正是那条规则的 e2e 钉子。剩下能重读轮的只有数据版本号(FOL-94,
-// 回到页面 / 每分钟),这几条用例里都碰不到。
-test.describe("面板读轮", () => {
-  // 有类型标注:面板真按 `SyncRoundView` 的字段读,fixture 走形(字段改名 / 新增必填)要在
-  // 编译期红,不是在浏览器里静默显示成空面板。
+// How the panel reads a round's result. The `POST /api/sync` response is replaced directly: the server wouldn't easily produce these combinations (accounts missing
+// credentials, the round never started, a worker dying midway), and the response is the round's current state which the frontend writes straight into the cache.
+// Closed-out / interrupted rounds don't trigger polling again (`refetchInterval` is on only while running), so the fabricated one is what the panel keeps reading and there's
+// no need to intercept the server fn address. One more precondition: nothing else re-reads the round. The post-create background sync is also a round, so a real one exists
+// before clicking sync, and swapping in the response counts as "progress advances one step"; that step refreshes the data domain, not the round itself (`REFRESH_MAP["sync.round"]`):
+// if it marked the round stale too, the immediately following GET would swap the response back to the real round and the panel would show "All synced", which is this rule's e2e pin.
+// The only other thing that re-reads the round is the data version number (on returning to the page / each minute), not hit in these cases.
+test.describe("panel reading a round", () => {
+  // Typed: the panel reads by `SyncRoundView`'s fields, so fixture drift (renamed field / new required field) must turn red at compile time rather than silently show an empty panel in the browser.
   const roundView = (over: Partial<SyncRoundView>) => ({
     status: 200,
     contentType: "application/json",
@@ -246,33 +254,33 @@ test.describe("面板读轮", () => {
     await dismissPasskeyPrompt(page);
     await page.goto("/accounts");
     await addBinanceAccount(page, "Spot A");
-    // 等创建后那次后台同步落完(FOL-89 起它是这个组合的一轮,见 addBinanceAccount 的注释)。
-    // 不等的话,reload 时那一轮可能还在跑:胶囊转着圈、点了不发 POST,下面的回包替换无从谈起。
+    // Wait for the post-create background sync to finish (it's a round of this portfolio, see addBinanceAccount's comment).
+    // Otherwise on reload that round may still be running: the pill spins, clicking sends no POST, and swapping the response is moot.
     await waitForSnapshot(
       page,
       await accountIdByLabel(page, "Spot A"),
       () => true,
-      "创建后的首轮同步没落库",
+      "first sync after creation didn't persist",
     );
   };
 
-  // 面板各档(整轮没跑起来 / 中断 / 失败逐条)的文案与徽标由 `tests/sync-panel.test.tsx` 钉;
-  // 这里只留一条,验「回包 → 胶囊 → 面板」这条接线在真浏览器里通。
-  test("缺凭据的账户算「需要凭据」,不算失败", async ({ page, request }) => {
+  // Each tier's wording and badge (round never started / interrupted / per-item failures) are pinned by `tests/sync-panel.test.tsx`; only one case stays here, checking that the response -> pill -> panel wiring works in a real browser.
+  test('an account missing credentials counts as "needs credentials", not a failure', async ({
+    page,
+    request,
+  }) => {
     await withOneAccount(page, request);
     await page.route("**/api/sync", (route) => route.fulfill(roundView({ needsKeys: 1 })));
 
     await page.reload();
     await clickSyncPill(page);
 
-    // 缺凭据是三段里自己的一段 —— 用户只是还没填 API key,那不是错误。
-    // 锚定整串:Playwright 的字符串 name 是子串匹配,裸 "Synced" 会连账户行的「Synced now」
-    // 一起命中,strict mode 直接炸(本地实跑抓到)。
+    // Missing credentials is its own tier: the user just hasn't entered the API key, which is not an error.
+    // Anchor the whole string: Playwright's string name is a substring match, so a bare "Synced" would also hit the account row's "Synced now" and strict mode would blow up.
     await expect(page.getByRole("button", { name: /^Synced$/ })).toBeVisible({ timeout: 30_000 });
     await hoverSyncPill(page);
-    // 面板文字读的是同一份 round 原料,理应紧随胶囊出现;但 CI 2 核冷编译下偶尔慢过默认 15s
-    // (胶囊那步已给 30s)。对齐到 30s —— 修的是「断言比慢机跑得快」这个 race,不是产品行为
-    // (这条曾经 flaky 的根)。
+    // The panel text reads the same round data and should follow the pill, but under CI's 2-core cold compile it is occasionally slower than the default 15s (the pill step already gets 30s);
+    // aligned to 30s: this fixes the race of the assertion outrunning a slow machine, not product behavior.
     await expect(page.getByText("1 need keys")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("Failed this round")).toHaveCount(0);
   });

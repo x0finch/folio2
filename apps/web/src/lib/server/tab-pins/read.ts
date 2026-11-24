@@ -4,8 +4,7 @@ import { connectorLabelFallback, platformLogoUrl } from "@/lib/core/logo";
 import type { PortfolioTabPinsData } from "@/lib/core/portfolio";
 import { connectorPlatformMeta } from "@/lib/server/connectors/platform";
 
-// 首页 tab 条 pin 原料 —— 只取 pin 行 + connector 展示元数据。账户 / 快照走 overview 缓存,
-// 标签名走 tagListQuery 缓存;改 pin 只 invalidate 这一层。
+// Only pin rows + connector display meta; accounts, snapshots and tag names come from other caches.
 
 const connectorMetaEntries = (
   pins: readonly { kind: string; connectorId: string | null }[],

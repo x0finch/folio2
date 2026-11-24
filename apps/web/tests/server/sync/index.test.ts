@@ -1,7 +1,6 @@
-// 每个 vitest 文件在 workerd 里都要重新评估整张 app import 图(实测 ~9s/文件,
-// 迁移只占 22ms)—— 这版 pool(0.16.x)没有共享模块图的旋钮,唯一的杠杆是少开文件。
-// 用例仍按 handler 一个 `.cases.ts` 分文件住,这里只做汇入;各文件的钩子被自己的
-// describe 作用域住,互不串。
+// Each vitest file re-evaluates the whole app import graph in workerd (~9s/file; migrations are only 22ms) and this pool
+// version (0.16.x) has no shared-module-graph knob, so the only lever is fewer files. Cases live one `.cases.ts` per handler
+// and are pulled in here; each file's hooks are scoped to its own describe.
 import "./cron.cases";
 import "./round.cases";
 import "./run.cases";

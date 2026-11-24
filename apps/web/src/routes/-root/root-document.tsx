@@ -13,20 +13,9 @@ import appCss from "@/styles.css?url";
 import { appCssLoaderScript, SPLASH_STYLE, THEME_COLORS } from "./pwa-head";
 import { SplashScreen } from "./splash";
 
-// toast 的落位:手机顶部(叠安全区)、桌面右下角。
-//
-// **为什么不是「留在底部、抬到 Dock 之上」**:底部那一带被悬浮 Dock 占着,而同步一轮会连着堆
-// 好几条 —— 抬高只是把同一个问题往上推几十像素。顶部本来就是原生横幅的位置。
-//
-// `classNames.root` 里那个 top 覆盖 vendored 位置类自带的 `top-4`(它排在位置类之后,twMerge 生效),
-// 叠上 `env(safe-area-inset-top)` → 刘海/灵动岛下不压内容。
-// 断点与外壳的手机形态(顶栏 / Dock 的 `lg:hidden`)对齐,那条线是 64rem。
-//
-// **3.75rem = 移动顶栏的高 + 一档间隙**:顶栏(见 app-shell)是 `pt-[0.75rem+safe] + 内容行 +
-// pb-0.75rem + border-b 1px`,内容行由 `text-lg` 的 1.75rem 行高定(比 logo 的 1.5rem 高),
-// 安全区之外合计 3.25rem + 1px;3.75rem 落点在顶栏下缘之下约 0.44rem。以前这里只叠了 0.75rem,
-// 于是 toast 正落在顶栏那条毛玻璃上、压着 folio 的 logo(FOL-32 症状 5)。顶栏改高了这个数要
-// 跟着改 —— 两处都在「移动外壳」这一件事里,没有第三处。
+// Top on mobile (the floating Dock owns the bottom), bottom-right on desktop; 64rem matches the
+// shell's `lg:` breakpoint. 3.75rem = mobile top bar height (3.25rem + 1px) plus a gap; change it
+// together with the top bar in app-shell.
 function AppToaster() {
   const isDesktop = useMediaQuery("(min-width: 64rem)");
   return isDesktop ? (
@@ -39,53 +28,40 @@ function AppToaster() {
   );
 }
 
-// 运行中更新 toast 的挂载点:useUpdateToast 用 useTranslations,必须在 IntlProvider 之内(RootDocument
-// 本身在 Provider 之外),故抽成一个渲染 null 的子组件。
+// useUpdateToast needs IntlProvider, which RootDocument itself sits outside of.
 function UpdateWatcher() {
   useUpdateToast();
   return null;
 }
 
-// **这份文档在构建期渲一次,作为静态文件发给所有人**(ADR 0049 补记:SPA 模式 prerender 出
-// `index.html`,导航请求不进 Worker)。所以这里渲出来的东西不能依赖「是谁、什么时候、什么语言」:
-//   · locale:服务端 / 补水那一帧是默认语言(壳就是按它渲的),补水后换成 localStorage /
-//     浏览器语言那个真值(useLocalePreference 的 useSyncExternalStore 负责两帧衔接,不报 mismatch)。
-//     `<html lang>` 首帧就对:<head> 里的 LOCALE_INIT_SCRIPT 在 React 之前设好。
-//   · now:浏览器里取。它若在服务端取,就是**发版那一刻**,永远错。作为 IntlProvider 的全局 now,
-//     relativeTime 才有基准(否则 use-intl 抛 ENVIRONMENT_FALLBACK);壳里没有用到它的文字,
-//     构建期那个值不会进 DOM,补水也就不会对不上。
+// Rendered once at build time and served statically to everyone, so nothing here may depend on who,
+// when, or which language. Locale is fixed up by LOCALE_INIT_SCRIPT before React; `now` must come
+// from the browser (a server value would be the release time).
 export function RootDocument({ children }: { children: React.ReactNode }) {
   const locale = useLocalePreference();
   const [now] = useState(() => new Date());
-  // 挂载后重放主题:<head> 脚本负责首帧无闪,但 hydration recovery / 重渲染可能把它设的 .dark 冲掉
-  // 且全站再无人恢复(useTheme 仅设置页挂载)→ 此处兜底,让 React 生命周期在每次(重)挂载后自愈。见 lib/hooks/use-theme。
+  // Hydration recovery can wipe the `.dark` set by the head script, and nothing else restores it
+  // (useTheme mounts only on settings).
   useEffect(() => {
     applyStoredTheme();
-    // 生产注册 Service Worker(可安装外壳 + 离线兜底 + 更新流,ADR 0051);dev 内部直接 return。
-    // 返回其清理函数,移除 controllerchange 监听。
     return registerServiceWorker();
   }, []);
   return (
     <html lang={locale} suppressHydrationWarning>
       <head>
         <HeadContent />
-        {/* theme-color 明暗两套:静态直渲(不进 head() 的 meta 数组,避开 TanStack 按 name 去重)。 */}
+        {/* Static JSX, not head(): TanStack dedupes meta by name. */}
         {THEME_COLORS.map((tc) => (
           <meta key={tc.media} name="theme-color" media={tc.media} content={tc.content} />
         ))}
-        {/* 深色模式无闪烁:hydration 前就按 localStorage/system 设好 .dark(见 lib/hooks/use-theme)。 */}
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,无用户输入 */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static constant script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
-        {/* 首帧即正确的 <html lang>:壳是静态的,语言只能由浏览器在 hydration 前自己定(见 lib/i18n/locale-preference)。 */}
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,无用户输入 */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static constant script, no user input */}
         <script dangerouslySetInnerHTML={{ __html: LOCALE_INIT_SCRIPT }} />
-        {/* 冷启动闪屏的关键样式(ADR 0051):内联,不依赖 app 样式表,首帧即可画覆盖层。 */}
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量样式,无用户输入 */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static constant style, no user input */}
         <style dangerouslySetInnerHTML={{ __html: SPLASH_STYLE }} />
-        {/* app 样式表**非渲染阻塞**:脚本注入 link(不阻塞首帧),让内联的 splash 样式先画。 */}
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 静态常量脚本,href 来自构建期资产 URL */}
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: static script; href is a build-time asset URL */}
         <script dangerouslySetInnerHTML={{ __html: appCssLoaderScript(appCss) }} />
-        {/* 无 JS 兜底:照常阻塞加载 app 样式表。 */}
         <noscript>
           <link rel="stylesheet" href={appCss} />
         </noscript>
@@ -96,21 +72,17 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
           messages={messages[locale]}
           timeZone="UTC"
           now={now}
-          // 缺翻译 → 回退到请求的 key 本身(对 Inputs 而言即英文源串 label;见 ProviderInput.label)。
+          // Missing translation → the key itself, which for Inputs is the English source label.
           getMessageFallback={({ key }) => key}
         >
-          {/* 冷启动闪屏(ADR 0051):**包住页面**。未放行前把 children 设 visibility:hidden(照常
-              SSR/hydrate,只是不绘制)—— 没有可露脸的东西,从根上消除「页面抢在 splash 前闪一下」。
-              就绪后覆盖层淡出、露出下面已渲好的页;阶段文案住 IntlProvider 内取。 */}
+          {/* Hides children with visibility:hidden until release (still rendered and hydrated), so
+              nothing can flash ahead of the splash. */}
           <SplashScreen>
-            {/* **静态壳与补水那一帧只渲骨架,不渲路由**。壳只有一份(`/` 的 prerender),却要给
-                `/login`、`/accounts`…… 所有地址用;若在这里渲路由,烤进去的就是 `/` 那棵树,
-                在别的地址上补水必然对不上。所以这一帧与地址无关:永远是这张零数据骨架,
-                补水完成后才换成真正的路由(闪屏盖着,看不到这次交接)。 */}
+            {/* The single static shell serves every URL, so this frame renders a route-agnostic
+                skeleton; rendering the route here would bake `/` in and mismatch elsewhere. */}
             <ClientOnly fallback={<AppShellSkeleton />}>{children}</ClientOnly>
           </SplashScreen>
           <AppToaster />
-          {/* 运行中更新提示:探到新版弹「有新版本 · 更新」toast(住 IntlProvider 内取文案)。 */}
           <UpdateWatcher />
         </IntlProvider>
         <TanStackDevtools

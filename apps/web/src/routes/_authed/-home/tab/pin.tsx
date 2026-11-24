@@ -20,23 +20,17 @@ import { PinPanel } from "./pin-portal-popover";
 import { PinTargetMark } from "./pin-target-mark";
 import { useHomeTabSelection } from "./selection";
 
-/** 一个 pin 指着什么 —— 用来判「条子上这一格换过来了没有」。三个目标列按 kind 互斥非空。 */
+/** What a pin targets, to tell whether the strip's slot has caught up. Exactly one target column is set per kind. */
 const targetOf = (p: PinTargetChoice) => `${p.kind}:${p.connectorId ?? p.tagId ?? p.accountId}`;
 
-/**
- * **写完之后等 tab 条真的变了再收工。**
- *
- * invalidate 之后紧跟着的那次刷新可能还是旧条子 —— 新钉的 Tab 还不在里面、刚改的指向还显示老名字。
- * 三处写都吃这一口,所以等待也写在一处。
- */
+/** Waits until the tab strip actually changes: the refresh right after invalidate may still be the old strip. */
 const awaitStrip = (
   queryClient: ReturnType<typeof useQueryClient>,
   portfolioId: string,
   ok: (strip: HomeTabStrip) => boolean,
 ) => refetchUntil(() => fetchHomeTabStrip(queryClient, portfolioId), ok);
 
-// 单个自定义 pin:本体是**普通 beUI TabsTrigger**(点选原生工作、与视角 tab 共享滑动药丸);
-// 管理面板经 PinPanel 浮出。写(改指向 / 取消固定)自包含。
+// A custom pin: a plain beUI TabsTrigger sharing the sliding pill; the manage panel floats via PinPanel.
 export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
   const { selectedId } = usePortfolio();
   const queryClient = useQueryClient();
@@ -56,7 +50,7 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
       updateTabPinTarget({ data: { pinId: pin.id, ...choice } }),
     onSuccess: async (_out, choice) => {
       await invalidateFor(queryClient, "portfolio.pin.write");
-      // 等到条子上这一格真的指向新目标 —— 不等的话它会挂着老名字、渲染老目标的内容。
+      // Wait until the strip points at the new target, else it keeps the old name and content.
       await awaitStrip(queryClient, selectedId, (strip) =>
         strip.pins.some((p) => p.id === pin.id && targetOf(p) === targetOf(choice)),
       );
@@ -75,14 +69,14 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
   });
   const onUnpin = () => {
     if (shownActive === pin.id) {
-      // 取消当前激活的 → 回**左邻**:前一个 pin,没有则最后一个视角 tab(别一路滑回第一个)。
+      // Unpinning the active tab selects the left neighbour (previous pin, else the last perspective tab).
       selectTab(tabAfterUnpin(pin.id, strip.pins, kindTabsOf(strip.hasPerps, strip.hasDefi)));
     }
     unpinMut.mutate();
   };
   return (
     <PinPanel
-      // 必须先选中才可开(需求 9):首点选中(此刻 isActive 仍是旧值 false)不开,再点才开。
+      // Must be selected before it opens: the first click only selects (isActive is still false then).
       gate={isActive}
       ghost={
         <span
@@ -108,7 +102,7 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
               close();
             }}
           />
-          {/* 分割线:把「取消固定」与上面的选择器隔开(独立直线,不挂在带圆角按钮上)。 */}
+          {/* Divider separating unpin from the picker above (standalone line, not on a rounded button). */}
           <div className="border-border border-t" />
           <button
             type="button"
@@ -122,15 +116,14 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
       )}
     >
       <TabsTrigger value={pin.id}>
-        {/* 类型标记(#351 ②):tag `#名` / account `@名` / connector `logo + 类型名`。
-            激活时药丸是浅底 → onPrimary 让 logo 的底盘随之改色,不叠成两块白。 */}
+        {/* Target mark; onPrimary recolors the logo's backing when the pill is active (light fill). */}
         <PinTargetMark kind={selected.kind} name={pin.name} logo={pin.logo} onPrimary={isActive} />
       </TabsTrigger>
     </PinPanel>
   );
 }
 
-// ＋固定:ghost 加钮(hover 无边框,A1);面板同样经 PinPanel 浮出。写自包含。
+// + button: opens the picker via PinPanel.
 export function AddPinButton() {
   const { selectedId } = usePortfolio();
   const queryClient = useQueryClient();
@@ -140,18 +133,17 @@ export function AddPinButton() {
   const addMut = useMutation({
     mutationFn: (choice: PinTargetChoice) => createTabPin({ data: choice }),
     onSuccess: async (pin) => {
-      // 先等 tab 条上真的挂上这个新 tab 再选中 —— 提前选中会让 active 指向条子上还没有的 tab
-      // (药丸不动,看着像「点了没反应」)。刷新那一下拿回的通常还是旧条子,所以要等重算落地。
+      // Wait for the new tab to appear on the strip before selecting it, else active points at a
+      // tab that isn't there yet and the pill doesn't move.
       await invalidateFor(queryClient, "portfolio.pin.write");
       await awaitStrip(queryClient, selectedId, (strip) => strip.pins.some((p) => p.id === pin.id));
       selectTab(pin.id);
     },
     onError: () => toast.error(tct("actionFailed")),
   });
-  // 满员不渲染。`pins.length` 是刷新前的清单,所以在飞期间 ＋ 还在;
-  // 不禁的话手快能再挑一个。**真正兜住上限的是服务端那道**(`lib/server/tab-pins/create.ts` 的
-  // `assertPinCap`:对这个 pin 会出现的每个组合各数一遍,ADR 0047),这里挡的
-  // 只是「让用户白挑一次、再吃一个报错」。
+  // Hidden at the cap. `pins.length` predates the refresh so + stays during the in-flight write;
+  // the real cap is server-side (`assertPinCap` in lib/server/tab-pins/create.ts), this just avoids
+  // a wasted pick plus an error.
   if (strip.pins.length >= MAX_PINS_PER_PORTFOLIO) return null;
   return (
     <PinPanel
@@ -195,8 +187,7 @@ function PickerFailed() {
   return <p className="px-1 py-2 text-muted-foreground text-sm">{tct("actionFailed")}</p>;
 }
 
-// 选择器打开才拉目录 / 账户 / 标签 —— 这三份退出首屏关键路径。PinPanel 关着时不挂 children,
-// 所以这里的查询不会在 tab 条一出现就飞。
+// Catalog / accounts / tags are fetched only once the picker opens, keeping them off the first-paint path.
 function LazyPinPicker({
   selected,
   onPick,
@@ -218,14 +209,12 @@ function PinPickerOptions({
   selected?: PinTargetChoice;
   onPick: (choice: PinTargetChoice) => void;
 }) {
-  // **三类选项都只来自当前组合**(ADR 0047):这两份数据由服务端按组合筛过了,所以这里不再有
-  // 「客户端按归属 / 按 portfolioId 再筛一遍」那一步。**connector 那类以前是漏的** ——
-  // 它取的是全量账户的 connector 集合,于是能在一个组合里 pin 一个它压根没有的 connector。
+  // Options come only from the current portfolio (the server already filters accounts and tags).
   const { selectedId } = usePortfolio();
   const { data: catalog } = useSuspenseQuery(connectorCatalogQuery());
   const { data: accounts } = useSuspenseQuery(accountListQuery(selectedId));
   const { data: tags } = useSuspenseQuery(tagListQuery(selectedId));
-  // 归档账户不给 pin:pin 是「常看的一个视角」,而归档是封存(ADR 0039)。
+  // Archived accounts aren't pinnable: a pin is a perspective to watch, archived is sealed.
   const active = accounts.filter((a) => a.archivedAt == null);
   const connectorOptions = [...new Set(active.map((a) => a.connectorId))].map((id) => ({
     id,

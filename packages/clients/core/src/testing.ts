@@ -2,34 +2,21 @@ import { HttpClient, HttpClientError, HttpClientResponse } from "@effect/platfor
 import { Effect, Layer, type Scope, TestContext } from "effect";
 import { type RateLimitScope, RateLimitScopeOverride } from "./ratelimit";
 
-// 九个 client 的测试共用的装配。**以前是九份手抄的 `withClient`**,长得几乎一样 ——
-// 抄九遍的东西每一份都会慢慢长歪(实测:有几个包漏了 provide 限频档,于是偷偷跑在了另一档上,
-// 而那一档的游标是模块级的、按 key 共享,测试之间会串味)。
-//
-// **为什么不是 `@effect/vitest`**(它有 `it.effect` / `it.scoped`,正是干这个的):版本对不上。
-// 稳定版 `0.30.0` 声明只支持 `vitest ^3.2.0`(本仓是 4.x),而支持 vitest 4 的 `4.0.0-beta.x`
-// 要求 `effect ^4.0.0-beta`(本仓是 3.22)。硬装是能跑(试过),但要在 `package.json` 里写一条
-// 「忽略这个 peer 冲突」,而那条得一直挂到 Effect 4 稳定 + 整仓迁过去。为了省几行样板换一个
-// 长期挂着的隐患,不划算 —— 真正要解决的是「抄了九遍」,不是「写法不够时髦」。
+// Shared test wiring for the clients. Not `@effect/vitest`: its stable release peers on vitest 3,
+// and the vitest-4 beta requires effect 4.
 
 export interface Seen {
   readonly request: HttpClientRequestLike;
 }
 
-// 测试只关心这几样,不必扛整个 `HttpClientRequest` 的类型。
 export interface HttpClientRequestLike {
   readonly method: string;
   readonly url: URL;
-  // **读的时候大小写不敏感**(见 `caseInsensitive`)。
-  readonly headers: Record<string, string>;
+  readonly headers: Record<string, string>; // case-insensitive reads
   readonly body: string | undefined;
 }
 
-// HTTP 头**本来就大小写不敏感**,而底层会把名字归一成小写。用一个普通对象直接暴露那份记录
-// 等于让测试去迁就实现细节:`headers["X-Api-Sign"]` 明明发出去了却读到 `undefined`,
-// 报错信息还完全不提大小写这回事(迁过来的时候五个用例栽在这上面)。
-//
-// 所以这里按头的真实语义包一层:存的是小写,读的时候也按小写找。
+// The platform lowercases header names; without this `headers["X-Api-Sign"]` reads undefined.
 const caseInsensitive = (headers: Record<string, string>): Record<string, string> =>
   new Proxy(headers, {
     get: (target, key) =>
@@ -42,10 +29,8 @@ export interface HttpStub {
   readonly calls: Seen[];
 }
 
-// 造一个假的 `HttpClient`:`reply` 收「第几发 + 这一发长什么样」,回一个 `Response`。
-//
-// 假的是 **`HttpClient` 服务**而不是 `globalThis.fetch` —— 换底之后出网走的是官方客户端,
-// 在那一层顶替才测得到真实路径(签名头、body、中断都经过它)。
+// Fakes the `HttpClient` service (not `fetch`), so signing headers, body and interruption go
+// through the real path.
 export function httpStub(
   reply: (request: HttpClientRequestLike, nth: number) => Response | Promise<Response>,
 ): HttpStub {
@@ -61,9 +46,8 @@ export function httpStub(
           : undefined,
     };
     calls.push({ request: seen });
-    // `reply` 抛出 / reject = **出不去**(DNS 挂了、连不上)。走 `tryPromise` 转成官方的
-    // `RequestError` 而不是 `Effect.promise` —— 后者会把它变成 defect(不进错误通道),
-    // 于是「网络失败该归成哪一类」这条根本测不到,测试只会看到一个未捕获的异常。
+    // A throwing `reply` simulates a network failure: map it to `RequestError` (not a defect) so
+    // failure classification stays testable.
     return Effect.tryPromise({
       try: async () => {
         const res = await reply(seen, calls.length - 1);
@@ -75,7 +59,6 @@ export function httpStub(
   return { layer: Layer.succeed(HttpClient.HttpClient, client), calls };
 }
 
-// JSON 响应的简写。
 export const jsonResponse = (body: unknown, init?: ResponseInit): Response =>
   new Response(JSON.stringify(body), {
     status: 200,
@@ -83,22 +66,15 @@ export const jsonResponse = (body: unknown, init?: ResponseInit): Response =>
     ...init,
   });
 
-// 测试用的装配:假出网 + **进程内的限频档** + `TestClock`。
-//
-// 限频档必须显式 provide 成 `memory`:默认是 `isolated`(生产的样子),而那一档的游标是模块级、
-// 按 key 共享的 —— 不换档的话同一个 key 的两个测试会互相看见对方用掉的额度。
-//
-// **`none` 档给「这个文件测的不是限频」的测试**:一个用例连着打十几发时(上游 adapter 的翻页、
-// 分块),`memory` 档会在突发额度用完后停下来等 —— 而 `TestClock` 不会自己走,于是测试挂死。
-// 那种文件传 `"none"`,限频本身由本包自己的单测负责。
+// Fake outbound + rate-limit scope + `TestClock`. Defaults to `memory`: the `isolated` cursor is
+// module-level per key, so tests would leak quota into each other. Pass `"none"` for files that
+// fire many requests: once the burst is spent, `memory` waits on a `TestClock` that never moves.
 export const testLayer = (stub: HttpStub, gate: RateLimitScope = "memory") =>
   Layer.mergeAll(stub.layer, Layer.succeed(RateLimitScopeOverride, gate), TestContext.TestContext);
 
-// 跑一个用了 client 的 effect。**失败时先把完整 `Cause` 打出来再抛** —— `runPromise` 默认只给一个
-// `FiberFailure`,原因藏在里面;这一句把 `@effect/vitest` 唯一真正比手搓强的地方补回来。
+// Logs the full `Cause` on failure; `runPromise` alone only surfaces an opaque `FiberFailure`.
 export const runClient = <A, E>(
   stub: HttpStub,
-  // `Scope` 也收:多数 client 的 `make` 要它(闸的构造绑在 scope 上),下面 `Effect.scoped` 关掉。
   effect: Effect.Effect<A, E, HttpClient.HttpClient | Scope.Scope>,
   gate?: RateLimitScope,
 ): Promise<A> =>
@@ -109,19 +85,12 @@ export const runClient = <A, E>(
     Effect.runPromise,
   );
 
-// 进程级的限频默认档,**给没有 provide 位置的测试**:被测代码内部自己 `runPromise`
-// (oracle 的 CoinGecko adapter 就是),测试手里够不到那个 context。传 `"none"` 全放行,
-// 传 `undefined` 还原成生产默认(`isolated`)。
-//
-// 这是 `@folio/shared` 那个 `bypassRateLimitsForTests()` 全局开关**唯一**没被上面那个服务
-// 吃掉的用途。留下来的是更小的东西:不是「所有闸一律放行」的布尔,而是「不选档时算哪一档」。
+// Process-wide default scope for tests that can't provide one (the code under test calls
+// `runPromise` itself). `undefined` restores the production default.
 export { setScopeDefaultForTests as setRateLimitScopeForTests } from "./ratelimit";
 
-// 「这段代码不该经出网服务发请求」。**被调到就 die**,不是悄悄回一个空响应 ——
-// 后者会让「本该走服务、结果没走」这类接线错误静默通过。
-//
-// 谁用:还没迁到 `@folio/client-core` 的 provider —— 它们内部直接调全局 `fetch`(测试打桩打在那儿),
-// 但契约的 `R` 已经写着「可能要出网」,得有人填上这个位置。填一个会炸的,填得诚实。
+// Fills the `HttpClient` slot for code that must not use it; dies if called, so wiring mistakes
+// can't pass silently.
 export const noOutbound: Layer.Layer<HttpClient.HttpClient> = Layer.succeed(
   HttpClient.HttpClient,
   HttpClient.make(() =>

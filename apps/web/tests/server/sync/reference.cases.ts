@@ -18,10 +18,10 @@ import { call } from "../_kit/run";
 import { DAY, seedAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser } from "../_kit/user";
 
-// 参考层那五件小活(FOL-88):汇率 / 平台 / 目录 / DeFi 图 / 剪 note,一件一条消息。
-// 每件钉三样:**出网数不超过推导出来的预算**(按真 fetch 数,adapter 真在发请求)、**重跑零出网**
-// (at-least-once 的队列上,重投必须是免费的)、以及真写进了库。
-// 另钉读路径:展示币种 / 法币下拉 / 同步的重估**一发上游都不打**,缓存冷也一样。
+// The reference layer's five small jobs: rates / platforms / catalogue / DeFi graph / note pruning, one message each.
+// Each pins three things: outbound count within the derived budget (counted on real fetches), a rerun makes zero outbound calls
+// (redelivery on an at-least-once queue must be free), and the data is really written. Also pins that the read paths
+// (display currency / fiat dropdown / sync revaluation) never hit the upstream, even on a cold cache.
 
 describe("jobs/reference", () => {
   const USER = "h-jobs-reference";
@@ -45,9 +45,9 @@ describe("jobs/reference", () => {
 
   const ACKED = { acked: true, retried: false };
 
-  // 上游那个端点以 BTC 为基准:value = 1 BTC 值多少该币种。**全部支持币种都给**(真上游就是这样):
-  // `fx.warm()` 的「都新鲜才跳过」按全部支持币种判,缺一个就每次都回源 —— 仍在预算内(1 发),
-  // 但那就不是「重跑零出网」了。
+  // The upstream endpoint is BTC-based: value = how much of the currency 1 BTC is worth. All supported currencies are given
+  // (as the real upstream does): `fx.warm()` skips only when all supported currencies are fresh, so a gap would refetch every
+  // time (still within budget at 1 call, but no longer "rerun makes zero outbound").
   const RATES = {
     rates: {
       ...Object.fromEntries(
@@ -65,7 +65,7 @@ describe("jobs/reference", () => {
     expect(await consume({ kind: "fx", userId: USER })).toEqual(ACKED);
   };
 
-  // 把汇率的过期戳推到过去 —— 「隔了很久没暖」。
+  // Push the rates' expiry stamp into the past ("not warmed for a long time").
   const expireFx = () =>
     env.DB.prepare("UPDATE user_cache SET expires_at = 1 WHERE user_id = ? AND k LIKE 'fx:%'")
       .bind(USER)
@@ -78,7 +78,7 @@ describe("jobs/reference", () => {
   });
 
   describe("fx", () => {
-    it("一发拉全部币种写进这个用户的缓存;刚暖过再跑 → 零出网", async () => {
+    it("one call pulls all currencies into this user's cache; run again right after warming -> zero outbound", async () => {
       const first = stubOutbound([["/exchange_rates", () => json(RATES)]]);
       expect(await consume({ kind: "fx", userId: USER })).toEqual(ACKED);
       expect(first.calls).toHaveLength(1);
@@ -95,7 +95,7 @@ describe("jobs/reference", () => {
   describe("platforms", () => {
     const CHAINS = [{ id: "arbitrum-one", name: "Arbitrum One", chain_identifier: 42161 }];
 
-    it("最新快照里的链键缺 → 拉一次整张链表、只写这几个键;再跑 → 零出网", async () => {
+    it("a chain key missing from the latest snapshot -> fetch the whole chain table once, write only those keys; rerun -> zero outbound", async () => {
       const acc = await seedAccount(USER, "w", "bitcoin");
       await seedSnapshot(USER, acc.id, Date.now(), [
         { tokenId: "tok-a", amount: 1, usdValue: 1, platform: "arbitrum-one" },
@@ -112,7 +112,7 @@ describe("jobs/reference", () => {
       expect(again.calls).toEqual([]);
     });
 
-    it("没有快照 → 什么都不问", async () => {
+    it("no snapshot -> asks nothing", async () => {
       const outbound = blockOutbound();
       expect(await consume({ kind: "platforms", userId: USER })).toEqual(ACKED);
       expect(outbound.calls).toEqual([]);
@@ -125,7 +125,7 @@ describe("jobs/reference", () => {
       { id: "ethereum", symbol: "eth", name: "Ethereum", current_price: 3_000, market_cap_rank: 2 },
     ];
 
-    it("冷 → 拉一次目录写进缓存(≤ 预算);一周 TTL 内再跑 → 零出网", async () => {
+    it("cold -> fetch the catalogue once into the cache (within budget); rerun inside the one-week TTL -> zero outbound", async () => {
       const first = stubOutbound([["/coins/markets", () => json(MARKETS)]]);
       expect(await consume({ kind: "catalogue", userId: USER })).toEqual(ACKED);
       expect(first.calls.length).toBeLessThanOrEqual(REFERENCE_JOB_UPSTREAM_CALLS.catalogue);
@@ -138,7 +138,7 @@ describe("jobs/reference", () => {
   });
 
   describe("defi-logos", () => {
-    it("从最新快照的 meta 收集协议图写缓存,零出网;重跑同值覆盖", async () => {
+    it("collects the protocol graph from the latest snapshot's meta into the cache, zero outbound; rerun overwrites with the same value", async () => {
       const acc = await seedAccount(USER, "w", "bitcoin");
       await seedSnapshot(USER, acc.id, Date.now(), [
         {
@@ -176,7 +176,7 @@ describe("jobs/reference", () => {
         balances: [],
       });
 
-    it("剪掉 7 天外的 note、留 7 天内的,零出网;重投剪到 0 行", async () => {
+    it("prunes notes older than 7 days, keeps those within 7 days, zero outbound; redelivery prunes 0 rows", async () => {
       const acc = await seedAccount(USER, "w", "bitcoin");
       const now = Date.now();
       const old = await withNote(acc.id, now - 8 * DAY);
@@ -189,15 +189,15 @@ describe("jobs/reference", () => {
       expect(await noteOf(recent)).not.toBeNull();
       expect(await noteOf(latest)).not.toBeNull();
 
-      // 幂等:再跑一遍什么都不变。
+      // Idempotent: a rerun changes nothing.
       expect(await consume({ kind: "prune-notes", userId: USER })).toEqual(ACKED);
       expect(await noteOf(recent)).not.toBeNull();
       expect(outbound.calls).toHaveLength(REFERENCE_JOB_UPSTREAM_CALLS["prune-notes"]);
     });
   });
 
-  describe("每天那个 cron 的投递", () => {
-    it("每个用户一条 prune-notes + 一条 catalogue,不延后;一发上游都不打", async () => {
+  describe("the daily cron's enqueue", () => {
+    it("one prune-notes + one catalogue per user, not delayed; no upstream calls", async () => {
       const outbound = blockOutbound();
       const sent: Enqueued[] = [];
       const result = await Effect.runPromise(
@@ -219,19 +219,18 @@ describe("jobs/reference", () => {
     });
   });
 
-  // FOL-88 的另一半:读路径只读缓存。以前 `getCurrencyPreference` / `listFiatOptions` 冷缓存就当场
-  // `fx.warm`(一个读端点打上游、写库)。
-  describe("读路径不出网", () => {
+  // Read paths only read the cache: a read endpoint must not hit the upstream and write the db.
+  describe("read paths make no outbound calls", () => {
     const preferenceOf = (code: string) =>
       runEffect(handleGetCurrencyPreference)({ data: { code }, context: { userId: USER } });
 
-    it("getCurrencyPreference:缓存冷 → 回退 USD,零出网", async () => {
+    it("getCurrencyPreference: cold cache -> falls back to USD, zero outbound", async () => {
       const outbound = blockOutbound();
       expect(await preferenceOf("EUR")).toMatchObject({ currency: { code: "USD" }, rate: 1 });
       expect(outbound.calls).toEqual([]);
     });
 
-    it("getCurrencyPreference:汇率过期了照用旧值,零出网", async () => {
+    it("getCurrencyPreference: expired rates still use the old value, zero outbound", async () => {
       await warmFx();
       await expireFx();
       const outbound = blockOutbound();
@@ -241,7 +240,7 @@ describe("jobs/reference", () => {
       expect(outbound.calls).toEqual([]);
     });
 
-    it("listFiatOptions:缓存冷 → 选项照给、EUR 不带价,零出网", async () => {
+    it("listFiatOptions: cold cache -> options still returned, EUR without a price, zero outbound", async () => {
       const outbound = blockOutbound();
       const out = await call(USER, handleListFiatOptions({ locale: "en" }));
       expect(out.length).toBeGreaterThan(1);
@@ -250,13 +249,13 @@ describe("jobs/reference", () => {
       expect(outbound.calls).toEqual([]);
     });
 
-    it("listFiatOptions:暖过之后带价,零出网", async () => {
+    it("listFiatOptions: after warming has prices, zero outbound", async () => {
       await warmFx();
       const outbound = blockOutbound();
       const out = await call(USER, handleListFiatOptions({ locale: "en" }));
       const eur = out.find((o) => o.symbol === "EUR") as { price?: number; asOf?: number };
       expect(eur.price).toBeCloseTo(EUR_USD, 6);
-      expect(eur.asOf).toBeTruthy(); // 取到的时刻跟着价一起给
+      expect(eur.asOf).toBeTruthy(); // the fetch time comes with the price
       expect(outbound.calls).toEqual([]);
     });
 
@@ -268,7 +267,7 @@ describe("jobs/reference", () => {
       tokenRef: "fiat/issued:EUR",
     };
 
-    it("revalue:法币汇率过期也只读缓存,零出网", async () => {
+    it("revalue: expired fiat rates also read only the cache, zero outbound", async () => {
       await warmFx();
       await expireFx();
       const outbound = blockOutbound();
@@ -277,7 +276,7 @@ describe("jobs/reference", () => {
       expect(outbound.calls).toEqual([]);
     });
 
-    it("revalue:缓存冷 → 保留 provider 原值,零出网", async () => {
+    it("revalue: cold cache -> keeps the provider's original value, zero outbound", async () => {
       const outbound = blockOutbound();
       const [out] = await call(USER, revalue(false, [eurCash], new Map()));
       expect(out?.value).toBe(100);

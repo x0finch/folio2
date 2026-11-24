@@ -5,13 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "@/lib/i18n/messages";
 import { accountKeys, connectorKeys } from "@/lib/queries/keys";
 
-// 加账户弹窗:两步(选类型 ↔ 填表)+ 补录凭据视图。表单本体(AccountForm / CredentialForm)
-// 各有自己的测试,这里换成替身,只看弹窗**把什么交给它、它说「好了」之后弹窗做什么**:
-// ① 打开 → 网格;点一个类型 → 那个类型的表单(带上它的字段规格);返回 → 回网格;
-//    关了再开永远从网格起步,不停在上次的表单;
-// ② 建好 → 关弹窗,后台同步**新建的那个**账户;同步失败要说出来,跳过(手记)不吵;
-// ③ 补录:直接进补录视图(标题是那个 connector),交给表单的是那个账户 + 打码提示;
-//    存好 → 提示「已保存,正在同步」,关补录视图,后台同步那个账户。
+// Add-account modal: type grid ↔ form, plus the add-credentials view. The forms are stubbed; we check
+// what the modal hands them and what it does once they report done.
 const { syncAccountAndWait, toastError, toastSuccess, listConnectors, getSpecs } = vi.hoisted(
   () => ({
     syncAccountAndWait: vi.fn(),
@@ -94,7 +89,7 @@ function wrap(node: React.ReactNode, catalog: object = CATALOG) {
   };
 }
 
-// 自持模式:页面上的按钮作触发器。
+// Self-owned mode: a button on the page is the trigger.
 function mountSelfOwned() {
   const { ui, client } = wrap(
     <AddAccountModal
@@ -109,12 +104,12 @@ function mountSelfOwned() {
 }
 
 const openModal = () => fireEvent.click(screen.getByTestId("trigger"));
-// 账户页名单那份缓存:弹窗写完之后它该被标旧(下一次读就是新的),这才看得到新账户 / 新余额。
+// The accounts list cache must be marked stale after a write so the new account / balances show up.
 const LIST = accountKeys.list("p1");
 const seedList = (client: QueryClient) => client.setQueryData(LIST, []);
 const listStale = (client: QueryClient) => client.getQueryState(LIST)?.isInvalidated === true;
 
-// 网格格子的可访问名前面还带着 logo 的首字母兜底,按名字结尾匹配。
+// Grid cells' accessible names start with the logo's initials fallback, so match on the name's end.
 const pick = async (label: string) =>
   fireEvent.click(await screen.findByRole("button", { name: new RegExp(`${label}$`) }));
 
@@ -125,8 +120,8 @@ beforeEach(() => {
   listConnectors.mockImplementation(() => new Promise(() => {}));
 });
 
-describe("选类型 ↔ 填表", () => {
-  it("打开是网格;点一个类型进它的表单,带上它的字段规格", async () => {
+describe("type grid ↔ form", () => {
+  it("opens on the grid; clicking a type shows its form with its field specs", async () => {
     mountSelfOwned();
     openModal();
     await screen.findByText("Pick a type, then fill in its details.");
@@ -142,7 +137,7 @@ describe("选类型 ↔ 填表", () => {
     expect(screen.getByRole("heading", { name: "Binance" })).toBeTruthy();
   });
 
-  it("没打开时不去拉字段规格;打开才拉", async () => {
+  it("doesn't fetch field specs until opened", async () => {
     mountSelfOwned();
     await Promise.resolve();
     expect(getSpecs).not.toHaveBeenCalled();
@@ -152,7 +147,7 @@ describe("选类型 ↔ 填表", () => {
     await waitFor(() => expect(getSpecs).toHaveBeenCalled());
   });
 
-  it("返回 → 回到网格", async () => {
+  it("back → returns to the grid", async () => {
     mountSelfOwned();
     openModal();
     await pick("EVM");
@@ -164,13 +159,13 @@ describe("选类型 ↔ 填表", () => {
     expect(screen.getByRole("heading", { name: "Add account" })).toBeTruthy();
   });
 
-  it("关了再开 → 从网格起步,不停在上次的表单", async () => {
+  it("close and reopen → starts at the grid, not the last form", async () => {
     mountSelfOwned();
     openModal();
     await pick("EVM");
     await screen.findByTestId("account-form");
 
-    // 网格那一视图的退场动画走完之前,两个视图的头同时在 DOM 里 —— 等只剩表单那一个再点。
+    // Until the grid view's exit animation ends both headers are in the DOM — wait for just the form's.
     fireEvent.click(await waitFor(() => screen.getByRole("button", { name: "Close" })));
     await waitFor(() => expect(screen.queryByTestId("account-form")).toBeNull());
     openModal();
@@ -180,8 +175,8 @@ describe("选类型 ↔ 填表", () => {
   });
 });
 
-describe("建好之后", () => {
-  it("关弹窗,后台同步新建的那个账户", async () => {
+describe("after creating", () => {
+  it("closes the modal and syncs the new account in the background", async () => {
     syncAccountAndWait.mockResolvedValue({ ok: true });
     const onOpenChange = vi.fn();
     const { ui, client } = wrap(<AddAccountModal open onOpenChange={onOpenChange} />);
@@ -195,7 +190,7 @@ describe("建好之后", () => {
     expect(toastError).not.toHaveBeenCalled();
   });
 
-  it("建好 → 账户名单立刻刷新;后台同步跑完再刷一次(余额进来)", async () => {
+  it("created → accounts list refreshes at once, and again after the background sync (balances in)", async () => {
     let finishSync: (v: unknown) => void = () => {};
     syncAccountAndWait.mockImplementation(
       () =>
@@ -212,7 +207,7 @@ describe("建好之后", () => {
 
     await waitFor(() => expect(listStale(client)).toBe(true));
     await waitFor(() => expect(syncAccountAndWait).toHaveBeenCalled());
-    seedList(client); // 名单已按新数据读回来
+    seedList(client); // list re-read with the new data
     expect(listStale(client)).toBe(false);
 
     finishSync({ ok: true });
@@ -220,7 +215,7 @@ describe("建好之后", () => {
     await waitFor(() => expect(listStale(client)).toBe(true));
   });
 
-  it("后台同步失败 → 把上游的原话报出来", async () => {
+  it("background sync failure → shows the upstream message", async () => {
     syncAccountAndWait.mockResolvedValue({ ok: false, skipped: false, error: "rate limited" });
     const { ui } = wrap(<AddAccountModal open onOpenChange={vi.fn()} />);
     render(ui);
@@ -230,7 +225,7 @@ describe("建好之后", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("rate limited"));
   });
 
-  it("后台同步失败但没有原话 → 通用失败文案", async () => {
+  it("background sync failure without a message → generic failure copy", async () => {
     syncAccountAndWait.mockResolvedValue({ ok: false, skipped: false });
     const { ui } = wrap(<AddAccountModal open onOpenChange={vi.fn()} />);
     render(ui);
@@ -240,7 +235,7 @@ describe("建好之后", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("Sync failed."));
   });
 
-  it("同步被跳过(如手记账户)→ 不报错", async () => {
+  it("sync skipped (e.g. manual account) → no error", async () => {
     syncAccountAndWait.mockResolvedValue({ ok: false, skipped: true });
     const { ui } = wrap(<AddAccountModal open onOpenChange={vi.fn()} />);
     render(ui);
@@ -253,14 +248,14 @@ describe("建好之后", () => {
   });
 });
 
-describe("补录凭据", () => {
+describe("add credentials", () => {
   const target = {
     accountId: "acc_9",
     connectorId: "binance" as const,
     credsSafe: { apiKey: "ab…yz" },
   };
 
-  it("直接进补录视图:标题是那个 connector,交给表单的是那个账户 + 打码提示", async () => {
+  it("opens straight into the creds view: titled with the connector, form gets the account + masked hints", async () => {
     const { ui } = wrap(<AddAccountModal completeFor={target} onCompleteClose={vi.fn()} />);
     render(ui);
 
@@ -274,7 +269,7 @@ describe("补录凭据", () => {
     expect(screen.queryByRole("button", { name: "Back to connectors" })).toBeNull();
   });
 
-  it("补录视图的标题用目录里那个 connector 的名字", async () => {
+  it("creds view title uses the connector's catalog name", async () => {
     const { ui } = wrap(<AddAccountModal completeFor={target} onCompleteClose={vi.fn()} />, {
       binance: { label: "Binance Global" },
     });
@@ -283,7 +278,7 @@ describe("补录凭据", () => {
     expect(await screen.findByRole("heading", { name: "Binance Global" })).toBeTruthy();
   });
 
-  it("存好 → 提示正在同步,关补录视图,后台同步那个账户", async () => {
+  it("saved → toasts syncing, closes the creds view, syncs that account in the background", async () => {
     syncAccountAndWait.mockResolvedValue({ ok: true });
     const onCompleteClose = vi.fn();
     const { ui, client } = wrap(
@@ -296,12 +291,12 @@ describe("补录凭据", () => {
 
     expect(toastSuccess).toHaveBeenCalledWith("Saved, syncing…");
     expect(onCompleteClose).toHaveBeenCalled();
-    // 账户立刻翻正(不再显示缺凭据),不等同步跑完。
+    // The account flips right away (no longer missing creds), without waiting for the sync.
     expect(listStale(client)).toBe(true);
     await waitFor(() => expect(syncAccountAndWait).toHaveBeenCalledWith(client, "acc_9"));
   });
 
-  it("关闭 → 清掉补录目标", async () => {
+  it("close → clears the creds target", async () => {
     const onCompleteClose = vi.fn();
     const { ui } = wrap(<AddAccountModal completeFor={target} onCompleteClose={onCompleteClose} />);
     render(ui);

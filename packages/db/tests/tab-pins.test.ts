@@ -10,15 +10,13 @@ import { InvalidInput } from "../src/errors";
 import { user } from "../src/schema/auth";
 import { forDomain } from "./effect";
 
-// tab-pins 已经挂进聚合 `Database`(#504 T1),所以把手从聚合取字段;**断言一行没动**。
 const tabPinsOf = forDomain((db) => db.tabPins);
 const tagsOf = forDomain((db) => db.tags);
 
 const accounts = forDomain((db) => db.accounts);
 const portfolios = forDomain((db) => db.portfolios);
 
-// 自定义 Tab pin 地基(ADR 0034)对着真 D1 跑:tag pin FK cascade / connector pin 无 FK 存活 /
-// owner 断言都真生效。不隔离每测存储 → beforeEach 重置用户。
+// Runs on real D1: tag pin FK cascade, FK-less connector pins surviving, and owner assertions all take effect. Storage isn't isolated per test, so beforeEach resets users.
 
 const USER_A = "user-a";
 const USER_B = "user-b";
@@ -41,8 +39,7 @@ beforeEach(async () => {
   await resetUser(USER_B);
 });
 
-// 跑一次 `create` 但**不把失败抹平成 reject** —— `forDomain` 那个把手出的是 Promise,
-// 到了 `rejects` 那一头 die 和 fail 长得一模一样。要分辨就得拿 `Exit`。
+// Runs `create` without flattening failure into a reject: the `forDomain` handle returns a Promise, where die and fail look identical, so inspect the `Exit`.
 const createExit = (userId: string, input: Parameters<TabPinCreate>[0]) =>
   Effect.runPromiseExit(
     Effect.flatMap(Database, (db) => db.tabPins.create(input)).pipe(
@@ -55,9 +52,9 @@ const createExit = (userId: string, input: Parameters<TabPinCreate>[0]) =>
 type TabPinCreate = Database["tabPins"]["create"];
 
 describe("createTabPin", () => {
-  it("建 connector pin / tag pin,两列互斥非空", async () => {
+  it("creates a connector pin / tag pin, the two columns mutually exclusive", async () => {
     const pf = await portfolios(USER_A).ensureDefault();
-    const tag = await tagsOf(USER_A).create({ portfolioId: pf.id, name: "长线" });
+    const tag = await tagsOf(USER_A).create({ portfolioId: pf.id, name: "Long" });
     const cp = await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "binance" });
     expect(cp.connectorId).toBe("binance");
     expect(cp.tagId).toBeNull();
@@ -67,7 +64,7 @@ describe("createTabPin", () => {
     expect(await tabPinsOf(USER_A).list()).toHaveLength(2);
   });
 
-  it("建 account pin,只 account_id 非空", async () => {
+  it("creates an account pin with only account_id set", async () => {
     await portfolios(USER_A).ensureDefault();
     const acc = await accounts(USER_A).create({
       connectorId: "binance",
@@ -80,7 +77,7 @@ describe("createTabPin", () => {
     expect(ap.connectorId).toBeNull();
   });
 
-  it("tag pin 缺 tagId / connector pin 缺 connectorId / account pin 缺 accountId → 拒", async () => {
+  it("a tag pin without tagId / connector pin without connectorId / account pin without accountId is rejected", async () => {
     await portfolios(USER_A).ensureDefault();
     await expect(tabPinsOf(USER_A).create({ kind: "tag" })).rejects.toThrow(
       "tag pin: requires tagId",
@@ -93,10 +90,8 @@ describe("createTabPin", () => {
     );
   });
 
-  // **「拒」有两种,区别要紧**(#504 T6):`Effect.die` 是「代码写错了」,handler 无从下手,
-  // 端点只能一律 500;`Effect.fail(InvalidInput)` 是「你这么组合不成立」,能回一句人话。
-  // `rejects.toThrow()` 两种都过,所以这条直接看 Cause —— 上面那三条盯不住这件事。
-  it("缺字段是类型化失败,不是 defect", async () => {
+  // Two kinds of rejection: `Effect.die` is a code bug (endpoint can only 500); `Effect.fail(InvalidInput)` is an invalid combination that can carry a readable message. `rejects.toThrow()` passes for both, so inspect the Cause.
+  it("a missing field is a typed failure, not a defect", async () => {
     const exit = await createExit(USER_A, { kind: "tag" });
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
@@ -107,7 +102,7 @@ describe("createTabPin", () => {
     }
   });
 
-  it("account pin 指向他人账户 → 拒", async () => {
+  it("an account pin pointing at another user's account is rejected", async () => {
     await portfolios(USER_B).ensureDefault();
     const accB = await accounts(USER_B).create({ connectorId: "okx", label: "x", creds: "y" });
     await expect(
@@ -115,16 +110,14 @@ describe("createTabPin", () => {
     ).rejects.toThrow();
   });
 
-  it("tag pin 指向他人 Tag → 拒", async () => {
+  it("a tag pin pointing at another user's Tag is rejected", async () => {
     const pfB = await portfolios(USER_B).create({ name: "B's" });
     const tagB = await tagsOf(USER_B).create({ portfolioId: pfB.id, name: "x" });
     await expect(tabPinsOf(USER_A).create({ kind: "tag", tagId: tagB.id })).rejects.toThrow();
   });
 
-  // 上限**不在这一层**(ADR 0047):它是「每个组合 ≤3」,而一个 pin 属于哪个组合要 Tag 与账户的归属
-  // 一起参与判断 —— 那道拦在 app 的 create handler 里,和「摆不摆」共用同一个纯函数。
-  // 这里只钉住「db 自己不拦」:钉第 4 个照样落库。
-  it("db 层不管上限:第 4 个照样落库(上限在应用层按组合算)", async () => {
+  // The cap isn't enforced here: it is per portfolio and needs Tag/account ownership, so the app's create handler owns it. This pins that the db doesn't block: a 4th pin still persists.
+  it("the db layer ignores the cap: a 4th still persists (the cap is computed per portfolio in the app)", async () => {
     await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "binance" });
     await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "okx" });
     await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "hyperliquid" });
@@ -133,20 +126,20 @@ describe("createTabPin", () => {
   });
 });
 
-describe("cascade / 存活", () => {
-  it("删 Tag → 其 tag pin 经 FK cascade 删除", async () => {
+describe("cascade / survival", () => {
+  it("deleting a Tag deletes its tag pin via FK cascade", async () => {
     const pf = await portfolios(USER_A).ensureDefault();
-    const tag = await tagsOf(USER_A).create({ portfolioId: pf.id, name: "长线" });
+    const tag = await tagsOf(USER_A).create({ portfolioId: pf.id, name: "Long" });
     await tabPinsOf(USER_A).create({ kind: "tag", tagId: tag.id });
     await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "binance" });
     expect(await tabPinsOf(USER_A).list()).toHaveLength(2);
     await tagsOf(USER_A).remove(tag.id);
     const left = await tabPinsOf(USER_A).list();
     expect(left).toHaveLength(1);
-    expect(left[0]!.kind).toBe("connector"); // 只剩 connector pin
+    expect(left[0]!.kind).toBe("connector"); // only the connector pin is left
   });
 
-  it("删账户 → 其 account pin 经 FK cascade 删除;connector pin 不受影响", async () => {
+  it("deleting an account deletes its account pin via FK cascade; connector pins are unaffected", async () => {
     await portfolios(USER_A).ensureDefault();
     const acc = await accounts(USER_A).create({
       connectorId: "binance",
@@ -162,7 +155,7 @@ describe("cascade / 存活", () => {
     expect(left[0]!.kind).toBe("connector");
   });
 
-  it("connector pin 名下账户被删光 → pin 仍在(无 FK,显示空)", async () => {
+  it("a connector pin survives when all accounts under it are deleted (no FK, shown empty)", async () => {
     await portfolios(USER_A).ensureDefault();
     const acc = await accounts(USER_A).create({
       connectorId: "binance",
@@ -171,14 +164,14 @@ describe("cascade / 存活", () => {
     });
     await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "binance" });
     await accounts(USER_A).remove(acc.id);
-    expect(await tabPinsOf(USER_A).list()).toHaveLength(1); // pin 存活
+    expect(await tabPinsOf(USER_A).list()).toHaveLength(1); // the pin survives
   });
 });
 
-describe("update / reorder / delete + 越权", () => {
-  it("updateTabPinTarget 换指向(connector → tag)", async () => {
+describe("update / reorder / delete + foreign ownership", () => {
+  it("updateTabPinTarget changes the target (connector to tag)", async () => {
     const pf = await portfolios(USER_A).ensureDefault();
-    const tag = await tagsOf(USER_A).create({ portfolioId: pf.id, name: "长线" });
+    const tag = await tagsOf(USER_A).create({ portfolioId: pf.id, name: "Long" });
     const pin = await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "binance" });
     await tabPinsOf(USER_A).updateTarget(pin.id, { kind: "tag", tagId: tag.id });
     const [after] = await tabPinsOf(USER_A).list();
@@ -187,23 +180,23 @@ describe("update / reorder / delete + 越权", () => {
     expect(after!.connectorId).toBeNull();
   });
 
-  it("reorderTabPins 按给定顺序写 sortOrder", async () => {
+  it("reorderTabPins writes sortOrder in the given order", async () => {
     const a = await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "binance" });
     const b = await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "okx" });
     await tabPinsOf(USER_A).reorder([b.id, a.id]);
     expect((await tabPinsOf(USER_A).list()).map((p) => p.id)).toEqual([b.id, a.id]);
   });
 
-  it("deleteTabPin 取消固定;越权改/删他人 pin 无效", async () => {
+  it("deleteTabPin unpins; modifying/deleting another user's pin has no effect", async () => {
     const pin = await tabPinsOf(USER_A).create({ kind: "connector", connectorId: "binance" });
-    // B 改 A 的 pin → 断言失败抛。
+    // B editing A's pin throws.
     await expect(
       tabPinsOf(USER_B).updateTarget(pin.id, { kind: "connector", connectorId: "okx" }),
     ).rejects.toThrow();
-    // B 删 A 的 pin → 作用域限定,影响 0 行(不抛),A 的 pin 仍在。
+    // B deleting A's pin is scoped away: 0 rows affected (no throw), A's pin remains.
     await tabPinsOf(USER_B).remove(pin.id);
     expect(await tabPinsOf(USER_A).list()).toHaveLength(1);
-    // A 删自己的 → 没了。
+    // A deleting their own: gone.
     await tabPinsOf(USER_A).remove(pin.id);
     expect(await tabPinsOf(USER_A).list()).toHaveLength(0);
   });

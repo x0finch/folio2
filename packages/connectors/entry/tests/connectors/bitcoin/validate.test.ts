@@ -6,8 +6,7 @@ import { describe, expect, it } from "vitest";
 import { blockbookProvider } from "../../../src/connectors/bitcoin/provider";
 import xpubBasicFixture from "./fixtures/xpub-basic.json";
 
-// 契约(#240):凭据被拒 / xpub 解析不出来 → 成功返回 `false`;够不到上游 → 留在错误通道,
-// 让调用方重试。这几条钉的是**那条分界**。
+// Rejected creds / unparseable xpub → `false`; unreachable upstream → error channel for retry.
 const ADDR = "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa";
 const ZPUB84 =
   "zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs";
@@ -34,7 +33,7 @@ const failing = (
 ): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
 
 describe("validateAccount", () => {
-  it("地址:打 /address/,200 → true", async () => {
+  it("address: hits /address/, 200 → true", async () => {
     const stub = httpStub(() => json({ address: ADDR, balance: "0", unconfirmedBalance: "0" }));
     expect(await run(stub, blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })))).toBe(
       true,
@@ -42,9 +41,8 @@ describe("validateAccount", () => {
     expect(stub.calls[0].request.url.pathname).toContain("/address/");
   });
 
-  // 回的是**录下来的真实 basic 响应**:它没有 `unconfirmedBalance`(tokens 及以上才有)。
-  // 这里以前手写了一个带它的假响应,于是测试绿着、线上每个 xpub 添加都在解析那步失败。
-  it("xpub:打 /xpub/ 且只要 basic(探活不需要各地址明细)", async () => {
+  // A real recorded basic response: it has no `unconfirmedBalance` (only tokens+ details do).
+  it("xpub: hits /xpub/ asking only for basic details", async () => {
     const stub = httpStub(() => json(xpubBasicFixture.response));
     expect(await run(stub, blockbookProvider.validateAccount(ctx({ addressOrXpub: ZPUB84 })))).toBe(
       true,
@@ -53,14 +51,14 @@ describe("validateAccount", () => {
     expect(stub.calls[0].request.url.searchParams.get("details")).toBe("basic");
   });
 
-  it("凭据被拒(403)→ false,不进错误通道", async () => {
+  it("rejected credentials (403) → false, not the error channel", async () => {
     const stub = httpStub(() => json({}, 403));
     expect(await run(stub, blockbookProvider.validateAccount(ctx({ addressOrXpub: ADDR })))).toBe(
       false,
     );
   });
 
-  it("端点全故障(5xx)→ 走错误通道(可重试),不压成 false", async () => {
+  it("all nodes failing (5xx) → error channel (retryable), not false", async () => {
     const stub = httpStub(() => json({}, 500));
     const err = await failing(
       stub,
@@ -70,10 +68,8 @@ describe("validateAccount", () => {
     expect(isRetryable(err)).toBe(true);
   });
 
-  it("**服务端永久拒(400)→ 不可重试**", async () => {
-    // 无效 xpub 之类的 400 换四个节点还是四个 400。老那版靠客户端标 `retryable: false` 表达这条;
-    // 换成 Effect 客户端之后它只说「够不到上游」(可重试)—— 这条测试当场抓到了那个回归。
-    // 判据搬到适配层:4xx 是「你给的东西不对」,重试改变不了。
+  it("permanent server rejection (400) → not retryable", async () => {
+    // An invalid xpub gets the same 400 from every node; a 4xx won't change on retry.
     const stub = httpStub(() => json({}, 400));
     const err = await failing(
       stub,
@@ -82,7 +78,7 @@ describe("validateAccount", () => {
     expect(isRetryable(err)).toBe(false);
   });
 
-  it("非法扩展公钥(乱串)→ false,造 token 即失败(压根没出网)", async () => {
+  it("invalid extended key (junk) → false, fails before any request", async () => {
     const stub = httpStub(() => json({}));
     expect(
       await run(stub, blockbookProvider.validateAccount(ctx({ addressOrXpub: "zpubGARBAGE" }))),

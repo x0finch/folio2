@@ -5,12 +5,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TokenOption } from "@/lib/core/token-model";
 import { messages } from "@/lib/i18n/messages";
 
-// 手记选币的内联下拉。钉住用户走一遍会碰到的每一处:
-// ① 收起态:有选中显示代号 + 名字,点 × 清空且不展开;
-// ② 展开:按「已有 / 代币 / 现金」分组列出;敲字本地即筛,本地凑不够且 ≥2 字符才防抖问上游;
-// ③ 点行 / ↓+Enter 选中 → onChange 带着**下拉里正显示的那个价**(刷来的优先)并收起;Esc / 点外面只收起;
-// ④ 没结果 → 「手动输入 X」与 Enter 都走 onManual(query);一条都没有时目录挂了 → 报搜索失败;
-// ⑤ 价过期的行在展开后批量补一次价,补来的价显示在行上。
 const s = vi.hoisted(() => ({
   listTokenCatalogue: vi.fn(),
   listFiatOptions: vi.fn(),
@@ -26,7 +20,6 @@ vi.mock("@/lib/server/tokens", () => ({
 
 const { TokenCombobox } = await import("@/components/token-combobox");
 
-// jsdom 没有 scrollIntoView(键盘移高亮时把那行滚进可视区用)。
 Element.prototype.scrollIntoView = vi.fn();
 
 const ta = messages.en.Accounts;
@@ -87,15 +80,15 @@ beforeEach(() => {
   s.refreshTokenPrices.mockResolvedValue([]);
 });
 
-describe("TokenCombobox — 收起态", () => {
-  it("没选 → 占位提示;选了 → 大写代号 + 名字", () => {
+describe("TokenCombobox: collapsed state", () => {
+  it("nothing selected: placeholder; selected: uppercase symbol + name", () => {
     expect(mount().text()).toContain(ta.searchTokenPlaceholder);
     const picked = mount({ value: BTC }).text();
     expect(picked).toContain("BTC");
     expect(picked).toContain("Bitcoin");
   });
 
-  it("点 × → onChange(null),不展开", () => {
+  it("click ×: onChange(null), does not expand", () => {
     const { container, onChange, input } = mount({ value: BTC });
     fireEvent.click(container.querySelector("button svg:last-child") as Element);
     expect(onChange).toHaveBeenCalledWith(null);
@@ -103,8 +96,8 @@ describe("TokenCombobox — 收起态", () => {
   });
 });
 
-describe("TokenCombobox — 浏览与搜索", () => {
-  it("展开 → 分组列出:已有 / 代币 / 现金", async () => {
+describe("TokenCombobox: browse and search", () => {
+  it("expand: grouped list of owned / tokens / cash", async () => {
     const owned = [tok("sol", "Solana")];
     const { open, text, rows } = mount({ owned });
     open();
@@ -116,7 +109,7 @@ describe("TokenCombobox — 浏览与搜索", () => {
     expect(t).toContain("US Dollar");
   });
 
-  it("行上显示价与 24h 涨跌", async () => {
+  it("rows show price and 24h change", async () => {
     const { open, row } = mount();
     open();
     await waitFor(() => expect(row("Bitcoin")).toBeTruthy());
@@ -124,7 +117,7 @@ describe("TokenCombobox — 浏览与搜索", () => {
     expect(row("Ethereum").textContent).toContain("-2.00%");
   });
 
-  it("敲字 → 本地即筛", async () => {
+  it("typing: filters locally at once", async () => {
     const { open, type, rows, row } = mount();
     open();
     await waitFor(() => expect(rows().length).toBeGreaterThan(0));
@@ -133,12 +126,11 @@ describe("TokenCombobox — 浏览与搜索", () => {
     expect(row("Ethereum")).toBeTruthy();
   });
 
-  it("本地凑不够 → 防抖后问一次上游,回来的结果并进列表", async () => {
+  it("local results insufficient: debounced, asks upstream once, results merge into the list", async () => {
     s.listTokens.mockResolvedValue([tok("pepe", "Pepe")]);
     const { open, type, row } = mount();
     open();
     await waitFor(() => expect(s.listTokenCatalogue).toHaveBeenCalled());
-    // 连敲几下:中间那几个词不该各打一次上游,只认停顿后的那一个。
     type("pe");
     type("pep");
     type("pepe");
@@ -147,7 +139,7 @@ describe("TokenCombobox — 浏览与搜索", () => {
     expect(s.listTokens).toHaveBeenCalledWith({ data: { query: "pepe" } });
   });
 
-  it("本地命中已经够多 → 不问上游", async () => {
+  it("enough local hits: does not ask upstream", async () => {
     const many = Array.from({ length: 10 }, (_, i) =>
       tok(`w${i}`, `Wrapped ${i}`, { rank: i + 1 }),
     );
@@ -155,23 +147,23 @@ describe("TokenCombobox — 浏览与搜索", () => {
     open();
     await waitFor(() => expect(rows().length).toBeGreaterThan(0));
     type("wrapped");
-    await new Promise((r) => setTimeout(r, 400)); // 超过防抖窗口
+    await new Promise((r) => setTimeout(r, 400));
     expect(rows().length).toBeGreaterThanOrEqual(8);
     expect(s.listTokens).not.toHaveBeenCalled();
   });
 
-  it("只敲一个字符 → 不问上游", async () => {
+  it("a single typed character: does not ask upstream", async () => {
     const { open, type, rows } = mount();
     open();
     await waitFor(() => expect(rows().length).toBeGreaterThan(0));
     type("z");
-    await new Promise((r) => setTimeout(r, 400)); // 超过防抖窗口
+    await new Promise((r) => setTimeout(r, 400));
     expect(s.listTokens).not.toHaveBeenCalled();
   });
 });
 
-describe("TokenCombobox — 选中与收起", () => {
-  it("点行 → onChange(该币,带着显示价)并收起", async () => {
+describe("TokenCombobox: selection and collapse", () => {
+  it("click a row: onChange(the token, with its display price) and collapses", async () => {
     const { open, row, onChange, input } = mount();
     open();
     await waitFor(() => expect(row("Ethereum")).toBeTruthy());
@@ -182,7 +174,7 @@ describe("TokenCombobox — 选中与收起", () => {
     expect(input()).toBeNull();
   });
 
-  it("↓ 再 Enter → 选中第二行", async () => {
+  it("↓ then Enter: selects the second row", async () => {
     const { open, key, rows, onChange } = mount();
     open();
     await waitFor(() => expect(rows().length).toBe(3));
@@ -191,7 +183,7 @@ describe("TokenCombobox — 选中与收起", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ ticket: ETH.ticket }));
   });
 
-  it("↓↓ 再 ↑ 再 Enter → 回到第二行", async () => {
+  it("↓↓ then ↑ then Enter: back to the second row", async () => {
     const { open, key, rows, onChange } = mount();
     open();
     await waitFor(() => expect(rows().length).toBe(3));
@@ -202,7 +194,7 @@ describe("TokenCombobox — 选中与收起", () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ ticket: ETH.ticket }));
   });
 
-  it("Esc → 收起,不改选", async () => {
+  it("Esc: collapses, selection unchanged", async () => {
     const { open, key, rows, onChange, input } = mount();
     open();
     await waitFor(() => expect(rows().length).toBe(3));
@@ -211,7 +203,7 @@ describe("TokenCombobox — 选中与收起", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("点组件外 → 收起,不改选", async () => {
+  it("click outside the component: collapses, selection unchanged", async () => {
     const { open, rows, onChange, input, getByText } = mount();
     open();
     await waitFor(() => expect(rows().length).toBe(3));
@@ -221,8 +213,8 @@ describe("TokenCombobox — 选中与收起", () => {
   });
 });
 
-describe("TokenCombobox — 没结果 / 出错", () => {
-  it("没结果 → 「手动输入」按钮走 onManual(query)", async () => {
+describe("TokenCombobox: no results / errors", () => {
+  it('no results: the "enter manually" button calls onManual(query)', async () => {
     const { open, type, onManual, text, getByText } = mount();
     open();
     await waitFor(() => expect(s.listTokenCatalogue).toHaveBeenCalled());
@@ -232,7 +224,7 @@ describe("TokenCombobox — 没结果 / 出错", () => {
     expect(onManual).toHaveBeenCalledWith("zzzz");
   });
 
-  it("没结果时按 Enter → 同样走 onManual", async () => {
+  it("Enter with no results: also calls onManual", async () => {
     const { open, type, key, onManual, text } = mount();
     open();
     await waitFor(() => expect(s.listTokenCatalogue).toHaveBeenCalled());
@@ -242,13 +234,13 @@ describe("TokenCombobox — 没结果 / 出错", () => {
     expect(onManual).toHaveBeenCalledWith("zzzz");
   });
 
-  it("目录取失败、手上一条都没有 → 报搜索失败", async () => {
+  it("catalogue fetch fails with nothing at hand: reports search failure", async () => {
     const { open, text } = mount({}, new Error("down"), []);
     open();
     await waitFor(() => expect(text()).toContain(ta.searchFailed));
   });
 
-  it("目录取失败但还有别的可选(法币)→ 照常列出,不报错", async () => {
+  it("catalogue fetch fails but other options remain (fiat): listed as usual, no error", async () => {
     const { open, text, row } = mount({}, new Error("down"));
     open();
     await waitFor(() => expect(row("US Dollar")).toBeTruthy());
@@ -256,8 +248,8 @@ describe("TokenCombobox — 没结果 / 出错", () => {
   });
 });
 
-describe("TokenCombobox — 展开时补价", () => {
-  it("同一次打开里,补过的票不再补(哪怕那次失败了、列表又变了)", async () => {
+describe("TokenCombobox: price top-up on expand", () => {
+  it("within one opening, topped-up tickets are not topped up again (even if that attempt failed and the list changed)", async () => {
     const stale = tok("doge", "Dogecoin", { asOf: undefined });
     s.refreshTokenPrices.mockRejectedValue(new Error("rate limited"));
     const { open, type, rows } = mount({}, [BTC, stale]);
@@ -265,11 +257,11 @@ describe("TokenCombobox — 展开时补价", () => {
     await waitFor(() => expect(s.refreshTokenPrices).toHaveBeenCalledTimes(1));
     type("dog");
     await waitFor(() => expect(rows()).toHaveLength(1));
-    await new Promise((r) => setTimeout(r, 400)); // 等搜索词落定(刷价跟着落定才发)
+    await new Promise((r) => setTimeout(r, 400));
     expect(s.refreshTokenPrices).toHaveBeenCalledTimes(1);
   });
 
-  it("价过期的行 → 批量刷一次,刷来的价显示在行上、选中时带出去", async () => {
+  it("rows with expired prices: refreshed in one batch, fresh prices shown on rows and carried out on selection", async () => {
     const stale = tok("doge", "Dogecoin", { asOf: undefined, price: 0.1 });
     s.refreshTokenPrices.mockResolvedValue([
       { ticket: stale.ticket, unitPrice: 0.25, change24h: 5, asOf: Date.now() },

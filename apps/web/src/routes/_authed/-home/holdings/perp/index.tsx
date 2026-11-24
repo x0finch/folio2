@@ -10,10 +10,8 @@ import { ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 import { LiqRing } from "./liq-ring";
 import { liqRisk, pnlPct } from "./liq-risk";
 
-// 永续持仓明细 v2(H5 #120):总览「永续」tab 与账户详情抽屉共用。
-// 与代币行同语言 —— 行式(零表格/表头)、左「标识+标题」右 <ValueDelta>;
-// 行内色语义唯一(rev5):红绿只表达盈亏,--warn/--neg 警报只在 LiqRing 上,
-// 方向 pill 一律中性灰(方向是事实,不是评价)。
+// Perp holdings detail, shared by the overview "Perps" tab and the account drawer. Row-style like
+// token rows; red/green only mean PnL, --warn/--neg alerts live only on LiqRing, and the direction pill is neutral gray.
 
 interface PlatformBadge {
   name: string;
@@ -28,8 +26,7 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
-// 中性灰 chip:方向 pill(`3x Long`)小号,不与标题争重量;
-// 行 hover(SharedLayoutBg 滑块 = bg-muted)时底色换 --background,不与滑块融为一体。
+// Neutral gray chip (e.g. `3x Long`); on row hover it switches to --background so it doesn't blend into the slider.
 function NeutralChip({ children }: { children: React.ReactNode }) {
   return (
     <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-muted-foreground text-xs tabular-nums transition-colors group-hover:bg-background">
@@ -38,7 +35,7 @@ function NeutralChip({ children }: { children: React.ReactNode }) {
   );
 }
 
-// side 原文 capitalize(Long/Short 不翻译 —— 金融术语中性化是设计定稿)。
+// side is capitalized as-is; Long/Short are not translated.
 const sideLabel = (side: "long" | "short") => side.charAt(0).toUpperCase() + side.slice(1);
 
 function PerpRowContent({ p }: { p: PerpPositionView }) {
@@ -47,7 +44,7 @@ function PerpRowContent({ p }: { p: PerpPositionView }) {
   const risk = liqRisk(p);
   return (
     <div className="flex w-full items-center gap-3">
-      {/* 方向 badge 上;数量+币种 与 强平风险环 同一行水平对齐(环挂在数量行的父容器里)。 */}
+      {/* Direction badge above; amount + coin share a row with the liquidation ring. */}
       <div className="flex flex-col items-start gap-1">
         <NeutralChip>
           {p.leverage != null ? `${p.leverage}x ` : ""}
@@ -55,13 +52,13 @@ function PerpRowContent({ p }: { p: PerpPositionView }) {
         </NeutralChip>
         <div className="flex items-center gap-2">
           <span className="font-medium tabular-nums">
-            {/* 遮仓位数量,留 coin(公开的币名);开仓价是市场价、不遮。 */}
+            {/* Masks the position size, keeps the coin; entry price is a market price, unmasked. */}
             <Sensitive>{formatNumber(Math.abs(p.size))}</Sensitive> {p.coin}
           </span>
           {risk ? (
             <LiqRing risk={risk} position={p} />
           ) : (
-            // 无强平价(如全仓部分场景)→ 环降级为 muted 开仓价文本。
+            // No liquidation price (e.g. some cross-margin cases): the ring degrades to a muted entry-price text.
             <span className="text-muted-foreground text-xs tabular-nums">
               {t("entry")} {usd(p.entryPx)}
             </span>
@@ -85,7 +82,7 @@ function PerpAccountBody({ view }: { view: PerpView }) {
     <>
       {equity && (
         <div className="flex flex-wrap gap-x-10 gap-y-2 px-3">
-          {/* 权益 / uPnL / 可提 / 名义都是「你的钱」→ 遮;保证金率、杠杆是比率 → 留。 */}
+          {/* Equity / uPnL / withdrawable / notional are the user's money: masked; margin ratio and leverage are ratios: kept. */}
           <Stat
             label={t("accountEquity")}
             value={<Sensitive>{usd(equity.accountValue)}</Sensitive>}
@@ -124,8 +121,8 @@ function PerpAccountBody({ view }: { view: PerpView }) {
   );
 }
 
-// 永续分区(单账户,抽屉用):eyebrow 节头 + 权益条 + 仓位行。
-// hideHeader:抽屉改 tab 后 tab 即标题,节头冗余。
+// Perp section (single account, drawer): eyebrow header + equity bar + position rows. hideHeader:
+// the drawer's tab already titles it.
 export function PerpPositions({ view, hideHeader }: { view: PerpView; hideHeader?: boolean }) {
   const t = useTranslations("Overview");
   return (
@@ -143,7 +140,7 @@ export interface PerpSectionItem {
   accountLabel?: string;
 }
 
-// 永续分区(总览「永续」tab 用):每账户一个子块,按账户权益降序。
+// Perp section (overview "Perps" tab): one block per account, by account equity descending.
 export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
   const sorted = [...items].sort(
     (a, b) => (b.view.equity?.accountValue ?? 0) - (a.view.equity?.accountValue ?? 0),

@@ -11,35 +11,21 @@ import {
 import { useTranslations } from "use-intl";
 import type { HistoryPoint } from "@/lib/core/history";
 
-// 价值趋势区的**状态机**:一个点数不够 / 还在取数 / 什么都还没有 / 真有数据,四种情况在这里一次
-// 判完,调用方只给原料。
-//
-// **为什么要有这一层。** 这个判断原来在三处各写一遍(首页 hero、资产抽屉、账户抽屉),而且三处
-// 各写各的门槛 —— 漏一处就是一半的界面留白,那正是 #444 的形状。更糟的是当时还得靠一条**源码扫描
-// 测试**去盯「每处都写了 `series.length >= 2 ?` 而不是 `&&`」:需要拿正则看源码来保证一致性,
-// 说明这件事本来就该收成一个组件。收进来之后那条扫描测试可以删掉 —— 一处代码不需要被扫。
-//
-// 默认值按**抽屉**那两处配好(topMargin 56 / fillOpacity 0.14),于是它们各自只剩一行;hero 的
-// 排版不同(上留白更大把折线压到下半区),自己覆盖。
+// State machine of the value-trend area (too few points / loading / nothing yet / data), so callers
+// only pass raw inputs and every surface applies the same thresholds. Defaults suit the drawers
+// (topMargin 56 / fillOpacity 0.14); the hero overrides them.
 const CHART_TOP_MARGIN = 56;
 const CHART_FILL_OPACITY = 0.14;
 
-// 价值曲线画不出来时的空态(#444)。
-//
-// **为什么不画一条平线凑数。** 一个点连不成线;硬画一条水平线是在说「这段时间没变过」,而事实是
-// 「只有一个观测点」。那跟 24h 盈亏那边「算不出就显示 `—` 而不是 0」是同一条规矩:不知道的时候
-// 别装作知道。
-//
-// **为什么不留空白。** 空白读作「还没加载出来」或者「这功能坏了」。新建账户第一次同步之后必然
-// 落在这里(只有一张快照),而那是个完全正常的状态 —— 说清楚就好。
-//
-// 只在**确定**只有 0/1 个点时渲染:还在取数的时候什么都不显示,否则会闪一下这句话再被图盖掉。
+// Empty state when the curve can't be drawn. A flat line would claim "unchanged" when there is
+// only one observation (same rule as 24h PnL showing `—`, not 0); blank space reads as broken. A
+// new account's first sync lands here. Rendered only when 0/1 points are certain: while loading,
+// it would flash before the chart covers it.
 function TrendEmpty({ loading }: { loading: boolean }) {
   const t = useTranslations("Overview");
   if (loading) return null;
-  // 贴**底部左侧**,不居中:这块容器是「图 + 数字浮层」共用的,正中央正是大号金额所在 ——
-  // 居中会把这句话压在金额上(浏览器实测,代币抽屉里「One more sync…」直接穿过 $1,326,637.92)。
-  // 折线本来画在下半区,把话放在折线该在的地方最自然;右下角留给区间切换(RangeTabs),故靠左。
+  // Bottom-left, not centered: the container is shared with the number overlay, whose big amount
+  // sits in the center; the bottom-right is taken by RangeTabs.
   return (
     <div className="absolute inset-0 flex items-end pb-2">
       <p className="text-muted-foreground text-xs">{t("trendNeedsSecondSync")}</p>
@@ -47,24 +33,15 @@ function TrendEmpty({ loading }: { loading: boolean }) {
   );
 }
 
-// 价值趋势面积图(主页净值 hero + 代币抽屉单币价值 + 账户抽屉共用):折线随涨跌走 --pos/--neg,
-// 渐变填充,轴全隐。绝对定位垫底用(inset-0),调用方套 relative + overflow-hidden 容器。
-//
-// **读数不再靠 tooltip 气泡**(#470 片7):横向划过(桌面为悬停)把**上方那个大数字**顶替成该点的值,
-// 由调用方拿 `onActive` 自己换。于是气泡原来那两个毛病一起结构性消失 —— 一部分被上层数字压住
-// (图容器没层级,数字层与窗口切换都在更高层)、一部分被容器裁掉(那个裁剪是为收住贴边的活跃圆点
-// **故意加的**,不能删)。没有气泡,就没有东西会被裁、也没有东西需要抢层级。
-//
-// **`<ChartTooltip>` 仍然留着,只是渲染空内容。** 探过了:那条竖向指示线就是 tooltip 的 `cursor`,
-// 删掉 tooltip 元素连线一起没了;而 `useIsTooltipActive` / `useActiveTooltipDataPoints` 读的是
-// 图内部那个 store,要有 tooltip 才会被激活。所以保留元素、`content` 返回 null:线与活跃圆点都在,
-// 不产生气泡。
-//
-// 关键:四周留 margin 给 recharts 的 active dot 余量 —— 折线贴容器边(尤其接近底部)时,圆点半径会溢出
-// 绘图区被 overflow-hidden 裁掉;各边留 8px 让贴边圆点仍完整(top 由调用方按需加大,把折线压到下半区)。
-// gradient id 用 useId 保唯一:hero 与抽屉可同时在 DOM,写死 id 会撞、串色。
+// Value trend area chart shared by the hero and both drawers: line follows --pos/--neg, gradient
+// fill, axes hidden; absolutely positioned (inset-0) in a relative + overflow-hidden parent.
+// Readouts are not a tooltip bubble: scrubbing reports the point via `onActive` and the caller
+// swaps the big number. `<ChartTooltip>` stays with empty content because the vertical cursor line
+// and `useIsTooltipActive` / `useActiveTooltipDataPoints` need it. Margins leave room for the
+// active dot (the container's overflow clip is deliberate), top is caller-adjustable. Gradient ids
+// use useId since hero and drawer can coexist in the DOM.
 
-// 划到哪个点,报给调用方。必须住在 <AreaChart> 里面 —— 那两个 hook 读的是图自己的 store。
+// Reports the scrubbed point. Must live inside <AreaChart>: the hooks read the chart's store.
 function ActivePointReporter({ onActive }: { onActive: (point: HistoryPoint | null) => void }) {
   const active = useIsTooltipActive();
   const points = useActiveTooltipDataPoints<HistoryPoint>();
@@ -72,9 +49,8 @@ function ActivePointReporter({ onActive }: { onActive: (point: HistoryPoint | nu
   useEffect(() => {
     onActive(point);
   }, [point, onActive]);
-  // 图自己被卸掉时要清一次 —— 否则调用方那个大数字会永远停在一个历史值上。
-  // 真会发生:正划着的时候切时间窗,新窗口点数不够两点 → TrendPanel 换成空态、这张图整个卸载,
-  // 「移出」那一下于是永远不会到来。
+  // Clear on unmount, else the caller's big number sticks on a historical value (switching the
+  // window mid-scrub can unmount the chart with too few points, so "leave" never fires).
   useEffect(
     () => () => {
       onActive(null);
@@ -93,7 +69,7 @@ function ValueTrendChart({
   series: HistoryPoint[];
   topMargin?: number;
   fillOpacity?: number;
-  /** 划动/悬停到某点时回调;松手或移出给 `null`。不传 = 只画图,不读数。 */
+  /** Called when scrubbing/hovering a point; `null` on release or leave. Omitted = chart only. */
   onActive?: (point: HistoryPoint | null) => void;
 }) {
   const gradientId = `value-trend-${useId().replace(/:/g, "")}`;
@@ -103,7 +79,7 @@ function ValueTrendChart({
     total: { label: "", color: up ? "var(--pos)" : "var(--neg)" },
   } satisfies ChartConfig;
   return (
-    // touch-pan-y:竖向滑动照常滚页面,横向留给图读数 —— 交给平台仲裁,不自己判方向。
+    // touch-pan-y: vertical swipes still scroll the page, horizontal ones go to the chart.
     <ChartContainer config={config} className="absolute inset-0 h-full w-full touch-pan-y">
       <AreaChart data={series} margin={{ top: topMargin, right: 8, bottom: 8, left: 8 }}>
         <defs>
@@ -114,7 +90,7 @@ function ValueTrendChart({
         </defs>
         <XAxis dataKey="t" hide />
         <YAxis hide domain={["dataMin", "dataMax"]} />
-        {/* content 返回 null:不产生气泡,只留 cursor 那条竖线与活跃圆点。 */}
+        {/* content returns null: no bubble, only the cursor line and active dot. */}
         <ChartTooltip
           cursor={{ stroke: "var(--border-2)", strokeDasharray: "3 3" }}
           content={() => null}
@@ -123,9 +99,8 @@ function ValueTrendChart({
         <Area
           dataKey="total"
           type="monotone"
-          // baseValue 钉死 dataMin:填充恒在折线下方。默认 "auto" 在 domain 跨 0(账户可有负值历史点)时
-          // 取基线 0 → 负值段填充翻到线上方(阴影反向);dataMin 消除反向。全正序列下 domain=[dataMin,dataMax]
-          // 中 0 本就不在域内、auto 已等于 dataMin,故 hero / 资产抽屉观感不变。
+          // baseValue pinned to dataMin so the fill stays below the line: "auto" picks baseline 0 when
+          // the domain spans 0 (negative history points) and flips the fill above the line.
           baseValue="dataMin"
           stroke="var(--color-total)"
           strokeWidth={2}
@@ -138,12 +113,9 @@ function ValueTrendChart({
   );
 }
 
-// 「还什么都没有」时的装饰趋势:曲折上扬,纯背景纹样 —— 实线平滑曲线(type=natural,非折线)、
-// 不吃指针、无 hover/tooltip。值仅用于形状(轴全隐藏)。
-//
-// **它只在没有任何持仓、总额为 0 时出现**,由调用方给 `decorate` 决定。一旦屏幕上有真实数字,
-// 这条线就会跟它矛盾(它恒向上,而那个数完全可能在跌),那时必须走 TrendEmpty 说明原因 —— 它
-// 与真折线肉眼分不出来,拿它充行情就是在编数据。
+// Decorative upward trend for "nothing yet": pure background pattern, no pointer/tooltip, values
+// only shape it. Only shown with no holdings and a zero total (the caller's `decorate`); next to a
+// real number it would contradict it and pass as market data, so TrendEmpty explains instead.
 const DEMO_TREND = [
   0.12, 0.16, 0.13, 0.2, 0.17, 0.24, 0.28, 0.23, 0.31, 0.27, 0.35, 0.41, 0.37, 0.45, 0.52, 0.48,
   0.55, 0.51, 0.6, 0.67, 0.63, 0.72, 0.82, 0.92,
@@ -188,24 +160,22 @@ export function TrendPanel({
   onActive,
 }: {
   series: readonly HistoryPoint[];
-  /** 还在取数 —— 此时什么都不渲染,否则会闪一下空态文案再被图盖掉。 */
+  /** Still loading: render nothing, else the empty copy would flash before the chart covers it. */
   loading?: boolean;
   topMargin?: number;
   fillOpacity?: number;
-  /**
-   * 「什么都还没有」→ 画装饰纹样而不是说明原因。**只有在屏幕上没有任何真实数字可被它矛盾时
-   * 才允许开**(hero:无持仓且总额 0)。判据留给调用方 —— 那是它的领域知识,不是这一层的。
-   */
+  /** "Nothing yet": draw the decorative pattern instead of explaining. Only allowed when no real number
+   * on screen could contradict it (hero: no holdings and zero total); the caller decides. */
   decorate?: boolean;
-  /** 划动/悬停读数(#470 片7):把当前点报给调用方,由它顶替上方那个大数字。 */
+  /** Scrub/hover readout: reports the current point so the caller can replace the big number. */
   onActive?: (point: HistoryPoint | null) => void;
 }) {
-  // 还在取数时什么都不画:不能先闪装饰线/空态文案,再被真图盖掉。
+  // While loading draw nothing: no flash of decoration/empty copy.
   if (loading) return <TrendEmpty loading />;
-  // 一个点连不成线。门槛只在这里写一次。
+  // One point can't make a line; the threshold lives only here.
   if (series.length >= 2) {
-    // 图单独一层裁溢出:调用方的容器往往还浮着名称/金额层,不能被 overflow-hidden 切掉
-    // (账户抽屉左上角那个铅笔角标就吃过这个)。图本身是 absolute inset-0,套一层不改几何。
+    // The chart gets its own overflow clip: callers' containers often float name/amount layers
+    // that must not be cut off. The chart is absolute inset-0, so the wrapper doesn't change geometry.
     return (
       <div className="absolute inset-0 overflow-hidden">
         <ValueTrendChart

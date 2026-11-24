@@ -26,8 +26,7 @@ export const handleUpdateManualActivity = Effect.fn("updateManualActivity")(func
   return result;
 });
 
-// server fn 的那一层:改成功之后投一条定向的 `daily-prices`(FOL-90)—— 改日期可能把首笔活动
-// 挪到更早,那一段日价还没补过。
+// Queues a `daily-prices` refill: a date edit can move the first activity earlier than backfilled.
 export const handleUpdateManualActivityAndRefill = Effect.fn("updateManualActivity")(function* (
   data: Parameters<typeof handleUpdateManualActivity>[0],
 ) {

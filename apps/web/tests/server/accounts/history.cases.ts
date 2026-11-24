@@ -6,14 +6,9 @@ import { call, callExit } from "../_kit/run";
 import { DAY, seedAccount, seedManualAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 accounts/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("accounts/history", () => {
-  // #527 · getAccountHistory
-  //
-  // **FOL-38 之后这条接口只发原料**(ADR 0049):快照点 +(手记账户的)当下点,裁窗口与降采样
-  // 都在浏览器里。所以要看曲线的用例走 `curve()` —— 把抽屉里那两行照抄一遍,断言的仍然是
-  // 屏幕上那条线。
+  // The endpoint returns raw points; windowing and downsampling happen client-side, so `curve()`
+  // replays the drawer's two steps.
   const USER = "h-acc-history";
   const BTC = "token-btc";
 
@@ -27,14 +22,13 @@ describe("accounts/history", () => {
     NOW = Date.now();
   });
 
-  /** 抽屉里那两行:接口给窗口内的原料点,浏览器阶梯重建 + 降采样。 */
   const curve = async (input: { accountId: string; since?: number; connectorId?: string }) => {
     const raw = await call(USER, handleGetAccountHistory(input));
     return buildAccountValueHistory(raw.rows, raw.live, { sampled: raw.sampled });
   };
 
   describe("getAccountHistory", () => {
-    it("手记账户 → 曲线由账本算出,末点是按当前价的实时值", async () => {
+    it("manual account → curve from the ledger, last point at current price", async () => {
       const acc = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
         unitPrice: 100,
@@ -44,17 +38,17 @@ describe("accounts/history", () => {
       const series = await curve({ accountId: acc.id, connectorId: "manual" });
 
       expect(series.length).toBeGreaterThan(0);
-      // 末点是「现在」补的实时盯市点,不是某张旧快照的时刻。
+      // The last point is the live mark-to-market "now", not an old snapshot's time.
       expect(Date.now() - (series.at(-1)?.t ?? 0)).toBeLessThan(60_000);
     });
 
-    it("从没同步过 → 空曲线,不报错", async () => {
+    it("never synced → empty curve, no error", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
 
       expect(await curve({ accountId: acc.id })).toEqual([]);
     });
 
-    it("历史里有负值点(perp 亏穿)→ 原样返回,曲线跨 0 不失真", async () => {
+    it("negative points (perp underwater) → returned as-is, curve crosses 0", async () => {
       const acc = await seedAccount(USER, "永续", "hyperliquid");
       await seedSnapshot(USER, acc.id, ago(2 * DAY), [
         { tokenId: BTC, amount: 1, usdValue: 100, kind: "perp_equity" },
@@ -68,19 +62,16 @@ describe("accounts/history", () => {
       expect(series.map((p) => p.total)).toEqual([100, -50]);
     });
 
-    it("窗口起点在未来 → 空曲线,不是报错", async () => {
+    it("window start in the future → empty curve, not an error", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
       expect(await curve({ accountId: acc.id, since: NOW + 30 * DAY })).toEqual([]);
     });
 
-    // FOL-38 验收 ① —— 响应里只有原料点,**而且只有窗口里那些**。
-    //
-    // 后半条是这条接口的上界:发的是原样的点、不再降采样,所以「出门多少行」只能由窗口定死。
-    // 把 `since` 当成前端的事(接口发全历史、浏览器自己裁)就等于没有上界 —— 一个同步了一年的
-    // 账户会把整段历史塞进一次响应。
-    it("接口只发窗口内的原料点,窗口外的一行都不出门", async () => {
+    // The window is the response's upper bound: points aren't downsampled server-side, so without
+    // `since` a year-old account would ship its whole history.
+    it("only raw points inside the window are sent", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await seedSnapshot(USER, acc.id, ago(40 * DAY), [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
       await seedSnapshot(USER, acc.id, ago(DAY), [{ tokenId: BTC, amount: 1, usdValue: 120 }]);
@@ -93,13 +84,13 @@ describe("accounts/history", () => {
 
       expect(Object.keys(all).sort()).toEqual(["live", "rows", "sampled"]);
       expect(all.sampled).toBe(true);
-      expect(all.rows).toHaveLength(2); // 仅两点,min-max 路径仍原样返回
-      expect(month.rows).toHaveLength(1); // 40 天前那行**没有出门**
+      expect(all.rows).toHaveLength(2); // two points: min-max path returns them as-is
+      expect(month.rows).toHaveLength(1); // the 40-day-old row is not sent
       expect(month.rows[0]?.totalUsd).toBe(120);
     });
 
-    // 手记账户的日网格必须整条现算(要从首笔活动折下来),窗口管的是**出门的那一段**。
-    it("手记账户:网格整条算,但只发窗口内那一段", async () => {
+    // Manual grids must be computed from the first activity; the window only limits what's sent.
+    it("manual account: full grid computed, only the window sent", async () => {
       const acc = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
         unitPrice: 100,
@@ -123,7 +114,7 @@ describe("accounts/history", () => {
       expect(future.rows).toEqual([]);
     });
 
-    it("别人的账户 → 拒", async () => {
+    it("someone else's account → rejected", async () => {
       const theirs = await seedAccount(otherUser(USER), "他们的", "bitcoin");
       await seedSnapshot(otherUser(USER), theirs.id, ago(DAY), [
         { tokenId: BTC, amount: 1, usdValue: 999 },
@@ -134,7 +125,7 @@ describe("accounts/history", () => {
       expect(exit._tag).toBe("Failure");
     });
 
-    it("accountId 空串 / since 是负数 → schema 拒", () => {
+    it("empty accountId / negative since → schema rejects", () => {
       expect(AccountHistoryInput.safeParse({ accountId: "" }).success).toBe(false);
       expect(AccountHistoryInput.safeParse({ accountId: "a", since: -1 }).success).toBe(false);
       expect(AccountHistoryInput.safeParse({ accountId: "a" }).success).toBe(true);

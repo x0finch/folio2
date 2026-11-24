@@ -6,10 +6,7 @@ import { blockOutbound } from "../_kit/outbound";
 import { call } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 portfolios/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
 describe("portfolios/rename", () => {
-  // #527 · renamePortfolio
   const USER = "h-pfs-rename";
 
   const nameOf = async (userId: string, id: string) =>
@@ -22,7 +19,7 @@ describe("portfolios/rename", () => {
   });
 
   describe("renamePortfolio", () => {
-    it("改完列表里是新名字", async () => {
+    it("rename → list shows the new name", async () => {
       await db(USER).portfolios.ensureDefault();
       const pf = await db(USER).portfolios.create({ name: "旧名" });
 
@@ -31,12 +28,12 @@ describe("portfolios/rename", () => {
       expect(await nameOf(USER, pf.id)).toBe("新名");
     });
 
-    it("改成空串 / 纯空格 → schema 拒", () => {
+    it("empty / whitespace name → schema rejects", () => {
       expect(RenamePortfolioInput.safeParse({ portfolioId: "p", name: "" }).success).toBe(false);
       expect(RenamePortfolioInput.safeParse({ portfolioId: "p", name: "  " }).success).toBe(false);
     });
 
-    it("改别人的 Portfolio → 对方那个名字一个字没变", async () => {
+    it("renaming someone else's portfolio → their name unchanged", async () => {
       const theirs = await db(otherUser(USER)).portfolios.create({ name: "他们的" });
 
       await call(USER, handleRenamePortfolio({ portfolioId: theirs.id, name: "被我改了" }));
@@ -44,7 +41,7 @@ describe("portfolios/rename", () => {
       expect(await nameOf(otherUser(USER), theirs.id)).toBe("他们的");
     });
 
-    it("改一个不存在的 id → 不抛,也不凭空建一条", async () => {
+    it("unknown id → no throw, nothing created", async () => {
       await db(USER).portfolios.ensureDefault();
 
       await call(USER, handleRenamePortfolio({ portfolioId: "没有这个", name: "x" }));

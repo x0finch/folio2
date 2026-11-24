@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-// **认会话不许把 passkey 拉进来**(`session/session-auth.ts` 讲了为什么:约 12ms 的冷启动)。
-//
-// 这条约定破起来毫无声息 —— 谁在 server fn 的路径上随手 `import { getAuth } from ".../session/auth"`,
-// 一切照常工作,只是每个冷请求又贵回去。所以从源码里数:
-//   · 全量实例(`session/auth.ts`)只许被 `/api/auth` 那条路由**动态** `import()`;
-//   · 服务端的 passkey 插件只许出现在全量实例里(`/client` 是浏览器那一半,不算)。
+// Session checks must not pull in passkey (~12ms cold start). Breaking this is silent, so count in source:
+// the full instance is only dynamically imported by /api/auth, and the server passkey plugin lives only there.
 
 const sources = import.meta.glob("../src/**/*.{ts,tsx}", {
   query: "?raw",
@@ -21,8 +17,8 @@ const files = Object.entries(sources).map(([path, text]) => ({
 const FULL_AUTH = /["'](?:@\/lib\/server\/session|\.)\/auth["']/;
 const STATIC_IMPORT = /^\s*import\s[^;]*?from\s*["'][^"']+["']/gm;
 
-describe("认会话与全量 better-auth 分开加载", () => {
-  it("全量实例只被 /api/auth 路由按需 import", () => {
+describe("session checks load separately from full better-auth", () => {
+  it("the full instance is only lazily imported by the /api/auth route", () => {
     const importers = files.filter((f) => FULL_AUTH.test(f.text)).map((f) => f.path);
     expect(importers).toEqual(["routes/api/auth/$.ts"]);
 
@@ -32,7 +28,7 @@ describe("认会话与全量 better-auth 分开加载", () => {
     expect(route).toMatch(/await import\(["']@\/lib\/server\/session\/auth["']\)/);
   });
 
-  it("服务端 passkey 插件只在全量实例里", () => {
+  it("the server passkey plugin lives only in the full instance", () => {
     const users = files
       .filter((f) => /from\s*["']@better-auth\/passkey["']/.test(f.text))
       .map((f) => f.path);

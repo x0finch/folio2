@@ -27,7 +27,6 @@ import {
 import { EditableName } from "./editable-name";
 import { Portal } from "./portal";
 
-// swipe 行去卡片:item / surface 均用抽屉底色 bg-background,hover:bg-muted 悬停反馈(同账户侧栏代币面板)。
 const swipeClasses: SwipeableListClassNames = {
   root: "gap-0",
   item: "rounded-xl bg-background",
@@ -36,14 +35,11 @@ const swipeClasses: SwipeableListClassNames = {
   action: "[&>span]:group-hover:bg-muted!",
 };
 
-// 当前视图 = 单一状态源:view.id 既是 MorphingModal 的 morph 标识,也是内容路由的判据(下方渲染直接
-// switch view.id,不再另算一份)。list 一层按 mode 分 manage/move;delete 二层携带待删除的 portfolio。
+// view.id is both the MorphingModal morph key and the content route.
 type View = { id: "list" } | { id: "create" } | { id: "delete"; portfolio: PortfolioSummary };
 
-// Portfolio 选择器弹窗(ADR 0033)。**只做状态编排 + 页面路由**,每个页面各自独立组件:
-//  · mode="manage"(选择器菜单) → 一层 <ManageList>:改名 + 右滑 pin/删除;删除进 <DeletePage> 二层确认。
-//  · mode="move"(账户抽屉「移到组合」)→ 一层 <MoveList>:点选即归属;左下角新建入口进 <CreatePage> 二层。
-// 一层 ↔ 二层由 MorphingModal 的 viewId 驱动 morph;二层遮罩/Esc 退回列表,一层遮罩/Esc/叉叉关闭弹窗。
+// Orchestrates state and page routing: "manage" (picker menu) shows <ManageList>, "move" (account
+// drawer) shows <MoveList>; create/delete are second-level pages morphed in via viewId.
 export function PortfolioPickerModal({
   mode,
   accountId,
@@ -52,8 +48,8 @@ export function PortfolioPickerModal({
   onClose,
 }: {
   mode: "manage" | "move";
-  accountId?: string; // move 模式:被归属的账户
-  /** move 模式:那个账户此刻归属哪个组合(画绿勾用)。由账户行给 —— 归属随行下发,ADR 0047。 */
+  accountId?: string; // move mode: the account being moved
+  /** Move mode: the portfolio the account currently belongs to (drives the green check). */
   currentPortfolioId?: string;
   open: boolean;
   onClose: () => void;
@@ -66,7 +62,7 @@ export function PortfolioPickerModal({
     <Portal>
       <MorphingModal
         viewId={open ? view.id : null}
-        // 二层(create/delete)遮罩/Esc → 退回列表;一层 → 关闭弹窗。
+        // Second-level pages go back to the list; the list closes the modal.
         onClose={view.id === "list" ? onClose : backToList}
         placement={isDesktop ? "center" : "bottom"}
         className="max-w-sm"
@@ -93,7 +89,6 @@ export function PortfolioPickerModal({
   );
 }
 
-// 一层列表页页头:标题 + 右上角关闭叉叉(hover 圆形底)。
 function PickerHeader({ title, onClose }: { title: string; onClose: () => void }) {
   const tc = useTranslations("Common");
   return (
@@ -111,7 +106,6 @@ function PickerHeader({ title, onClose }: { title: string; onClose: () => void }
   );
 }
 
-// manage 一层:SwipeableList —— 行内 EditableName 改名,右滑 pin 设默认 + 删除(删除交给父级切二层确认页)。
 function ManageList({
   onClose,
   onDelete,
@@ -124,7 +118,7 @@ function ManageList({
   const queryClient = useQueryClient();
   const { portfolios } = usePortfolio();
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  // 定向刷新替掉整页刷新(#412):改名 / 设默认改的是组合清单与归属,刷组合域这一个前缀就够。
+  // Only the portfolio domain needs refreshing for rename / set-default.
   const invalidate = () => invalidateFor(queryClient, "portfolio.write");
 
   const renameMut = useMutation({
@@ -192,7 +186,6 @@ function ManageList({
   );
 }
 
-// move 一层:点选即把账户归属过去;当前所在项右侧绿勾。左下角「新建组合」入口(交给父级切二层新建页)。
 function MoveList({
   accountId,
   currentPortfolioId,
@@ -214,7 +207,7 @@ function MoveList({
       moveAccountToPortfolio({ data: { accountId: accountId ?? "", portfolioId } }),
     onSuccess: async () => {
       onClose();
-      // 移动账户会同时改两个组合的总额、走势与归属 —— 一句域前缀全盖住。
+      // Moving touches two portfolios' totals, trends and membership; the domain prefix covers it all.
       await invalidateFor(queryClient, "portfolio.write");
       toast.success(t("moved"));
     },
@@ -225,14 +218,13 @@ function MoveList({
     <div className="flex flex-col gap-3">
       <PickerHeader title={t("moveToTitle")} onClose={onClose} />
 
-      {/* SharedLayoutBg 承载 hover 高亮(滑动 pill,与选择器菜单一致)。尺寸(min-h-12 / px-3 / rounded-xl)
-          对齐 manage 的 SwipeableList surface → 两态 item 一致。每个 <button> 内容须是单个 flex 容器
-          (SharedLayoutBg 会把 children 塞进非 flex 的 z-10 div)。 */}
+      {/* SharedLayoutBg hosts the hover pill; each button's content must be a single flex container
+          (it wraps children in a non-flex z-10 div). */}
       <SharedLayoutBg className="gap-0.5" inset={0} pillClassName="rounded-xl bg-muted">
         {portfolios.map((p) => {
           const current = p.id === currentPortfolioId;
-          // current 项不设 disabled:否则 disabled button 不派发 mouseenter,SharedLayoutBg 的滑动 pill
-          // 就到不了它。改为点击时过滤(current / 进行中 → no-op),pill 全程可达。
+          // Not `disabled` for the current item: a disabled button doesn't dispatch mouseenter, so the
+          // sliding pill couldn't reach it. Filter on click instead.
           return (
             <button
               key={p.id}
@@ -256,8 +248,7 @@ function MoveList({
         })}
       </SharedLayoutBg>
 
-      {/* 左下角新建入口:AnimatedBadge 包裹 —— hover/聚焦切文案(children 变 → badge 内置 text-roll),
-          让入口更灵动。点击进二层新建页。 */}
+      {/* Create entry: AnimatedBadge swaps its label on hover/focus. */}
       <button
         type="button"
         className="self-start rounded-full outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -275,7 +266,6 @@ function MoveList({
   );
 }
 
-// 二层:新建组合名称。建完回列表(新组合随 invalidate 出现,由用户再选)。
 function CreatePage({ onDone }: { onDone: () => void }) {
   const t = useTranslations("Portfolio");
   const tc = useTranslations("Common");
@@ -323,7 +313,6 @@ function CreatePage({ onDone }: { onDone: () => void }) {
   );
 }
 
-// 二层:删除确认。删完回列表(账户退回默认组合)。
 function DeletePage({ portfolio, onDone }: { portfolio: PortfolioSummary; onDone: () => void }) {
   const t = useTranslations("Portfolio");
   const tc = useTranslations("Common");
@@ -334,7 +323,7 @@ function DeletePage({ portfolio, onDone }: { portfolio: PortfolioSummary; onDone
     onSuccess: async () => {
       onDone();
       toast.success(t("deleted"));
-      // 删组合会把它的账户退回默认组合 → 默认视图的总额也变,所以刷整个域而不只是清单。
+      // Deleting returns its accounts to the default portfolio, so refresh the whole domain.
       await invalidateFor(queryClient, "portfolio.write");
     },
     onError: () => toast.error(t("manageFailed")),

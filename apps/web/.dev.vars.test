@@ -1,25 +1,17 @@
-# e2e 专用的 worker 环境变量。**故意入库** —— 每个值都是假的,测试每轮自建用户、从不碰真上游。
-#
-# 怎么生效:启动命令带 `CLOUDFLARE_ENV=test`(见 playwright.config.ts 的 webServer)→
-# @cloudflare/vite-plugin 选 wrangler.jsonc 的 `env.test` 段,并**只**加载本文件。
-# 官方文档写明:存在 `.dev.vars.<env>` 时 `.dev.vars` 完全不加载 —— 所以日常开发不受影响,
-# 真凭据也不会被 e2e 读到。
-#
-# BETTER_AUTH_URL 必须与 Playwright 驱动的 origin **逐字**一致:passkey 校验的 expectedOrigin 是
-# 完整 origin(带 scheme),不一致则每次 ceremony 都失败,且没有有用的报错。**https 不是笔误** ——
-# vite 的 server/preview 都配了自签名证书(见 vite.config.ts:要的是 HTTP/2),所以本地和 CI 上
-# 那个 server 都只听 https。
+# E2E-only worker env, committed on purpose: every value is fake.
+# Active when started with CLOUDFLARE_ENV=test: @cloudflare/vite-plugin then loads only this file
+# (when `.dev.vars.<env>` exists, `.dev.vars` is not loaded), so real credentials never reach e2e.
 BETTER_AUTH_SECRET=e2e-fake-auth-secret-000000000000
+# Must match the Playwright origin verbatim (passkey expectedOrigin); https because vite serves
+# a self-signed cert for HTTP/2.
 BETTER_AUTH_URL=https://localhost:3100
-# 必须是 **32 字节的 base64**(见 connectors/basic/src/crypto.ts 的 importKey)—— 少一个字节就
-# CryptoError,而加账户要用它加密 API secret。这串解出来正好是 "e2e-fake-secrets-key-32-bytes!!!"。
+# 32-byte base64 key (decodes to "e2e-fake-secrets-key-32-bytes!!!").
 SECRETS_KEY=ZTJlLWZha2Utc2VjcmV0cy1rZXktMzItYnl0ZXMhISE=
 LOG_LEVEL=warning
-# 把 Binance 的三个 host 全指向本地假 server(见 e2e/fixtures/binance-server.mjs)。
-# 这是生产也在用的 provider-creds 覆盖开关(#264),不是测试专用分支。
+# Point all Binance hosts at the local fake server (e2e/fixtures/binance-server.mjs).
 BINANCE_API_BASE=http://localhost:3099
 BINANCE_FAPI_BASE=http://localhost:3099
 BINANCE_DAPI_BASE=http://localhost:3099
-# CoinGecko 也指到同一个假 server(FOL-84 的 base URL 覆盖开关,生产不设)。不指的话刷价任务
-# 打真网,在本地串行的队列里堵住同步消息(见 binance-server.mjs 的 COINGECKO_PREFIX)。
+# CoinGecko goes to the same fake server; otherwise the price job hits the real network and
+# blocks the serial local queue.
 COINGECKO_API_BASE=http://localhost:3099/coingecko/api/v3

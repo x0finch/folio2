@@ -6,11 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { coinGeckoUpstreamLayers } from "../src/upstreams";
 import { routed } from "./harness";
 
-// **三个端口一起挂 → 一次构建只建一个 client。** 装配点(apps/web 的 oracle.ts)每次请求都把
-// 三个端口挂上,建 client 不是免费的(profile 里每次约 1.7ms CPU)。layer memoisation 按**引用**
-// 认,所以要紧的是三格挂在同一个 `transport` 引用上 —— 这里数的就是「client 真被建了几次」。
+// Mounting all three ports builds one client per construction: layer memoisation is keyed by reference, and
+// building a client is not free, so this counts how many times the client is actually built.
 
-// 包一层计数:每次这张 layer 真被**建**(不是被调用出一个描述)就 +1。
+// Counts each time the layer is actually built.
 const countBuilds = () => {
   const real = CoinGeckoClient.layer;
   const counter = { builds: 0 };
@@ -24,7 +23,7 @@ const countBuilds = () => {
   return counter;
 };
 
-// 四张票都拿一遍 —— 拿得到就说明图建完了,顺带钉住四格各自接对了端口。
+// Resolve all four tickets: success proves the graph built and each slot is wired to the right port.
 const idsFrom = (layer: Layer.Layer<TokenUpstream | FxUpstream | PlatformUpstream | Namer>) =>
   runClient(
     routed({}).http,
@@ -40,7 +39,7 @@ afterEach(() => {
 });
 
 describe("coinGeckoUpstreamLayers", () => {
-  it("三个端口共用一个 client:一次构建只建一份", async () => {
+  it("three ports share one client: one build per construction", async () => {
     const counter = countBuilds();
     const cg = coinGeckoUpstreamLayers({ apiKey: "k" });
 
@@ -50,10 +49,8 @@ describe("coinGeckoUpstreamLayers", () => {
     expect(counter.builds).toBe(1);
   });
 
-  // 对照组:memo 按**引用**认,不按 config 认 —— 两次调用、config 逐字相同,照样各建一份。
-  // 这就是「为什么三格必须出自同一次调用」:以前三个单端口工厂各 `transport(config)` 一次,
-  // 一次请求建三遍(已删);这条钉住共用靠的是引用,别指望 config 相同就能省。
-  it("对照:两次调用即使 config 相同也各建一份", async () => {
+  // Control: memoisation is keyed by reference, not config, so two calls with identical config still build twice.
+  it("control: two calls with identical config still build separately", async () => {
     const counter = countBuilds();
     const config = { apiKey: "k" };
     const a = coinGeckoUpstreamLayers(config);

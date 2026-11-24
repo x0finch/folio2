@@ -6,11 +6,7 @@ import { tokens as tokensTable } from "../src/schema";
 import { user } from "../src/schema/auth";
 import { forDomain, forOracle } from "./effect";
 
-// 手记账本的**编辑与批量提交**(`activityOwner` / `updateActivity` / `commitBatch`):
-//   · 编辑只覆盖给定字段,id / 账户 / 币 / createdAt 不动;空 patch 不写库也不炸;
-//   · 别人的活动 —— 定位、编辑都当「不存在」(NotFound),行原样不动;
-//   · 批量提交整批落库、按提交序排;混进一个别人的币 → 整批一行都不落。
-// 真 D1(Miniflare),跑的是生产那条门票 → 服务的路(`./effect`)。
+// Manual ledger editing and batch commit (`activityOwner` / `updateActivity` / `commitBatch`): edits overwrite only given fields; others' activity reads as NotFound and stays untouched; a batch lands whole in commit order, and one foreign token aborts the whole batch. Real D1 via the production ticket path (`./effect`).
 
 const manualOf = forDomain((db) => db.manual);
 const accounts = forDomain((db) => db.accounts);
@@ -60,7 +56,7 @@ async function oneActivity(userId: string) {
 }
 
 describe("activityOwner", () => {
-  it("回这条活动挂在哪个账户、哪个币上", async () => {
+  it("returns which account and coin the activity belongs to", async () => {
     const { acc, row } = await oneActivity(USER_A);
     expect(await manualOf(USER_A).activityOwner(row.id)).toEqual({
       tokenId: acc.tokenId,
@@ -68,7 +64,7 @@ describe("activityOwner", () => {
     });
   });
 
-  it("别人的活动 / 不存在的 id → NotFound,两者长得一样", async () => {
+  it("another user's activity / an unknown id gives NotFound, indistinguishably", async () => {
     const { row } = await oneActivity(USER_A);
     await expect(manualOf(USER_B).activityOwner(row.id)).rejects.toThrow(
       `manual activity not found: ${row.id}`,
@@ -80,7 +76,7 @@ describe("activityOwner", () => {
 });
 
 describe("updateActivity", () => {
-  it("只覆盖给定字段;id / 账户 / 币 / createdAt 不动", async () => {
+  it("overwrites only given fields; id / account / coin / createdAt untouched", async () => {
     const { acc, row } = await oneActivity(USER_A);
 
     const owner = await manualOf(USER_A).updateActivity(row.id, {
@@ -105,14 +101,14 @@ describe("updateActivity", () => {
     });
   });
 
-  it("只给一个字段 → 其余原样", async () => {
+  it("with one field given, the rest are unchanged", async () => {
     const { acc, row } = await oneActivity(USER_A);
     await manualOf(USER_A).updateActivity(row.id, { memo: "edited" });
     const [after] = await manualOf(USER_A).listActivityByAccount(acc.id);
     expect(after).toEqual({ ...row, memo: "edited" });
   });
 
-  it("空 patch → 不炸、不改,照样回归属", async () => {
+  it("an empty patch neither fails nor changes anything, and still returns the ownership", async () => {
     const { acc, row } = await oneActivity(USER_A);
     expect(await manualOf(USER_A).updateActivity(row.id, {})).toEqual({
       tokenId: acc.tokenId,
@@ -121,7 +117,7 @@ describe("updateActivity", () => {
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toEqual([row]);
   });
 
-  it("改别人的活动 → NotFound,那一行原样", async () => {
+  it("editing another user's activity gives NotFound and the row is unchanged", async () => {
     const { acc, row } = await oneActivity(USER_A);
     await expect(manualOf(USER_B).updateActivity(row.id, { amount: 999 })).rejects.toThrow(
       "manual activity not found",
@@ -131,7 +127,7 @@ describe("updateActivity", () => {
 });
 
 describe("commitBatch", () => {
-  it("落持仓声明(改 symbol)+ 整批活动,同一时刻的按提交序排", async () => {
+  it("writes the holding declaration (symbol edit) plus a whole batch; same-instant entries sort by commit order", async () => {
     const acc = await manualAccount(USER_A, "old");
     const eth = await tokensOf(USER_A, "coingecko").create({ symbol: "ETH" }, []);
 
@@ -158,7 +154,7 @@ describe("commitBatch", () => {
     expect(tok?.symbol).toBe("MYBTC");
   });
 
-  it("混进一个别人的币 → 整批一行都不落,我的声明也不改", async () => {
+  it("a foreign coin in the batch writes no row, and my declaration isn't changed either", async () => {
     const acc = await manualAccount(USER_A, "mine");
     const theirs = await tokensOf(USER_B, "coingecko").create({ symbol: "X" }, []);
 
@@ -181,7 +177,7 @@ describe("commitBatch", () => {
     expect(tok?.symbol).toBe("mine");
   });
 
-  it("往别人的账户里提交 → NotFound,一行都不落", async () => {
+  it("committing into another user's account gives NotFound and writes no row", async () => {
     const theirs = await manualAccount(USER_B);
     const mine = await tokensOf(USER_A, "coingecko").create({ symbol: "BTC" }, []);
 
@@ -195,7 +191,7 @@ describe("commitBatch", () => {
     expect(await manualOf(USER_B).listActivityByAccount(theirs.id)).toEqual([]);
   });
 
-  it("空计划 → 什么都不写,不炸", async () => {
+  it("an empty plan writes nothing and doesn't fail", async () => {
     const acc = await manualAccount(USER_A);
     await manualOf(USER_A).commitBatch({ accountId: acc.id, declare: [], activities: [] });
     expect(await manualOf(USER_A).listActivityByAccount(acc.id)).toEqual([]);

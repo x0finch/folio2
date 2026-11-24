@@ -6,7 +6,7 @@ import { NoteView } from "@/components/notes/note-view";
 
 afterEach(cleanup);
 
-// formatNumber 注入:打标记 <n>,断言数字值被格式化(而非裸 String)。
+// Injected formatNumber tags values as <n> to prove numbers are formatted, not String()-ed.
 const formatNumber = (n: number) => `<${n}>`;
 
 function renderNote(note: Note) {
@@ -14,7 +14,7 @@ function renderNote(note: Note) {
 }
 
 describe("<NoteView>", () => {
-  it("段首(icon + 标题)+ content 行列表渲染", () => {
+  it("renders header (icon + title) and the content row list", () => {
     renderNote({
       title: "Locked",
       icon: "warning",
@@ -24,25 +24,24 @@ describe("<NoteView>", () => {
     expect(screen.getByText("BTC")).toBeTruthy();
   });
 
-  it("content string → 纯文本", () => {
+  it("content string -> plain text", () => {
     renderNote({ title: "Note", content: "Pending funds" });
     expect(screen.getByText("Note")).toBeTruthy();
     expect(screen.getByText("Pending funds")).toBeTruthy();
   });
 
-  it("content NoteRow[] → 数字经 formatNumber + 单位", () => {
+  it("content NoteRow[] -> numbers via formatNumber + unit", () => {
     renderNote({ title: "Locked", content: [{ label: "ETH", value: 2.5, unit: "ETH" }] });
     expect(screen.getByText("ETH")).toBeTruthy();
-    // 数字值经注入 formatNumber(<2.5>)+ 单位符号。
     expect(screen.getByText("<2.5> ETH")).toBeTruthy();
   });
 
-  it("字符串 value 原样呈现(不经 formatNumber)", () => {
+  it("string values render as-is (no formatNumber)", () => {
     renderNote({ title: "Receive", content: [{ label: "Next #0", value: "bc1qexample" }] });
     expect(screen.getByText("bc1qexample")).toBeTruthy();
   });
 
-  it("行有 href → 包外链(新标签 + noopener)", () => {
+  it("row with href -> external link (new tab + noopener)", () => {
     const { container } = renderNote({
       title: "Distribution",
       content: [{ label: "addr", value: 1, unit: "BTC", href: "https://mempool.space/address/x" }],
@@ -53,7 +52,7 @@ describe("<NoteView>", () => {
     expect(a?.getAttribute("rel")).toContain("noopener");
   });
 
-  it("hideHeader → 只渲染 content(段首 icon+标题不出现)", () => {
+  it("hideHeader -> renders only content (no header icon/title)", () => {
     render(
       <NoteView
         note={{ title: "Locked", icon: "warning", content: "held" }}
@@ -65,33 +64,33 @@ describe("<NoteView>", () => {
     expect(screen.getByText("held")).toBeTruthy();
   });
 
-  it("未知 / 缺省 icon → 不崩(退化 info)", () => {
+  it("unknown / missing icon -> no crash (falls back to info)", () => {
     expect(() => {
       renderNote({ title: "NoIcon", content: "text" });
-      // @ts-expect-error 运行时兜底:未知 icon 名退化 info
+      // @ts-expect-error runtime fallback: unknown icon name degrades to info
       renderNote({ title: "Weird", icon: "nope", content: "text" });
     }).not.toThrow();
     expect(screen.getByText("NoIcon")).toBeTruthy();
     expect(screen.getByText("Weird")).toBeTruthy();
   });
 
-  it("缺 formatNumber → 数字 String 化(安全退化)", () => {
+  it("missing formatNumber -> numbers String()-ed (safe fallback)", () => {
     render(<NoteView note={{ title: "S", content: [{ label: "x", value: 7 }] }} />);
     expect(screen.getByText("7")).toBeTruthy();
   });
 });
 
 describe("<NoteIndicator>", () => {
-  it("纯 icon 触发(aria-label=段标题)+ popover 内 NoteView 含标题", () => {
+  it("icon-only trigger (aria-label = section title) + popover NoteView includes the title", () => {
     render(
       <NoteIndicator
         note={{ title: "Frozen", icon: "warning", content: "0.5 ETH · 25%" }}
         formatNumber={formatNumber}
       />,
     );
-    // 触发是纯 icon,无文字 → 用 aria-label 暴露段标题(无障碍)。
+    // Icon-only trigger exposes the section title via aria-label.
     expect(screen.getByLabelText("Frozen")).toBeTruthy();
-    // popover 内容(NoteView 段首)含标题 + 内联文案(内容常驻 DOM,关闭时 inert)。
+    // Popover content stays in the DOM (inert when closed).
     expect(screen.getAllByText("Frozen").length).toBeGreaterThan(0);
     expect(screen.getByText("0.5 ETH · 25%")).toBeTruthy();
   });

@@ -4,14 +4,10 @@ import type { Enqueued } from "@/lib/server/jobs/queue";
 import { db } from "./_kit/db";
 import { freshUser } from "./_kit/user";
 
-// Worker 入口(`src/server.ts`)的两条外壳:
-//   · fetch:TanStack 回的响应**没声明缓存策略就补 private, no-store**(唯一出口上的安全默认),
-//     声明了的原样放行;里面抛了照样上抛。
-//   · scheduled:按 cron 表达式分支 —— 每天那条只投逐用户的日活,其余是全量 sweep(投同步活);
-//     两条都在投完之后**戳一下运行器**;投活失败要可见(waitUntil 的 promise 拒绝),但照戳;
-//     戳失败不盖掉一次成功的投递。
-// TanStack 那个 app handler 在这套 harness 里没有(只绑 DB,见 wrangler.test.jsonc),换成一个
-// 回什么由用例定的替身 —— 被测的是它外面那层,不是它。运行器 DO 没有绑定,换成收活的假绑定(出口)。
+// Worker entry shells (`src/server.ts`): fetch adds `private, no-store` when the response declares no cache policy and rethrows errors;
+// scheduled branches on the cron expression (daily: per-user jobs only; otherwise a full sweep), pokes the runner after enqueueing,
+// surfaces enqueue failures via the waitUntil rejection but still pokes, and a poke failure never masks a successful enqueue.
+// The TanStack handler and the runner DO are replaced by test doubles.
 
 const inner = vi.hoisted(() => ({
   fetch: async (_req: Request): Promise<Response> => new Response("ok"),
@@ -48,7 +44,7 @@ beforeEach(async () => {
         sent.push(...batch);
       },
       poke: async () => {
-        // 记下戳的那一刻已经投了几条:兜底的意思是「投完了再看一眼」。
+        // Record how many were enqueued at poke time: the poke is a final check after enqueueing.
         pokes += 1;
         sentAtPoke = sent.length;
         if (failPoke) throw new Error("poke refused");
@@ -69,7 +65,7 @@ afterEach(() => {
   inner.fetch = async () => new Response("ok");
 });
 
-/** 跑一次 scheduled,回 waitUntil 收到的那个 promise 的下场。 */
+/** Runs one scheduled event and returns how the waitUntil promise settled. */
 const runCron = async (cron: string): Promise<PromiseSettledResult<unknown>> => {
   let pending: Promise<unknown> | undefined;
   const ctx = {
@@ -91,7 +87,7 @@ const jobsFor = (userId: string) =>
   sent.filter((m) => (m.job as { userId?: string }).userId === userId).map((m) => m.job.kind);
 
 describe("scheduled", () => {
-  it("每天那条:给每个用户投 prune-notes + catalogue,不投同步;投完戳一下运行器", async () => {
+  it("daily cron: enqueues prune-notes + catalogue per user, no sync; pokes the runner after", async () => {
     const out = await runCron(DAILY);
 
     expect(out.status).toBe("fulfilled");
@@ -100,7 +96,7 @@ describe("scheduled", () => {
     expect(sentAtPoke).toBe(sent.length);
   });
 
-  it("其余 cron:全量 sweep —— 账户各一条 sync-account 外加逐用户的价 / 参考层活;再戳一下", async () => {
+  it("other crons: full sweep -- one sync-account per account plus per-user price / reference jobs; pokes again", async () => {
     const out = await runCron(HOURLY);
 
     expect(out.status).toBe("fulfilled");
@@ -111,7 +107,7 @@ describe("scheduled", () => {
     expect(pokes).toBe(1);
   });
 
-  it("投活失败 → waitUntil 的那个 promise 拒绝(可见),但运行器照样被戳", async () => {
+  it("enqueue failure -> the waitUntil promise rejects (visible) but the runner is still poked", async () => {
     failEnqueue = true;
     const out = await runCron(DAILY);
 
@@ -119,7 +115,7 @@ describe("scheduled", () => {
     expect(pokes).toBe(1);
   });
 
-  it("戳失败 → 不盖掉已经成功的投递,这一趟仍算成功", async () => {
+  it("poke failure -> does not mask a successful enqueue, the run still counts as success", async () => {
     failPoke = true;
     const out = await runCron(DAILY);
 
@@ -132,7 +128,7 @@ describe("fetch", () => {
   const call = (req: Request) =>
     (worker as unknown as { fetch: (r: Request) => Promise<Response> }).fetch(req);
 
-  it("没声明缓存策略的响应 → 补 private, no-store 与 Vary: cookie,body 与状态原样", async () => {
+  it("response without a cache policy -> adds private, no-store and Vary: cookie, body and status untouched", async () => {
     inner.fetch = async () => new Response("page", { status: 201 });
     const res = await call(new Request("http://localhost/x"));
 
@@ -142,14 +138,14 @@ describe("fetch", () => {
     expect(await res.text()).toBe("page");
   });
 
-  it("自己声明了缓存策略 → 原样放行", async () => {
+  it("declares its own cache policy -> passed through as is", async () => {
     inner.fetch = async () =>
       new Response("logo", { headers: { "cache-control": "public, max-age=60" } });
     const res = await call(new Request("http://localhost/logo"));
     expect(res.headers.get("cache-control")).toBe("public, max-age=60");
   });
 
-  it("里面抛了 → 原样上抛,不吞成一个 200", async () => {
+  it("inner throws -> rethrown as is, never swallowed into a 200", async () => {
     inner.fetch = async () => {
       throw new Error("ssr blew up");
     };

@@ -11,15 +11,7 @@ import {
   type PerpSectionItem,
 } from "@/routes/_authed/-home/holdings/perp";
 
-// 永续持仓(首页「永续」tab 与账户抽屉共用)屏幕上写的是什么:
-//   · 账户权益条:权益 / 未实现盈亏(各仓位相加)/ 保证金占用% / 可提 / 名义 / 账户杠杆;权益为 0 时
-//     两个比率不出现(不除零)
-//   · 多账户按权益降序;账户头用平台名 + `@账户名`,没平台就只写账户名
-//   · 仓位行:`3x Long` 方向 pill、数量取绝对值;有强平价 → 风险环(明细里的余量 / 开仓 / 标记 / 强平),
-//     没有 → 降级成「Entry $x」文字
-//   · 风险环:穿仓给满环、余量写 0%
-//   · 隐私:钱(权益、盈亏、可提、名义、数量、已用保证金)被遮;比率、市场价不遮
-// beUI hover Popover 关着时也把明细渲染在 DOM 里,所以明细文字直接可断。
+// The beUI hover Popover keeps details in the DOM when closed, so they are assertable.
 
 afterEach(cleanup);
 
@@ -71,11 +63,11 @@ const view = (over: Partial<PerpView> = {}): PerpView => ({
   ...over,
 });
 
-// Stat:label 与值是相邻两个 div。按 label 找到它,取它的兄弟。
+// Stat: label and value are adjacent divs; find the label and take its sibling.
 const stat = (label: string) => screen.getByText(label).nextElementSibling?.textContent;
 
-describe("账户权益条", () => {
-  it("六个数:权益、各仓相加的 uPnL、保证金占用%、可提、名义、账户杠杆", () => {
+describe("Account equity bar", () => {
+  it("six figures: equity, summed uPnL, margin usage %, withdrawable, notional, account leverage", () => {
     wrap(<PerpPositions view={view()} />);
     expect(stat("Equity")).toBe("$1,000.00");
     expect(stat("uPnL")).toBe("+$950.00"); // 1000 + (−50)
@@ -85,7 +77,7 @@ describe("账户权益条", () => {
     expect(stat("Acct. leverage")).toBe("3.00x"); // 3000 / 1000
   });
 
-  it("权益为 0 → 不出保证金占用与账户杠杆(不除零)", () => {
+  it("zero equity -> no margin usage or account leverage (no divide by zero)", () => {
     wrap(
       <PerpPositions
         view={view({
@@ -98,30 +90,30 @@ describe("账户权益条", () => {
     expect(stat("Equity")).toBe("$0.00");
   });
 
-  it("没有权益行 → 整条不出,仓位照常", () => {
+  it("no equity row -> bar hidden, positions still shown", () => {
     wrap(<PerpPositions view={view({ equity: null })} />);
     expect(screen.queryByText("Equity")).toBeNull();
     expect(screen.getByText("BTC", { exact: false })).toBeTruthy();
   });
 });
 
-describe("仓位行", () => {
-  it("方向 pill 带杠杆、数量取绝对值;没杠杆就只写方向", () => {
+describe("Position row", () => {
+  it("side pill carries leverage, size is absolute; without leverage only the side", () => {
     const { container } = wrap(<PerpPositions view={view()} hideHeader />);
     const text = container.textContent ?? "";
     expect(text).toContain("3x Long");
     expect(text).toContain("0.1 BTC");
     expect(text).toContain("Short");
     expect(text).not.toContain("x Short");
-    expect(text).toContain("1 ETH"); // size = −1 → 1
+    expect(text).toContain("1 ETH"); // size = -1 -> 1
     expect(text).not.toContain("-1 ETH");
   });
 
-  it("有强平价 → 风险环,明细里是保证金模式 / 已用 / 余量 / 开仓 / 标记 / 强平", () => {
+  it("has a liquidation price -> risk ring; details show margin mode / used / buffer / entry / mark / liq", () => {
     wrap(<PerpPositions view={view({ positions: [pos()] })} hideHeader />);
     const ring = screen.getByRole("button", { name: "Safety margin" });
     expect(ring).toBeTruthy();
-    // 明细:mark = 6000 / 0.1 = 60,000;余量 = (60000 − 40000) / 60000 ≈ 33%
+    // Details: mark = 6000 / 0.1 = 60,000; buffer = (60000 - 40000) / 60000 ~ 33%
     const detail = (label: string) =>
       screen.getAllByText(label).at(-1)?.nextElementSibling?.textContent;
     expect(detail("Margin mode")).toBe("Cross");
@@ -132,7 +124,7 @@ describe("仓位行", () => {
     expect(detail("Entry")).toBe("$50,000.00");
   });
 
-  it("没有强平价 → 不画环,降级成「Entry $x」", () => {
+  it("no liquidation price -> no ring, falls back to 'Entry $x'", () => {
     const { container } = wrap(
       <PerpPositions view={view({ positions: [ethShortNoLiq] })} hideHeader />,
     );
@@ -140,7 +132,7 @@ describe("仓位行", () => {
     expect(container.textContent).toContain("Entry $2,000.00");
   });
 
-  it("没有保证金模式 → 明细里不出那一行", () => {
+  it("no margin mode -> that detail row is omitted", () => {
     wrap(
       <PerpPositions view={view({ positions: [pos({ leverageType: undefined })] })} hideHeader />,
     );
@@ -148,26 +140,26 @@ describe("仓位行", () => {
   });
 });
 
-// 环的彩弧 = 第二个 circle 的 strokeDasharray「弧长 周长」→ 弧长 / 周长 = 填充比例。
+// The ring's colored arc is the second circle's strokeDasharray "arc circumference"; ratio = fill.
 function ringFill(container: HTMLElement): number {
   const arc = container.querySelectorAll("svg circle")[1];
   const [len, circ] = (arc?.getAttribute("stroke-dasharray") ?? "").split(" ").map(Number);
   return len / circ;
 }
 
-describe("风险环的填充", () => {
-  // 多头 entry 100 / 强平 90,数量 1 → 标记价 = positionValue。
+describe("Risk ring fill", () => {
+  // Long entry 100 / liq 90, size 1 -> mark price = positionValue.
   const at = (mark: number) =>
     pos({ entryPx: 100, liquidationPx: 90, size: 1, positionValue: mark, leverageType: undefined });
 
-  it("已越过强平价 → 满环(终态),余量写 0%", () => {
+  it("past the liquidation price -> full ring (terminal), buffer shows 0%", () => {
     const { container } = wrap(<PerpPositions view={view({ positions: [at(85)] })} hideHeader />);
     expect(ringFill(container)).toBeCloseTo(1, 5);
     expect(screen.getAllByText("Safety margin").at(-1)?.nextElementSibling?.textContent).toBe("0%");
   });
 });
 
-describe("多账户列表(首页「永续」tab)", () => {
+describe("Multi-account list (home Perps tab)", () => {
   const item = (
     id: string,
     equity: number,
@@ -181,7 +173,7 @@ describe("多账户列表(首页「永续」tab)", () => {
     ...over,
   });
 
-  it("按权益降序排,没权益的垫底", () => {
+  it("sorted by equity descending, accounts without equity last", () => {
     const { container } = wrap(
       <PerpPositionsList
         items={[
@@ -197,7 +189,7 @@ describe("多账户列表(首页「永续」tab)", () => {
     expect(heads).toEqual(["Big", "Small", "None"]);
   });
 
-  it("有平台 → 主行平台名、副行 @账户名;没平台 → 主行就是账户名", () => {
+  it("with platform -> platform name on the main line, @account on the sub line; without -> account name", () => {
     wrap(
       <PerpPositionsList
         items={[
@@ -213,8 +205,8 @@ describe("多账户列表(首页「永续」tab)", () => {
   });
 });
 
-describe("隐私", () => {
-  it("开着 → 钱都被遮;保证金占用、账户杠杆、方向、开仓价不遮", () => {
+describe("Privacy", () => {
+  it("on -> money is masked; margin usage, leverage, side, entry price are not", () => {
     const { container } = wrap(<PerpPositions view={view()} hideHeader />, true);
     const masked = screen
       .getAllByRole("button", { name: /balance hidden/i })
@@ -225,7 +217,7 @@ describe("隐私", () => {
     expect(stat("Margin usage")).toBe("25%");
     expect(stat("Acct. leverage")).toBe("3.00x");
     expect(container.textContent).toContain("Entry $2,000.00");
-    // 未遮的那份「Entry $x」不在任何遮罩里。
+    // The unmasked 'Entry $x' is not inside any mask.
     for (const m of screen.getAllByRole("button", { name: /balance hidden/i })) {
       expect(within(m).queryByText(/Entry/)).toBeNull();
     }

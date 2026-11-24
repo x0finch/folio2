@@ -1,12 +1,9 @@
-// 重新生成 vendor/ 里那两个文件。**补丁是脚本打的,不是手改的** —— 上游发新版时跑这个,
-// 别手动改 sign-patched.cjs。
-//
-// 为什么非得打补丁:Workers 禁止运行时编译 wasm(`Wasm code generation disallowed by embedder`,
-// 同步异步都禁)。上游 bundle 在模块求值时就 `new WebAssembly.Module(内联的 base64 字节)` ——
-// 触发条件正是「没有 window」,恰好是 Workers 的形状,于是当场炸。
-// 唯一能走的路:把 wasm 提成 .wasm 文件让构建期编译,再把已编译的 Module 塞回去。
-//
-// 用法:node vendor/regenerate.mjs [版本号]
+// Regenerates the two files in vendor/. The patch is applied by this script, not by hand: run it when upstream releases a new version,
+// and never hand-edit sign-patched.cjs.
+// Why patch at all: Workers forbid runtime wasm compilation (`Wasm code generation disallowed by embedder`, sync and async), while the upstream
+// bundle does `new WebAssembly.Module(inline base64 bytes)` at module evaluation whenever there is no window, which is a Worker's shape.
+// The only way: extract the wasm to a .wasm file compiled at build time and hand the compiled Module back.
+// Usage: node vendor/regenerate.mjs [version]
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -18,7 +15,7 @@ const PKG = "@rabby-wallet/rabby-sign";
 const VERSION = process.argv[2] ?? "0.4.1";
 const ENTRY = "package/umd/sign-wasm-rabby.js";
 
-// 两处替换。命中数必须是 1/1 —— 上游改了形状就该在这里炸,而不是静默产出一个跑不起来的包。
+// Two replacements; each must hit exactly once, so an upstream shape change breaks here rather than silently producing an unusable bundle.
 const PATCHES = [
   ["new WebAssembly.Module(w)", "globalThis.__RABBY_WASM__"],
   ["WebAssembly.compile(w)", "Promise.resolve(globalThis.__RABBY_WASM__)"],
@@ -27,7 +24,7 @@ const PATCHES = [
 const here = dirname(fileURLToPath(import.meta.url));
 const work = mkdtempSync(join(tmpdir(), "rabby-sign-"));
 
-console.log(`拉 ${PKG}@${VERSION} …`);
+console.log(`fetching ${PKG}@${VERSION} …`);
 execFileSync("npm", ["pack", `${PKG}@${VERSION}`, "--pack-destination", work], {
   stdio: ["ignore", "ignore", "inherit"],
 });
@@ -36,23 +33,23 @@ execFileSync("tar", ["xzf", join(work, tgz), "-C", work, ENTRY]);
 
 const src = readFileSync(join(work, ENTRY), "utf8");
 
-// —— 1. 提 wasm ——
+// 1. Extract the wasm
 const b64 = src.match(/"(AGFzbQ[A-Za-z0-9+/=]{1000,})"/);
-if (!b64) throw new Error("找不到内联的 base64 wasm — 上游可能改了打包方式");
+if (!b64) throw new Error("inline base64 wasm not found: upstream may have changed its bundling");
 const wasm = Buffer.from(b64[1], "base64");
-if (wasm.subarray(0, 4).toString("hex") !== "0061736d") throw new Error("提出来的不是 wasm");
+if (wasm.subarray(0, 4).toString("hex") !== "0061736d") throw new Error("extracted bytes are not wasm");
 writeFileSync(join(here, "rabby_sign.wasm"), wasm);
 
-// —— 2. 打补丁 ——
+// 2. Patch
 let out = src;
 for (const [from, to] of PATCHES) {
   const hits = out.split(from).length - 1;
-  if (hits !== 1) throw new Error(`补丁点 ${JSON.stringify(from)} 命中 ${hits} 次,应为 1 次`);
+  if (hits !== 1) throw new Error(`patch point ${JSON.stringify(from)} hit ${hits} times, expected 1`);
   out = out.split(from).join(to);
 }
 writeFileSync(join(here, "sign-patched.cjs"), out);
 
 const sha = (b) => createHash("sha256").update(b).digest("hex").slice(0, 16);
-console.log(`rabby_sign.wasm    ${wasm.length} 字节  sha256:${sha(wasm)}`);
-console.log(`sign-patched.cjs    ${out.length} 字节  sha256:${sha(out)}`);
-console.log(`来源 ${PKG}@${VERSION}`);
+console.log(`rabby_sign.wasm    ${wasm.length} bytes  sha256:${sha(wasm)}`);
+console.log(`sign-patched.cjs    ${out.length} bytes  sha256:${sha(out)}`);
+console.log(`source ${PKG}@${VERSION}`);

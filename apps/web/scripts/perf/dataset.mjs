@@ -1,13 +1,8 @@
-// 往 perf 专用的本地 D1(Miniflare SQLite 文件)里灌一份确定性的「老用户」数据集。
+// Seeds a deterministic "veteran user" dataset into the perf-only local D1 (a Miniflare SQLite file). It writes the file directly (node:sqlite), not via `/api/import`: tens of thousands of snapshot rows take minutes over HTTP and a second or two directly. The worker must be stopped: workerd has the file open too and concurrent writes would lock.
 //
-// 直接写 SQLite 文件(node:sqlite),不走 `/api/import`:几万行快照走 HTTP 要几分钟,直写一两秒。
-// **worker 必须是停着的** —— workerd 自己也开着这个文件,两边同时写会撞锁。
+// Deterministic: ids hash from "kind + index" and values are functions of the index; only timestamps anchor to the current hour, since "now" is itself under test (getSnapshots now / 24h window).
 //
-// 确定性:id 由「种类 + 序号」散列出来,数值是序号的函数;只有时间戳锚在「当前整点」上 ——
-// 「现在」本身就是被测的东西(getSnapshots now / 24h 窗口),锚死一个过去的时刻反而测不到它。
-//
-// **刻意不造 manual 账户**:有它在,每次 getSnapshots / getPortfolioHistory 都会去 CoinGecko 取
-// 今日价(今日桶永不缓存),沙箱里出网被挡,一发 36s —— 测出来的是网络,不是 CPU。
+// Deliberately no manual account: it makes every getSnapshots / getPortfolioHistory fetch today's price from CoinGecko (today's bucket is never cached), and with egress blocked in the sandbox that's 36s per request, measuring the network not CPU.
 import { createCipheriv, createHash, randomBytes } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -23,10 +18,10 @@ import {
 
 const D1_DIR = join(PERF_STATE_DIR, "v3", "d1", "miniflare-D1DatabaseObject");
 
-/** better-auth 的表 —— 重灌时保留(用户、会话都在里面),其余业务表整表清空。 */
+/** better-auth tables are kept on reseed (users and sessions live there); all other business tables are emptied. */
 const AUTH_TABLES = new Set(["user", "session", "account", "verification", "passkey"]);
 
-// 账户模板:一个 perf 数据集按 `--accounts N` 从这里循环取。nBal = 每张快照几行持仓。
+// Account templates, cycled for `--accounts N`. nBal = holdings per snapshot.
 const ACCOUNT_TEMPLATES = [
   { connectorId: "binance", platform: "binance", label: "Binance main", kind: "spot", nBal: 14 },
   { connectorId: "okx", platform: "okx", label: "OKX", kind: "spot", nBal: 9 },
@@ -71,29 +66,26 @@ const SYMBOLS = [
   "STX",
 ];
 
-/** 现汇率(每单位多少 USD)—— 预先放进缓存,读路径就不必出网。 */
+/** Spot FX rates (USD per unit), preloaded into the cache so the read path needs no egress. */
 const FX_USD_PER_UNIT = { EUR: 1.08, GBP: 1.27, CNY: 0.14, JPY: 0.0067 };
 
-/** 缓存条目的有效期:远大于一次 perf 运行,保证整轮都是命中。 */
+/** Cache entry lifetime: far beyond one perf run, so the whole run hits. */
 const CACHE_TTL_MS = 30 * DAY_MS;
-/** 代币价的新鲜期:在此之内 enrichment 不回源。 */
+/** Token price freshness: within it, enrichment doesn't go back to the source. */
 const PRICE_TTL_MS = DAY_MS;
-/** 快照记在整点后一分钟,与生产 sweep 的节拍(每小时一次)同形。 */
+/** Snapshots are stamped one minute past the hour, matching the production sweep's hourly cadence. */
 const SNAPSHOT_OFFSET_MS = 60_000;
-/** 持仓数量随时间的正弦扰动:周期与幅度。纯粹为了让曲线不是一条直线。 */
+/** Sinusoidal perturbation of holding amounts (period and amplitude), only so curves aren't straight lines. */
 const DRIFT_PERIOD_H = 11;
 const DRIFT_AMPLITUDE = 0.08;
-/** 账户与组合的「创建时间」往前推多少天。 */
+/** How many days back account and portfolio "created" times go. */
 const HISTORY_AGE_DAYS = 90;
 
-/** AES-GCM 的参数 —— 与 `@folio/connectors-basic` 的 crypto.ts 逐项一致(那边是 Web Crypto)。 */
+/** AES-GCM parameters, identical to `@folio/connectors-basic`'s crypto.ts (Web Crypto there). */
 const SECRET_KEY_BYTES = 32;
 const GCM_IV_BYTES = 12;
 
-/**
- * 按 app 的规矩封一个 secret 字段:`base64(IV(12) ‖ 密文 ‖ GCM tag)`。Web Crypto 的 AES-GCM 输出
- * 就是「密文 ‖ tag」,所以这里拼出来的与 `encrypt()` 同形,worker 用同一把 SECRETS_KEY 解得开。
- */
+/** Seals a secret field as the app does: `base64(IV(12) || ciphertext || GCM tag)`. Web Crypto's AES-GCM output is already "ciphertext || tag", so this matches `encrypt()` and the worker decrypts it with the same SECRETS_KEY. */
 function sealSecret(plaintext, secretsKey) {
   const key = Buffer.from(secretsKey, "base64");
   if (key.length !== SECRET_KEY_BYTES) throw new Error("SECRETS_KEY must be base64 of 32 bytes");
@@ -103,11 +95,7 @@ function sealSecret(plaintext, secretsKey) {
   return Buffer.concat([iv, body, cipher.getAuthTag()]).toString("base64");
 }
 
-/**
- * 一个账户的 creds map(存库形状):secret 字段封好,public / semi 明文 —— 与 `sealCreds` 同一份规矩
- * (字段表见各 connector 的 account.creds)。凭据是假的:同步打到的是本机假上游
- * (`fake-upstream.mjs`),它不验签。读路径(perf:cpu)不解密,只看得到 semi 的打码与 public。
- */
+/** One account's creds map (storage shape): secret fields sealed, public / semi plain, as `sealCreds` does (field tables in each connector's account.creds). The credentials are fake: syncs hit the local fake upstream (`fake-upstream.mjs`), which doesn't verify signatures. The read path (perf:cpu) doesn't decrypt and only sees masked semi and public fields. */
 function credsFor(connectorId, i, secretsKey) {
   const seal = (v) => sealSecret(v, secretsKey);
   const evmAddress = `0x${createHash("sha256").update(`folio-perf:addr:${i}`).digest("hex").slice(0, 40)}`;
@@ -131,27 +119,24 @@ function credsFor(connectorId, i, secretsKey) {
         address: `PerfSo1${createHash("sha256").update(`sol:${i}`).digest("hex").slice(0, 37)}`,
       };
     default:
-      // evm / hyperliquid:一个 EVM 地址。
+      // evm / hyperliquid: an EVM address.
       return { address: evmAddress };
   }
 }
 
-/** 由种子串散列出一个 UUID 形状的 id(版本位 4、变体位 8),同一种子恒得同一个 id。 */
+/** A UUID-shaped id hashed from a seed string (version 4, variant 8); the same seed always gives the same id. */
 function stableId(seed) {
   const h = createHash("sha256").update(`folio-perf:${seed}`).digest("hex");
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
-/**
- * perf 库的 SQLite 文件。文件名是 database_id 的散列(Miniflare 的规矩),所以不写死,
- * 按「里面有 user 表」认。迁移没跑过 → 找不到,报错指路。
- */
+/** The perf DB's SQLite file. The file name is a database_id hash (Miniflare convention), so it's found by "has a user table" rather than hardcoded; if migrations haven't run it isn't found and the error says what to do. */
 function perfDbPath() {
   let files = [];
   try {
     files = readdirSync(D1_DIR).filter((f) => f.endsWith(".sqlite") && f !== "metadata.sqlite");
   } catch {
-    // 目录还不存在 —— 下面统一报错
+    // The directory doesn't exist yet: reported below.
   }
   for (const f of files) {
     const path = join(D1_DIR, f);
@@ -168,7 +153,7 @@ function perfDbPath() {
   throw new Error(`perf D1 not found under ${D1_DIR} — migrations were not applied`);
 }
 
-/** perf 用户的 id;还没注册过 → undefined。 */
+/** The perf user's id; undefined if not registered yet. */
 export function findUserId(email) {
   const db = new DatabaseSync(perfDbPath(), { readOnly: true });
   try {
@@ -178,7 +163,7 @@ export function findUserId(email) {
   }
 }
 
-/** 端点入参要用的那几样:默认组合的 id、账户覆盖到的平台。 */
+/** What endpoint inputs need: the default portfolio's id and the platforms the accounts cover. */
 export function endpointInputs(userId) {
   const db = new DatabaseSync(perfDbPath(), { readOnly: true });
   try {
@@ -253,8 +238,7 @@ function seedAccounts(db, userId, portfolioId, nAccounts, now, secretsKey) {
     const t = ACCOUNT_TEMPLATES[i % ACCOUNT_TEMPLATES.length];
     const id = stableId(`account:${i}`);
     const label = i < ACCOUNT_TEMPLATES.length ? t.label : `${t.label} #${i}`;
-    // 凭据按真账户的形状封好(secret 字段用 SECRETS_KEY 加密):cron 的同步要能真的解开、真的出网
-    // (perf:cpu:jobs),否则它在「缺凭据」那一步就跳过,量不到取数与估值。
+    // Seal credentials in a real account's shape (secret fields encrypted with SECRETS_KEY) so cron syncs can really decrypt and go out to the network (perf:cpu:jobs); otherwise they'd skip at "missing credentials" and fetch and valuation go unmeasured.
     const creds = JSON.stringify(credsFor(t.connectorId, i, secretsKey));
     insAccount.run(
       id,
@@ -284,8 +268,7 @@ function seedTags(db, userId, portfolioId, accounts, now) {
   }
 }
 
-// 平台名/图标与现汇率预先进 per-user 缓存(形状见 @folio/oracle 的 platforms.ts / fx.ts),
-// 读路径因此零出网。
+// Platform names/icons and spot FX rates are preloaded into the per-user cache (shapes in @folio/oracle's platforms.ts / fx.ts), so the read path needs no egress.
 function seedCache(db, userId, accounts, now) {
   const ins = db.prepare(
     "insert or replace into user_cache (user_id,k,v,expires_at) values (?,?,?,?)",
@@ -343,17 +326,14 @@ function seedSnapshots(db, accounts, tokens, hours, now) {
   return { nSnap, nBal };
 }
 
-// 快照的日汇总(FOL-91)。生产上它由写快照那个 batch 维护、存量由迁移回填;这里快照是直写
-// SQLite 灌的,绕过了写侧 —— 不补的话长窗曲线读到一张空表,量出来的是「没数据」有多快。
-// **跑的就是迁移里那条回填语句**(从迁移文件里取,不另抄一份):灌完快照后重算一遍,与存量
-// 用户升级那一刻的结果相同。
+// The snapshot daily rollup: in production the snapshot write batch maintains it and the migration backfills existing data; here snapshots are written straight into SQLite, bypassing the write side, so without this long-window curves would read an empty table and measure "no data" speed. Runs the migration's own backfill statement (read from the migration file, no copy) after seeding, matching what an existing user gets on upgrade.
 const DAILY_TOTALS_TABLE = "account_daily_totals";
 
 function seedDailyTotals(db) {
   const file = readdirSync(MIGRATIONS_DIR).find(
     (f) => f.endsWith(".sql") && f.includes(DAILY_TOTALS_TABLE),
   );
-  // 没有这条迁移 = 被测的是 FOL-91 之前的代码(前后对比时的 BEFORE 那份),那时没有这张表 —— 跳过。
+  // Without this migration the code under test predates the rollup (the BEFORE side of a before/after comparison) and has no such table: skip.
   if (!file) return null;
   const backfill = readFileSync(join(MIGRATIONS_DIR, file), "utf8")
     .split("--> statement-breakpoint")
@@ -377,15 +357,12 @@ function seedDailyPrices(db, tokens, now) {
   return n;
 }
 
-/**
- * 清空业务表并重灌。返回各表行数,调用方打印出来 —— 数据集大小是结果的一部分,
- * 不同大小的两次运行不可比。
- */
+/** Empties the business tables and reseeds. Returns per-table row counts for the caller to print: dataset size is part of the result and runs of different sizes aren't comparable. */
 export function seedDataset({ userId, accounts: nAccounts, tokens: nTokens, days, secretsKey }) {
   const db = new DatabaseSync(perfDbPath());
   let open = false;
   try {
-    // 整表清空不按父子顺序删 → 先关外键。PRAGMA 在事务里是空操作,所以必须在 BEGIN 之前。
+    // A full-table wipe ignores parent/child order, so turn FKs off first. PRAGMA is a no-op inside a transaction, so it must precede BEGIN.
     db.exec("PRAGMA foreign_keys=OFF");
     const now = Date.now();
     db.exec("BEGIN");
@@ -424,14 +401,7 @@ export function seedDataset({ userId, accounts: nAccounts, tokens: nTokens, days
   }
 }
 
-/**
- * 让库「老一个小时」:把 perf 用户所有代币的价标成过期(`PRICE_TTL_MS` 是 30 分钟)。
- *
- * 为什么要它:生产的整点 sweep 每次都隔着一小时,上一轮取的价**一定**过期了 —— 那一轮必然去
- * CoinGecko 取价、写价。连着触发几次 cron 的话,第二次起价都还新鲜,那一截就被跳过,量小了。
- * 其余缓存(汇率 6h、平台 30d、目录 7d)在生产的整点 sweep 里也多半是命中,不动。
- * worker 必须停着(同 seedDataset)。
- */
+/** Ages the DB by an hour: marks all the perf user's token prices expired (`PRICE_TTL_MS` is 30 minutes). Production's hourly sweep always sees prices from over an hour ago, so it always fetches and writes prices; with back-to-back cron triggers, prices are fresh from the second on and that part would be skipped, understating cost. Other caches (FX 6h, platforms 30d, catalog 7d) mostly hit in production's sweep too, so they stay. The worker must be stopped (as in seedDataset). */
 export function expirePrices(userId) {
   const db = new DatabaseSync(perfDbPath());
   try {
@@ -446,11 +416,7 @@ export function expirePrices(userId) {
   }
 }
 
-/**
- * 清掉这个用户的同步轮(`sync-round:*`,ADR 0048)。`perf:cpu:jobs --cron-only` 不等队列排空就停 worker,
- * 留下没收官的轮;不清的话下一次 cron 在心跳期内看到「活轮还在」就不投 `sync-account`,量的就不是
- * 同一件事了。
- */
+/** Clears this user's sync rounds (`sync-round:*`). `perf:cpu:jobs --cron-only` stops the worker without waiting for the queue to drain, leaving an unfinished round; otherwise the next cron within the heartbeat sees a live round and posts no `sync-account`, measuring something else. */
 export function clearSyncRounds(userId) {
   const db = new DatabaseSync(perfDbPath());
   try {
@@ -462,7 +428,7 @@ export function clearSyncRounds(userId) {
   }
 }
 
-/** 全局映射表(`global_token_ref_index`)有几行 —— 0 = 还没刷过,sweep 认不出链上的币。 */
+/** Rows in the global map (`global_token_ref_index`); 0 means never refreshed, so the sweep can't recognise on-chain tokens. */
 export function refIndexRowCount() {
   const db = new DatabaseSync(perfDbPath(), { readOnly: true });
   try {

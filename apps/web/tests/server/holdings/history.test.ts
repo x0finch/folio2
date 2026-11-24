@@ -6,12 +6,10 @@ import { call } from "../_kit/run";
 import { DAY, seedAccount, seedSnapshot } from "../_kit/seed";
 import { freshUser, otherUser } from "../_kit/user";
 
-// #527 · getTokenValueHistory (FOL-50)
-//
-// 这条曲线的归属键就是 tokenId(`groupKey` = `row.tokenId ?? …`),入选口径是 `kind === "spot"`。
+// The curve is keyed by tokenId and includes only `kind === "spot"` rows.
 const USER = "h-holdings-history";
 const BTC = "token-btc";
-const NOW = 1_770_000_000_000; // 固定时钟:这一片全是时间关系,不能让墙钟参与
+const NOW = 1_770_000_000_000; // fixed clock: every case is about relative time
 
 beforeEach(async () => {
   blockOutbound();
@@ -25,7 +23,7 @@ const curve = async (input: { key: string; since?: number }) => {
 };
 
 describe("getTokenValueHistory", () => {
-  it("同一个币分散在三个账户 → 每个时刻是三个账户之和", async () => {
+  it("same token across three accounts → each point is their sum", async () => {
     const a = await seedAccount(USER, "甲");
     const b = await seedAccount(USER, "乙");
     const c = await seedAccount(USER, "丙");
@@ -43,7 +41,7 @@ describe("getTokenValueHistory", () => {
     expect(series[0].total).toBe(600);
   });
 
-  it("带 since → 只返回窗口内的点", async () => {
+  it("with since → only points inside the window", async () => {
     const acc = await seedAccount(USER, "甲");
     await seedSnapshot(USER, acc.id, NOW - 10 * DAY, [{ tokenId: BTC, amount: 1, usdValue: 10 }]);
     await seedSnapshot(USER, acc.id, NOW - DAY, [{ tokenId: BTC, amount: 1, usdValue: 20 }]);
@@ -53,7 +51,7 @@ describe("getTokenValueHistory", () => {
     expect(series.map((p) => p.total)).toEqual([20]);
   });
 
-  it("key 对不上任何持仓 → 空曲线,不是报错", async () => {
+  it("key matches no holding → empty curve, not an error", async () => {
     const acc = await seedAccount(USER, "甲");
     await seedSnapshot(USER, acc.id, NOW, [{ tokenId: BTC, amount: 1, usdValue: 100 }]);
 
@@ -62,7 +60,7 @@ describe("getTokenValueHistory", () => {
     expect(series).toEqual([]);
   });
 
-  it("别人的快照不进我的曲线", async () => {
+  it("other users' snapshots stay out of my curve", async () => {
     const theirs = await seedAccount(otherUser(USER), "他们的");
     await seedSnapshot(otherUser(USER), theirs.id, NOW, [
       { tokenId: BTC, amount: 1, usdValue: 999 },
@@ -75,7 +73,7 @@ describe("getTokenValueHistory", () => {
     expect(series.at(-1)?.total).toBe(100);
   });
 
-  it("短窗:只下发该 token 的现货合计(每账户每天一行),不发余额行", async () => {
+  it("short window: sends only the token's spot totals (one row per account per day), no balance rows", async () => {
     const acc = await seedAccount(USER, "甲");
     await seedSnapshot(USER, acc.id, NOW, [
       { tokenId: BTC, amount: 1, usdValue: 100 },
@@ -89,9 +87,9 @@ describe("getTokenValueHistory", () => {
     expect(raw.rows).toEqual([{ accountId: acc.id, takenAt: NOW, totalUsd: 100 }]);
   });
 
-  it("长窗(all):SQL 按桶封顶(行数与历史长度脱钩),浏览器 min-max 后极值原样", async () => {
+  it("long window (all): SQL caps rows per bucket; client min-max keeps extremes", async () => {
     const acc = await seedAccount(USER, "甲");
-    // 400 天、每天一张 → 原样是 400 行;长窗每账户 ≤ 3 × 66 + 1 = 199 行(review #2)。
+    // 400 daily snapshots would be 400 rows; the long window caps at 3 × 66 + 1 = 199 per account.
     for (let i = 0; i < 400; i++) {
       await seedSnapshot(USER, acc.id, NOW - i * DAY, [
         { tokenId: BTC, amount: 1, usdValue: 100 + (i % 7) * 10 },
@@ -107,11 +105,11 @@ describe("getTokenValueHistory", () => {
     expect(series.length).toBeLessThanOrEqual(82);
     expect(Math.min(...series.map((p) => p.total))).toBe(100);
     expect(Math.max(...series.map((p) => p.total))).toBe(160);
-    // 末点是最后一张快照(i = 0 → 100)。
+    // The last point is the latest snapshot (i = 0 → 100).
     expect(series.at(-1)).toEqual({ t: NOW, total: 100 });
   }, 120_000);
 
-  it("key 空串 / since 是负数 → schema 拒", () => {
+  it("empty key / negative since → schema rejects", () => {
     expect(TokenValueHistoryInput.safeParse({ key: "" }).success).toBe(false);
     expect(TokenValueHistoryInput.safeParse({ key: "t", since: -1 }).success).toBe(false);
   });

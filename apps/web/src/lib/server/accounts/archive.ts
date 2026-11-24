@@ -6,20 +6,9 @@ import { sealManualAccount } from "@/lib/server/manual/store";
 
 const log = getLogger(["folio", "web", "accounts"]);
 
-// 归档切换:跨 accounts / snapshots / tab_pins 的编排。归档可逆、数据保留;归档后不计总额、不参与同步。
-// db 层按 (id, userId) 作用域,天然杜绝越权;不存在则影响 0 行(静默),不额外抛。
-//
-// **归档 = 封存(ADR 0039),对 manual 账户它是一次写。** manual 从不写快照(ADR 0018),归档之后
-// 库里没有任何可展示的照片 —— 所以先按账本算一次、落一张真快照,**成功了才**打归档标记。
-//
-// **顺序不可颠倒,这不是风格问题:**
-//   · D1 没有交互式事务,而这两条写分属快照与账户两个 store,没有共同的 batch 边界;
-//   · 按这个顺序,最坏情况是留下一张孤儿快照 —— 无害,只是账户历史里多一个真实数据点,
-//     而且下次归档成功会再写一张更新的;
-//   · 反过来,最坏情况是「已归档但没有照片」—— 正好是这次要消灭的那个状态。
-// 为此**不**在 `@folio/db` 里开跨两张表的合并 op:为一个低频动作在契约层捅个口子,不划算。
-//
-// 封存那一步要用参考层(取现价)—— 所以这个 handler 的 `R` 里 `Database` 与 `Oracle` 都在。
+// Archiving seals a manual account: snapshot it from the ledger first, then set the flag.
+// D1 has no cross-store transaction; this order's worst case is a harmless orphan snapshot,
+// the reverse's is an archived account with nothing to show.
 export const ArchiveAccountInput = z.object({
   accountId: z.string().min(1),
   archived: z.boolean(),
@@ -31,18 +20,14 @@ export const handleArchiveAccount = Effect.fn("archiveAccount")(function* (
   const accounts = (yield* Database).accounts;
   let sealed = false;
   if (data.archived) {
-    // 取的是**还没打标记**的那一行 —— 封存那条路按「未归档」过滤,顺序反了会一无所获。
+    // Read before flagging: sealing only considers unarchived accounts.
     const account = yield* accounts.getById(data.accountId);
-    // **已经归档的不再动它**(review 补):对已归档账户再发一次 `archived: true`,封存那步会
-    // 被「未归档」这道过滤挡掉、什么都不落,而 `setArchived` 却会把 `archivedAt` 重写成当刻 ——
-    // 结果是封存时刻往前跳、数据还停在旧那张:曲线的截断点、抽屉曲线的窗口锚都跟着挪,
-    // 而它们描述的那份数据一点没变。UI 那颗按钮是切换、触发不到这条,但 server fn 收得下。
+    // Skip already-archived accounts: re-flagging would move archivedAt without a new seal.
     if (account?.archivedAt == null) {
       if (account) sealed = yield* sealManualAccount(account);
       yield* accounts.setArchived(data.accountId, true);
-      // 归档顺手解掉指向它的 pin:pin 是「常看的一个视角」,封存账户的快捷入口没有意义。
-      // 不解的话它只是从 tab 条上消失(pinsInView 按活跃账户筛),但名额还占着,而且解归档时
-      // 会凭空冒回来 —— 可能把那个组合顶到 4 个。**解归档不恢复 pin**(行已删,想看再钉一次)。
+      // Drop pins to it: they would still hold a slot and reappear on unarchive.
+      // Unarchiving does not restore them.
       yield* (yield* Database).tabPins.removeByAccount(data.accountId);
     }
   } else {

@@ -1,9 +1,9 @@
 import { vi } from "vitest";
 
-// 组合 / 账户这几条读路径的**假服务端**:只替换 server fn 这一层 I/O(取数),queryOptions、
-// 浏览器合并、readJson / snapshotsFromWire 解线上形状都走真代码。各测试文件用
-// `vi.mock("@/lib/server/<域>", () => import("./helpers/fake-portfolio-server").then((m) => m.modules.<域>))`
-// 接上;世界状态由 `world` 描述,`resetWorld()` 每个用例复位。
+// Fake server for the portfolio/account read paths: only the server-fn I/O is replaced; queryOptions,
+// client-side merging and wire decoding run the real code. Wire it in with
+// `vi.mock("@/lib/server/<domain>", () => import("./helpers/fake-portfolio-server").then((m) => m.modules.<domain>))`;
+// state lives in `world`, reset per test with `resetWorld()`.
 
 export interface FakeBalance {
   id: string;
@@ -91,7 +91,7 @@ export const world: World = emptyWorld();
 
 const json = (body: unknown) => new Response(JSON.stringify(body));
 
-// 快照的线上形状(FOL-92):D1 原样行的位置元组。
+// Snapshot wire shape: the D1 row as a positional tuple.
 const toWire = (snaps: FakeSnapshot[]) => ({
   snapshots: snaps.map((s) => [s.accountId, s.takenAt, s.totalUsd, null]),
   balances: snaps.flatMap((s) =>
@@ -120,7 +120,7 @@ export const server = {
   getManualAccount: vi.fn(async ({ data }: Data<{ accountId: string }>) => ({
     accountId: data.accountId,
   })),
-  // `after` 只有「24h 前」那一组会带(见 snapshots.ts)。
+  // Only the "24h ago" group carries `after`.
   getSnapshots: vi.fn(async ({ data }: Data<{ portfolioId: string; at: number; after?: number }>) =>
     json(toWire(data.after == null ? world.snapshotsNow : world.snapshotsPrev)),
   ),
@@ -177,6 +177,6 @@ export const modules = {
 
 export function resetWorld(): void {
   Object.assign(world, emptyWorld());
-  // mockReset 清调用记录并回到 vi.fn(impl) 的原实现 —— 用例里临时换的实现不串到下一个用例。
+  // mockReset restores the vi.fn(impl) default so per-test overrides don't leak.
   for (const fn of Object.values(server)) fn.mockReset();
 }

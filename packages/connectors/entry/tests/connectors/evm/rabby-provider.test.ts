@@ -17,7 +17,7 @@ const json = (body: unknown, init?: ResponseInit): Response =>
     ...init,
   });
 
-// 假签名器:真家伙靠 wasm(只在 Workers 里跑得动)。要验的是**接线**,签名算法不是被测对象。
+// Fake signer: the real one needs wasm (runs only in Workers). What is verified is the wiring; the signature algorithm is not under test.
 const fakeSign: SignRequest = () =>
   Effect.succeed({ "X-Api-Ts": "1", "X-Api-Nonce": "n", "X-Api-Sign": "sig" });
 
@@ -41,9 +41,9 @@ const ctx = (address = ADDR, providerCreds: Record<string, string> = {}): Ctx =>
     creds: providerCreds,
   }) as unknown as Ctx;
 
-// **rabby 有闸(limit=1)**,所以多发请求时要推虚拟时钟,否则第二发永远在等。
-// fork → 反复「推一截 + 冲微任务」→ join:推的是虚拟时钟(不占真实时间),冲微任务是因为
-// 假出网走的是 `Promise.resolve`,不归 TestClock 管(CODING.md 的 Effect 一节记着这条)。
+// Rabby has a gate (limit=1), so with several requests the virtual clock must be advanced or the second waits forever:
+// fork, repeatedly advance a bit + flush microtasks, join. The clock is virtual (no real time); microtasks are flushed because the fake
+// egress uses `Promise.resolve`, which TestClock does not govern.
 const drive = <A, E>(effect: Effect.Effect<A, E, ProviderNeeds>) =>
   Effect.gen(function* () {
     const fiber = yield* Effect.fork(effect);
@@ -63,13 +63,12 @@ const failing = (
   runClient(stub, drive(Effect.flip(effect).pipe(Effect.provideService(RabbySigner, fakeSign))));
 
 describe("fetchBalances", () => {
-  // ⚠️ **本 describe 内的顺序是有意义的**:链映射在 client 里缓存 24 小时,而那份缓存是**模块级**
-  // (CF Workers 上每请求一次 runPromise,放 Scope 里等于每请求重置 —— 见 CODING.md 的 Effect 一节)。
-  // 所以只有**第一条**用例见得到冷缓存。与其想办法绕开,不如把它变成覆盖:第一条钉冷启的三发与
-  // 顺序,第二条钉「第二个账户只花两发」—— 那正是这份缓存存在的理由。
-  it("冷启:三发按固定顺序 —— 链映射先拿,后两发的解析都要它", async () => {
-    // 顺序是 `Effect.all` 顺序执行**唯一**可观测的后果,而且完全确定。
-    // (不数「同时在飞几发」:那要么得让桩真的挂住,要么就是同一个 tick 里加减、恒等于 1 的假断言。)
+  // The order within this describe is meaningful: the chain mapping is cached 24h in the client at module level (on CF Workers each request runs
+  // one runPromise, so a Scope would reset it every request), so only the first case sees a cold cache. Rather than work around it, make it coverage:
+  // the first pins the cold start's three requests and their order, the second pins "the second account costs only two", which is why the cache exists.
+  it("cold start: three requests in a fixed order: the chain mapping first, since the other two parses need it", async () => {
+    // The order is the only observable consequence of `Effect.all` running sequentially, and fully deterministic.
+    // (Not counting "how many in flight": that needs a stub that really hangs, or add/subtract in one tick, always 1: a vacuous assertion.)
     const stub = upstream();
     const { balances } = await run(stub, rabbyProvider.fetchBalances(ctx()));
 
@@ -83,7 +82,7 @@ describe("fetchBalances", () => {
     expect(paths[2]).toContain("complex_protocol");
   });
 
-  it("链映射缓存 24h → **下一个账户只花两发**,不再问一次链清单", async () => {
+  it("chain mapping cached 24h: the next account costs only two requests, no second chain list", async () => {
     const stub = upstream();
     await run(stub, rabbyProvider.fetchBalances(ctx(`0x${"1".repeat(40)}`)));
 
@@ -92,10 +91,10 @@ describe("fetchBalances", () => {
     expect(paths.some((p) => p.includes("chain/list"))).toBe(false);
   });
 
-  it("base 覆盖生效,默认 host 一个不留", async () => {
+  it("base override takes effect, no default host left", async () => {
     const overrides = { RABBY_API_BASE: "http://127.0.0.1:3399/rabby" };
-    // 不要 provider key —— PC 只有这一个 public 的 base 覆盖(这正是它当默认源的理由)。
-    // 声明的 key 正是这里注入后真生效的那一个(app 按声明从 env 注入 ctx.creds);全 public(不加密 / 不导出)。
+    // No provider key: this is the only public base override (the reason it is the default source).
+    // The declared key is the one that really takes effect when injected here (the app injects ctx.creds from env per the declaration); all public (not encrypted / exported).
     expect(rabbyProvider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
     expect(rabbyProvider.creds.every((f) => f.type === "public")).toBe(true);
 
@@ -106,7 +105,7 @@ describe("fetchBalances", () => {
     expect(urls.every((u) => u.startsWith("http://127.0.0.1:3399/rabby/v1/"))).toBe(true);
   });
 
-  it("429 → 限流(可重试)", async () => {
+  it("429 gives rate-limited (retryable)", async () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     expect((await failing(stub, rabbyProvider.fetchBalances(ctx())))._tag).toBe(
       "ConnectorRateLimitError",
@@ -115,18 +114,18 @@ describe("fetchBalances", () => {
 });
 
 describe("validateAccount", () => {
-  it("200 → true(打最轻的 total_balance)", async () => {
+  it("200 gives true (hits the lightest total_balance)", async () => {
     const stub = httpStub(() => json({ total_usd_value: 1 }));
     expect(await run(stub, rabbyProvider.validateAccount(ctx()))).toBe(true);
     expect(stub.calls[0].request.url.pathname).toContain("total_balance");
   });
 
-  it("凭据被拒(403)→ false", async () => {
+  it("credentials rejected (403): false", async () => {
     const stub = httpStub(() => json({}, { status: 403 }));
     expect(await run(stub, rabbyProvider.validateAccount(ctx()))).toBe(false);
   });
 
-  it("5xx → 走错误通道,不压成 false", async () => {
+  it("5xx goes through the error channel, not squashed into false", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     expect((await failing(stub, rabbyProvider.validateAccount(ctx())))._tag).toBe(
       "ConnectorUnavailableError",

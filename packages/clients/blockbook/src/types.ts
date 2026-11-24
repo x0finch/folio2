@@ -1,42 +1,36 @@
 import { maybe } from "@folio/client-core";
 import { Schema } from "effect";
 
-// Trezor Blockbook v2 响应(仅取用到的字段)。金额一律 satoshi 字符串。
-//
-// 字段一个没动 —— 换的是「谁说了算」:以前是 `interface` + 一次 `as`(声明而已,运行时没人查),
-// 现在是 schema,类型从它推出来,上游改了形状当场就是 `UpstreamParseError`。
+// Trezor Blockbook v2 responses (only the fields used). Amounts are always satoshi strings. Types derive from the schema, so an
+// upstream shape change is an `UpstreamParseError` on the spot.
 
-// xpub 的一个派生地址(details=tokenBalances 时带 balance;tokens=used → 仅已用地址)。
+// One derived address of an xpub (carries balance with details=tokenBalances; tokens=used gives used addresses only).
 export const XpubToken = Schema.Struct({
-  name: Schema.String, // 地址
-  path: Schema.String, // 派生路径 m/purpose'/0'/0'/chain/index
+  name: Schema.String, // address
+  path: Schema.String, // derivation path m/purpose'/0'/0'/chain/index
   transfers: Schema.Number,
-  balance: Schema.String, // 已确认(satoshi 串)
+  balance: Schema.String, // confirmed (satoshi string)
   totalReceived: maybe(Schema.String),
   totalSent: maybe(Schema.String),
 });
 export type XpubToken = typeof XpubToken.Type;
 
-// GET /api/v2/xpub/{token}?details=tokenBalances&tokens=used —— 服务端派生 + 汇总。
+// GET /api/v2/xpub/{token}?details=tokenBalances&tokens=used: server-side derivation + totals.
 export const XpubResponse = Schema.Struct({
-  address: Schema.String, // 回显的 xpub/descriptor
-  balance: Schema.String, // 账户已确认总额(satoshi 串,Blockbook 已汇总)
-  unconfirmedBalance: Schema.String, // 账户净未确认(satoshi 串)
-  // **这几个按可选收** —— 只是展示/计数用的附带字段,读不到不该让整份余额解析失败。
-  // (更正:之前这里说「录制的真实响应里压根没有 `unconfirmedTxs`」—— 那是手写 fixture 的缺字段,
-  // 真实的 tokenBalances 响应是带 `unconfirmedTxs` 的,见 connectors-entry 的 `fixtures/xpub.json`。)
+  address: Schema.String, // echoed xpub/descriptor
+  balance: Schema.String, // account confirmed total (satoshi string, summed by Blockbook)
+  unconfirmedBalance: Schema.String, // account net unconfirmed (satoshi string)
+  // Optional: display/count extras whose absence must not fail the whole balance parse.
   unconfirmedTxs: maybe(Schema.Number),
   txs: maybe(Schema.Number),
   usedTokens: maybe(Schema.Number),
-  tokens: maybe(Schema.Array(XpubToken)), // 已用派生地址(带余额)
+  tokens: maybe(Schema.Array(XpubToken)), // used derived addresses (with balance)
 });
 export type XpubResponse = typeof XpubResponse.Type;
 
-// GET /api/v2/xpub/{token}?details=basic —— 只要账户汇总(探活用,不拉各地址明细)。
-//
-// **与上面那份不是同一个形状**:basic 档**不回 `unconfirmedBalance`**(tokens 及以上才有)。以前两档
-// 共用 `XpubResponse`,于是每次 basic 探活都在解析那步失败 —— 添加 xpub 账户一律被拒(录制的
-// 真实响应见 connectors-entry 的 `fixtures/xpub-basic.json`)。所以单独一份,只列 basic 真有的字段。
+// GET /api/v2/xpub/{token}?details=basic: account summary only (liveness probe, no per-address detail).
+// Not the same shape as above: the basic tier has no `unconfirmedBalance` (tokens and above do), so sharing one schema made every
+// probe fail at parsing; this one lists only the fields basic really returns.
 export const XpubSummary = Schema.Struct({
   address: Schema.String,
   balance: Schema.String,

@@ -10,9 +10,8 @@ import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
 import { ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 
-// DeFi 持仓明细 v2(H5 #120):总览「DeFi」tab 与账户详情抽屉共用。
-// 与代币行同语言 —— 行式(零表格/表头)、左「标识+标题」右 <ValueDelta>;
-// 行内色语义唯一(rev5):红绿只表达盈亏与负债,类型是事实不是评价。
+// DeFi holdings detail, shared by the overview "DeFi" tab and the account drawer. Row-style like the
+// token rows; red/green only mean PnL and debt, the type is a fact, not a judgment.
 
 function SectionHeader({ title }: { title: string }) {
   return (
@@ -22,13 +21,12 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
-// 负债腿的展示:「−」+ 中性色(不用亏损红 —— 负债≠亏损,红/绿只留给涨跌);角色由 chip/分组承载。
+// Debt leg: "−" in neutral color (debt is not a loss; red/green are for price moves).
 const legText = (r: DefiRow) =>
   `${r.usdValue < 0 ? "−" : ""}${formatNumber(Math.abs(r.amount))} ${r.symbol}`;
 
-// 角色 → 图表色(CLAUDE.md 原则 11:数据可视化是唯一取色例外,仍只走 --chart-* token;
-// --chart-1..5 是设计系统既有色板,非自定义)。/50 加透明度让色段不扎眼(与深色轨道相融、更柔)。
-// 负债段不取色,走中性斜纹。
+// Role -> chart color. Data-viz is the one exception to design tokens but still uses --chart-* tokens;
+// /50 opacity softens the segments. Debt segments take no color (neutral stripes).
 const CHART_BG = [
   "bg-chart-1/50",
   "bg-chart-2/50",
@@ -37,8 +35,8 @@ const CHART_BG = [
   "bg-chart-5/50",
 ] as const;
 
-// 强语义「资产」角色固定色(deposit/supply 及同义词 → 恒定 chart-1);负债(borrow/loan)已走斜纹、不进这里。
-// 固定色位从 hash 池排除,保证固定角色永不与 hash 角色撞色。
+// Fixed color for asset-like roles (deposit/supply...); debt roles use stripes. Fixed slots are
+// excluded from the hash pool so they never collide with hashed roles.
 const FIXED_ROLE_IDX: Record<string, number> = {
   deposit: 0,
   supply: 0,
@@ -47,8 +45,7 @@ const FIXED_ROLE_IDX: Record<string, number> = {
 const RESERVED_IDX = new Set(Object.values(FIXED_ROLE_IDX));
 const HASH_POOL = CHART_BG.map((_, i) => i).filter((i) => !RESERVED_IDX.has(i));
 
-// 角色名 → 图表色索引:固定角色取固定色,其余 hash(role) % 池(djb2-lite)。同一角色名跨协议**恒定同色**
-// (便于扫读);代价:同协议内两个 hash 角色可能撞色(角色数通常 1–3,概率低;固定角色已排除撞色)。
+// Fixed roles get fixed colors, others hash(role) % pool, so a role name has the same color across protocols.
 function roleColorIdx(role: string): number {
   const key = role.toLowerCase();
   const fixed = FIXED_ROLE_IDX[key];
@@ -58,7 +55,7 @@ function roleColorIdx(role: string): number {
   return HASH_POOL[Math.abs(h) % HASH_POOL.length];
 }
 
-// 负债段:中性色底 + 细斜纹(token-only;负债≠亏损,不用 --neg,靠纹理与资产色段区分)。
+// Debt segment: neutral background with fine stripes (not --neg: debt is not a loss).
 const DEBT_SEG_STYLE: React.CSSProperties = {
   backgroundColor: "var(--muted-foreground)",
   backgroundImage: "repeating-linear-gradient(45deg, transparent 0 3px, var(--background) 3px 4px)",
@@ -67,12 +64,12 @@ const DEBT_SEG_STYLE: React.CSSProperties = {
 interface RoleSeg {
   role?: string;
   legs: DefiRow[];
-  gross: number; // 段宽 = 该角色毛敞口 Σ|usd|
-  debt: boolean; // 该角色净为负 → 负债
-  colorIdx: number | null; // 图表色索引;负债为 null
+  gross: number; // segment width = the role's gross exposure, sum of |usd|
+  debt: boolean; // role is net negative
+  colorIdx: number | null; // chart color index; null for debt
 }
 
-// 有值腿按角色分组 → 构成条的段。角色净负 = 负债(不取色);其余按 hash(role) 取图表色。
+// Groups valued legs by role into bar segments; a net-negative role is debt (no color), others hash(role).
 function toRoleSegs(rows: DefiRow[]): RoleSeg[] {
   return groupLegsByRole(defiMeaningfulLegs(rows)).map((g) => {
     const gross = g.legs.reduce((s, r) => s + Math.abs(r.usdValue), 0);
@@ -87,37 +84,37 @@ function toRoleSegs(rows: DefiRow[]): RoleSeg[] {
   });
 }
 
-// 段显示权重(%,和恒为 100 → flexGrow 相对分配即百分比):占比 < MIN% 的小段抬到 MIN%(让小仓/小角色
-// 能被感知,不被压成看不见的一线),其余段按毛敞口瓜分剩余空间。标签与色段用同一权重 → 保持对齐。
+// Display weights (percent, summing to 100 so flexGrow reads as a percentage): segments below
+// MIN% are raised to MIN% so small roles stay visible, the rest split the remainder by gross exposure.
 const DEFI_BAR_MIN_SEG_PCT = 5;
 
 function displayWeights(segs: RoleSeg[]): number[] {
   const n = segs.length;
   if (n === 0) return [];
   const total = segs.reduce((s, x) => s + x.gross, 0);
-  if (total <= 0) return segs.map(() => 100 / n); // 全 0 值 → 均分
+  if (total <= 0) return segs.map(() => 100 / n); // all zero: split evenly
   const MIN = DEFI_BAR_MIN_SEG_PCT;
   const small = segs.map((s) => (s.gross / total) * 100 < MIN);
   const reserved = small.filter(Boolean).length * MIN;
   const largeTotal = segs.reduce((s, x, i) => (small[i] ? s : s + x.gross), 0);
   const remaining = Math.max(0, 100 - reserved);
-  // largeTotal===0 仅当全部为小段 → 都取 MIN(flexGrow 相对分配即均分)。
+  // largeTotal === 0 only when every segment is small: all take MIN.
   return segs.map((s, i) =>
     small[i] || largeTotal <= 0 ? MIN : (s.gross / largeTotal) * remaining,
   );
 }
 
-// 构成条(H5 #120 定稿,C 方案):协议名下一条 4px 细条,按角色分段(段宽 = 毛敞口占比),
-// 角色名排条上方、按段宽对齐,写不下则整条隐藏(opacity:0 占位留白,与色段保持对齐)。整块是
-// hover 触发器 → 弹按角色分组的全量明细(方向自适应 / 抬 z / 隐垫底取自 useHoverPopover,与风险环/笔记同款)。
+// Composition bar: a 4px bar under the protocol name, segmented by role (width = gross share), role
+// names above aligned to segment widths and hidden as a whole when they don't fit (opacity:0 keeps
+// the space). The whole block is a hover trigger for a per-role detail popover (useHoverPopover).
 function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
   const usd = useDisplayValue();
   const pop = useHoverPopover();
   const labelsRef = useRef<HTMLDivElement>(null);
-  // 标签放不下(overflow → scrollWidth > clientWidth)整条隐藏;宽度变化(抽屉/响应式)经 ResizeObserver
-  // 重算,数据变化(段宽)经 fitKey 依赖重跑 —— 段宽变化时容器总宽不变,ResizeObserver 不触发,故需 fitKey。
+  // Hide all labels when they overflow; ResizeObserver re-measures on width changes, and `fitKey`
+  // re-runs on segment changes (container width stays the same then, so the observer doesn't fire).
   const fitKey = segs.map((s) => `${s.role ?? ""}:${s.gross}`).join("|");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fitKey 不在体内引用,但用于段宽变更后重测标签。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fitKey isn't referenced in the body but re-measures labels after segment widths change
   useEffect(() => {
     const el = labelsRef.current;
     if (!el) return;
@@ -133,12 +130,12 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
     return () => ro.disconnect();
   }, [fitKey]);
 
-  // 段宽权重(和为 100):小段抬到 5% 保可感知,其余按毛敞口瓜分。标签与色段共用 → 对齐;和为 100 也顺带
-  // 解决「flex-grow 因子和 < 1 时不填满容器」(sub-dollar 协议)。
+  // Segment weights (sum 100): small ones raised to 5%, shared by labels and segments so they
+  // align; summing to 100 also fixes flex-grow factors < 1 not filling the container (sub-dollar protocols).
   const weights = displayWeights(segs);
 
   return (
-    // pt 预留角色名的高度:角色名绝对定位在条上方、不占 root in-flow 盒 → root 顶 = 条顶。
+    // pt reserves room for the role names, which are absolutely positioned above the bar so root top = bar top.
     <div className="mt-1 ml-9 pt-4">
       <Popover
         trigger="hover"
@@ -147,13 +144,13 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
         onOpenChange={pop.onOpenChange}
         className={cn("w-full", pop.rootClassName)}
       >
-        {/* 透明 hover 捕获层:把「角色名 + 条 + 条下方一小条」连成一整片 hover 区 —— 否则 root in-flow 盒
-            只有 4px 的条,鼠标稍移到条下方就出判定区而关闭。absolute → 不影响 root 盒(锚点仍在条);
-            **不带 aria-hidden**(否则会被 useHoverPopover 关闭态的 [&>[aria-hidden]]:hidden 隐藏,就捕获不到 hover)。 */}
+        {/* Transparent hover catcher joining role names, bar and a strip below into one hover area
+            (the root's in-flow box is only the 4px bar). Absolute, so the anchor stays the bar. No
+            aria-hidden: useHoverPopover's closed state would hide it and it couldn't catch hover. */}
         <div className="absolute inset-x-0 -top-4 -bottom-3.5" />
-        {/* 角色名:绝对定位在条正上方,但仍是 Popover root 的 DOM 子级 —— hover 区照样覆盖它(beUI 的
-            mouseenter 挂在 root 上,按 DOM 子树触发、不看几何盒);因不占 root in-flow 盒,root 顶 = 条顶,
-            故面板几何 + goo pill 都以「条」为锚(上下都贴条),而非「标签+条」父块。写不下经 fit 隐藏。 */}
+        {/* Role names sit above the bar but stay DOM children of the Popover root (beUI's mouseenter
+            fires per DOM subtree), and take no in-flow space so the panel and goo pill anchor to the
+            bar. Hidden via fit when they don't fit. */}
         <div ref={labelsRef} className="absolute bottom-full left-0 mb-0.5 flex w-full gap-0.5">
           {segs.map((s, i) => (
             <div
@@ -167,14 +164,14 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
           ))}
         </div>
         <PopoverTrigger>
-          {/* 触发器只包 2px 条 → goo pill 只有条那么大、被条本身盖住(无黑块、退出 melt 自然)。 */}
+          {/* The trigger wraps only the thin bar, so the goo pill is the bar's size and hidden behind it. */}
           <button
             ref={pop.measureRef}
             type="button"
             aria-label={label}
             className="block w-full cursor-default outline-none"
           >
-            {/* 4px 细条:按角色分段;负债段中性斜纹,其余取图表色。 */}
+            {/* The 4px bar: segmented by role; debt gets neutral stripes, others chart colors. */}
             <div className="flex h-1 gap-0.5 overflow-hidden rounded-full bg-muted">
               {segs.map((s, i) => (
                 <div
@@ -191,8 +188,8 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
           </button>
         </PopoverTrigger>
         <PopoverContent>
-          {/* 完整明细:按角色分段(段前色块对应条上色),组内全部有值腿 + 每腿美元值;负债「−」中性色。
-              间隔三级节奏:组间 gap-2.5、组内(角色头↔腿、腿↔腿)gap-1;面板自带 p-4,不再叠 p-1。 */}
+          {/* Full detail per role (colored swatch matches the bar), all valued legs with USD values;
+              debt in neutral "−". Spacing: gap-2.5 between groups, gap-1 within; the panel has its own p-4. */}
           <div className="flex min-w-52 flex-col gap-2.5">
             <div className="font-medium text-sm">{label}</div>
             {segs.map((s, i) => (
@@ -214,7 +211,7 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
                     key={r.id}
                     className="flex items-baseline justify-between gap-8 text-xs tabular-nums"
                   >
-                    {/* hover 明细里的腿:数量与美元值都遮(ADR 0052)。 */}
+                    {/* Masks amount and USD value of legs in the hover detail. */}
                     <span>
                       <Sensitive>{legText(r)}</Sensitive>
                     </span>
@@ -235,8 +232,8 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
   );
 }
 
-// DeFi 协议行:上行 logo+名 与右侧 <ValueDelta>;下方一条构成条(角色分段 + hover 全量明细)。
-// hover 触发器只在构成条上(不再是整行左簇)—— 扫列表不再连炸弹层(H5 定稿)。
+// DeFi protocol row: logo + name with <ValueDelta> on the right, and a composition bar below. The
+// hover trigger is only the bar, so scanning the list doesn't pop overlays.
 function DefiProtocolRowContent({
   group,
   gainPending,
@@ -245,15 +242,15 @@ function DefiProtocolRowContent({
   gainPending: boolean;
 }) {
   const subtotal = group.rows.reduce((s, r) => s + r.usdValue, 0);
-  // 24h 盈亏(ADR 0050,两端相减):该协议现在的净值 − 24 小时前的净值,与全站同一口径。
-  // 百分比的分母是**起点净值**(`gain24h.start`);跨账户合并按 Σ金额 ÷ Σ起点净值 重算(见
-  // `mergeDefiGroups`)。动仓那天(充提)会体现在这个数里,是设计不是 bug。
+  // 24h PnL: the protocol's current net value minus 24h ago. The percentage denominator is the
+  // start net value (`gain24h.start`); cross-account merges recompute it (see `mergeDefiGroups`).
+  // Position changes (deposits/withdrawals) show up in this number by design.
   const change = group.gain24h;
   const segs = toRoleSegs(group.rows);
   return (
     <div className="w-full">
       <div className="flex w-full items-center gap-3">
-        {/* 协议 logo(#126):有图 → 经 /api/logo/defi 代理;无图 → 首字母兜底。 */}
+        {/* Protocol logo via /api/logo/defi, initials fallback. */}
         <LogoAvatar
           src={defiLogoUrl(group.protocol, group.protocolLogo)}
           fallback={group.protocol}
@@ -262,8 +259,8 @@ function DefiProtocolRowContent({
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium">{group.protocol}</div>
         </div>
-        {/* 右:协议净小计 + 24h 聚合增量。整协议一行都算不出 → `—`(不是留白:协议行本来就该有这个数)。
-            还在取 → 小骨架,不跟破折号混。 */}
+        {/* Right: protocol net subtotal + aggregated 24h delta. If the whole protocol is not
+            computable show `—`; while loading a small skeleton, not the dash. */}
         <ValueDelta
           value={subtotal}
           delta={change?.amount ?? null}
@@ -276,8 +273,8 @@ function DefiProtocolRowContent({
   );
 }
 
-// DeFi 分区:每协议一行(总览传跨账户合并的 groups,抽屉传单账户 groups)。
-// hideHeader:总览已有独立「DeFi」tab,节头冗余;抽屉无 tab 上下文,保留标题。
+// DeFi section: one row per protocol (overview passes cross-account merged groups, the drawer a single account's).
+// hideHeader: the overview has its own "DeFi" tab, so the header is redundant.
 export function DefiPositions({
   groups,
   hideHeader,
@@ -285,7 +282,7 @@ export function DefiPositions({
 }: {
   groups: DefiGroup[];
   hideHeader?: boolean;
-  /** 24h 盈亏还在取 —— 市值照常,增量位走小骨架。账户抽屉不传。 */
+  /** PnL still loading: value renders, the delta slot shows a small skeleton. Not passed by the account drawer. */
   gainPending?: boolean;
 }) {
   const t = useTranslations("Overview");
@@ -294,7 +291,7 @@ export function DefiPositions({
       {!hideHeader && <SectionHeader title={t("defiSectionTitle")} />}
       <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
         {groups.map((g) => (
-          // 行内 popover 打开时把整行抬到兄弟行之上(否则被后续行盖住;与 perp 行同款)。
+          // Lift the row above siblings while its inline popover is open (same as perp rows).
           <div
             key={g.protocol}
             className="group rounded-xl px-3 py-1.5 has-[[data-state=open]]:z-20"

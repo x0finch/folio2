@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { manualTokensJson } from "@/components/manual-tokens";
 
-// manual 加账户表单首 token 标量 → 单元素 creds.tokens JSON(ADR 0017)。
-// 数字保持字符串(交给 provider 的 manualToken validator coerce);ticket 空则省略键。
+// First-token scalars of the manual add form -> single-element creds.tokens JSON. Numbers stay
+// strings (the provider validator coerces them); empty ticket omits the key.
 describe("manualTokensJson", () => {
   it("serializes one token, numbers left as strings", () => {
     expect(

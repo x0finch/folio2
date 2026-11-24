@@ -15,47 +15,26 @@ import { Clock, Effect, Option, Schema } from "effect";
 import { type DailyFillReport, fillDaily } from "./daily-fill";
 import { degradeTo } from "./tokens/swr";
 
-// 汇率这个领域的门面 —— **现在的汇率与历史的汇率在同一个服务上**。
-//
-// 曾经是两个(`FxRateResolver` / `FxHistory`),理由是「两半不共用缓存键、不共用上游、
-// 不共用一行逻辑」。那是按**能力**切,不是按**领域**切:同样的话对 `TokenService` 全都成立
-// (现价走价 store、历史价走 `token_daily_prices`、两条也不共用一行逻辑),而那边从来没人
-// 提议拆。判据统一到 ADR 0012 的口径之后,这两半归位成一个服务的四个方法。
-//
-// 四个方法、三种判据:
-//   `resolve`    读**现**汇率 —— 软过期,有多旧都给
-//   `warm`       写**现**汇率 —— 按 TTL,缺或过期才拉
-//   `rateSeries` 读**历史**日汇率 —— 只读表(今天读现汇率),零网络(FOL-90)
-//   `fillDaily`  补**历史**日汇率 —— 只有队列的 `daily-prices` 活调它
-//
-// `resolve` 不看过期:汇率旧十分钟不会让总资产错到影响决策,而「暂时没有汇率」会让整个
-// 认证区拿不到数字。所以有多旧都给,新鲜度由 `warm` 负责往上追。
-//
-// **两半的持久化确实不同,合住之后更要写清楚**:现汇率住 per-user 的 `user_cache`
-// (`fx:<币种>` 键,TTL 6h);历史日汇率落全局的 `token_daily_prices`(过去日不可变),
-// **一个字都不写 user_cache**。所以本服务的 `R` 有四个端口,其中 `TokenPriceStore` /
-// `TokenUpstream` 只被 `fillDaily` 用到。
-//
-// **`fx` 与 `fiat` 在本仓是两个词,不是一件事的两种写法**,所以这个文件里两个都出现:
-//   `fx`   汇率本身 —— `FxUpstream` / `FX_TTL_MS` / `fx:<币种>` 键 / 本服务
-//   `fiat` 把法币当成一种「币」的那套 —— `FIAT_NAMER` / `fiat/issued:<CODE>` / `fiatSeed`
-// 服务名按**它给什么**取,存储那侧按**它存成什么**取(法币 token 行 → `FIAT_NAMER`)。
+// Fx facade: current and historical rates in one service.
+//   `resolve`    read current rate (soft expiry: always served, however old)
+//   `warm`       write current rate (by TTL; fetch only when missing or expired)
+//   `rateSeries` read historical daily rates (table only, zero network)
+//   `fillDaily`  backfill historical daily rates (only the queue's `daily-prices` job calls it)
+// Persistence differs: current rates live in per-user `user_cache` (`fx:<code>`, TTL 6h); historical rates go to the
+// global `token_daily_prices` and never touch user_cache, so `TokenPriceStore` / `TokenUpstream` are used only by `fillDaily`.
+// `fx` is the rate itself (`FxUpstream`, `FX_TTL_MS`, `fx:<code>` key); `fiat` treats a currency as a token
+// (`FIAT_NAMER`, `fiat/issued:<CODE>`, `fiatSeed`).
 const ALL_CODES = SUPPORTED_CURRENCIES.map((c) => c.code);
 
-// 币种 code 的归一口径。**造键、判「是不是 USD」、反查法币 ref 共用这一个函数** ——
-// 两处分开写过一次,漏归一的话 `usd` 既不短路成 1、又永远不会被写进缓存(写的时候按大写
-// 过滤掉了),于是每次预热都白拉一趟上游。合住这个文件之后它也只剩一份。
+// Currency code normalisation shared by key building, the USD check and fiat ref lookup; a missed normalisation would
+// stop `usd` short-circuiting to 1 and never being cached.
 const norm = (code: string): string => code.trim().toUpperCase();
 
-// —— 现汇率的缓存那一侧:键、形状、三个读写口 ——
-// 汇率住 per-user 缓存表的 `fx:<币种>` 键上(另两种键见 warm.ts / platforms.ts)。
-// **读写都走批量**:上游那个端点一把给十来个币种,逐键往返会把 1 次 D1 变成 N 次。
-// TTL 6h —— 慢变,但不静态。
+// Current-rate cache: keys `fx:<code>`; reads and writes are batched (upstream returns a dozen currencies at once). TTL 6h.
 
 export const fxKey = (currency: string): string => `fx:${norm(currency)}`;
 
-// 存的就是一个数。解不动(旧形状 / 手改过库)当 miss —— 回源重写一份,自愈,
-// 而不是把坏值 `as number` 一路端到展示层。
+// Stored value is a bare number; an unreadable one (old shape / hand-edited) is a miss that heals by refetching.
 const decodeNumber = Schema.decodeUnknownOption(Schema.Number);
 
 export const readFx = (
@@ -66,13 +45,13 @@ export const readFx = (
     Option.flatMap(hit, (entry) => decodeNumber(entry.value)),
   );
 
-// 一批币种的新鲜度(预热用):miss 的键不出现,命中的带 stale。
+// Freshness for a batch (used by warm): missing keys are absent, hits carry stale.
 const readFxFreshness = (
   cache: CacheStore,
   currencies: readonly string[],
 ): Effect.Effect<Map<string, CacheEntry>, never, DbRequest> => cache.getMany(currencies.map(fxKey));
 
-// 一次批量写回。上游那个端点一把全给,所以这里恒是「十来个键一个批次」。
+// One batched write: a dozen keys in one batch.
 export const writeFx = (
   cache: CacheStore,
   rates: readonly { currency: string; usdPerUnit: number }[],
@@ -81,13 +60,9 @@ export const writeFx = (
     rates.map((r) => ({ key: fxKey(r.currency), value: r.usdPerUnit, ttlMs: FX_TTL_MS })),
   );
 
-// BTC 美元历史腿(只给**过去日**,补日汇率时用):优先读 `token_daily_prices` 的
-// `coingecko/issued:bitcoin`(BTC 持有者 / 上一轮已补的直接命中),缺的拉一次并落库(顺带补给 BTC
-// 持有者)。返回全桶的 Map(命中什么给什么)。ADR 0026 的「BTC 美元腿优先读缓存、不重取」就在这里。
-//
-// **收已解析好的服务对象**(与本文件其余几个辅助件、以及 `./warm` 同款),所以它的 `R` 里没有
-// 任何服务、能被直接喂假端口打 —— 那条「不重取」的规则因此有自己的用例,不必绕整条反算去数请求。
-// (`R` 里只剩 `DbRequest`:一次请求的连接 + 用户,store 的 op 跑的那一刻才取,ADR 0054。)
+// BTC/USD history leg (past days only): reads `coingecko/issued:bitcoin` from `token_daily_prices` first, fetches and persists
+// what is missing. Returns a Map of all buckets it has.
+// Takes resolved service objects so its `R` is empty and the "do not refetch" rule can be tested with fake ports.
 export const btcUsdDaily = (
   prices: TokenPriceStore,
   upstream: TokenUpstream,
@@ -103,7 +78,7 @@ export const btcUsdDaily = (
     const toMs = Math.max(...buckets) * MS_PER_DAY + (MS_PER_DAY - 1);
     const fetched = new Map<number, number>();
     for (const pt of yield* upstream.fetchPriceSeries(btcRef, fromMs, toMs)) {
-      if (pt.unitPrice > 0) fetched.set(dayBucketOf(pt.atMs), pt.unitPrice); // 升序 → 当日最后一点胜出
+      if (pt.unitPrice > 0) fetched.set(dayBucketOf(pt.atMs), pt.unitPrice); // ascending: last point of the day wins
     }
     const wanted = new Set(buckets);
     const toPersist = [...fetched.entries()]
@@ -116,8 +91,8 @@ export const btcUsdDaily = (
     return out;
   });
 
-// 逐日反算法币美元价(纯):usd_per_unit(code)@日 = BTC美元@日 ÷ BTC该币@日。缺任一腿、或
-// BTC该币 ≤ 0(坏值 / 除零)的日**跳过**——宁可那天没历史价、走降级链,也不出一个乱数。导出供纯测。
+// Per-day fiat usd_per_unit = BTC/USD@day / BTC/currency@day (pure). Days missing either leg, or with BTC/currency <= 0,
+// are skipped so the fallback chain handles them rather than emit a garbage number. Exported for pure tests.
 export function deriveFiatDaily(
   btcUsdByDay: ReadonlyMap<number, number>,
   btcCodeByDay: ReadonlyMap<number, number>,
@@ -132,40 +107,35 @@ export function deriveFiatDaily(
   return out;
 }
 
-// 服务的形状从下面这段 `effect` 的返回值推导,`.Default` 就是它的 layer —— 不再手写
-// interface + Tag + layer 三件套(#501)。
+// Service shape is derived from the `effect` return value; `.Default` is its layer.
 export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
   effect: Effect.gen(function* () {
     const { cache, tokenPrices: prices } = yield* DatabaseForOracle;
     const upstream = yield* FxUpstream;
-    // —— 只有历史那半(`rateSeries` / `fillDaily`)用得到的两个端口 ——
-    // 历史日汇率读写 `token_daily_prices`(按 ref 直存,见 `getDailyByRef`)。
-    // BTC 反算两条腿走 `fetchPriceSeries(btcRef, …, vsCurrency)`(ADR 0026:复用现成取数口,
-    // 不给 `FxUpstream` 加取数方法)。BTC 反算是全仓价格骨架的一部分,所以历史这半搭在代币上游上。
+    // Ports used only by the historical half (`rateSeries` / `fillDaily`): daily rates in `token_daily_prices`,
+    // and the two BTC legs via `fetchPriceSeries(btcRef, …, vsCurrency)`.
     const priceUpstream = yield* TokenUpstream;
-    // 从 `FxUpstream` 只要 `btcRef` 一个字段 —— 那是 fx 与代币两个世界的桥(BTC 反算的基),
-    // 留在 `FxUpstream` 上是对的,不为了消掉这条依赖去挪它。
+    // `btcRef` from `FxUpstream` is the bridge between fx and tokens (base of the BTC derivation).
     const { btcRef } = upstream;
 
     return {
-      // 1 单位该币种值多少美元。USD 恒 1(不查缓存);缓存里没有 → `none`(调用方回退 USD)。
+      // usd per 1 unit of currency. USD is always 1 (no cache lookup); cache miss gives `none` (caller falls back to USD).
       resolve: (currency: string): Effect.Effect<Option.Option<number>, never, DbRequest> =>
         norm(currency) === "USD" ? Effect.succeed(Option.some(1)) : readFx(cache, currency),
 
-      // 预热(同步之后 / 用户第一次切币种时)。缺省预热全部支持币种。
+      // Warm after sync / first currency switch; defaults to all supported currencies.
       warm: (currencies: readonly string[] = ALL_CODES): Effect.Effect<void, never, DbRequest> =>
         Effect.gen(function* () {
-          // USD 不进目标:它恒为 1、不存缓存,算进去会让「全都新鲜」永远判不成立。
+          // USD is not a target: it is always 1 and never cached, so including it would make "all fresh" never hold.
           const targets = [...new Set(currencies.map(norm))].filter((c) => c !== "USD");
           if (targets.length === 0) return;
 
-          // 一次批量读:目标全都在且新鲜 → 什么都不做。
+          // One batched read: all targets present and fresh means nothing to do.
           const hits = yield* readFxFreshness(cache, targets);
           if (targets.every((c) => hits.get(fxKey(c))?.stale === false)) return;
 
-          // 一次拉全 → **一个批次**把其余支持币种也写上(反正都在同一份响应里),
-          // 下次别人切过去就是热的。逐个写会把一次 D1 批次变成十来次往返。
-          // 上游挂了 → 记一行、什么都不写(读那一侧软过期,拿得到旧值就用旧的)。
+          // One fetch gets everything: write the other supported currencies in the same batch so a later switch is warm.
+          // Upstream down: log and write nothing (reads soft-expire and serve the old value).
           const fresh = yield* upstream
             .fetchRates()
             .pipe(
@@ -181,10 +151,9 @@ export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
           );
         }),
 
-      // 某法币在区间内逐日的 usd_per_unit,口径同 `resolve` 但按**当天**汇率(ADR 0026 / #274)。
-      // **只读**(FOL-90):过去日读 `token_daily_prices`(`fiat/issued:<CODE>` 那几行),今天读现汇率
-      // 缓存(每小时的 `fx` 活在刷它)。缺的日子不在结果里,由调用方降级。USD 恒 1。
-      // 缓存对齐到 UTC 日桶(`atMs = 日桶 × 一日毫秒`)。
+      // Per-day usd_per_unit for a currency over the range, like `resolve` but at that day's rate.
+      // Read-only: past days from `token_daily_prices` (`fiat/issued:<CODE>`), today from the current-rate cache.
+      // Missing days are absent from the result; the caller degrades. USD is always 1. Aligned to UTC day buckets.
       rateSeries: (
         code: string,
         fromMs: number,
@@ -199,7 +168,7 @@ export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
           const buckets: number[] = [];
           for (let b = fromB; b <= toB; b++) buckets.push(b);
 
-          // USD 恒 1 —— 不查表、不反算它自己。
+          // USD is always 1: no lookup, no derivation.
           if (CODE === "USD") return buckets.map((b) => ({ atMs: b * MS_PER_DAY, unitPrice: 1 }));
 
           const daily = buckets.filter((b) => b !== todayB);
@@ -213,9 +182,8 @@ export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
           return out;
         }),
 
-      // 把 `fromMs` 那天到昨天的日汇率补进表(FOL-90 的 `daily-prices` 活,**唯一回源处**)。
-      // 一窗两条腿(BTC 该币 + BTC 美元,后者优先读缓存):反算 = 后者 ÷ 前者,落
-      // `fiat/issued:<CODE>`。USD 无事可做。
+      // Backfills daily rates from `fromMs` to yesterday into the table (the only upstream fetch path).
+      // One window has two legs (BTC/currency + BTC/USD, the latter cache first): rate = latter / former, stored as `fiat/issued:<CODE>`.
       fillDaily: (
         code: string,
         fromMs: number,
@@ -234,7 +202,7 @@ export class FxService extends Effect.Service<FxService>()("oracle/FxService", {
               Effect.gen(function* () {
                 const buckets: number[] = [];
                 for (let b = fromB; b <= toB; b++) buckets.push(b);
-                // **两条腿并发** —— 互不依赖。任一腿挂 → 这一窗失败(`fillDaily` 记一行、下次再试)。
+                // The two legs run concurrently; either failing fails the window (logged, retried next run).
                 const [series, btcUsd] = yield* Effect.all(
                   [
                     priceUpstream.fetchPriceSeries(

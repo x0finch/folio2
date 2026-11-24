@@ -4,19 +4,13 @@ import { requireAuth } from "@/lib/server/session/require-auth";
 import { GetSyncRoundInput, handleGetSyncRound } from "./round";
 import { handleSyncAccount, SyncAccountInput } from "./run";
 
-// sync 资源面:只做装配(method / 鉴权 / 校验),实现与入参 schema 在 ./run、./round。
-// handler 及其 import 链(oracle → cloudflare:workers)由 Start 编译器从客户端 bundle 剥离,
-// 故本文件对客户端安全可 import(#499 探针实证)。
-
-// 它**不同步**(FOL-89):排进一轮、投一条消息就返回,前端按那一轮轮询等结果。投的消息要带
-// userId,由装配点填(`enqueueForUser`)—— handler 照样不收 userId。
+// Doesn't sync inline: queues the account into a round and returns; the client polls the round.
 export const syncAccount = createServerFn({ method: "POST" })
   .middleware([requireAuth])
   .validator(SyncAccountInput)
   .handler(runEffect(handleSyncAccount));
 
-// 这一轮进行到哪(ADR 0048)。**busy 时 1.5s 一发的就是它** —— 页头摘要改在浏览器由
-// accounts + snapshots 派生(FOL-58),轮询只盯着唯一在变的东西。
+// Polled every 1.5s while busy; it is the only thing that changes.
 export const getSyncRound = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(GetSyncRoundInput)

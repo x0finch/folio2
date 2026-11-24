@@ -1,15 +1,14 @@
 import { maybe } from "@folio/client-core";
 import { Schema } from "effect";
 
-// CoinStats 响应的**最小形状**(仅取用到的字段)。字段一个没动 —— 换的是「谁说了算」:
-// 以前是 `interface` + 一次 `as`,现在是 schema,类型从它推出来。
+// Minimal shape of the CoinStats response (only the fields used). Types derive from the schema.
 
-// wallet/balance 返回的单条 coin。响应无图标字段 → 适配层不产 logo。
+// One coin from wallet/balance. The response has no icon field, so the adapter produces no logo.
 export const CoinstatsCoin = Schema.Struct({
   symbol: maybe(Schema.String),
   name: maybe(Schema.String),
   amount: maybe(Schema.Number),
-  // **`null` 留在类型里**:没价与没给这个字段,适配层分得清。
+  // `null` stays in the type: no price differs from the field not being given, and the adapter tells them apart.
   price: Schema.optional(Schema.NullOr(Schema.Number)),
   chain: maybe(Schema.String),
   contractAddress: Schema.optional(Schema.NullOr(Schema.String)),

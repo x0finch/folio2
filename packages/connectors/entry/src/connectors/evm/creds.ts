@@ -2,11 +2,7 @@ import type { CredField } from "@folio/connectors-basic";
 import { z } from "zod";
 import { EVM_ADDRESS_RE } from "./constants";
 
-// —— 账户级 creds(AC):EVM 地址,public(明文落库、可导出重建)——
-//
-// **两个源共用这一份,所以它自己一个文件。** 它是 connector 的属性(这个账户怎么标识),
-// 不是某个数据源的 —— 拆包前 rabby 包里还另有一份本地声明只为类型,那种「同一件事两处写」
-// 正是这次拆包要消掉的。
+// Shared by both providers: it identifies the account, not a data source.
 export const evmAccountCreds = [
   {
     key: "address",

@@ -7,14 +7,8 @@ import { messages } from "@/lib/i18n/messages";
 import type { PinScopeKey } from "@/lib/queries/keys";
 import type { PortfolioOverview } from "@/lib/queries/portfolio";
 
-// 首页下半截「持仓岛」:按当前选中的 tab 渲染哪份内容。
-//   · 没有账户 → 什么都不渲染(空态归页面那句「还没有账户」管)
-//   · 视角 tab:tokens → 代币列表(没持仓 → 「No snapshot yet」);perps → 只列真有仓位 / 权益的账户;
-//     defi → 跨账户按协议合并后的列表、不带节头;认不出的 tab 值 → 回落 tokens
-//   · 自定义 Tab(pin):按 pin 的目标另拉一份总览(断言拉的是哪个 scope);空 → 「No accounts match」;
-//     有 → 三段(Tokens / Perps / DeFi)按小计排;还在取 → 骨架;失败 → 「Something went wrong.」
-//   · `derive`:永续权益小计 = 各账户权益之和(tab 条右侧合计也用它)
-// 数据钩子(组合选择 / tab 条 / 总览)打桩:它们背后是 server fn 与 query 编排,这里只看这一层怎么分支。
+// Home holdings island: what renders for the selected tab. Data hooks (portfolio selection, tab strip,
+// overview) are stubbed; this only checks the branching at this layer.
 
 const h = vi.hoisted(() => ({
   strip: {
@@ -28,7 +22,7 @@ vi.mock("@/lib/hooks/use-home-tab-strip", () => ({ useHomeTabStrip: () => h.stri
 vi.mock("@/lib/queries/portfolio-overview-compose", () => ({
   usePortfolioOverview: (id: string, pin?: PinScopeKey) => h.overview(id, pin),
 }));
-// 代币抽屉的历史查询模块会拉进这几个 server fn 模块;只挡住加载。
+// The token sheet's history module imports these server fn modules; just block loading them.
 vi.mock("@/lib/server/holdings", () => ({ getTokenValueHistory: vi.fn() }));
 vi.mock("@/lib/server/accounts", () => ({ listAccounts: vi.fn(), getAccountHistory: vi.fn() }));
 vi.mock("@/lib/server/manual-tokens", () => ({ getManualAccount: vi.fn() }));
@@ -68,7 +62,7 @@ const overview = (over: Partial<PortfolioOverview> = {}): PortfolioOverview => (
     {
       account: { id: "w2", label: "Wallet 2" },
       defi: [{ protocol: "Aave", rows: [{ id: "r2", symbol: "DAI", amount: 5, usdValue: 5 }] }],
-      // 空壳永续(无仓位、无权益)→ 不该在永续 tab 里占一块
+      // Empty perp shell (no positions, no equity) → must not take a block in the perps tab
       perp: { equity: null, positions: [] },
     },
   ],
@@ -90,7 +84,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// 测试用的 tab 切换器:直接写首页的页内 tab 状态(真实页面里是 tab 条在写它)。
+// Test tab switcher: writes the home tab state directly (the tab strip does this in the app).
 let setTab: (v: string) => void = () => {};
 function TabHandle() {
   setTab = useHomeViewState().setTab;
@@ -116,25 +110,25 @@ function mount() {
   return { ...r, go };
 }
 
-describe("视角 tab", () => {
-  it("没有账户 → 什么都不渲染", () => {
+describe("view tabs", () => {
+  it("no accounts → renders nothing", () => {
     h.strip.current = { ...h.strip.current, hasAccounts: false };
     const { container } = mount();
     expect(container.textContent).toBe("");
   });
 
-  it("默认 tokens → 代币列表", () => {
+  it("default tokens → token list", () => {
     mount();
     expect(screen.getByText("Bitcoin")).toBeTruthy();
   });
 
-  it("tokens 但一个持仓都没有 → 「No snapshot yet」", () => {
+  it("tokens with no holdings → 'No snapshot yet'", () => {
     h.overview.mockImplementation(() => overview({ holdings: [] }));
     mount();
     expect(screen.getByText(/No snapshot yet/)).toBeTruthy();
   });
 
-  it("perps → 只列真有权益 / 仓位的账户", () => {
+  it("perps → only accounts with actual equity / positions", () => {
     const { go } = mount();
     go("perps");
     expect(screen.getByText("Hyperliquid")).toBeTruthy();
@@ -142,21 +136,21 @@ describe("视角 tab", () => {
     expect(screen.queryByText("Bitcoin")).toBeNull();
   });
 
-  it("defi → 跨账户按协议合并成一行,不带节头", () => {
+  it("defi → merged by protocol across accounts into one row, no section header", () => {
     const { go, container } = mount();
     go("defi");
     expect(screen.getAllByText("Aave", { selector: ".truncate" })).toHaveLength(1);
-    expect(container.textContent).toContain("$15.00"); // 10 + 5 合并
+    expect(container.textContent).toContain("$15.00"); // 10 + 5 merged
     expect(screen.queryByText("DeFi positions")).toBeNull();
   });
 
-  it("认不出的 tab 值(比如被删掉的 pin)→ 回落到 tokens", () => {
+  it("unknown tab value (e.g. a deleted pin) → falls back to tokens", () => {
     const { go } = mount();
     go("pin-that-is-gone");
     expect(screen.getByText("Bitcoin")).toBeTruthy();
   });
 
-  it("选着 perps 但这个组合已经没有永续了 → 回落到 tokens,不留空白", () => {
+  it("perps selected but the portfolio has no perps anymore → falls back to tokens, not blank", () => {
     h.strip.current = { ...h.strip.current, hasPerps: false };
     const { go } = mount();
     go("perps");
@@ -164,14 +158,14 @@ describe("视角 tab", () => {
     expect(screen.queryByText("Hyperliquid")).toBeNull();
   });
 
-  it("视角 tab 只拉组合的那份总览,不带 pin scope", () => {
+  it("view tabs fetch only the portfolio overview, without pin scope", () => {
     mount();
     expect(h.overview).toHaveBeenCalledWith("p1", undefined);
     expect(h.overview.mock.calls.every(([, pin]) => pin === undefined)).toBe(true);
   });
 });
 
-describe("自定义 Tab(pin)", () => {
+describe("custom tabs (pins)", () => {
   beforeEach(() => {
     h.strip.current = {
       ...h.strip.current,
@@ -179,13 +173,13 @@ describe("自定义 Tab(pin)", () => {
     };
   });
 
-  it("按 pin 的目标另拉一份总览", () => {
+  it("fetches a separate overview for the pin's target", () => {
     const { go } = mount();
     go("pin1");
     expect(h.overview).toHaveBeenCalledWith("p1", { kind: "tag", tagId: "t1" });
   });
 
-  it("那份总览是空的 → 「No accounts match this tab yet.」", () => {
+  it("that overview is empty → 'No accounts match this tab yet.'", () => {
     h.overview.mockImplementation((_id, pin) =>
       pin ? overview({ holdings: [], sections: [] }) : overview(),
     );
@@ -194,7 +188,7 @@ describe("自定义 Tab(pin)", () => {
     expect(screen.getByText("No accounts match this tab yet.")).toBeTruthy();
   });
 
-  it("有内容 → 三段按小计排(最大那段省节头),内容来自 pin 那份", () => {
+  it("with content → three sections by subtotal (largest omits its header), content from the pin's overview", () => {
     h.overview.mockImplementation((_id, pin) =>
       pin
         ? overview({
@@ -215,13 +209,13 @@ describe("自定义 Tab(pin)", () => {
     go("pin1");
     expect(screen.getByText("Ether")).toBeTruthy();
     expect(screen.queryByText("Bitcoin")).toBeNull();
-    // 永续 300 > 代币 50 > DeFi 15:最大的永续段省节头,后两段有。
+    // Perps 300 > tokens 50 > DeFi 15: the largest (perps) omits its header, the other two show theirs.
     expect(screen.queryByText("Perps")).toBeNull();
     expect(screen.getByText("Tokens")).toBeTruthy();
     expect(screen.getByText("DeFi")).toBeTruthy();
   });
 
-  it("pin 那份还在取 → 骨架,不先闪组合的全量列表", () => {
+  it("pin overview still loading → skeleton, no flash of the full portfolio list", () => {
     h.overview.mockImplementation((_id, pin) => {
       if (pin) throw new Promise(() => {});
       return overview();
@@ -232,7 +226,7 @@ describe("自定义 Tab(pin)", () => {
     expect(container.querySelector("[data-slot=skeleton]")).toBeTruthy();
   });
 
-  it("pin 那份失败 → 「Something went wrong.」,不塌整页", () => {
+  it("pin overview failed → 'Something went wrong.', page doesn't collapse", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     h.overview.mockImplementation((_id, pin) => {
       if (pin) throw new Error("boom");
@@ -245,7 +239,7 @@ describe("自定义 Tab(pin)", () => {
 });
 
 describe("derive", () => {
-  it("永续权益小计 = 有永续的各账户权益之和;空壳永续不算一项", () => {
+  it("perp equity subtotal = sum of equity of accounts with perps; empty perp shells don't count", () => {
     const parts = derive(
       overview({
         sections: [

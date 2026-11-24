@@ -1,13 +1,11 @@
 #!/usr/bin/env node
-// 线上 CPU:从 Workers Logs 读 Cloudflare 计量的 `cpuTimeMs`(不是响应耗时)。
+// Online CPU: Cloudflare-metered `cpuTimeMs` from Workers Logs (not response time).
 //
-//   pnpm --filter @folio/web perf:cpu:online                    # 当前线上版本,最近 7 天
+//   pnpm --filter @folio/web perf:cpu:online                    # the current live version, last 7 days
 //   pnpm --filter @folio/web perf:cpu:online --days 1 --version all
 //   pnpm --filter @folio/web perf:cpu:online --token-env MY_TOKEN_VAR
 //
-// 要一把能读 Workers Logs 的账户级 API token(`folio` 这个 Worker 的 Metadata Read-Only 即可),
-// 放在环境变量里(默认 CLOUDFLARE_OBSERVABILITY_TOKEN)。token 只进请求头,从不打印。
-// 口径与局限见 scripts/perf/README.md 的「线上」一节。
+// Needs an account-level API token that can read Workers Logs (Metadata Read-Only on the `folio` Worker suffices), in an env var (default CLOUDFLARE_OBSERVABILITY_TOKEN). The token goes only in request headers, never printed. Caveats: see the "online" section of scripts/perf/README.md.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -17,15 +15,15 @@ import { cpuByName, handlerOf, jobKindOf } from "./online-join.ts";
 const API = "https://api.cloudflare.com/client/v4";
 const DEFAULT_TOKEN_ENV = "CLOUDFLARE_OBSERVABILITY_TOKEN";
 const DEFAULT_DAYS = 7;
-/** Workers Logs 事件接口一次最多回这么多条(再多它也会按自适应采样截断)。 */
+/** Max events the Workers Logs events API returns per call (beyond it, it truncates with adaptive sampling). */
 const EVENTS_LIMIT = 2000;
-/** 分组统计最多回多少组。 */
+/** Max groups returned by a grouped statistic. */
 const GROUPS_LIMIT = 100;
-/** `runtime.ts` 的 `withServerFnTiming` 每个 server fn 打的那行日志:带 `handler`,和调用日志同一个 requestId。 */
+/** The line `withServerFnTiming` in `runtime.ts` logs per server fn: carries `handler`, same requestId as the invocation log. */
 const SERVER_FN_MESSAGE = "server fn";
-/** `jobs/consume.ts` 每件活收尾打的那行(`job done` / `job failed…`)的开头:带 `kind`,和那次 alarm 同一个 requestId。 */
+/** Prefix of the line `jobs/consume.ts` logs when each job ends (`job done` / `job failed...`): carries `kind`, same requestId as that alarm. */
 const JOB_MESSAGE_PREFIX = "job ";
-/** 免费档每次调用的 CPU 上限。 */
+/** Free-plan CPU cap per invocation. */
 const BUDGET_MS = 10;
 
 const USAGE = `usage: perf:cpu:online [options]
@@ -33,7 +31,7 @@ const USAGE = `usage: perf:cpu:online [options]
   --version ID      script version id, "latest" (default) or "all"
   --token-env NAME  env var holding the API token (default ${DEFAULT_TOKEN_ENV})`;
 
-/** account_id 与 Worker 名只写在 wrangler.jsonc 里一次,这里照读,不另抄一份。 */
+/** account_id and the Worker name live only in wrangler.jsonc and are read here. */
 function readWranglerIds() {
   const text = readFileSync(join(WEB_ROOT, "wrangler.jsonc"), "utf8");
   const pick = (key) => text.match(new RegExp(`^\\s*"${key}"\\s*:\\s*"([^"]+)"`, "m"))?.[1];
@@ -82,7 +80,7 @@ async function latestVersion(api, script) {
   return { id: newest.versions[0].version_id, createdOn: newest.created_on };
 }
 
-/** 所有查询共用的时间窗 + 过滤(Worker 名,可选版本)。 */
+/** Time window + filters shared by all queries (Worker name, optional version). */
 function scope({ script, version, from, to }) {
   const filters = [{ key: "$metadata.service", operation: "eq", type: "string", value: script }];
   if (version) {
@@ -96,10 +94,7 @@ function scope({ script, version, from, to }) {
   return { timeframe: { from, to }, filters };
 }
 
-/**
- * 分组统计 CPU:这部分是全量的,不抽样。**分组键在某条调用上缺失时,那条调用整个不进结果**
- * (fetch 没有 cron),所以「按 cron」只能在只看 scheduled 的那次查询里分。
- */
+/** Grouped CPU stats: full, not sampled. An invocation missing the group key is dropped entirely (fetch has no cron), so "by cron" can only be split in a query that looks only at scheduled invocations. */
 async function cpuBy(api, sc, groupKeys, extraFilters = []) {
   const cpu = { key: "$workers.cpuTimeMs", keyType: "number" };
   const result = await api.call("/workers/observability/telemetry/query", {
@@ -150,12 +145,7 @@ async function events(api, sc, extraFilters) {
   return result.events?.events ?? [];
 }
 
-/**
- * 按名字拆 CPU(server fn / 后台任务种类):调用事件不带名字,只能把我们自己打的那行日志
- * (带名字)与同一个 requestId 的调用事件(带 cpuTimeMs)对上 —— 对法见 `online-join.ts`。
- * **事件接口是抽样的**,所以这两张表给的是样本内的分布,n 就是样本数;P99 在小样本上接近 max,
- * 只当尾部的粗看。
- */
+/** CPU by name (server fn / background job kind): invocation events carry no name, so our own named log line is joined to the invocation event (with cpuTimeMs) by requestId; see `online-join.ts`. The events API is sampled, so these two tables give the in-sample distribution with n = sample count; P99 on a small sample is near max and only a rough look at the tail. */
 async function byName(api, sc, { message, invocation, nameOf }) {
   const [named, invocations] = await Promise.all([
     events(api, sc, [message]),
@@ -184,11 +174,7 @@ const byServerFn = (api, sc) =>
     nameOf: handlerOf,
   });
 
-// 运行器一次 alarm 只跑一件活(`jobs/runner.ts`,FOL-100),所以一个 requestId 就是一件活。
-// `alarm`:Workers Trace Events 的 EventType 取值(fetch | scheduled | alarm | queue | …,
-// developers.cloudflare.com/logs/logpush/logpush-job/datasets/account/workers_trace_events/)。
-// Workers Logs 的 `$workers.eventType` 用的是同一套取值(上面 "scheduled" 就是这么对上的),但 "alarm"
-// 还没对着线上数据验过 —— 表空着就先查这里。一次 alarm 没领到到点的活(`ran: null`)不打收尾行,算进 unmatched。
+// The runner runs one job per alarm (`jobs/runner.ts`), so a requestId is one job. `alarm` is the Workers Trace Events EventType (fetch | scheduled | alarm | queue | ...); Workers Logs' `$workers.eventType` uses the same values (as "scheduled" above matches) but "alarm" isn't yet verified against live data, so if the table is empty check here. An alarm that picked up no due job (`ran: null`) logs no end line and counts as unmatched.
 const byJobKind = (api, sc) =>
   byName(api, sc, {
     message: {

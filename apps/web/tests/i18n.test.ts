@@ -12,7 +12,6 @@ describe("pickLocale", () => {
     expect(pickLocale(undefined, "zh-CN,zh;q=0.9,en;q=0.8")).toBe("zh");
     expect(pickLocale("bogus", "zh")).toBe("zh");
     expect(pickLocale(undefined, "en-US")).toBe("en");
-    // navigator.language 的形状(没有逗号、没有 q 值)
     expect(pickLocale(null, "zh-TW")).toBe("zh");
   });
   it("defaults to en", () => {
@@ -21,7 +20,6 @@ describe("pickLocale", () => {
   });
 });
 
-// 不测 use-intl 本身,测我们的消息:插值 + ICU 复数在中英都产出正确串。
 describe("messages (via createTranslator)", () => {
   it("English: ICU plural one/other", () => {
     const t = createTranslator({ locale: "en", messages: messages.en });

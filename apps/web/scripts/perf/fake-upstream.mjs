@@ -1,41 +1,32 @@
-// 假上游:perf:cpu:jobs 专用。沙箱里出网被挡,而 cron 那条写路径**每一步都要出网**(取余额、取价、
-// 刷币目录)—— 不给它一个会答话的上游,量到的就是「连不上 → 报错 → 重试」那条路,不是生产那条。
+// Fake upstream for perf:cpu:jobs. Egress is blocked in the sandbox and every step of the cron write path goes out (balances, prices, coin catalog); without an answering upstream the measurement would be the "unreachable, error, retry" path, not production's.
 //
-// 一个 HTTP server,按路径前缀扮演 cron 会打的每一家:`/binance` `/okx` `/bybit` `/rabby`
-// `/coinstats` `/hyperliquid` `/blockbook` `/coingecko`。worker 经 .dev.vars 里的 base URL 覆盖
-// 被指过来(`upstreamVars`)—— binance / okx / bybit 那三个是生产本来就有的 #264 开关,其余几个是
-// FOL-84 补的同款开关,生产不设。
+// One HTTP server impersonating each upstream the cron hits by path prefix: `/binance` `/okx` `/bybit` `/rabby` `/coinstats` `/hyperliquid` `/blockbook` `/coingecko`. The worker is pointed here by base-URL overrides in .dev.vars (`upstreamVars`); binance / okx / bybit are switches production already has, the rest are same-style switches that production doesn't set.
 //
-// **确定性**:一切由「序号 + 账户标识的散列」算出来,不读时钟之外的任何东西 —— 两次运行打到的是
-// 同一份数据,前后对比才有意义。形状照着各家录制的 fixture(`packages/connectors/entry/tests/
-// connectors/*/fixtures`、`packages/clients/*/tests/fixtures`),带上生产响应里那些**我们不读**的
-// 字段:JSON.parse 的开销按字节算,只留我们读的字段会把解析那一截量小。
+// Deterministic: everything derives from index + a hash of the account identity and reads nothing but the clock, so runs hit identical data and before/after comparisons mean something. Shapes follow each upstream's recorded fixtures (`packages/connectors/entry/tests/connectors/*/fixtures`, `packages/clients/*/tests/fixtures`), including production response fields we don't read: JSON.parse cost scales with bytes, so keeping only the fields we read would understate it.
 //
-// **一个代币宇宙,所有上游共用**:CEX 报的 symbol、链上钱包报的合约地址、CoinGecko 的目录 /
-// `coins/list` / 价格,指的是同一批币 —— 否则 mint 认不出来,估值那一段就不跑,量到的是短路。
+// One token universe shared by all upstreams: CEX symbols, on-chain wallet contract addresses and CoinGecko's catalog / `coins/list` / prices refer to the same coins, otherwise mint wouldn't recognise them and valuation would short-circuit.
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { HOST } from "./constants.mjs";
 
-/** `/coins/list?include_platform=true` 的规模 —— 对齐生产实测(约 18k 个币、23k 条平台地址、2.6 MB)。 */
+/** Size of `/coins/list?include_platform=true`, matching production measurements (~18k coins, 23k platform addresses, 2.6 MB). */
 const UNIVERSE_COINS = 18_000;
-/** 有市值排名的前多少个(`/coins/markets` 能翻到的深度,目录取前 1000)。 */
+/** How many top-by-market-cap coins (the depth `/coins/markets` reaches; the catalog takes the top 1000). */
 const RANKED_COINS = 5_000;
-/** `/asset_platforms` 的条数(生产约 400)。 */
+/** Number of `/asset_platforms` entries (~400 in production). */
 const ASSET_PLATFORM_COUNT = 400;
-/** Binance `/api/v3/ticker/price` 回多少个交易对(生产约 3000,一次全给)。 */
+/** Pairs Binance `/api/v3/ticker/price` returns (~3000 in production, all at once). */
 const BINANCE_TICKERS = 2_400;
-/** 每 4 个 / 每 25 个币多挂一条链 —— 凑出生产那样「一币多链」的平台行数。 */
+/** Every 4th / 25th coin gets an extra chain, giving production-like multi-chain platform rows. */
 const SECOND_PLATFORM_EVERY = 4;
 const THIRD_PLATFORM_EVERY = 25;
-/** 历史价序列的点距与上限(`market_chart/range`)。 */
+/** Point spacing and cap for history price series (`market_chart/range`). */
 const CHART_STEP_MS = 3_600_000;
 const CHART_MAX_POINTS = 2_000;
-/** CoinGecko `/search` 最多回几条。 */
+/** Max results from CoinGecko `/search`. */
 const SEARCH_LIMIT = 25;
 
-// 各账户吐多少行。目标是「每个账户约 50 行持仓」,各家按自己的桶摊开(bitcoin 一个地址只有一行,
-// 形状使然)。
+// Rows per account: target ~50 holdings each, spread by each upstream's own buckets (bitcoin has one row per address by shape).
 const COUNTS = {
   binance: { spot: 30, funding: 8, flexible: 6, locked: 3, futures: 2, coinm: 1 },
   okx: { trading: 30, funding: 10, savings: 5, staking: 3, positions: 2 },
@@ -45,8 +36,7 @@ const COUNTS = {
   hyperliquid: { positions: 40 },
 };
 
-// 市值前列的真实币(id 与 `@folio/oracle-upstream-coingecko` 的 OVERRIDES 对齐,symbol 那一档靠它认)。
-// native = 在任何链上都没有合约(`platforms` 为空)。
+// Real top-by-market-cap coins (ids aligned with `@folio/oracle-upstream-coingecko`'s OVERRIDES, which the symbol tier relies on). native means no contract on any chain (`platforms` empty).
 const MAJORS = [
   ["bitcoin", "btc", "Bitcoin", 64000, true],
   ["ethereum", "eth", "Ethereum", 3200, true],
@@ -70,7 +60,7 @@ const MAJORS = [
   ["near", "near", "NEAR Protocol", 5.3, true],
 ];
 
-// 平台表的头几条:真实的 EVM 链 + 我们认的三条非 EVM 链(NON_EVM_PLATFORMS)。其余补成假链。
+// The platform table's first entries: real EVM chains plus the three non-EVM chains we recognise (NON_EVM_PLATFORMS); the rest are fake chains.
 const REAL_PLATFORMS = [
   ["ethereum", 1, "Ethereum"],
   ["arbitrum-one", 42161, "Arbitrum One"],
@@ -84,10 +74,10 @@ const REAL_PLATFORMS = [
   ["cosmos", null, "Cosmos Hub"],
   ["tron", null, "TRON"],
 ];
-/** 非 major 的币挂在哪几条链上轮着来(平台表的前这么多条)。 */
+/** How many chains (the platform table's first N) non-major coins rotate through. */
 const HOME_PLATFORMS = 40;
 
-// Rabby 的链 slug ↔ chainId(`/v1/chain/list`)。钱包里的币只从这两条链上挑。
+// Rabby chain slug <-> chainId (`/v1/chain/list`); wallet coins are picked only from these two chains.
 const RABBY_CHAINS = [
   { slug: "eth", platform: "ethereum", chainId: 1, native: "ethereum", nativeSymbol: "ETH" },
   {
@@ -101,7 +91,7 @@ const RABBY_CHAINS = [
 
 const hex = (seed, n) =>
   createHash("sha256").update(`folio-perf-upstream:${seed}`).digest("hex").slice(0, n);
-/** 种子串 → [0, 1) 的确定性小数。 */
+/** Seed string to a deterministic fraction in [0, 1). */
 const unit = (seed) => Number.parseInt(hex(seed, 8), 16) / 0x1_0000_0000;
 const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const base58 = (seed, n) =>
@@ -121,7 +111,7 @@ function platformAddress(platformId, seed) {
 function buildPlatforms() {
   const out = REAL_PLATFORMS.map(([id, chainId, name]) => ({ id, chainId, name }));
   for (let k = out.length; k < ASSET_PLATFORM_COUNT; k++) {
-    // 一半是 EVM(有 chain_identifier),一半不是 —— 后者在映射表里会被记成 skipped,与生产同形。
+    // Half are EVM (with chain_identifier), half aren't; the latter are recorded as skipped in the map, matching production.
     out.push({
       id: `perf-chain-${k}`,
       chainId: k % 2 ? null : 900_000 + k,
@@ -166,7 +156,7 @@ function buildCoins(platforms) {
   return coins;
 }
 
-/** 整个宇宙 + 那几份大响应的预编码(每发现编 2.6 MB 会把假上游自己变成瓶颈)。 */
+/** The whole universe plus pre-encoded large responses (encoding 2.6 MB per request would make the fake upstream itself the bottleneck). */
 function buildUniverse() {
   const platforms = buildPlatforms();
   const coins = buildCoins(platforms);
@@ -199,7 +189,7 @@ function buildUniverse() {
     platforms,
     byId,
     ranked,
-    // CEX 与钱包从这几份里挑:CEX 按 symbol 认,只认得目录(前 1000)里的;钱包按合约地址认。
+    // CEX and wallets pick from these: CEX by symbol (only the catalog's top 1000 are recognised), wallets by contract address.
     catalogue: ranked.slice(0, 1_000),
     chainPools: new Map(RABBY_CHAINS.map((ch) => [ch.slug, onPlatform(ch.platform)])),
     solanaPool: onPlatform("solana"),
@@ -209,7 +199,7 @@ function buildUniverse() {
   };
 }
 
-/** 从 pool 里按种子挑 n 个互不相同的(确定性;majors 优先放进前几个,像真账户)。 */
+/** Picks n distinct items from the pool by seed (deterministic; majors first, like a real account). */
 function pick(pool, n, seed, { majors = 0 } = {}) {
   const out = [];
   const seen = new Set();
@@ -229,7 +219,7 @@ function pick(pool, n, seed, { majors = 0 } = {}) {
 }
 
 const amountOf = (seed, coin) => {
-  // 大约 $50 – $5000 一行,按价折回数量。
+  // Roughly $50 to $5000 per row, converted to amounts by price.
   const usd = 50 + unit(`amt:${seed}`) * 4_950;
   return +(usd / Math.max(coin.price, 1e-6)).toPrecision(8);
 };
@@ -269,9 +259,7 @@ function marketRow(c, nowIso) {
   };
 }
 
-// **覆盖全部 `SUPPORTED_CURRENCIES`**(真 CoinGecko 的 `exchange_rates` 都有):少一个,`fx.warm()`
-// 每次都判「有币种缺」而回源,量到的 `fx` 活就成了「每小时真刷一次」,而生产上 6h TTL 内它是零出网的
-// 缓存命中(第二轮之前这里只有六种,`fx` 那一行因此一直偏高)。
+// Covers all `SUPPORTED_CURRENCIES` (real CoinGecko `exchange_rates` has them): with one missing, `fx.warm()` would see "currency missing" and go to the source every time, making the `fx` job a real hourly refresh when in production it's a zero-egress cache hit within the 6h TTL.
 const FX_PER_BTC = {
   usd: 64000,
   eur: 59000,
@@ -356,7 +344,7 @@ function coingecko(u, path, q) {
     }
     return { body: { prices, market_caps: [], total_volumes: [] } };
   }
-  // 合约点查:宇宙之外的地址 → 404(client 把它读成「CGK 不认识」,正常答案)。
+  // Contract lookup: an address outside the universe gives 404 (the client reads it as "CGK doesn't know it", a normal answer).
   if (/^\/coins\/[^/]+\/contract\//.test(path))
     return { status: 404, body: { error: "not found" } };
   return null;
@@ -367,7 +355,7 @@ function binance(u, path, seed) {
   const n = COUNTS.binance;
   const spot = pick(u.catalogue, n.spot, `binance:spot:${seed}`, { majors: 6 });
   if (path === "/api/v3/ticker/price") {
-    // 一次全给,与生产同形:所有 `<SYM>USDT` 对 + 一堆和我们无关的交叉对。
+    // All at once, as in production: every `<SYM>USDT` pair plus unrelated cross pairs.
     const out = u.catalogue.map((c) => ({ symbol: `${upper(c)}USDT`, price: c.price.toFixed(8) }));
     for (let k = 0; out.length < BINANCE_TICKERS; k++) {
       const c = u.catalogue[k % u.catalogue.length];
@@ -791,7 +779,7 @@ function blockbook(path) {
 }
 
 // ---------------------------------------------------------------- server
-/** 各上游的路径前缀。worker 那侧的 base URL = `<origin>/<前缀>`。 */
+/** Path prefix per upstream; the worker-side base URL is `<origin>/<prefix>`. */
 const UPSTREAMS = [
   "binance",
   "okx",
@@ -803,7 +791,7 @@ const UPSTREAMS = [
   "coingecko",
 ];
 
-/** 签名 CEX 的 key 头:用它区分同一家的不同账户(数据集超过 8 个账户时会有第二个 binance)。 */
+/** Signed-CEX key header: tells accounts of the same exchange apart (a dataset over 8 accounts has a second binance). */
 const KEY_HEADERS = ["x-mbx-apikey", "ok-access-key", "x-bapi-api-key"];
 
 async function readBody(req) {
@@ -843,11 +831,10 @@ function route(u, upstream, path, q, headers, body) {
 
 const nowUs = () => Number(process.hrtime.bigint() / 1000n);
 
-/**
- * 起假上游。返回 { origin, vars, stats(), hits, reset(), close() }:
- * - `vars`:要写进 worker `.dev.vars` 的覆盖(各家 base URL + 两把假 key)
- * - `hits`:收到的每一发 `{ atUs, upstream, path, status }`(时钟与 profiler 同一个单调钟)
- * - `stats()`:宇宙规模(写进 summary,数据集大小是结果的一部分)
+/** Starts the fake upstream. Returns { origin, vars, stats(), hits, reset(), close() }:
+ * - `vars`: overrides to write into the worker's `.dev.vars` (each base URL + two fake keys)
+ * - `hits`: every request received `{ atUs, upstream, path, status }` (same monotonic clock as the profiler)
+ * - `stats()`: universe size (written to the summary; dataset size is part of the result)
  */
 export async function startFakeUpstream({ port }) {
   const u = buildUniverse();
@@ -891,8 +878,7 @@ export async function startFakeUpstream({ port }) {
       HYPERLIQUID_API_BASE: base("hyperliquid"),
       BLOCKBOOK_API_BASE: base("blockbook"),
       COINGECKO_API_BASE: base("coingecko"),
-      // 假 key:coinstats 没 key 直接判「缺凭据」不出网;CoinGecko 有 key 走 demo 档的闸
-      // (每分钟 80 发)而不是无 key 那档(每分钟 10 发)—— 只影响 wall,不影响 CPU。
+      // Fake keys: coinstats without a key is judged "missing credentials" and doesn't go out; CoinGecko with a key uses the demo tier's gate (80/min) rather than the keyless one (10/min); affects wall only, not CPU.
       COINSTATS_API_KEY: "perf-fake-coinstats-key",
       COINGECKO_API_KEY: "perf-fake-coingecko-key",
     },

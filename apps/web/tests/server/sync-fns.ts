@@ -6,16 +6,12 @@ import { runForUser } from "@/lib/server/runtime";
 import { makeSyncServicesLayer } from "@/lib/server/sync/deps";
 import { runReferenceJob } from "@/lib/server/sync/reference";
 
-// 同步的测试把手(#403 片 3)。`SyncDeps` 与 `buildSyncDeps` 没了 —— 编排现在从 `SyncServices`
-// 取能力,所以测试要换掉的不再是「deps 对象上的一个字段」,而是**一层**。
-//
-// 只换「取余额」那一个能力:它是唯一会出网的一步。其余(账户、快照、认币、重估)都走真接线 +
-// 真 D1,否则测的就不是这条路了。
+// Only balance fetching is swapped (the one step that goes out to the network); accounts, snapshots,
+// token minting and revaluation use the real wiring and real D1.
 
 export interface SyncJob {
   account: AccountSafe;
   rawCreds?: string | null;
-  /** 这个账户这一轮报出来的余额;给 `fail` 则模拟取数失败。 */
   balances?: Balance[];
   fail?: ConnectorError;
 }
@@ -32,16 +28,7 @@ const sourceFor = (job: SyncJob) =>
           }),
   });
 
-/**
- * **一轮同步**:多个账户共用一次装配。
- *
- * 这是生产里一轮同步的真实形状,也是这些用例原来靠「共用一份 `deps` 对象」表达的那件事 ——
- * seed 收集器与估值模式的存活范围就是这一轮。共用一层比共用一个对象更接近真相:它们本来
- * 就该同生同死。
- *
- * 账户**串行**跑(与 cron 的 sweep 一致);要测并发落同一个币,各起一轮即可(那也正是
- * 两个请求同时进来时的样子)。
- */
+/** One sync round: several accounts share one assembly, run serially like the cron sweep. */
 export const syncRound = (userId: string, jobs: SyncJob[]): Promise<AccountSyncResult[]> =>
   runForUser(
     userId,
@@ -52,15 +39,11 @@ export const syncRound = (userId: string, jobs: SyncJob[]): Promise<AccountSyncR
     ).pipe(Effect.provide(makeSyncServicesLayer())),
   );
 
-/** 一轮里就一个账户 —— 最常用的那一种。 */
 export const syncOne = async (userId: string, job: SyncJob): Promise<AccountSyncResult> => {
   const [result] = await syncRound(userId, [job]);
   return result;
 };
 
-/**
- * 跑一条 `catalogue` 活(FOL-88 的参考层那一件),跑成 Promise。以前手动同步的收尾(`warmTokens`)
- * 在请求里连做这一件;FOL-89 起它只是一条队列消息,生产里由 consumer 跑 —— 用例直接调同一个 consumer。
- */
+/** Runs one `catalogue` job through the same consumer production uses. */
 export const refreshCatalogueFor = (userId: string): Promise<void> =>
   Effect.runPromise(runReferenceJob({ kind: "catalogue", userId }));

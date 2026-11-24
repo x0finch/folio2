@@ -1,55 +1,24 @@
-# perf:cpu —— 每个端点吃多少服务端 CPU
+# Perf scripts — server CPU per endpoint and per job
+
+Cloudflare Workers' free plan gives each request **10 ms of CPU**. For performance work, run the relevant script before and after the change and paste both tables into the PR.
+
+Don't trust the `durationMs` server-fn log: workerd's `performance.now()` stops during synchronous compute, so it only sees I/O waits and reads 2–10× low. These scripts measure from outside with the V8 sampling profiler.
+
+## `perf:cpu` — read endpoints
 
 ```sh
-pnpm --filter @folio/web perf:cpu                     # 构建 → 灌数据 → 全部端点各 30 发
+pnpm --filter @folio/web perf:cpu                     # build → seed → 30 requests per endpoint
 pnpm --filter @folio/web perf:cpu --no-build --only fn-getSnapshots-now,doc-root-authed
-pnpm --filter @folio/web perf:cpu --cold --only fn-getValuationSettings   # 第一发(冷 isolate)
-pnpm --filter @folio/web perf:cpu --list              # 有哪些端点
-pnpm --filter @folio/web perf:cpu --help              # 全部参数
+pnpm --filter @folio/web perf:cpu --cold --only fn-getValuationSettings   # first request on a cold isolate
+pnpm --filter @folio/web perf:cpu --list              # endpoints
+pnpm --filter @folio/web perf:cpu --help              # all flags
 ```
 
-Cloudflare Workers 免费档每个请求只有 **10ms CPU**。做性能的活,改之前、改之后各跑一遍,
-把两张表贴进 PR。
+Needs `apps/web/.dev.vars` with at least `BETTER_AUTH_SECRET` and `SECRETS_KEY`. The script builds (`--no-build` skips), migrates and seeds a dedicated local database in `apps/web/.wrangler/perf-state/` (your dev database is untouched; size via `--accounts` / `--tokens` / `--days`, `--no-seed` reuses the last data), runs `wrangler dev` on the build output on port 3300 (inspector 9330, so it can run alongside `pnpm dev`), warms each endpoint with 5 requests and profiles 30. It overrides `BETTER_AUTH_URL` to its own origin and drops `LOG_LEVEL` / `LOG_PRETTY` so production log settings apply. No secret values are printed.
 
-## 为什么不能看 `durationMs` 日志
+Add an endpoint in `endpoints.mjs` → `ENDPOINTS`: `fn: "<handler name>"` (GET only) with optional `data: (ctx) => ({ … })`, or `path` for documents and routes; `expect` for a non-200 status.
 
-`src/lib/server/runtime.ts` 的 `withServerFnTiming` 用 `performance.now()` 记每个 server fn
-的耗时。**在 workerd 里这个时钟在同步计算期间是停的**(防计时侧信道,只在 I/O 边界前进),所以
-那行日志只看得见等 D1 的时间,看不见 CPU;而且它只包住 handler 本体,框架在前后做的事全不算。
-实测它比真实 CPU 低 2–10 倍(`getValuationSettings` 日志 2ms,真实约 20ms)。FOL-40 按它排过
-一次优先级,排错了。
-
-这个脚本从**外面**量:V8 采样 profiler 按真实时间打点,不受那个时钟影响。
-
-## 它做了什么
-
-1. `vite build`(`--no-build` 跳过)—— 测的是 `dist/server`,也就是 `wrangler deploy` 发出去的
-   那份,不是 `vite dev` 的逐模块转译。
-2. 在 **专用本地库** `apps/web/.wrangler/perf-state/` 上跑迁移。开发用的 `.wrangler/state`
-   一行都不碰(Miniflare 按 `--persist-to` 目录分库)。整个 `.wrangler/` 已被 gitignore。
-3. 确保压测用户 `perf@folio.test` 存在(没有就经 better-auth 的 HTTP 接口注册),然后清空
-   业务表、直写 SQLite 灌一份确定性数据:默认 8 个账户、60 个代币、30 天逐小时快照
-   (约 5.8k 张快照、4.4 万行持仓)。大小可调:`--accounts` / `--tokens` / `--days`。
-   `--no-seed` 沿用上次的数据。
-4. `wrangler dev --config dist/server/wrangler.json --inspector-port …` 起 worker,登录拿会话
-   cookie,经 inspector(CDP)开 `Profiler`,每个端点先预热 5 发、再顺序发 30 发,停采样。
-5. 退出时(正常、报错、Ctrl-C)把 wrangler 连同 workerd 子进程一起停掉。
-
-默认端口 3300 / inspector 9330,避开 `pnpm dev` 的 3000,两者可以同时开。
-
-## 需要 `apps/web/.dev.vars`
-
-至少要有 `BETTER_AUTH_SECRET` 和 `SECRETS_KEY`(抄 `.dev.vars.example`),缺了直接报错退出。
-脚本会给构建产物另写一份 `dist/server/.dev.vars`,其中:
-
-- `BETTER_AUTH_URL` 改成 perf worker 自己的 origin(`http://127.0.0.1:3300`)—— better-auth 的
-  CSRF 按它校验,必须和实际访问的 origin 一致。你的 `.dev.vars` 里写 `http://localhost:3000` 就行。
-- `LOG_LEVEL` / `LOG_PRETTY` 被丢掉,生效的是 `wrangler.jsonc` 里的生产值 —— 本地的 debug 彩色
-  日志每条都是真 CPU,线上没有。
-
-任何值都不会被打印。
-
-## 怎么读输出
+### Reading the output
 
 ```
    endpoint                  status  mean   p50   max  proc  wall p50  owners (mean ms/req)
@@ -57,222 +26,82 @@ Cloudflare Workers 免费档每个请求只有 **10ms CPU**。做性能的活,�
    static-favicon            200      0.0   0.0   0.0   4.0       5.0
 ```
 
-- **mean / p50 / max** —— 采样得到的每请求 CPU 毫秒(JS 自耗时 + GC)。`!` = mean 超过
-  `--budget-ms`(默认 10)。**mean 是主数字**,预算判定、前后对比都看它。
-- **proc** —— 交叉校验:不开采样再发同样多发,读内核记的 workerd 进程上 CPU 时间
-  (`/proc/<pid>/task/*/schedstat`)。它不靠采样,所以采样线程被饿的时候照样准;但它**多算**了
-  本地才有的东西 —— 同进程里跑的本地 D1(SQLite)、资源路由、HTTP 解析。`static-favicon` 那一行的
-  proc 就是这层本地底座(几毫秒)。mean 与 proc 大体相当 → 采样可信;mean 远高于 proc → 采样被
-  放大了(多半是机器忙),这次的数别用。非 Linux 上显示 `—`。
-- 端点名后的 **`*`** —— 这一行的 CPU 有四分之一以上来自「稀疏样本」:isolate 闲着时 V8 的采样会停,
-  恢复后第一个样本带着整段空档(几毫秒)记在当时那一帧上。总数(mean)仍然可用,但它落到哪一发
-  请求上是碰运气,所以 p50 / max 只是粗估。便宜的端点(几毫秒)常见。
-- **wall p50** —— Node 这边看到的往返时间。wall 远大于 CPU → 这个端点在等 I/O(本地 D1 或者
-  被挡住的上游请求),CPU 数字本身仍然可信,但它不是你以为的那条路径。
-- **status** —— 与期望不符会写成 `401≠200`:这时量的是报错路径,数字作废。
-- **owners** —— 这些毫秒落在谁身上。按构建产物里 rolldown 留下的 `//#region <源路径>` 注释把
-  每个采样帧映射回源模块,再归到包:`Effect`、`TanStack Start`、`TanStack Router`、`seroval`、
-  `better-auth`、`D1 driver`(`cloudflare-internal:d1-api`,主要是行 → JS 对象)、`React SSR`、
-  `GC`、`V8 native`、`app code (@folio/*)`,其余第三方按包名。不依赖 chunk 文件名,构建怎么切都准。
-- **`static-favicon`** 是对照组:静态资源不进 worker,应当是 0。它不是 0 就说明量法坏了。
+- **mean / p50 / max** — sampled CPU ms per request (JS self time + GC). **mean is the headline number.** `!` = mean over `--budget-ms` (default 10).
+- **proc** — cross-check from the kernel's CPU time for workerd, without sampling. It also counts local-only work (local D1, HTTP parsing; the `static-favicon` row shows that floor). mean ≈ proc → the sample is trustworthy; mean ≫ proc → the machine was busy, discard the run.
+- **`*`** after a name — over a quarter of the CPU came from sparse samples (the first sample after an idle gap carries the gap). mean is still usable; p50 / max are rough.
+- **wall p50** — round trip seen from Node. wall ≫ CPU means the endpoint is waiting on I/O.
+- **status** — `401≠200` means it measured an error path; ignore the numbers.
+- **owners** — where the ms go, mapped back to packages from the build's `//#region` comments (`Effect`, `TanStack Start`, `better-auth`, `D1 driver`, `React SSR`, `GC`, `V8 native`, `app code (@folio/*)`, …).
+- **`static-favicon`** is the control: static assets don't reach the Worker, so it must be 0.
 
-输出目录(默认 `.wrangler/perf-state/runs/<时间戳>/`,`--out` 可改):
+Output goes to `.wrangler/perf-state/runs/<timestamp>/` (`--out` to change): one `.cpuprofile` per endpoint (load in Chrome DevTools › Performance), `summary.json` (per-request CPU, owners, top 25 modules, GC, dataset size, machine load) and `wrangler.log`. `--fail-over-budget` exits 1 if any mean is over budget.
 
-- `<端点>.cpuprofile` —— 原始 profile,Chrome DevTools › Performance › 载入,看火焰图。
-- `summary.json` —— 每端点的逐请求 CPU、归属分组、最热的 25 个源模块、GC / `(program)` 时间、
-  数据集大小、运行前后的机器负载。
-- `wrangler.log` —— 构建、迁移与 worker 的日志。
+### Caveats
 
-`--fail-over-budget`:任一端点 mean 超预算就以 1 退出,留给以后接 CI(现在没接)。
+- These are local CPU ms, not edge ms; there is no conversion factor. Compare **shapes** (who dominates, ratios, before/after). The real numbers are `cpuTime` in Workers Logs (`perf:cpu:online`).
+- A busy machine inflates everything; the script warns when load exceeds ¾ of the cores. Run before/after on a quiet machine.
+- One request at a time, read paths only, and no manual accounts in the dataset (they would hit CoinGecko on every request).
+- `--cold` includes module evaluation and first-call initialization; Cloudflare bills Worker startup separately.
 
-## 口径与局限(引用数字前先看)
-
-- **这是本机的 CPU 毫秒,不是 Cloudflare 边缘的。** 两者没有换算系数。可以搬过去的是**形状**
-  (谁占大头、端点之间的比例、改动前后的差),不是绝对值。线上真值看 Workers Logs 的 `cpuTime`。
-- **机器忙的时候数字整体偏高**(被抢走的时间片会落在正在跑的帧上)。开测前负载高于核数 ¾ 时
-  脚本会提醒;对比前后两次时,两次都要在安静的机器上跑。
-- CPU 是上界:采样间隔里的短暂 I/O 等待会被算进前一个 JS 帧。
-- `(program)` 不计入(V8 说不清归谁的原生时间),与最初那轮测量同口径;数值在 `summary.json` 里。
-- 逐请求拆分靠「profile 时间戳与 Node 的 `process.hrtime` 是同一个单调时钟」(Linux 上成立,
-  实测对得上)。对不上时只给 mean,p50 / max 显示 `—`。
-- 一次一发,不测并发;不测写路径;数据集里**刻意没有 manual 账户** —— 有它的话
-  `getSnapshots` / `getPortfolioHistory` 每次都会去 CoinGecko 取今日价,断网环境里一发要等几十秒,
-  量到的是网络。
-- `--cold` 的第一发把模块求值、better-auth / Effect 的首调初始化都算进去了;Cloudflare 把 worker
-  启动(模块解析求值)记在另一份约 400ms 的预算里,所以冷启动这个数和线上计费不是一回事。
-
-## perf:cpu:jobs —— 定时任务(和运行器的 alarm)每次调用吃多少 CPU
+## `perf:cpu:jobs` — cron and background job CPU
 
 ```sh
-pnpm --filter @folio/web perf:cpu:jobs                     # 构建 → 灌数据 → 两个 cron 各量一轮
+pnpm --filter @folio/web perf:cpu:jobs                     # build → seed → measure both crons
 pnpm --filter @folio/web perf:cpu:jobs --no-build --only cron-sweep --reps 3
 pnpm --filter @folio/web perf:cpu:jobs --list              # cron-daily / cron-sweep
-pnpm --filter @folio/web perf:cpu:jobs --help
 ```
 
-上面那个 `perf:cpu` 只量读路径。这个量**后台写路径**:整点 sweep(`30 * * * *`,开轮 + 给每个账户投
-一条 `sync-account`、给每个用户投 `prices` / `daily-prices` / `fx` / `platforms` / `defi-logos`)与每天
-那条(`0 23 * * *`,投 `prune-notes` / `catalogue`)。两个 cron 本体都只投活(FOL-86 / FOL-88),真活在
-运行器(`JobRunner` 这个 Durable Object,FOL-100)的 alarm 里一件一次调用地跑,所以表里分开量:cron 那一次,
-与**每件活的每一次 alarm**。改 cron 之前、之后各跑一遍,两张表
-贴进 PR。基线存在 `baselines/`(`jobs-before-2026-09-28.txt` 是改成队列扇出之前的那一份,里面的
-`cron-ref-index` 行是刷全局映射表还在 Worker 里跑的时候量的)。
+Measures the write path: the hourly sweep (`30 * * * *`) and the daily cron (`0 23 * * *`), plus every `JobRunner` Durable Object alarm they cause. A fake upstream (`fake-upstream.mjs`, `127.0.0.1:3399`) stands in for every provider and CoinGecko with production-sized, deterministic responses; the Worker is pointed at it through `*_API_BASE` overrides and fake keys. Seeded accounts have real encrypted credentials so sync actually runs. The Worker restarts for every invocation (production crons usually land on a cold isolate) and prices are marked stale first. Each task gets one `:first` run, then `--reps` steady-state runs. A sweep takes over two minutes locally because delayed jobs fire 120 s later.
 
-**全局代币映射表不在这里量了**(FOL-85,ADR 0056):那一趟(基线里 ≈ 390ms)挪到了 GitHub Actions
-里的 Node 脚本(`scripts/ref-index/refresh.ts`),不再吃 Worker 的 10ms,所以 `cron-ref-index` 这一格
-没了。harness 仍要一张非空的表(sweep 靠它认链上的币):灌完数据后用**同一个脚本**
-`--local` 对着 perf 库刷一次(指到假上游),日志里打出它的计数与墙钟,不进表。
+Diagnostics: `--warm` keeps one Worker per scenario (cold vs warm cost); `--cron-only` binds `JOB_RUNNER` to a stub so only `scheduled()` is measured.
 
-**本机数字 ≠ 边缘数字。** 两者没有换算系数;能搬过去的是形状(谁占大头、第一次与稳态之比、改动前后
-的差)。线上真值看 Workers Logs 的 `cpuTime`。
-
-### 它做了什么(与 perf:cpu 不同的部分)
-
-1. **假上游**(`fake-upstream.mjs`,默认 `127.0.0.1:3399`)。沙箱出网被挡,而这条路每一步都要出网。
-   一个 HTTP server 按路径前缀扮演 cron 会打的每一家:binance / okx / bybit / rabby(EVM)/
-   coinstats(Solana)/ hyperliquid / blockbook(BTC)/ CoinGecko(`coins/markets`、`simple/price`、
-   `coins/list?include_platform=true`、`asset_platforms`、`exchange_rates`、交易所、搜索、历史价)。
-   响应形状照录制的 fixture,带上生产响应里我们不读的那些字段(JSON.parse 按字节收费)。
-   数据确定性生成,**一个代币宇宙所有上游共用**:CEX 报的 symbol、钱包报的合约地址、CoinGecko 的
-   目录与映射表指的是同一批币,mint 才认得出来、估值那段才真的跑。`coins/list` 约 18k 个币、
-   23k 条平台地址、2.6 MB,与生产同量级。每个账户约 50 行持仓(bitcoin 单地址只有一行)。
-2. worker 经 `dist/server/.dev.vars` 被指到假上游:各家的 base URL 覆盖(`BINANCE_*_BASE` /
-   `OKX_API_BASE` / `BYBIT_API_BASE` 是生产本来就有的 #264 开关;`RABBY_API_BASE` /
-   `COINSTATS_API_BASE` / `HYPERLIQUID_API_BASE` / `BLOCKBOOK_API_BASE` / `COINGECKO_API_BASE` 是
-   FOL-84 补的同款开关,**生产不设**)外加两把假 key(CoinStats 没 key 不出网;CoinGecko 有 key 走
-   demo 档的闸,只影响 wall)。你 `.dev.vars` 里就算有真 key,也被这些同名覆盖换掉。
-3. 灌的账户带**真形状的凭据**:secret 字段按 app 的规矩用 `SECRETS_KEY` 加密(AES-GCM),worker
-   解得开、同步真的会跑,不会在「缺凭据」那一步跳过。
-4. 每次调用都**重起 worker**,触发 `/cdn-cgi/handler/scheduled?cron=…`(它等 `waitUntil` 跑完才答,
-   所以一次触发 = 一次完整调用)。重起的理由:生产的整点 cron 隔着一小时,多半落在一个没热过这条
-   路径的 isolate 上;连着触发的话 JIT、Rabby 的链表缓存、各家的闸都是热的。sweep 每次之前还把代币价
-   标成过期(`PRICE_TTL_MS` 30 分钟,生产隔一小时必然过期)。
-5. 每个任务先单列一次 **`:first`**(灌完数据后的第一次:目录没缓存 / 代币没建行),
-   再量 `--reps` 次稳态(默认 sweep 5、每天那条 3)。映射表是空的就先用 `scripts/ref-index` 刷一次
-   (不计时,见上)—— 链上的币靠它认。
-6. **运行器**:触发之后接着等**这次投的每一件活**都收尾。件数来自 cron 投完那行日志的 `jobs`
-   (`cron sweep enqueued` / `daily jobs enqueued`),收尾来自 consumer 每件一行、带 `kind` 的日志
-   (`job done` / `job failed…` / `invalid job dropped`,见 `jobs/consume.ts`);件数收齐之后再等 2 秒
-   安静(没有新的收尾行),接住接力投的后续活(`prices` 拆件、`daily-prices` 补不完再投)。**只靠安静
-   不够**:`platforms` / `defi-logos` 延后 120s 才到点,中间整段是安静的 —— 所以一次 sweep 触发本机要两分多钟。
-   多出的行:`<任务>:window`(cron + 它引出的全部 alarm,每次触发的总数)与
-   `<任务>:alarm:<kind>`(每件活的**每次 alarm** 一个样本 —— 预算是按一次调用算的)。
-   **怎么切成逐次 alarm**:本地的 alarm 没有自己的起止可认 —— workerd 自己调度 alarm,wrangler dev 一行都
-   不打(队列时代有 miniflare 的 `QUEUE <name> a/b (Nms)`,alarm 没有对应物)。能用的只有 app 自己的收尾行:
-   一次 alarm 只跑一件(`jobs/runner.ts`),所以一行收尾 = 一次 alarm 的终点,按它 JSON 里的 `@timestamp`
-   (毫秒;workerd 的 `Date.now()` 只在 I/O 边界前进,收尾行紧跟最后一次 I/O,够用)换到 profile 的时钟上。
-   第 k 格 = [第 k−1 件收尾, 第 k 件收尾),第一格从 cron 投完那行起。一格里因此还带着上一次 alarm 收尾后的
-   那点尾巴(删行、再定 alarm)与这一次进门的开销;中间的空等(延后、退避)不算 CPU(采样器闲时停、恢复样本
-   封顶,见下)。cron 投完之后的 `pokeRunner` 落在第一格;多用户时前面用户的活会和后面用户的投活交错。
-   所以逐 kind 是**近似**,整段窗口(`:window`)的总数是准的。一次 alarm 的墙钟量不到,`wall p50` 空着。
-   DO 与 worker 在同一个 isolate 里(本地),采样器看得见它。运行器的本地存储(`v3/do/<worker>-JobRunner`)
-   每次起 worker 前清掉,上一次没跑完的活不会混进来。构建产物里没有 `JOB_RUNNER` 这个 DO 绑定 → 这些行不出现。
-
-### 怎么读输出
+### Reading the output
 
 ```
-   invocation                     n  status   mean … fetches  result                  owners (mean ms/invocation)
-!  cron-sweep:first*              1  200      70.0 …     0  synced 8/8, jobs 13/13  Effect … · app code … · D1 driver …
-!  cron-sweep                     1  200      86.4 …     0  synced 8/8, jobs 13/13  …
+   invocation                     n  status   mean … fetches  result                  owners
+!  cron-sweep:first*              1  200      70.0 …     0  synced 8/8, jobs 13/13  …
 !  cron-sweep:window              1  200     645.5 …     0  synced 8/8, jobs 13/13  …
-!  cron-sweep:alarm:prices        1  done     62.1 …     3  1.0 per trigger
 !  cron-sweep:alarm:sync-account  8  done     59.0 …     3  8.0 per trigger
 ```
 
-- **mean / p50 / max** —— 每次调用的采样 CPU(JS + GC),在 n 次之间比。
-- **空档样本封顶(与 perf:cpu 唯一的口径差别)**:一次 cron 大半时间在等(闸、上游、D1),isolate
-  闲着时采样器是停的,恢复后第一个样本带着整段空档。不封顶的话,一次 sweep 27 秒的窗口里有 21 秒
-  落在这种样本上,量到的是等待。所以单个样本最多记 10 × 采样间隔(1ms),超出的记进 summary 的
-  `gapMs`。这使 mean 偏向**上界**(每次恢复最多多记不到 1ms);封顶取 2 × 间隔时 sweep 低约 25%。
-  `*` 同 perf:cpu:封顶样本贡献了四分之一以上 —— 总数仍可用,但抖动大,多跑几次看 p50。
-- **proc** —— 同一段窗口里内核记的 workerd 上 CPU。它含本地 D1(SQLite 在同一个进程里跑,sweep
-  写几百行、刷表比对几万行)、HTTP 解析、**以及采样器自己**,所以比 mean 高得多是正常的;它的用处是
-  前后对比时看「总量」有没有一起动。
-- **wall p50** —— 触发到答的往返。sweep 的 wall 主要是闸在排队(Rabby 每秒 1 发、CoinGecko 每分钟
-  80 发),不是 CPU。
-- **fetches** —— 这次调用假上游收到几发(按上游 + 路径的明细在 `summary.json` 的 `fetchesByRoute`)。
-- **result** —— 从这次调用自己的日志里读出来的:sweep 是 `synced 同步成功/总数`(各轮收官那行
-  `queued round done` 相加)+ `jobs 收尾/投出`;每天那条是用户数 + `jobs 收尾/投出`。没干成(有账户
-  失败、有活被埋掉或超时、没见到投递日志)的状态格会标 `✗`,那行数字作废。逐 kind 那几行的 result
-  是「每次触发平均几次这种 alarm」,状态是 `done` / `retried` / `buried`。
-- **owners** —— 同 perf:cpu。
+- Rows: `<task>` is the cron invocation itself; `<task>:window` is the cron plus every alarm it caused (total is exact); `<task>:alarm:<kind>` is one sample per alarm of that job kind (the budget applies per invocation). Per-kind splits are approximate: alarms are cut at each job's completion log line.
+- **mean** is an upper bound: samples after idle gaps are capped at 10 × the sampling interval (the excess goes to `gapMs` in the summary). `*` means capped samples are over a quarter of the total — run more reps and watch p50.
+- **proc** includes local D1, HTTP parsing and the profiler itself, so it runs well above mean; use it only to see whether the total moved.
+- **wall p50** is mostly rate-limit queuing, not CPU.
+- **fetches** — requests the fake upstream received (per route in `summary.json` → `fetchesByRoute`).
+- **result** — `synced ok/total` and `jobs done/enqueued`, read from the run's own logs. A `✗` means something failed or timed out; ignore that row. Alarm rows show `done` / `retried` / `buried`.
 
-输出目录默认 `.wrangler/perf-state/runs/jobs-<时间戳>/`:每次调用一份 `<任务>-<first|repN>.cpuprofile`、
-`summary.json`(逐次的 CPU / gap / 逐路由的出网数 / 收尾日志的字段 / 逐次 alarm)、`wrangler.log`,
-以及每份 profile 旁边一份 `<任务>-<tag>.slots.json`(这一窗里每次调用的起点与 kind)。
+Output: `.wrangler/perf-state/runs/jobs-<timestamp>/` with a `.cpuprofile` and `.slots.json` per invocation, `summary.json` and `wrangler.log`.
 
-### 看到函数这一级:`perf:cpu:analyze`
+Limits: the fake upstream never fails or throttles (retry paths aren't measured); Bitcoin uses a single address; EVM uses Rabby only; one user.
 
-owners 只说到包(「Effect 325 ms」)。要知道是 Effect 里的哪件事,对着输出目录跑(profile 的行号只对那次构建有效,
-所以输出目录里存了一份那次的 region 表 `regions.json`,`dist/` 重建过也照样认得):
+## `perf:cpu:analyze` — function-level breakdown
 
 ```sh
-pnpm --filter @folio/web perf:cpu:analyze <run-dir>                    # 每个 kind:self / inclusive top-25
+pnpm --filter @folio/web perf:cpu:analyze <run-dir>                    # self / inclusive top 25 per kind
 pnpm --filter @folio/web perf:cpu:analyze <run-dir> --kind sync-account --top 40
-pnpm --filter @folio/web perf:cpu:analyze <run-dir> --tree --kind cron  # 自顶向下的树,折叠 Effect 运行时帧
+pnpm --filter @folio/web perf:cpu:analyze <run-dir> --tree --kind cron  # top-down tree
 ```
 
-拆窗与封顶和表里同一个规则(每次调用一格、空档样本封顶),数字是**每次调用**的平均。Effect 的
-fiber 是蹦床式的,调用栈里常常只剩 `runLoop` / `evaluateEffect`,认不出业务 —— 所以 `--tree`
-默认把 Effect 运行时的帧折掉(`--collapse` 可改),inclusive 列表里它们仍在。
+Numbers are per-invocation averages with the same windowing and capping as the tables. `--tree` collapses Effect runtime frames (`runLoop`, `evaluateEffect`) by default (`--collapse` to change). Each run dir stores its own `regions.json`, so it still works after `dist/` is rebuilt.
 
-### 两个诊断开关
-
-- `--warm`:一个场景只起一个 worker,后几次落在热 isolate 上。与默认口径对照,就知道一次调用里
-  多少是冷 isolate 的首跑开销(第二轮实测:每天那条 cron 冷 ≈57ms、热 ≈7ms)。
-- `--cron-only`:只量 `scheduled()` 那一次。alarm 关不掉(到点就响),所以 worker 以两份配置起:
-  主 worker 的 `JOB_RUNNER` 改绑到第二个 worker 里的空壳 DO(`dist/server/wrangler.cron-only.json` +
-  `wrangler.runner-stub.json` + `runner-stub.mjs`,`script_name` 跨 worker 绑定)—— cron 照样经 RPC 投活
-  (调用方那一侧照算),活却没人跑,不会和 cron 叠在同一个采样窗里;空壳在另一个 isolate,采样器看不见。
-  每次触发前清掉同步轮,免得下一次 cron 在心跳期内因为「活轮还在」不投。默认口径下 cron 那一格的
-  终点是「投完」那行日志,之后的 `pokeRunner` 与 alarm 交错 —— 比 cron 本体时用这个。
-
-### 局限
-
-- 假上游答得比真上游快、而且从不失败:重试、限流退避那几条路不在数字里。
-- bitcoin 只测了单地址(xpub 那条会多派生、多一截 CPU);EVM 只走 Rabby(Zerion 不是默认源)。
-- `:first` 在本机是「灌完数据的第一次」,生产上对应的是新用户 / 新币第一次进来那一轮,不是每小时。
-- 数据集只有一个用户;多用户的形状(sweep 逐用户串行)要靠 `--accounts` 放大近似。
-
-## 加一个端点
-
-在 `endpoints.mjs` 的 `ENDPOINTS` 里加一行:server fn 写 `fn: "<handler 名>"`(只支持 GET,id 从
-构建出的 manifest 按名字反查)+ 需要的话 `data: (ctx) => ({ … })`;文档或普通路由写 `path`。
-非 200 的期望状态写 `expect`。
-
-## 线上:`perf:cpu:online`
+## `perf:cpu:online` — production numbers
 
 ```sh
-CLOUDFLARE_OBSERVABILITY_TOKEN=… pnpm --filter @folio/web perf:cpu:online            # 当前线上版本,最近 7 天
-pnpm --filter @folio/web perf:cpu:online --version all --days 1 --token-env MY_VAR  # 所有版本
+CLOUDFLARE_OBSERVABILITY_TOKEN=… pnpm --filter @folio/web perf:cpu:online            # current version, last 7 days
+pnpm --filter @folio/web perf:cpu:online --version all --days 1 --token-env MY_VAR
 ```
 
-读 Workers Logs 里 Cloudflare 计量的 `cpuTimeMs` —— 线上真值,本地那张表的数字只能拿来比形状。
-需要一把**账户级** API token(Manage Account › Account API Tokens,Worker 选 `folio`,角色
-Metadata Read-Only);个人 token 加 Workers Observability 权限也读不了日志接口(2026-09 实测)。
-`account_id` 与 Worker 名从 `wrangler.jsonc` 读。
+Reads Cloudflare's `cpuTimeMs` from Workers Logs. Needs an **account-level** API token (Account API Tokens, Worker `folio`, Metadata Read-Only); a personal token can't read the logs endpoint.
 
-- **按调用类型 / cron 的两张表是全量统计**:`exceededCpu` 的次数可以直接引用。
-- **按 server fn 的那张是抽样的**:TanStack 的路径在日志里是 `REDACTED`,只能把
-  `withServerFnTiming` 打的「server fn」那行(带 `handler`)与同一个 requestId 的调用日志对上,
-  而事件接口按自适应采样只回一部分。`n` 就是样本数,别拿它算总量。列里有 P99(FOL-84 验收要的),
-  但样本少时它≈ max,只当尾部的粗看;p90 更稳。
-- **运行器按任务种类的那张同样是抽样的**:一次 alarm 调用本身不带「这是哪件活」,把 `jobs/consume.ts`
-  每件活收尾打的 `job done` / `job failed…` 行(带 `kind`)与同一个 requestId 的 alarm 调用
-  (`$workers.eventType = "alarm"`)对上(一次 alarm 只跑一件,一个 requestId 就是一件活)。
-  **因 CPU 超限被掐断的调用来不及打这行**,没领到活的 alarm 也不打,都算进 unmatched —— 超限的总次数看
-  上面「按调用类型」那张全量表的 `alarm · exceededCpu`。`"alarm"` 这个取值出自 Workers Trace Events
-  文档的 EventType 枚举,还没对着线上 Workers Logs 验过。
-  对法在 `online-join.ts`(`tests/perf-online-join.test.ts` 钉着)。
-- 默认只看**当前线上版本**:换过版本后旧数字不代表现在。新版本刚上线、还没有请求时表是空的。
+- The per-invocation-type and per-cron tables are complete counts — `exceededCpu` counts can be quoted.
+- The per-server-fn and per-job-kind tables are sampled (`n` = samples); don't derive totals from them, and prefer p90 over P99 when `n` is small. Alarms killed for exceeding CPU never log their job, so they show up as unmatched; use `alarm · exceededCpu` from the complete table.
+- By default only the current production version is shown; a fresh deploy with no traffic gives empty tables.
 
-## perf:requests —— 开一次页面发多少请求
+## `perf:requests` — requests per page load
 
 ```sh
 PLAYWRIGHT_BROWSERS_PATH=… pnpm --filter @folio/web perf:requests --no-build
 ```
 
-同一个构建产物 + perf 库 + 假上游,Playwright 的 Chromium 登录后冷开 `/`,等网络静下来,再 `reload()`
-(数据没变)。按类数 `/_serverFn/*`、`/api/*`、`/api/logo/*`:`server` 那一栏取自 wrangler dev 的请求日志
-(真进了 Worker 的),浏览器侧计数与逐 server fn 的明细在 `summary.json`(`.wrangler/perf-state/runs/requests-<时间戳>/`)。
-冷开时 app 会自己再加载一次文档(SW 安装后),所以冷开数是两次页面加载的和 —— 看 `navigations`。
+Logs in with Playwright on the perf build, cold-opens `/`, waits for the network to settle, then reloads. Counts `/_serverFn/*`, `/api/*` and `/api/logo/*`; the `server` column comes from requests that actually reached the Worker. Details in `.wrangler/perf-state/runs/requests-<timestamp>/summary.json`. The cold open includes a second document load after the service worker installs — see `navigations`.

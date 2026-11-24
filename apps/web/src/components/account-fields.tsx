@@ -21,11 +21,10 @@ import type { InputSpec } from "@/lib/server/creds";
 import { manualTokensJson } from "./manual-tokens";
 import { TokenCombobox } from "./token-combobox";
 
-// Bitcoin add-account 的脚本类型 UI 辅助(客户端安全:纯字符串,不引 @scure 派生库)。
-// ScriptType 本地定义(与 @folio/bitcoin-derive 的 provider 侧同口径;那份含 @scure 派生库,不能进客户端 bundle)。
+// Local ScriptType: the provider-side one pulls in @scure derivation libs, which can't enter the client bundle.
 type ScriptType = "native" | "nested" | "taproot" | "legacy";
 
-// 下拉选项(推荐项排前);label 走 Inputs i18n,addressPrefix 提示该类型派生地址的开头(语言无关,直接展示)。
+// Recommended option first; addressPrefix hints at the derived address start.
 const BTC_SCRIPT_OPTIONS: { value: ScriptType; label: string; addressPrefix: string }[] = [
   { value: "native", label: "Native SegWit", addressPrefix: "bc1q…" },
   { value: "nested", label: "Nested SegWit", addressPrefix: "3…" },
@@ -35,33 +34,27 @@ const BTC_SCRIPT_OPTIONS: { value: ScriptType; label: string; addressPrefix: str
 
 const EXT_PUBKEY_RE = /^(xpub|ypub|zpub)/;
 
-// 是否扩展公钥(xpub/ypub/zpub)。
 const isExtendedPubkey = (id: string): boolean => EXT_PUBKEY_RE.test(id.trim());
-// 是否裸 xpub —— 只有它脚本类型才歧义、需用户选;ypub/zpub 前缀已定,展示为只读。
+// Only a bare xpub is ambiguous and needs a user choice; ypub/zpub prefixes fix the type.
 const isBareXpub = (id: string): boolean => id.trim().startsWith("xpub");
 
-// 前缀预选/识别:ypub→Nested、zpub→Native、裸 xpub→Native(与 provider recommendedScript 一致)。
+// Matches the provider's recommendedScript.
 function recommendedScript(id: string): ScriptType {
   return id.trim().startsWith("ypub") ? "nested" : "native";
 }
 
-// 添加账户的录入字段与提交(A4 从 add-account-sheet 抽出,供 AddAccountModal 复用)。connector-driven 创建(#55):
-// 字段组件按 connector.account.creds 的 key 写入 values,原样透传给统一 createAccount(校验/加密/落库全在服务端
-// 按 connectorId 驱动)。manual 选币用 TokenCombobox(内联下推,取代旧 TokenPicker 浮层)。
 async function submitAccount(
   connectorId: ConnectorId,
   label: string,
   values: Record<string, string>,
   portfolioId: string | undefined,
 ) {
-  // portfolioId:新账户落在当前选中的 Portfolio(ADR 0033);缺省(= 看默认)则服务端落默认。
+  // Defaults to the server's default portfolio when undefined.
   return createAccount({ data: { connectorId, label, values, portfolioId } });
 }
 
-// manual 的字段:富控件(TokenCombobox 选币联动 symbol + 票 + autofill 单价 / 数字)。
-// 找不到的币可切"手动输入 symbol"(不关联,票为空)。
-// manual 的 account.creds 就是单个 `tokens`(ADR 0017)→ 本地维护首 token 标量,序列化成 `values.tokens`
-// (单元素 JSON,数字留字符串由 manualToken validator coerce)提交,服务端不再从标量拼装。
+// Manual account: a single `tokens` creds value, kept as local scalars and serialized into
+// `values.tokens` (numbers stay strings; the manualToken validator coerces).
 function ManualFields({
   setValues,
 }: {
@@ -70,41 +63,38 @@ function ManualFields({
   const t = useTranslations("Accounts");
   const [picked, setPicked] = useState<TokenOption | null>(null);
   const [manualMode, setManualMode] = useState(false);
-  // 取价 + 竞态守卫 + busy 都来自这一份共享 hook(#428 片 5)。
-  // 这里以前自己抄了一遍同样的 `reqRef` 守卫,与 use-token-price.ts 各存一份 —— 现在只有一份。
+  // Shared hook owns price fetching, the race guard and busy state.
   const { fetchPrice, cancel: cancelPriceFetch, busy: priceBusy } = useTokenPrice();
-  // 首 token 的本地标量;经 effect 序列化进 values.tokens(不在 setState updater 里做副作用)。
+  // Local scalars of the first token, serialized by the effect below.
   const [tok, setTok] = useState({ symbol: "", amount: "", unitPrice: "", ticket: "" });
   const patch = (p: Partial<typeof tok>) => setTok((prev) => ({ ...prev, ...p }));
 
-  // tok → values.tokens(纯序列化见 manualTokensJson)。副作用放 effect,不在 setState updater 里。
+  // Side effect lives in an effect, not in a setState updater.
   useEffect(() => {
     setValues(() => ({ tokens: manualTokensJson(tok) }));
   }, [tok, setValues]);
 
-  // 选中币:填 symbol + 票,并回填 unitPrice(用户可改;竞态守卫)。
-  // 票原样搬运 —— 组件不解释它,提交时随 `tokens` JSON 一起交回服务端。
+  // The ticket is passed through opaquely and returned to the server inside the `tokens` JSON.
   async function onPick(token: TokenOption | null) {
     setPicked(token);
     if (!token) {
-      cancelPriceFetch(); // 作废还在飞的取价,否则它回来会往空掉的框里填数
+      cancelPriceFetch(); // a late in-flight price would fill the emptied field
       patch({ symbol: "", ticket: "", unitPrice: "" });
       return;
     }
     const { ticket } = token;
     patch({ symbol: token.symbol.toUpperCase(), ticket });
-    // 下拉里已经显示了价(SWR 刷来的 / 默认列自带的)→ 直接用它回填,零延迟、就是用户点的那个数。
+    // Use the price already shown in the dropdown: instant, and it is the number the user clicked.
     if (token.price != null) {
       cancelPriceFetch();
       patch({ unitPrice: String(token.price) });
       return;
     }
-    // 没有显示价(那行本来就是 `—`,比如刷价失败)→ 才回源现取一次兜底。
+    // No displayed price (e.g. refresh failed): fetch once as a fallback.
     await fetchPrice(ticket, (unitPrice) => patch({ unitPrice: String(unitPrice) }));
   }
 
-  // 转去自定义 symbol(未收录资产):它没有市价 —— 清掉之前自动填的单价让用户自己填,
-  // 顺带作废还在飞的取价(否则它回来会把单价又填上)、清票与已选项。
+  // Custom symbol has no market price: clear any auto-filled price and cancel an in-flight fetch.
   function enterManual(symbol: string) {
     cancelPriceFetch();
     setPicked(null);
@@ -112,7 +102,7 @@ function ManualFields({
     patch({ symbol, ticket: "", unitPrice: "" });
   }
 
-  // 转回搜索:清掉自定义 symbol 与单价,回到干净的选币态(重新选中会再自动填价)。
+  // Back to search: reset to a clean pick state.
   function leaveManual() {
     setManualMode(false);
     patch({ symbol: "", unitPrice: "" });
@@ -182,9 +172,8 @@ function ManualFields({
   );
 }
 
-// 通用字段(onchain/exchange/perp):按 credentialSpecs 渲染(secret→password,其余 text);label 走 Inputs i18n。
-// 两用:加账户(默认 idPrefix "add",无 hint)与补录(A3,idPrefix "cred" + hint = credsSafe,semi 字段展示
-// "记录的 X:abc…xyz" 供识别)—— 一条字段渲染路径。hint 缺省 → 无提示行,加账户行为不变。
+// One field path for adding an account (idPrefix "add") and re-entering credentials (idPrefix
+// "cred" + hint = credsSafe, so semi fields show the masked fragment for recognition).
 export function GenericFields({
   specs,
   values,
@@ -196,14 +185,14 @@ export function GenericFields({
   values: Record<string, string>;
   setValues: (fn: (v: Record<string, string>) => Record<string, string>) => void;
   idPrefix?: string;
-  hint?: Record<string, string>; // safeView 投影:semi 打码片段(补录时识别用)
+  hint?: Record<string, string>; // safeView projection: masked semi fragments
 }) {
   const ti = useTranslations("Inputs");
   const ta = useTranslations("Accounts");
   return (
     <>
       {specs.map((s) => {
-        // 仅 semi 字段有可识别的打码片段(public 已知不问、secret 无投影);展示"记录的 X:片段"。
+        // Only semi fields have a recognizable masked fragment (public is known, secret has no projection).
         const recorded = s.type === "semi" ? hint?.[s.key] : undefined;
         return (
           <div key={s.key} className="flex flex-col gap-2">
@@ -217,8 +206,8 @@ export function GenericFields({
               id={`${idPrefix}-${s.key}`}
               type={s.type === "secret" ? "password" : "text"}
               required={s.type !== "public" || s.key === "address"}
-              // secret 用 new-password:Chrome 对 password 框忽略 autoComplete="off",会回填本站登录账号/密码;
-              // 标成"新密码"既不回填,也打断"前一个文本框=用户名"的登录表单配对,连带 API Key 也不再被填。
+              // `new-password`: Chrome ignores autoComplete="off" on password inputs and would autofill
+              // the site login; this also breaks the username/password pairing so API keys aren't filled.
               autoComplete={s.type === "secret" ? "new-password" : "off"}
               value={values[s.key] ?? ""}
               placeholder={s.desc ? ti(s.desc) : undefined}
@@ -231,8 +220,7 @@ export function GenericFields({
   );
 }
 
-// Bitcoin 字段:单 identifier(地址或扩展公钥),检测到扩展公钥后动态显示脚本类型下拉、按前缀预选。
-// ProviderInputType 无 enum → 脚本类型的 select + 动态显隐走本定制分支(仿 manual/perp),不走 GenericFields。
+// Custom branch: scriptType select shown dynamically once an extended pubkey is detected.
 function BitcoinFields({
   specs,
   values,
@@ -245,7 +233,7 @@ function BitcoinFields({
   const ti = useTranslations("Inputs");
   const idSpec = specs.find((s) => s.key === "addressOrXpub");
   const id = values.addressOrXpub ?? "";
-  // ypub/zpub 前缀已定类型的只读展示文案(具名变量,不在 JSX 里塞 IIFE)。
+  // Read-only label for ypub/zpub, whose prefix fixes the type.
   const detected = BTC_SCRIPT_OPTIONS.find((o) => o.value === recommendedScript(id));
   const detectedLabel = detected ? `${ti(detected.label)} · ${detected.addressPrefix}` : "";
   return (
@@ -260,7 +248,7 @@ function BitcoinFields({
           onChange={(val) =>
             setValues((v) => {
               const next: Record<string, string> = { ...v, addressOrXpub: val };
-              // 只有裸 xpub 才歧义、需 scriptType(默认 Native);ypub/zpub 前缀已定、单地址无关 → 不带。
+              // Only a bare xpub is ambiguous and needs scriptType.
               if (isBareXpub(val)) next.scriptType = recommendedScript(val);
               else delete next.scriptType;
               return next;
@@ -268,7 +256,7 @@ function BitcoinFields({
           }
         />
       </div>
-      {/* 裸 xpub:歧义 → 让用户选(默认 Native,可改)。 */}
+      {/* Bare xpub: ambiguous, user picks (default Native). */}
       {isBareXpub(id) && (
         <div className="flex flex-col gap-2">
           <Label>{ti("Address type")}</Label>
@@ -281,8 +269,7 @@ function BitcoinFields({
             </SelectTrigger>
             <SelectContent>
               {BTC_SCRIPT_OPTIONS.map((o) => (
-                // 单字符串 children:SelectItem 才会把它作为 trigger 显示的 label(JSX 会回退成 value)。
-                // 拼上地址前缀,让用户按自己钱包地址的开头对上类型。
+                // Single-string children: SelectItem only shows a string as the trigger label.
                 <SelectItem key={o.value} value={o.value}>
                   {`${ti(o.label)} · ${o.addressPrefix}`}
                 </SelectItem>
@@ -292,7 +279,7 @@ function BitcoinFields({
           <p className="text-muted-foreground text-xs">{ti("btcScriptHint")}</p>
         </div>
       )}
-      {/* ypub/zpub:前缀已确定类型 → 只读展示,不必选。 */}
+      {/* ypub/zpub: type fixed by prefix, read-only. */}
       {isExtendedPubkey(id) && !isBareXpub(id) && (
         <div className="flex flex-col gap-1.5">
           <Label>{ti("Address type")}</Label>
@@ -303,7 +290,7 @@ function BitcoinFields({
   );
 }
 
-// 单个 connector 的录入表单。key={connectorId} 重挂 → 切 connector 自动清空本地态(不用 useEffect→setState)。
+// key={connectorId} remounts on connector change, clearing local state.
 export function AccountForm({
   connectorId,
   specs,
@@ -319,7 +306,7 @@ export function AccountForm({
   const [label, setLabel] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const mutation = useMutation({
-    // 落在当前选中的 Portfolio;看默认时不传(服务端本就落默认),省一次多余归属重写。
+    // Omit for the default portfolio (the server defaults to it), saving a redundant reassignment.
     mutationFn: () =>
       submitAccount(connectorId, label, values, selectedId === defaultId ? undefined : selectedId),
     onSuccess: (account) => onDone(account.id),

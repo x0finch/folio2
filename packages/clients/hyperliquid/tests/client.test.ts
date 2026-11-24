@@ -18,15 +18,13 @@ import stateFixture from "./fixtures/clearinghouse-state.json" with { type: "jso
 
 const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
-// 假出网:记下每一发。顶替的是 **`HttpClient` 服务**而不是 `globalThis.fetch` ——
-// 请求层底下是官方客户端,在那一层顶替才测得到真实路径(签名头、method、body 都经过它)。
+// Fake egress that records every request. Replaces the `HttpClient` service, not `globalThis.fetch`, so the real path is exercised.
 function stub(reply: (url: URL) => Response | Promise<Response>) {
   const s = httpStub((request) => reply(request.url));
   return { fn: s, calls: s.calls };
 }
 
-// **构造是纯的**(没有闸就没有 Scope),所以这里不用在 Effect 里建 client —— 与 binance 的
-// `withClient` 不同,那边 `make` 返回 Effect。别为了形状统一而假装需要 Scope。
+// Construction is pure (no gate, so no Scope), so the client is not built inside an Effect here, unlike binance's `withClient`.
 const withClient = <A, E>(
   fn: HttpStub,
   use: (client: HyperliquidClientApi) => Effect.Effect<A, E, Outbound>,
@@ -39,7 +37,7 @@ const failing = (
 ): Promise<UpstreamError> => withClient(fn, (c) => Effect.flip(use(c)));
 
 describe("clearinghouseState", () => {
-  it("POST /info,body 里带 type 与 user", async () => {
+  it("POST /info, with type and user in the body", async () => {
     const { fn, calls } = stub(() => json(stateFixture));
     await withClient(fn, (c) => c.clearinghouseState(ADDR));
 
@@ -52,29 +50,28 @@ describe("clearinghouseState", () => {
     });
   });
 
-  it("带上 content-type: application/json(少了它上游回 422)", async () => {
+  it("sends content-type: application/json (upstream answers 422 without it)", async () => {
     const { fn, calls } = stub(() => json(stateFixture));
     await withClient(fn, (c) => c.clearinghouseState(ADDR));
     expect(calls[0].request.headers["content-type"]).toBe("application/json");
   });
 
-  it("值不翻译,但只吐声明过的字段 —— 上游多给的丢掉", async () => {
-    // client 的出口就是 DTO —— 数字仍是字符串,parse 归适配层(ADR 0036)。
+  it("values are not translated, but only declared fields come out: extras from upstream are dropped", async () => {
+    // The client's output is the DTO: numbers stay strings, parsing belongs to the adapter.
     const { fn } = stub(() => json(stateFixture));
     const state = await withClient(fn, (c) => c.clearinghouseState(ADDR));
 
-    // 声明过的字段一个字没动。
+    // Declared fields are untouched.
     expect(state.marginSummary).toEqual(stateFixture.marginSummary);
     expect(typeof state.marginSummary?.accountValue).toBe("string");
     expect(state.assetPositions?.[0].position).toEqual(stateFixture.assetPositions[0].position);
 
-    // **没声明的丢掉**(schema 的默认行为)。夹具里 `assetPositions[].type` 就是这么一个字段 ——
-    // 我们从来没读过它,所以它也不该跟着 DTO 出去。
+    // Undeclared ones are dropped (schema default): `assetPositions[].type` in the fixture was never read, so it should not leave with the DTO.
     expect("type" in stateFixture.assetPositions[0]).toBe(true);
     expect("type" in state.assetPositions![0]).toBe(false);
   });
 
-  it("地址每次调用传,一个 client 服务多个账户", async () => {
+  it("the address is passed per call: one client serves many accounts", async () => {
     const other = "0x0000000000000000000000000000000000000001";
     const { fn, calls } = stub(() => json(stateFixture));
     await withClient(fn, (c) =>
@@ -84,7 +81,7 @@ describe("clearinghouseState", () => {
     expect(JSON.parse(String(calls[1].request.body)).user).toBe(other);
   });
 
-  it("apiBase 可覆盖,且当不透明整串用", async () => {
+  it("apiBase can be overridden and is used as one opaque string", async () => {
     const { fn, calls } = stub(() => json(stateFixture));
     await withClient(fn, (c) => c.clearinghouseState(ADDR), {
       apiBase: "http://localhost:3099/hl-proxy",
@@ -93,17 +90,17 @@ describe("clearinghouseState", () => {
   });
 });
 
-describe("错误归类", () => {
-  // **hyperliquid 没有归类差异**(info 端点无 auth,「凭据被拒」这条路不存在),
-  // 这几条验的是 core 的默认规则在这条链路上确实通了。
-  it("429 → 限流,带上 Retry-After", async () => {
+describe("error classification", () => {
+  // Hyperliquid has no classification difference (the info endpoint has no auth, so "credentials rejected" cannot occur);
+  // these check that core's default rules do work on this path.
+  it("429 gives rate-limited, with Retry-After", async () => {
     const { fn } = stub(() => json({}, { status: 429, headers: { "retry-after": "7" } }));
     const err = await failing(fn, (c) => c.clearinghouseState(ADDR));
     expect(err._tag).toBe("UpstreamRateLimitError");
     expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(7000);
   });
 
-  it("5xx / 出不去 → 够不到上游", async () => {
+  it("5xx / unreachable give unreachable", async () => {
     const { fn: down } = stub(() => json({}, { status: 503 }));
     expect((await failing(down, (c) => c.clearinghouseState(ADDR)))._tag).toBe(
       "UpstreamUnavailableError",
@@ -116,17 +113,17 @@ describe("错误归类", () => {
     );
   });
 
-  it("读不成 JSON → parse", async () => {
+  it("unreadable JSON gives parse", async () => {
     const { fn } = stub(() => new Response("<html>", { status: 200 }));
     expect((await failing(fn, (c) => c.clearinghouseState(ADDR)))._tag).toBe("UpstreamParseError");
   });
 
-  it("错误带 upstream,答「是谁失败的」", async () => {
+  it("errors carry `upstream`, answering who failed", async () => {
     const { fn } = stub(() => json({}, { status: 503 }));
     expect((await failing(fn, (c) => c.clearinghouseState(ADDR))).upstream).toBe("hyperliquid");
   });
 
-  it("失败信息不带 query / 地址(原则 #5 红线)", async () => {
+  it("the failure info carries no query / address", async () => {
     const { fn } = stub(() => json({}, { status: 503 }));
     const err = await failing(fn, (c) => c.clearinghouseState(ADDR));
     expect(err.where).toBe("/info");
@@ -134,11 +131,10 @@ describe("错误归类", () => {
   });
 });
 
-// **走 Tag / Layer 那一条路。** 生产只走它,而在这之前**九个包的测试一条都没走过** ——
-// 全部直接调 `make`,于是「`layer()` 装出来的东西和 `make` 是不是同一个」从来没人验证。
-// 这是复审点出来的真空档(#12)。
-describe("装配:Tag 路径", () => {
-  it("`HyperliquidClient.layer(...)` 装出来的就是 `make` 那个 client", async () => {
+// Goes through the Tag / Layer path: production uses only it, and tests otherwise all call `make` directly, so whether what `layer()` assembles
+// equals `make` was never verified.
+describe("wiring: the Tag path", () => {
+  it("what `HyperliquidClient.layer(...)` assembles is the `make` client", async () => {
     const { fn, calls } = stub(() => json(stateFixture));
     const out = await runClient(
       fn,

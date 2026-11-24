@@ -17,30 +17,28 @@ import {
 import { AddressResponse, XpubResponse, XpubSummary } from "./types";
 
 export interface BlockbookConfig {
-  // 覆盖端点列表(测试 / 自托管节点);缺省用内置的 btc2–btc5。
+  // Override the endpoint list (tests / self-hosted node); defaults to the built-in btc2-btc5.
   readonly bases?: readonly string[];
   readonly userAgent?: string;
 }
 
-// `basic` 不在这里:那一档回的形状不同(没有 `unconfirmedBalance`),走 `xpubSummary`。
+// `basic` is not here: that tier returns a different shape (no `unconfirmedBalance`), see `xpubSummary`.
 export interface XpubQuery {
   readonly details?: "tokens" | "tokenBalances";
   readonly tokens?: "nonzero" | "used" | "derived";
 }
 
-// Trezor Blockbook v2 的请求层(只读)。**方法按上游端点组织,吐的是上游形状(DTO)** ——
-// satoshi 串转数字、UTXO 汇总、`tokenRef` 命名全在适配层(ADR 0036)。
-//
-// 这家上游没有凭据这回事(公共节点),所以方法不收 creds。
+// Request layer for Trezor Blockbook v2 (read-only). Methods follow upstream endpoints and return upstream shapes (DTOs);
+// satoshi-string conversion, UTXO totals and `tokenRef` naming belong to the adapter. No credentials (public nodes), so no creds param.
 export interface BlockbookClientApi {
-  // xpub / descriptor 的余额 + 逐地址(**服务端派生**,取代逐地址 gap 扫描)。
+  // Balance + per-address for an xpub / descriptor (server-side derivation, replacing per-address gap scanning).
   readonly xpub: (
     token: string,
     query?: XpubQuery,
   ) => Effect.Effect<XpubResponse, UpstreamError, Outbound>;
-  // 只要账户汇总(`details=basic`):探活用,不拉各地址明细。
+  // Account summary only (`details=basic`): a liveness probe that skips per-address detail.
   readonly xpubSummary: (token: string) => Effect.Effect<XpubSummary, UpstreamError, Outbound>;
-  // 单地址余额。
+  // Single-address balance.
   readonly address: (address: string) => Effect.Effect<AddressResponse, UpstreamError, Outbound>;
 }
 
@@ -52,24 +50,18 @@ export class BlockbookClient extends Context.Tag("clients/Blockbook")<
     Layer.sync(BlockbookClient, () => make(config));
 }
 
-// 轮询起点,**模块级** —— 分散负载,不让每一轮同步都从 btc2 开始。
-// 刻意不在 `Scope` 里:CF Workers 上每个请求一次 `runPromise`,放 scope 就等于每次都从 0 开始
-// (与时隙游标同一个理由)。
+// Rotation start, module-level to spread load so not every sync starts from btc2. Deliberately not in a `Scope`: on CF Workers each
+// request runs one `runPromise`, so a scope would restart from 0 every time (same reason as the slot cursor).
 let cursor = 0;
 
-// 「这个错误该不该换下一个节点」。
-//
-// **判据是 blockbook 自己的,不是通用的可重试性** —— 问的是「是这个节点不行,还是你的请求不行」:
-//   · 被这个节点限流 / 够不到这个节点(网络、5xx)→ **换**,下一个节点大概率好使
-//   · 无效的 xpub(4xx)→ **不换**,换四个节点得到同样的 4xx,白赔三次往返
-//   · 凭据被拒、响应读不懂 → 不换,同理
-//
-// 所以不能直接拿「这个错误可不可重试」当判据:`UpstreamUnavailableError` 涵盖了网络失败、5xx
-// **和** 4xx,而后者恰恰是不该换的那一类 —— 靠 `status` 分开。
+// Whether an error should move on to the next node. The criterion is blockbook's own, not generic retryability: is it this node or the request?
+//   rate-limited by this node / node unreachable (network, 5xx): switch; invalid xpub (4xx): do not (four nodes give the same 4xx);
+//   credentials rejected / unreadable response: do not.
+// Not "is it retryable": `UpstreamUnavailableError` covers network failure, 5xx and 4xx, and the 4xx must not switch; `status` tells them apart.
 const shouldTryNextBase = (error: UpstreamError): boolean => {
   if (error._tag === "UpstreamRateLimitError") return true;
   if (error._tag !== "UpstreamUnavailableError") return false;
-  // 没有 status = 压根没出去(网络失败)→ 换。有 status 就只有 5xx 才换。
+  // No status means it never left (network failure): switch. With a status, only 5xx switches.
   return error.status === undefined || error.status >= 500;
 };
 
@@ -77,24 +69,19 @@ export function make(config: BlockbookConfig = {}): BlockbookClientApi {
   const bases = config.bases?.length ? config.bases : BLOCKBOOK_BASES;
   const userAgent = config.userAgent ?? USER_AGENT;
 
-  // 一个 base 一个 requester,**建一次**(`make` 每轮同步每账户调一次,不该每次重建四个)。
+  // One requester per base, built once (`make` runs per account per sync; do not rebuild four each time).
   const requesters: Requester[] = bases.map((baseUrl) =>
     makeRequester({
       baseUrl,
       upstream: UPSTREAM,
-      // UA 必须发,见 constants.ts。
+      // The UA must be sent, see constants.ts.
       headers: () => Effect.succeed({ "user-agent": userAgent, accept: "application/json" }),
     }),
   );
 
-  // **依次试各个节点,直到成功或遇到「换了也没用」的错误。**
-  //
-  // 这就是 blockbook 的「重试」,而它是**换哪个节点**的策略,不是「一个请求怎么发」——
-  // 所以留在这儿,不塞给 `Effect.retry`。两个都开的话每个节点先自己退避几次再换下一个,
-  // 延迟直接乘起来。
-  //
-  // 用递归而不是 `Effect.firstSuccessOf`:后者对**任何**失败都继续试,而这里的要点恰恰是
-  // 「有些错误要立刻停」(无效 xpub 换四个节点得到四个一样的 4xx)。
+  // Tries nodes in turn until success or an error where switching is pointless. This is blockbook's retry: a "which node" policy,
+  // not "how to send one request", so it stays here rather than in `Effect.retry` (both together would multiply latency).
+  // Recursion rather than `Effect.firstSuccessOf`, which keeps trying after any failure, while some errors must stop at once.
   const tryBases = <A, I>(
     path: string,
     schema: Schema.Schema<A, I>,
@@ -128,20 +115,17 @@ export function make(config: BlockbookConfig = {}): BlockbookClientApi {
           }),
         );
       }
-      // 起点每次前进一格 —— 四个节点轮流当第一个。
+      // The start advances one slot each time, so the four nodes take turns being first.
       return tryBases(path, schema, query, cursor++, requesters.length);
     });
 
-  // `encodeURIComponent` 不编码括号,但 descriptor(如 `tr(xpub…)`)的括号在 path 里更稳妥地编码掉。
+  // `encodeURIComponent` does not encode parentheses, but a descriptor's (e.g. `tr(xpub…)`) are safer encoded in the path.
   const encodePath = (s: string): string =>
     encodeURIComponent(s).replace(/\(/g, "%28").replace(/\)/g, "%29");
 
-  // **`details` / `tokens` 走 query,不焊进 path 串** —— 那是 `makeRequester` 该拼的部分,
-  // 自己拼就得自己管编码,而且失败信息里的 `where` 会连 query 一起带上(原则 #5)。
-  //
-  // ⚠️ **但 xpub 本身在 pathname 里**,所以它一定会进 `where` —— Blockbook 的 URL 形状就是
-  // `/xpub/{token}`,躲不掉。xpub 在本仓的分类是 `public`(明文落库、可导出重建),不是 secret,
-  // 所以这是可接受的;但它毕竟是**整个钱包的观察密钥**,别再往日志里多抄一份。
+  // `details` / `tokens` go in the query, not welded into the path: `makeRequester` owns that, and the failure `where` carries the query too.
+  // But the xpub itself is in the pathname, so it always reaches `where` (Blockbook's URL shape is `/xpub/{token}`). An xpub is `public` here
+  // (stored in plain text), so that is acceptable, but it is the whole wallet's watch key: do not copy it into logs again.
   return {
     xpub: (token, query) =>
       request(`/xpub/${encodePath(token)}`, XpubResponse, {

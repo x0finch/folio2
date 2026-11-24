@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { userIdentity } from "@/routes/_authed/-settings/user-card";
 
-// 登录用户身份派生(grill Q4):有 name → 主行 name、副行 email;无 name → 主行 email、
-// 副行「自托管」标记;皆缺 → 兜底占位。secondary 用 kind 判别,「自托管」文案留给 UI 本地化。
 describe("userIdentity", () => {
-  it("有 name + email → 主行 name、副行 email", () => {
+  it("name + email: name on the main row, email on the sub row", () => {
     expect(userIdentity({ name: "Ada Lovelace", email: "ada@folio.dev" })).toEqual({
       primary: "Ada Lovelace",
       secondary: { kind: "email", value: "ada@folio.dev" },
@@ -12,7 +10,7 @@ describe("userIdentity", () => {
     });
   });
 
-  it("无 name(空串)→ 主行回退 email、副行「自托管」", () => {
+  it('no name (empty string): main row falls back to email, sub row "Self-hosted"', () => {
     expect(userIdentity({ name: "", email: "ada@folio.dev" })).toEqual({
       primary: "ada@folio.dev",
       secondary: { kind: "selfHosted" },
@@ -20,7 +18,7 @@ describe("userIdentity", () => {
     });
   });
 
-  it("name 为 null → 同样回退 email", () => {
+  it("name null: also falls back to email", () => {
     expect(userIdentity({ name: null, email: "bob@folio.dev" })).toEqual({
       primary: "bob@folio.dev",
       secondary: { kind: "selfHosted" },
@@ -28,7 +26,7 @@ describe("userIdentity", () => {
     });
   });
 
-  it("有 name 但无 email → 主行 name、副行「自托管」", () => {
+  it('name but no email: main row name, sub row "Self-hosted"', () => {
     expect(userIdentity({ name: "Grace", email: "" })).toEqual({
       primary: "Grace",
       secondary: { kind: "selfHosted" },
@@ -36,7 +34,7 @@ describe("userIdentity", () => {
     });
   });
 
-  it("name 与 email 皆缺 → 兜底占位(不抛错)", () => {
+  it("neither name nor email: fallback placeholder (no throw)", () => {
     expect(userIdentity({ name: null, email: null })).toEqual({
       primary: "?",
       secondary: { kind: "selfHosted" },
@@ -44,7 +42,7 @@ describe("userIdentity", () => {
     });
   });
 
-  it("首字母取 primary 首字符并大写;两侧空白先裁", () => {
+  it("initial takes the first character of primary, uppercased; surrounding whitespace trimmed first", () => {
     expect(userIdentity({ name: "  zoe  ", email: "z@folio.dev" })).toEqual({
       primary: "zoe",
       secondary: { kind: "email", value: "z@folio.dev" },

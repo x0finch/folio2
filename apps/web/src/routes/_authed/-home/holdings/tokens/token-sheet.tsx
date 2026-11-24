@@ -31,13 +31,12 @@ import { TrendPanel } from "@/routes/_authed/-home/hero/trend-panel";
 import { deltaTone, NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
 import { ACCOUNT_SLOTS, groupByAccount, groupByPlatform, type SourceGroup } from "./source-groups";
 
-// 代币 drill-down 侧边栏(v2):代币头部 + 来源明细。桌面右滑 Drawer、移动 BottomSheet 承载同一份内容。
-// 头部背景 = 单币【持仓价值】历史(片 2):折线随涨跌走 --pos/--neg,内容浮其上;可切 7d/30d/1y/全部。
-// 来源区是 Platforms / Accounts 两视图的 tab 切换(互为转置):按平台看散在哪些链/场馆,或按账户看散在哪些账户。
-// 窗口切换(RangeTabs)与账户抽屉共用,抽到 components/range-tabs。
+// Token drill-down drawer: token header + source breakdown, in a right Drawer on desktop and a
+// BottomSheet on mobile. The header background is the token's holding-value history (line follows
+// --pos/--neg); sources toggle between Platforms and Accounts (transposed views). The window switch
+// (RangeTabs) is shared with the account drawer.
 
-// 组头像:单 avatar → 单 logo;多 avatar(账户跨多链)→ 叠标 + N(共享 AvatarStack)。
-// manual 亦有内置 logo(NotebookPen),走普通 LogoAvatar,不再特判。
+// Group avatars: a single avatar is one logo; several (account across chains) are a stack + N (shared AvatarStack).
 function GroupAvatar({ group }: { group: SourceGroup }) {
   const [first] = group.avatars;
   if (group.avatars.length === 1 && first) {
@@ -46,8 +45,8 @@ function GroupAvatar({ group }: { group: SourceGroup }) {
   return <AvatarStack items={group.avatars} size="md" />;
 }
 
-// 账户名统一走 <AccountName>(`@名` 前置,#351 ③):全站「一个符号 = 一种身份」,与平台名(有 logo
-// 头像 + 公认名)区分。平台名不加。account slot 由视图决定:平台视图账户在副行、账户视图在主行。
+// Account names render via <AccountName> (`@name`); platform names don't. The account slot depends
+// on the view: platform view puts accounts in the sub-row, account view in the main row.
 function NameLine({
   text,
   account,
@@ -65,11 +64,9 @@ function NameLine({
   );
 }
 
-// 平台行副名:点名组内**按 value 倒序**的账户(#351 ③)—— 比原先的「{n} accounts」计数多说一句「是谁」。
-// 折叠与账户行的 tag 同一条规则(collapseToSlots):3 个以内全显,超过 3 个显 2 个 + `+n`。
-// 阈值直接用 source-groups 导出的 ACCOUNT_SLOTS —— 它同时决定 topAccounts 带几个候选,两边必须一致
-// (各写一份的话,阈值一改就会在「恰好等于阈值」那档静默少显一个)。
-// total 传组内账户总数(topAccounts 只带前几名),每个 `@名` 各自截断、尾巴不被挤掉。
+// Platform-row sub-name: the group's accounts by value descending, folded like account-row tags
+// (collapseToSlots). The threshold is source-groups' ACCOUNT_SLOTS, shared so the exact-threshold
+// case doesn't silently drop one. `total` is the group's account count (topAccounts is only the top few).
 function AccountNames({
   accounts,
   total,
@@ -88,9 +85,9 @@ function AccountNames({
   );
 }
 
-// 来源组行:左 = 头像 + 主名 / 副名;右 = 数量 + symbol(上)· 占比(下,= 组 value / 总 value)。
-// accountSlot 标出哪格是账户(带图标);副名与主名【严格相等】(区分大小写)才省略副行 ——
-// 用户可能特意把账户命名为小写 "binance"(≠ 平台 "Binance"),这属不同名字,靠钱包图标区分、照常显示。
+// Source group row: left = avatars + main / sub name; right = amount + symbol over share of total
+// value. The sub-row is omitted only when it equals the main name case-sensitively: an account
+// named "binance" differs from the platform "Binance" and still shows.
 function GroupRow({
   group,
   secondary,
@@ -99,7 +96,7 @@ function GroupRow({
   accountSlot,
 }: {
   group: SourceGroup;
-  secondary: ReactNode; // null = 省略副行(与主名重复时)
+  secondary: ReactNode; // null = omit the sub-row (duplicates the main name)
   symbol: string;
   totalValue: number;
   accountSlot: "primary" | "secondary";
@@ -127,7 +124,7 @@ function GroupRow({
   );
 }
 
-// 一个来源视图(平台 / 账户):SharedLayoutBg 承载 hover(与代币行同款移动滑块)。
+// One source view (platform / account): SharedLayoutBg carries the hover slider, as the token rows do.
 function SourceView({
   groups,
   countKey,
@@ -135,14 +132,14 @@ function SourceView({
   totalValue,
 }: {
   groups: SourceGroup[];
-  countKey: "nAccounts" | "nSources"; // 副行多基数时的 i18n key(平台视图数账户、账户视图数平台)
+  countKey: "nAccounts" | "nSources"; // i18n key for the sub-row cardinality
   symbol: string;
   totalValue: number;
 }) {
   const t = useTranslations("Overview");
-  const platformView = countKey === "nAccounts"; // 副维度是账户 → 副行点名;账户视图副维度是平台,仍报计数
-  // 副名与主名【严格相等】(区分大小写)才省略副行 —— 用户可能特意把账户命名为小写 "binance"
-  //(≠ 平台 "Binance"),那属不同名字,靠 `@` 区分、照常显示。
+  const platformView = countKey === "nAccounts"; // sub-dimension is accounts: name them; the account view still reports a count
+  // Sub-name equal to the main name (case-sensitive) omits the sub-row; "binance" vs "Binance"
+  // differ and are told apart by `@`.
   const secondaryFor = (g: SourceGroup) => {
     if (g.count === 1) {
       const only = g.single ?? "";
@@ -172,7 +169,7 @@ function SourceView({
             secondary={secondaryFor(g)}
             symbol={symbol}
             totalValue={totalValue}
-            // 平台视图(countKey=nAccounts)账户在副行;账户视图(nSources)账户在主行。
+            // Platform view (nAccounts) puts accounts in the sub-row; account view (nSources) in the main row.
             accountSlot={platformView ? "secondary" : "primary"}
           />
         </div>
@@ -184,23 +181,23 @@ function SourceView({
 function TokenSheetContent({ holding }: { holding: Holding }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
-  // 划动读数(#470 片7)。
+  // Chart scrub reading.
   const scrub = useChartScrub();
   const { token, totalValue, totalAmount, sources } = holding;
-  // 24h 盈亏(ADR 0040)—— server 算好的,与主页那一行同一个数。以前是 change24h 倒推的。
+  // 24h PnL computed server-side, the same number as the home row.
   const dayValue = holding.gain24h?.amount ?? null;
   const dayPct = holding.gain24h?.pct ?? null;
   const platformGroups = groupByPlatform(sources);
   const accountGroups = groupByAccount(sources);
 
-  // 单币持仓价值历史(片 2):按 Holding key + 窗口拉取,喂头部背景图。窗口切换即重取(keepPrevious 防闪)。
+  // Holding-value history by holding key + window, feeding the header background; keepPrevious avoids flashing on window switch.
   const [range, setRange] = useState<Range>("30d");
   const since = rangeSince(range, Date.now());
   const historyQuery = useQuery({
     ...holdingHistoryQuery({ holdingKey: holding.key, range, since }),
     placeholderData: keepPreviousData,
   });
-  // 曲线在浏览器里画(FOL-50):接口发窗口内该币的原样余额行,阶梯重建在这儿。
+  // The curve is drawn in the browser from the raw balance rows in the window.
   const series = useMemo(
     () => (historyQuery.data == null ? [] : tokenValueHistoryFromRaw(historyQuery.data)),
     [historyQuery.data],
@@ -208,12 +205,12 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* 头部:价值历史图垫底(hover 出 tooltip);内容 pointer-events-none 让 hover 透传。
-          窗口切换叠右下角、独占头部底部一带,与右侧价格徽标错开(name 行用满宽)。
-          预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
+      {/* Header: value-history chart backdrop (hover shows the tooltip); content is pointer-events-none
+          so hover passes through. Window switch sits bottom-right clear of the price badge. Fixed
+          min-h-44 so the async chart doesn't resize the list. */}
       <div className="relative min-h-44 overflow-hidden">
         <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
-        {/* 窗口切换(可交互,独立于 pointer-events-none 内容层):右下角独占一带,避开价格徽标。 */}
+        {/* Window switch (interactive, outside the pointer-events-none layer). */}
         <div className="absolute right-0 bottom-0 z-10">
           <RangeTabs value={range} onChange={setRange} />
         </div>
@@ -221,8 +218,8 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
           <div className="flex items-center gap-3">
             <LogoAvatar src={token.logo} fallback={token.symbol} size="lg" />
             <div className="min-w-0">
-              {/* 名称 + 徽标(中性 pill,无状态图标):市值排名 + 价格合一,贴在名称右侧。
-                    排名走 text-foreground(深色主题即白、亮色主题自动转深),价格保持 muted。 */}
+              {/* Name + badge (neutral pill): market-cap rank + price beside the name; rank uses
+                    text-foreground, price stays muted. */}
               <div className="flex min-w-0 items-center gap-2">
                 <h2 className="truncate font-semibold text-lg">{token.name}</h2>
                 {(token.marketCapRank != null || token.unitPrice != null) && (
@@ -245,8 +242,8 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
           </div>
 
           <div>
-            {/* 划到某点 → 顶替成该点的值(#470 片7);下面那行 24h 换成那一刻的时间。
-                滚动与「整数/小数怎么拆」走 AmountTicker(hero、账户抽屉同一份);字号是这一处的事。 */}
+            {/* While scrubbing the value replaces the live one and the 24h row shows that moment's time.
+                Rolling and integer/decimal split use AmountTicker (shared with hero and account drawer). */}
             <AmountTicker
               value={scrub.point ? scrub.point.total : totalValue}
               scrubbing={scrub.point != null}
@@ -256,13 +253,12 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
             {scrub.label ? (
               <div className="mt-1 text-muted-foreground text-sm tabular-nums">{scrub.label}</div>
             ) : null}
-            {/* 24h 盈亏 + %:共用一个前置符号、同色,与代币行/hero 一致。
-                算不出 → `—`(全站三态口径,见 ../value-delta)。 */}
+            {/* 24h PnL + %: one shared prefix and color, like token rows / hero. Not computable -> `—`. */}
             {scrub.point ? null : holding.gain24h == null ? (
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
             ) : (
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayValue))}>
-                {/* 遮盈亏金额,留百分比(ADR 0052)。 */}
+                {/* Masks the PnL amount, keeps the percentage. */}
                 <Sensitive>{signedUsd(usd, dayValue ?? 0)}</Sensitive>
                 {dayPct != null ? ` ${Math.abs(dayPct).toFixed(2)}%` : ""}
               </div>
@@ -271,7 +267,7 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
         </div>
       </div>
 
-      {/* 来源:Platforms / Accounts 两视图切换。tab 背景透明,与主页 Tokens/DeFi 一致。 */}
+      {/* Sources: Platforms / Accounts toggle; tab background transparent like home Tokens/DeFi. */}
       <Tabs defaultValue="platforms" variant="pill">
         <TabsList className="bg-transparent p-0">
           <TabsTrigger value="platforms">{t("platformsTab")}</TabsTrigger>
@@ -307,7 +303,7 @@ export function TokenSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  // 桌面右滑 Drawer;移动(< sm)用 BottomSheet。两壳复用同一份内容组件。
+  // Desktop: right Drawer; mobile (< sm): BottomSheet; both share one content component.
   const isDesktop = useMediaQuery("(min-width: 640px)");
 
   if (isDesktop) {
@@ -325,7 +321,7 @@ export function TokenSheet({
   }
 
   return (
-    // title 不传:内容头部已渲染代币名,避免 BottomSheet 自带标题区重复。
+    // No title: the header already renders the token name.
     <BottomSheet open={open} onOpenChange={onOpenChange} snapPoints={[0.6, 0.92]}>
       {holding && <TokenSheetContent holding={holding} />}
     </BottomSheet>

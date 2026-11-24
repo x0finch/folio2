@@ -4,10 +4,6 @@ import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SyncRoundView } from "@/lib/server/sync/status";
 
-// 前端这一侧只剩两件事:发起一轮,和读它(ADR 0048)。这里钉住的是**进度前进时才刷数据**
-// 那条规则 —— 它写起来只有几行,坏起来完全不报错:
-//   · 按对象身份刷 → 轮询每 1.5s 回一个新对象,于是每 1.5s 无条件重拉一遍首页;
-//   · 首次看见就刷 → 每次挂载(每次换页)都白刷一遍,而那时数据本来就是新的。
 const { getSyncRound } = vi.hoisted(() => ({ getSyncRound: vi.fn() }));
 vi.mock("@/lib/server/sync", () => ({ getSyncRound }));
 
@@ -54,7 +50,6 @@ function mountHook(
   return {
     api: api as { current: Api },
     client,
-    /** 换一个组合再渲染 —— 「切组合」在这个 hook 上的形状。 */
     switchTo: (pf: string) => view.rerender(wrapper(pf)),
   };
 }
@@ -64,7 +59,7 @@ beforeEach(() => {
 });
 
 describe("useSyncRound", () => {
-  it("在跑 = busy,按钮点了也没用", async () => {
+  it("running = busy, clicking the button does nothing", async () => {
     getSyncRound.mockResolvedValue(view());
     const { api } = mountHook();
     await waitFor(() => expect(api.current.busy).toBe(true));
@@ -72,7 +67,7 @@ describe("useSyncRound", () => {
     expect(api.current.round?.current).toBe("Kraken");
   });
 
-  it("收官的一轮不是 busy;有可同步的账户就点得动", async () => {
+  it("a finalized round is not busy; clickable when there are syncable accounts", async () => {
     getSyncRound.mockResolvedValue(view({ state: "done", finishedAt: 1, settled: 3 }));
     const { api } = mountHook();
     await waitFor(() => expect(api.current.round).not.toBeNull());
@@ -80,15 +75,15 @@ describe("useSyncRound", () => {
     expect(api.current.disabled).toBe(false);
   });
 
-  it("这个组合没有可同步的账户 → 点不动", async () => {
+  it("this portfolio has no syncable accounts: not clickable", async () => {
     getSyncRound.mockResolvedValue(null);
     const { api } = mountHook("pf-1", 0);
     await waitFor(() => expect(api.current).not.toBeNull());
     expect(api.current?.disabled).toBe(true);
   });
 
-  describe("什么时候刷数据", () => {
-    it("首次看见一轮不刷 —— 那只是页面加载时这里有一份旧记录", async () => {
+  describe("when to refresh data", () => {
+    it("first sight of a round does not refresh: it is just an old record present at page load", async () => {
       getSyncRound.mockResolvedValue(view({ state: "done", finishedAt: 1, settled: 3 }));
       const { api, client } = mountHook();
       const invalidate = vi.spyOn(client, "invalidateQueries");
@@ -96,7 +91,7 @@ describe("useSyncRound", () => {
       expect(invalidate).not.toHaveBeenCalled();
     });
 
-    it("同一份数据又回来一次 → 不刷(轮询每次都是新对象)", async () => {
+    it("same data again: no refresh (polling yields a new object each time)", async () => {
       getSyncRound.mockResolvedValue(view());
       const { api, client } = mountHook();
       await waitFor(() => expect(api.current.round).not.toBeNull());
@@ -107,9 +102,7 @@ describe("useSyncRound", () => {
       expect(invalidate).not.toHaveBeenCalled();
     });
 
-    // 切组合 = 换一份轮。B 组合那份与 A 的 mark 当然不同,但那不是「进度前进了」——
-    // 按旧 mark 一比就假刷一次全域,切几下组合就白拉几遍首页。切过去的第一眼永远走首见分支。
-    it("切组合看到另一份轮 → 不刷(那不是进度,是换了个话题)", async () => {
+    it("switching portfolio shows another round: no refresh (not progress, a different topic)", async () => {
       getSyncRound.mockResolvedValue(view({ roundId: "rA", state: "done", finishedAt: 1 }));
       const { api, client, switchTo } = mountHook("pf-a");
       await waitFor(() => expect(api.current.round?.roundId).toBe("rA"));
@@ -122,17 +115,13 @@ describe("useSyncRound", () => {
       await waitFor(() => expect(api.current.round?.roundId).toBe("rB"));
       expect(invalidate).not.toHaveBeenCalled();
 
-      // 切回来同理:A 那份还在缓存里,一挂上来就能读到 —— 它也不是进度。
       getSyncRound.mockResolvedValue(view({ roundId: "rA", state: "done", finishedAt: 1 }));
       switchTo("pf-a");
       await waitFor(() => expect(api.current.round?.roundId).toBe("rA"));
       expect(invalidate).not.toHaveBeenCalled();
     });
 
-    // 刷的是**数据域**,不是轮本身:这个事件就是轮查询自己读到新进度时发的,再把它标旧只会立刻
-    // 重读一遍刚读到的东西 —— 每前进一格多一发 `getSyncRound`,而且会把发起回包刚落进缓存的那一轮
-    // 换成这一刻 GET 读到的那一份(两者本该一致,不一致时回包那份是更新的)。
-    it("进度前进一格 → 刷一次数据域,但不重读轮本身", async () => {
+    it("progress advances one step: refreshes the data domain once, without rereading the round itself", async () => {
       getSyncRound.mockResolvedValue(view({ settled: 1 }));
       const { api, client } = mountHook();
       await waitFor(() => expect(api.current.round?.settled).toBe(1));
@@ -146,11 +135,10 @@ describe("useSyncRound", () => {
       await act(async () => {
         await new Promise((r) => setTimeout(r, 20));
       });
-      // 只有带来新进度的那一发;没有紧跟着的第二发。
       expect(getSyncRound.mock.calls.length).toBe(readsBefore + 1);
     });
 
-    it("发起回包是一轮已收官的新轮 → 面板读的就是它,不被 GET 读回的旧轮盖掉", async () => {
+    it("the start response is a new finalized round: the panel reads it, not overwritten by the stale round from the GET", async () => {
       getSyncRound.mockResolvedValue(view({ roundId: "r-old", state: "done", finishedAt: 1 }));
       const fresh = view({ roundId: "r-new", state: "done", finishedAt: 2, settled: 3 });
       global.fetch = vi.fn(
@@ -162,7 +150,6 @@ describe("useSyncRound", () => {
 
       act(() => api.current.sync());
       await waitFor(() => expect(api.current.round?.roundId).toBe("r-new"));
-      // 给一次失效 → 重读留出落地的时间,再确认它没发生。
       await act(async () => {
         await new Promise((r) => setTimeout(r, 20));
       });
@@ -172,33 +159,31 @@ describe("useSyncRound", () => {
   });
 });
 
-describe("进首页自动补同步(FOL-18 子票 2)", () => {
+describe("auto catch-up sync on entering home", () => {
   const HOUR = 60 * 60 * 1000;
-  // 发起走 POST /api/sync;自动补与手动点共用同一发,所以「补没补」= fetch 被没被调。
   const okFetch = () =>
     vi.fn(
       async () => new Response(JSON.stringify(view({ roundId: "auto" })), { status: 200 }),
     ) as unknown as typeof fetch;
 
-  it("数据过期(最新快照 > 1 小时)→ 自动补一轮", async () => {
-    getSyncRound.mockResolvedValue(null); // 无在跑的轮 → 不 busy
+  it("data stale (latest snapshot > 1 hour): starts a round automatically", async () => {
+    getSyncRound.mockResolvedValue(null);
     global.fetch = okFetch();
     mountHook("auto-due", 3, { lastSyncedAt: Date.now() - 2 * HOUR });
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
-    // 自动那一轮 body 带 auto:true —— 服务端据此按新鲜度跳过(FOL-18 子票 4)。
     const [, init] = (global.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock
       .calls[0];
     expect(JSON.parse(String(init.body))).toMatchObject({ auto: true });
   });
 
-  it("从没同步过(lastSyncedAt null)→ 也补(新用户第一轮)", async () => {
+  it("never synced (lastSyncedAt null): also syncs (a new user's first round)", async () => {
     getSyncRound.mockResolvedValue(null);
     global.fetch = okFetch();
     mountHook("auto-never", 3, { lastSyncedAt: null });
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
   });
 
-  it("数据还新(1 小时内)→ 不补", async () => {
+  it("data still fresh (within 1 hour): does not sync", async () => {
     getSyncRound.mockResolvedValue(null);
     global.fetch = okFetch();
     mountHook("auto-fresh", 3, { lastSyncedAt: Date.now() - 1000 });
@@ -206,15 +191,15 @@ describe("进首页自动补同步(FOL-18 子票 2)", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("没传 autoSync(账户页 / 洞察页)→ 不补,哪怕数据很旧", async () => {
+  it("no autoSync passed (accounts / insights page): does not sync, even when data is very old", async () => {
     getSyncRound.mockResolvedValue(null);
     global.fetch = okFetch();
-    mountHook("auto-off", 3); // 不传第三个参数
+    mountHook("auto-off", 3);
     await Promise.resolve();
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("正在同步 → 不补(busy 挡住)", async () => {
+  it("already syncing: does not sync (busy blocks it)", async () => {
     getSyncRound.mockResolvedValue(view({ state: "running" })); // busy
     global.fetch = okFetch();
     mountHook("auto-busy", 3, { lastSyncedAt: Date.now() - 2 * HOUR });
@@ -222,7 +207,7 @@ describe("进首页自动补同步(FOL-18 子票 2)", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("没有可同步的账户 → 不补", async () => {
+  it("no syncable accounts: does not sync", async () => {
     getSyncRound.mockResolvedValue(null);
     global.fetch = okFetch();
     mountHook("auto-empty", 0, { lastSyncedAt: Date.now() - 2 * HOUR });
@@ -230,20 +215,19 @@ describe("进首页自动补同步(FOL-18 子票 2)", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("冷却:同一组合再挂一次(重挂 / 切回来)不重复补", async () => {
+  it("cooldown: remounting the same portfolio (remount / switching back) does not sync again", async () => {
     getSyncRound.mockResolvedValue(null);
     global.fetch = okFetch();
     mountHook("auto-cooldown", 3, { lastSyncedAt: Date.now() - 2 * HOUR });
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
-    // 换个新 client 重挂同一个组合 —— autoFired 是新的,但模块级冷却挡住第二发。
     mountHook("auto-cooldown", 3, { lastSyncedAt: Date.now() - 2 * HOUR });
     await Promise.resolve();
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("发起失败那句话不串组合", () => {
-  it("A 组合发起失败,切到 B → startError 清空", async () => {
+describe("start failure message does not leak across portfolios", () => {
+  it("start fails in portfolio A, switch to B: startError is cleared", async () => {
     getSyncRound.mockResolvedValue(null);
     global.fetch = vi.fn(async () => {
       throw new Error("network down");
@@ -254,17 +238,13 @@ describe("发起失败那句话不串组合", () => {
     act(() => api.current.sync());
     await waitFor(() => expect(api.current.startError).toContain("network down"));
 
-    // 那句话说的是「在 A 组合发起失败了」—— 挂在 B 的面板上就是对着 B 说 A 的事。
     switchTo("pf-b");
     await waitFor(() => expect(api.current.startError).toBeNull());
   });
 });
 
-describe("发起那一下的两条边", () => {
-  // POST 的响应丢了 ≠ 轮没开:服务端可能已经抢下这一轮、waitUntil 已经在跑。什么都不做的话
-  // 面板对着旧数据坐着 —— 轮询没被叫醒(它只在读到 running 时自转)。补一发 refetch:
-  // 真开了轮会读到 running,轮询随之恢复;真没开也只是多读一次空键。
-  it("发起失败 → 补一发轮 query 的 invalidate,别让页面全旧", async () => {
+describe("the two edges of starting", () => {
+  it("start fails: invalidates the round query once so the page is not entirely stale", async () => {
     getSyncRound.mockResolvedValue(null);
     global.fetch = vi.fn(async () => {
       throw new Error("network down");
@@ -282,9 +262,7 @@ describe("发起那一下的两条边", () => {
     );
   });
 
-  // POST 的回包与一发在飞的 GET 赛跑:GET 先出发(读的是开轮前的旧轮)、后到达 —— 它落地会把
-  // 刚 set 进去的新轮盖回旧的。react-query 的标准手法:set 之前先 cancel 在飞的那发。
-  it("发起成功 → 先取消在飞的轮 query,再落刚回来的那份", async () => {
+  it("start succeeds: cancels the in-flight round query first, then lands the fresh one", async () => {
     getSyncRound.mockResolvedValue(null);
     const opened = view({ roundId: "r-new", settled: 0 });
     global.fetch = vi.fn(

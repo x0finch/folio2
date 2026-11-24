@@ -33,7 +33,7 @@ import {
 } from "./types";
 
 export interface CoinGeckoConfig {
-  // 有 key 就带上,并按档位选 base 与额度。**没有 key 也能跑**(keyless 档,按出口 IP 计额)。
+  // With a key, sends it and picks base and quota by tier. Works without one (keyless tier, quota per egress IP).
   readonly apiKey?: string;
   readonly pro?: boolean;
   readonly baseUrl?: string;
@@ -62,11 +62,8 @@ export interface CoinsMarketChartRangeParams {
   readonly toSec: number;
 }
 
-// CoinGecko v3 的请求层。**一个端点一个带类型的方法,吐上游形状(DTO)** ——
-// 认币、估值 policy、ref 索引那些全在 oracle 那边(ADR 0036)。
-//
-// **不自带重试**(与另外七个 client 一致):重试由调用方 `Effect.retry(策略)` 加在外面。
-// 老那版把重试收进传输层,于是这个仓库对「怎么重试」有过三份答案。
+// Request layer for CoinGecko v3: one typed method per endpoint, returning the upstream shape (DTO). Token recognition, valuation
+// policy and ref indexing live on the oracle side. No retry of its own: the caller adds `Effect.retry(policy)` outside.
 export interface CoinGeckoClientApi {
   readonly assetPlatforms: Effect.Effect<readonly AssetPlatform[], UpstreamError, Outbound>;
   readonly coinsList: Effect.Effect<readonly CoinListItem[], UpstreamError, Outbound>;
@@ -76,12 +73,12 @@ export interface CoinGeckoClientApi {
   readonly simplePrice: (
     params: SimplePriceParams,
   ) => Effect.Effect<SimplePriceMap, UpstreamError, Outbound>;
-  // 历史日价序列。出口就是 `prices` 那一列 —— 上游把它包在一个对象里,那层包装没有信息。
+  // Historical daily price series; the output is the `prices` column, since upstream wraps it in an object whose wrapper carries nothing.
   readonly coinsMarketChartRange: (
     params: CoinsMarketChartRangeParams,
   ) => Effect.Effect<readonly (readonly [number, number])[], UpstreamError, Outbound>;
   readonly search: (query: string) => Effect.Effect<SearchResult, UpstreamError, Outbound>;
-  // 按合约查币。**查不到是正常答案**(不是每个合约都在 CGK 的库里)→ null,不是失败。
+  // Coin by contract. Not found is a normal answer (not every contract is in CGK's database): null, not a failure.
   readonly coinContract: (
     platform: string,
     address: string,
@@ -111,22 +108,20 @@ export function make(
         ? CG_CALLS_PER_MIN_DEMO
         : CG_CALLS_PER_MIN_KEYLESS;
 
-    // **为什么 CGK 最需要闸**:一把 key 全部署共用,所有用户的每次调用都花同一份额度
-    // (目录预热 4 页、建 ref 索引时并发两发、搜索、按需取价、历史序列)。跟「每账户各花自己的」
-    // 正好相反。
-    //
-    // **闸的 key 随有没有 key 而变** —— 有 key 是按 key 计额,没 key 是按出口 IP 计额,
-    // 那是**两份不同的额度**,不该排在同一个队里。
+    // CGK most needs the gate: one key is shared across the deployment and every user's call spends the same quota (catalogue warm 4 pages,
+    // two concurrent for the ref index, search, on-demand prices, history), the opposite of "each account spends its own".
+    // The gate key varies with whether there is a key: per-key quota with a key, per-egress-IP without; those are two separate
+    // quotas that must not queue together.
     const limit = yield* makeRateLimit({
       key: config.apiKey ? CG_LIMIT_KEY : CG_LIMIT_KEY_KEYLESS,
       limit: CG_BURST,
-      // 每 interval 放 CG_BURST 发 —— 换算成上游那个「每分钟多少次」的口径。
+      // Allow CG_BURST per interval, converted to upstream's "calls per minute" convention.
       interval: Duration.millis((CG_BURST / (callsPerMin / 60)) * 1000),
     });
 
     const headers: Record<string, string> = {
       accept: "application/json",
-      // UA 必须发:Workers 的 fetch 默认不带,而 CGK 的 Cloudflare WAF 对无 UA 请求返 403。
+      // The UA must be sent: Workers' fetch sends none and CGK's Cloudflare WAF answers 403 without one.
       "user-agent": USER_AGENT,
     };
     if (config.apiKey) headers[config.pro ? HEADER_PRO : HEADER_DEMO] = config.apiKey;
@@ -138,9 +133,7 @@ export function make(
       headers: () => Effect.succeed(headers),
     });
 
-    // **顶层形状守卫没了** —— 以前这里有一对 `expectArray` / `expectObject`,手工挡住「上游回了个
-    // 错误页而下游拿着它当数组遍历」。那是 schema 的一个特例,而 schema 连字段类型一起管,
-    // 所以这两个函数连同它们的 `parseFailed` 一起删掉。
+    // No top-level shape guard: the schema covers it, along with field types.
     return {
       assetPlatforms: request("/asset_platforms", Schema.Array(AssetPlatform)),
 
@@ -165,14 +158,14 @@ export function make(
           query: {
             ids: params.ids.join(","),
             vs_currencies: params.vsCurrencies.join(","),
-            // **`undefined` 的键不参与** —— 传 "false" 与不传对 CGK 不是一回事。
+            // Keys that are `undefined` are left out: sending "false" and omitting are not the same to CGK.
             include_24hr_change: params.include24hrChange ? "true" : undefined,
             include_last_updated_at: params.includeLastUpdatedAt ? "true" : undefined,
           },
         }),
 
-      // 出口就是 `prices` 那一列 —— 上游把它包在一个对象里,那层包装没有信息。
-      // **`prices` 缺失现在是校验失败**(以前是手写的 `parseFailed`),同一个错误通道。
+      // The output is the `prices` column; upstream wraps it in an object whose wrapper carries nothing.
+      // A missing `prices` is a validation failure, in the same error channel.
       coinsMarketChartRange: (params) =>
         request(
           `/coins/${params.id}/market_chart/range`,
@@ -186,7 +179,7 @@ export function make(
         request(
           `/coins/${platform}/contract/${address.toLowerCase()}`,
           CoinContract,
-          // 查不到 → null。不是每个合约都在 CGK 的库里,那是正常答案不是故障。
+          // Not found gives null: not every contract is in CGK's database, a normal answer rather than a fault.
           { notFoundAsNull: true },
         ),
 

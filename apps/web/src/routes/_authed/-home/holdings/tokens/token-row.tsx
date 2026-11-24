@@ -5,17 +5,16 @@ import { Sensitive } from "@/components/sensitive";
 import { formatNumber } from "@/lib/core/format-number";
 import { ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 
-// 全站统一的「代币持仓行」内容(主页 Tokens 视图 + 账户详情抽屉现货区共用)。
-// 单个 flex 容器 —— SharedLayoutBg 会把子元素塞进非 flex 的 z-10 div,故 flex 放这层内层。
-// 左:logo + 名称(可接多源叠标 / note aside)+ 数量·symbol;右:<ValueDelta>(市值 + 24h 单符号增量)。
-// 纯展示层:不含点击/排序 —— 主页包成可点行(→ 资产抽屉),账户抽屉静态渲染,排序由调用方决定。
+// Shared token holding row content (home Tokens view + account drawer spot section): one flex
+// container (SharedLayoutBg wraps children in a non-flex z-10 div). Left: logo + name (optional
+// multi-source stack / note aside) + amount·symbol; right: <ValueDelta>. Display only; click and sort are the caller's.
 export interface TokenRowItem {
   logo?: string;
   name: string;
   symbol: string;
   amount?: number | null;
   value: number;
-  // 24h 盈亏(ADR 0040),由 server 按快照历史 / 账本分段算好。`null` = 算不出 → `—`。
+  // 24h PnL computed server-side; `null` = not computable -> `—`.
   gain24h?: { amount: number; pct: number | null } | null;
 }
 
@@ -26,33 +25,31 @@ export function TokenRowContent({
   gainPending = false,
 }: {
   item: TokenRowItem;
-  // 多源(主页跨链/多账户汇总)→ 名称右侧叠放各来源 logo;单账户抽屉不传。
+  // Multi-source (home, across chains/accounts): stacked source logos beside the name; omitted for a single account.
   sources?: { logo?: string; name: string; k: string }[];
-  // 行内附加物(如账户抽屉的 balance 级 note 指示器);无则省略。
+  // Extra inline element (e.g. the account drawer's balance-level note indicator).
   aside?: ReactNode;
-  /** 24h 盈亏还在取 —— 市值照常,增量位走小骨架。 */
+  /** PnL still loading: value renders, the delta slot shows a small skeleton. */
   gainPending?: boolean;
 }) {
-  // 24h 盈亏(ADR 0040)由 server 算好 —— 过渡期那条「没接上就回落到市场涨跌幅倒推」的路已经拆了,
-  // 主页与账户抽屉两条路都接上了(#447 第 2 / 5 片)。`null` = 算不出 → `—`。
-  // 三态原样透传:缺席 = 这个位置不该有(整行省略);`null` = 算不出(`—`);有对象才取金额。
-  // `?.amount ?? null` 会把「不该有」压成「算不出」。
+  // Pass the three states through: absent = no delta belongs here (omit the row), `null` = `—`,
+  // an object = use its amount. `?.amount ?? null` would collapse "shouldn't have" into "can't compute".
   const dayValue = item.gain24h === undefined ? undefined : (item.gain24h?.amount ?? null);
   const dayPct = item.gain24h === undefined ? undefined : (item.gain24h?.pct ?? null);
   return (
     <div className="flex w-full items-center gap-3">
       <LogoAvatar src={item.logo} fallback={item.symbol} size="md" />
       <div className="min-w-0 flex-1">
-        {/* min-w-0 让名称在 flex 里可收缩截断,叠 logo/aside(shrink-0)才不会被挤出框、被价值列盖住。 */}
+        {/* min-w-0 lets the name shrink and truncate so stacked logos/aside (shrink-0) aren't pushed out under the value column. */}
         <div className="flex min-w-0 items-center gap-1.5">
-          {/* select-text:代币名是内容,长按要能选中复制(行本身是按钮 → base 层不可选)。 */}
+          {/* select-text: the name is content and must stay copyable (the row is a non-selectable button). */}
           <span className="min-w-0 select-text truncate font-medium">{item.name}</span>
           {sources && sources.length > 1 ? <AvatarStack items={sources} /> : null}
           {aside}
         </div>
         {item.amount != null && (
           <span className="text-muted-foreground text-xs tabular-nums">
-            {/* 遮持仓数量,留 symbol(公开的币名)。 */}
+            {/* Masks the holding amount, keeps the symbol (public token name). */}
             <Sensitive>{formatNumber(item.amount)}</Sensitive> {item.symbol}
           </span>
         )}

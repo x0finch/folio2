@@ -5,8 +5,7 @@ import { z } from "zod";
 
 const log = getLogger(["folio", "web", "accounts"]);
 
-// 删除:不可逆(snapshots/manual_activity 经 ON DELETE CASCADE 级联清)。前端需二次确认。
-// db 层按 (id, userId) 作用域,天然杜绝越权;不存在则影响 0 行(静默),不额外抛。
+// Irreversible; snapshots and manual activity cascade. A missing or foreign id is a silent no-op.
 export const RemoveAccountInput = z.object({ accountId: z.string().min(1) });
 
 export const handleRemoveAccount = Effect.fn("removeAccount")(function* (

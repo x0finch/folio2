@@ -4,25 +4,20 @@ import { tokenRef } from "@folio/oracle-ref";
 import { NON_EVM_PLATFORMS } from "./constants";
 import { cgkRef } from "./parse";
 
-// 把 CoinGecko 的两个端点摊平成全局映射行(ADR 0022)。
-//
-// **纯函数,零 IO** —— 拉取在 upstream 里,灌库在 store 里,cron 只是把三者串起来的调用点。
-// 好处是这一步能拿 fixture 钉死:响应几 MB、四万来行,出了错在生产上是「某条链的币全部
-// 没价没图」,不会有任何报错。
-//
-// 这个文件住在 adapter 包里,契约层不知道上游有几个端点、返回什么形状。
+// Flattens CoinGecko's two endpoints into global ref-index rows. Pure and zero IO: a wrong row means a
+// whole chain's tokens lose price and logo with no error, so it is pinned by fixtures.
 
-// CoinGecko 的 asset_platform id → 我们的命名者。
+// CoinGecko asset_platform id to our namer.
 function namerByPlatformId(platforms: readonly AssetPlatform[]): Map<string, string> {
   const out = new Map<string, string>();
   for (const p of platforms) {
     if (!p?.id) continue;
-    // EVM:两边都归 `evm:<chainId>`,靠数字对齐。
+    // EVM: both sides map to `evm:<chainId>` by number.
     if (p.chain_identifier != null && Number.isFinite(p.chain_identifier)) {
       out.set(p.id, `evm:${p.chain_identifier}`);
     }
   }
-  // 非 EVM:走显式对照(我们的命名者 → 它的 id),覆盖式写入 —— 对照表说了算。
+  // Non-EVM: explicit table (our namer to its id), written over; the table wins.
   for (const [namer, platformId] of Object.entries(NON_EVM_PLATFORMS)) {
     out.set(platformId, namer);
   }
@@ -35,7 +30,7 @@ export function toRefIndexRows(
 ): RefIndexFetch {
   const namerOf = namerByPlatformId(platforms);
 
-  // 对照校验:我们指名要的那几条非 EVM 链,CoinGecko 的平台表里还在吗。
+  // Check that the non-EVM chains we ask for still exist in CoinGecko's platform list.
   const known = new Set(platforms.map((p) => p?.id).filter((id): id is string => !!id));
   const unmatchedPlatforms = Object.entries(NON_EVM_PLATFORMS)
     .filter(([, platformId]) => !known.has(platformId))
@@ -47,7 +42,7 @@ export function toRefIndexRows(
     const coinId = coin?.id;
     if (!coinId || !coin.platforms) continue;
     for (const [platformId, address] of Object.entries(coin.platforms)) {
-      // 原生币在这里是空地址(`{"": ""}` 或空串)—— 不产行,它们靠 symbol 认。
+      // Native coins have an empty address here; no row, they are matched by symbol.
       const addr = address?.trim();
       if (!platformId || !addr) continue;
       const namer = namerOf.get(platformId);
@@ -55,9 +50,8 @@ export function toRefIndexRows(
         skipped += 1;
         continue;
       }
-      // 左边(chainRef):全是**链上合约**,故产 `contract:` 形(ADR 0020 第三轮)—— mint 的 symbol 闸
-      // 据此跳过它们;地址归一(EVM 小写)由文法层按命名者决定。右边(upstreamRef):整条上游命名
-      // (`coingecko/issued:<id>`,#228 起不再产裸 id —— 半截会逼调用方拼回去)。
+      // chainRef is an on-chain `contract:` ref (lets mint's symbol gate skip it); EVM address normalisation is the grammar's job.
+      // upstreamRef is the whole upstream name (`coingecko/issued:<id>`), never a bare id.
       rows.push({ chainRef: tokenRef.contract(namer, addr), upstreamRef: cgkRef(coinId) });
     }
   }

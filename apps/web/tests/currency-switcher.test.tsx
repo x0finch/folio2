@@ -5,10 +5,9 @@ import { IntlProvider } from "use-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "@/lib/i18n/messages";
 
-// 展示币种切换器。钉住的是**先取汇率、再写码**这条顺序(码是外壳查询的键:先写码 → 新键没数据 →
-// 整个外壳挂起成骨架闪一下),以及两条边界:
-// ① 选当前币种 → 什么都不发;
-// ② 服务端还没有该币汇率(回退成 USD)→ 码照样写,但要说一句,免得「点了没反应」。
+// Rates are fetched before the code is written: the code keys the shell query, so writing it first suspends
+// the whole shell into a skeleton flash. Picking the current currency sends nothing; a missing rate
+// (USD fallback) still writes the code but says so, so the click doesn't look ignored.
 const { getCurrencyPreference, toastMessage } = vi.hoisted(() => ({
   getCurrencyPreference: vi.fn(),
   toastMessage: vi.fn(),
@@ -53,12 +52,12 @@ beforeEach(() => {
 });
 
 describe("CurrencySwitcher", () => {
-  it("触发器显示当前币种(缺省 USD)", () => {
+  it("trigger shows the current currency (USD by default)", () => {
     const { trigger } = mount();
     expect(trigger().textContent).toContain("USD Dollar");
   });
 
-  it("选 EUR → 先取 EUR 汇率,取到后才写码;汇率有 → 不提示", async () => {
+  it("pick EUR → fetches the EUR rate first, writes the code after; rate present → no toast", async () => {
     getCurrencyPreference.mockResolvedValue({ currency: cur("EUR"), rate: 1.1 });
     const { pick } = mount();
 
@@ -69,7 +68,7 @@ describe("CurrencySwitcher", () => {
     expect(toastMessage).not.toHaveBeenCalled();
   });
 
-  it("汇率还没回来时,码不写(不然外壳会换到一把没数据的键上闪骨架)", async () => {
+  it("code not written until the rate returns (else the shell flashes a skeleton on an empty key)", async () => {
     getCurrencyPreference.mockImplementation(() => new Promise(() => {}));
     const { pick } = mount();
 
@@ -79,7 +78,7 @@ describe("CurrencySwitcher", () => {
     expect(stored()).toBeNull();
   });
 
-  it("服务端还没有该币汇率(回退 USD)→ 码照样写,并提示一句", async () => {
+  it("server has no rate for it (USD fallback) → code still written, with a toast", async () => {
     getCurrencyPreference.mockResolvedValue({ currency: cur("USD"), rate: 1 });
     const { pick } = mount();
 
@@ -91,7 +90,7 @@ describe("CurrencySwitcher", () => {
     );
   });
 
-  it("选当前币种 → 不取不写", async () => {
+  it("picking the current currency → no fetch, no write", async () => {
     const { pick } = mount();
     pick("USD");
     await new Promise((r) => setTimeout(r, 0));

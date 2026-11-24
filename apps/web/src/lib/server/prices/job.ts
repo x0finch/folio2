@@ -9,37 +9,27 @@ import { type Enqueued, enqueue } from "@/lib/server/jobs/queue";
 import { manualBalancesForWarm } from "@/lib/server/manual/store";
 import { forUser } from "@/lib/server/runtime";
 
-// **持仓价的回源处**(FOL-87)。以前有三条路会为持仓价出网:同步重估里逐币的 `priceOf`、
-// 同步后的预热、以及首页 / 账户页挂载时自动调的 `refreshStalePrices` server fn(一个读页面顺手
-// 打 CoinGecko 再写库)。现在:cron 每小时给每个用户投一条 `prices`,consumer 在这里按 100 个一批
-// 回源、写回价表;重估与展示一律只读表。
-//
-// 手动同步(`/api/sync`、`syncAccount`)也不在请求里刷价了(FOL-89):它们与 cron 一样投一条 `prices`
-// (`jobs/schedule` 的 `hourlyUserJobs`)。
+// Where holdings prices are fetched: the hourly cron enqueues a `prices` message per user and this consumer fetches in
+// batches of 100 and writes the price table; revaluation and display only read the table.
 
 const log = getLogger(["folio", "jobs", "prices"]);
 
 /**
- * 这个用户此刻「在看的币」:最新快照 + 手记合成余额,过同一道 dust 门(`refreshableTokenIds`)。
- * **三门同源**:展示侧标 stale 的集合必须是这里的子集,否则标了 stale 的币永远刷不到。
- * 快照余额由调用方给(`runPricesJob` 跑的那一刻读一次):**原料元组**(`latestRaw`),不经 drizzle
- * 映射、不解析 note —— 这里只要四列(code review #1)。
+ * The tokens the user is looking at now: latest snapshot + manual synthetic balances, through the same dust gate
+ * (`refreshableTokenIds`). The display's stale set must be a subset of this, or stale tokens never refresh.
+ * Snapshot balances are raw tuples (`latestRaw`): only four columns needed.
  */
 const heldTokenIdsOf = (
   snapshotRows: readonly BalanceRawRow[],
 ): Effect.Effect<string[], NotFound, Database | DbRequest> =>
   Effect.gen(function* () {
     const accounts = yield* (yield* Database).accounts.list();
-    // manual 已退出快照(ADR 0018)→ 从手记的 creds 现造合成余额,否则纯手记用户的币永远暖不到价。
+    // Manual accounts write no snapshots: synthesize balances from their creds, or manual-only users' tokens never get priced.
     const manualBalances = yield* manualBalancesForWarm(accounts);
     return refreshableTokenIds(userDisplayBalances(snapshotRows, manualBalances));
   });
 
-/**
- * 一批 id 里价 / 元信息 stale 或缺失的,回源写回(`refreshStale`:两次 store 读 + 每条端点按 100 个
- * 一批)。**调用方负责把批控制在一条消息的预算内**(`PRICES_IDS_PER_MESSAGE`)。
- * 暖不上要喊一声(#375):连着几天都这样该有人发现。
- */
+/** Refreshes stale or missing prices / meta in one id batch. Callers keep the batch within one message's budget (`PRICES_IDS_PER_MESSAGE`). A failure to warm is logged loudly. */
 const refreshPricesOf = (
   ids: readonly string[],
 ): Effect.Effect<RefreshStaleReport, never, Oracle | DbRequest> =>
@@ -53,7 +43,7 @@ const refreshPricesOf = (
       }),
   );
 
-/** 按预算切块。空输入 → 一块空的(规划那条照样「刷」一遍 —— 空批不出网,只是少一个分支)。 */
+/** Splits by budget; empty input gives one empty chunk (the planning message still "refreshes", with no network). */
 const chunkTokenIds = (
   ids: readonly string[],
   size: number = PRICES_IDS_PER_MESSAGE,
@@ -64,11 +54,9 @@ const chunkTokenIds = (
 };
 
 /**
- * `prices` 的 consumer。规划那条(没带 `tokenIds`)自己刷第一块、其余每块投一条;带块的那条只刷它。
- *
- * **先刷、后投**:刷是幂等的(刚刷过的都新鲜了,再跑一遍零出网),投不是。反过来的话,刷那一步
- * 以 defect 失败、队列重投时会把后续块再投一遍。现在的顺序下,投失败 → 重投 → 第一块零出网、
- * 后续块照投。
+ * Consumer of `prices`. The planning message (no `tokenIds`) refreshes the first chunk and enqueues the rest; a chunk
+ * message refreshes only its own. Refresh before enqueue: refresh is idempotent, enqueue isn't, so a redelivery after a
+ * failure doesn't re-enqueue the later chunks twice.
  */
 export const runPricesJob = (job: PricesJob): Effect.Effect<void, Error> =>
   forUser(

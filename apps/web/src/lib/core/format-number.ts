@@ -1,15 +1,12 @@
-// 数字格式化。两个入口:
-//   · formatNumber —— 代币「数量」(移植/修复自 folio-old/lib/numbers.ts:紧凑 ≥1e8、≤2 位、下标 <0.01、bigint、负号)。
-//   · formatMoney  —— 「货币」金额:换算(value/rate)后 fiat 走 Intl currency style、crypto 走 ₿/Ξ 前缀高精度(见 ADR 0006)。
-// 数量 vs 货币分开:货币需 currency-aware 格式(符号/位置/小数位随币种),数量是纯量。
+// formatNumber is for token amounts; formatMoney is currency-aware (symbol, placement, decimals).
 
 import type { Currency } from "@folio/oracle-basic";
 
 const SUBSCRIPTS = "₀₁₂₃₄₅₆₇₈₉";
-const TINY_THRESHOLD = 0.01; // 低于此用下标记法
-const COMPACT_THRESHOLD = 100_000_000; // 1e8,不低于此且 compact 用 M/B/T
+const TINY_THRESHOLD = 0.01; // below this, subscript notation
+const COMPACT_THRESHOLD = 100_000_000; // at or above this, M/B/T when compact
 const DEFAULT_MAX_FRACTION_DIGITS = 2;
-const CRYPTO_FRACTION_DIGITS = 8; // 加密展示币种(BTC/ETH)的最多小数位
+const CRYPTO_FRACTION_DIGITS = 8;
 
 type NumberLike = number | bigint | string | null | undefined;
 
@@ -19,23 +16,22 @@ const toSubscript = (n: number): string =>
     .map((ch) => SUBSCRIPTS[Number(ch)])
     .join("");
 
-// 下标记法渲染极小数(0 < |n| < 0.01):下标 = 小数点后前导零个数,其后两位有效数字(四舍五入)。
-// 用 toExponential 取两位有效数字与指数,避免 toFixed 的二进制浮点噪声(如 0.009 曾误得 0.0₂89)。
-// 进位越过阈值(0.00999 → 0.01)则回退普通小数。
+// Subscript = count of leading zeros after the point, then two significant digits. Uses
+// toExponential to avoid toFixed float noise (0.009 once rendered as 0.0₂89); rounding up past the
+// threshold falls back to a plain decimal.
 const formatTiny = (value: number): string => {
   const sign = value < 0 ? "-" : "";
-  const [mantissa, expStr] = Math.abs(value).toExponential(1).split("e"); // 两位有效:如 "9.0","-3"
+  const [mantissa, expStr] = Math.abs(value).toExponential(1).split("e"); // e.g. "9.0", "-3"
   const exp = Number(expStr);
 
   const rounded = Number(`${mantissa}e${exp}`);
-  if (rounded >= TINY_THRESHOLD) return `${sign}${rounded}`; // 进位越界 → 回退普通小数
+  if (rounded >= TINY_THRESHOLD) return `${sign}${rounded}`;
 
-  const leadingZeros = -exp - 1; // 0.0090(exp -3)→ 2 个前导零
-  const digits = mantissa.replace(".", "").replace(/0+$/, "") || "0"; // 有效数字去尾零:"90"→"9"
+  const leadingZeros = -exp - 1; // 0.0090 (exp -3) → 2
+  const digits = mantissa.replace(".", "").replace(/0+$/, "") || "0"; // "90" → "9"
   return `${sign}0.0${toSubscript(leadingZeros)}${digits}`;
 };
 
-// locale + notation + 小数位 缓存的 Intl formatter(与 use-intl 同源,避免每次 new)。
 const formatters = new Map<string, Intl.NumberFormat>();
 const getFormatter = (
   locale: string,
@@ -55,8 +51,8 @@ const getFormatter = (
 };
 
 /**
- * 数字格式化的唯一入口。unit 作前缀(货币符号等),负号在最前;compact 默认开(≥1e8 用 M/B/T)。
- * maxFractionDigits 对常规/紧凑分支生效(下标分支恒两位有效数字);locale 决定分隔符与紧凑记法本地化。
+ * `unit` is a prefix; the sign goes before it. maxFractionDigits applies to the regular and
+ * compact branches only (the tiny branch always shows two significant digits).
  */
 export const formatNumber = (
   value: NumberLike,
@@ -91,14 +87,12 @@ export const formatNumber = (
     body = "0";
   }
 
-  // 负号在最前(unit 之前),unit 未传时也不会污染输出(修复旧版 "-undefined")。
   return `${value < 0 ? "-" : ""}${unit}${body}`;
 };
 
 const isTiny = (n: number): boolean =>
   Number.isFinite(n) && n !== 0 && Math.abs(n) < TINY_THRESHOLD;
 
-// locale+currency+compact 缓存的货币 formatter(Intl currency style)。
 const currencyFormatters = new Map<string, Intl.NumberFormat>();
 const currencyFormatter = (
   locale: string,
@@ -120,7 +114,7 @@ const currencyFormatter = (
   return f;
 };
 
-// 极小法币值:取 Intl 货币外壳,把数字部分替换成下标 body(裸 Intl 会把 0.005 舍成 $0.01 丢信息)。
+// Intl alone would round 0.005 to $0.01; keep the locale's currency shell around a subscript body.
 const formatTinyCurrency = (
   value: number,
   { locale = "en-US", currency = "USD" }: Partial<{ locale: string; currency: string }> = {},
@@ -139,16 +133,15 @@ const formatTinyCurrency = (
       }
       continue;
     }
-    if (p.type === "minusSign") continue; // 用 abs + 自己的符号
-    shell += p.value; // 货币符号、literal 空格等(跟随 locale)
+    if (p.type === "minusSign") continue; // we prepend our own sign
+    shell += p.value;
   }
   return `${negative ? "-" : ""}${shell}`;
 };
 
 /**
- * 货币金额展示。换算(value / rate)后按 currency.kind 分支:
- *   · fiat  → Intl currency style(符号/位置/小数位随币种+locale;≥1e8 紧凑);极小值走 formatTinyCurrency。
- *   · crypto→ `₿`/`Ξ` 前缀 + 高精度数字(复用 formatNumber:千分位/去尾零/极小值下标;不 compact)。
+ * Converts by `rate`, then fiat uses Intl currency style and crypto a `₿`/`Ξ` prefix with high
+ * precision (never compact).
  */
 export const formatMoney = (
   value: number,
@@ -171,14 +164,12 @@ export const formatMoney = (
   }
 
   if (isTiny(converted)) return formatTinyCurrency(converted, { locale, currency: currency.code });
-  // compact 未显式给时,≥1e8 自动紧凑;图表轴可显式传 true 缩短标签。
+  // Auto-compact at ≥1e8 unless set; chart axes pass true for short labels.
   const useCompact = compact ?? Math.abs(converted) >= COMPACT_THRESHOLD;
   return currencyFormatter(locale, currency.code, useCompact).format(converted);
 };
 
-// 单前置符号金额:`{+|−}usd(|v|)`(真负号 U+2212),零值无符号。
-// 全站涨跌/盈亏共用(hero 日增 / 代币行与协议行 <ValueDelta> / 资产抽屉 / perp 权益条)——
-// 符号与零值口径只此一处(code review:此前四处手搓,改约定会漏)。
+// Uses a true minus (U+2212); zero gets no sign. Every gain/loss display goes through here.
 export function signedUsd(usd: (n: number) => string, v: number): string {
   return `${v > 0 ? "+" : v < 0 ? "−" : ""}${usd(Math.abs(v))}`;
 }

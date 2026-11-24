@@ -8,12 +8,7 @@ import {
   parseImportLine,
 } from "@/lib/server/io/import";
 
-// `apply` 现在是 Effect(#394 T7:整条导入一个 effect)。用例测的是**单遍重映射的逻辑** ——
-// 哪些记录建了什么、id 怎么对上、版本闸拦不拦 —— 跟时序无关,所以照 CODING.md 那条判据保持
-// Promise 形状,只在这里跑一次。
 //
-// `Cause.squash` 是关键:`runPromise` 会把失败裹成 `FiberFailure`,而用例断言的是
-// `rejects.toThrow(ImportError)` —— 裹住之后那个断言就变成永远不成立的空断言了。
 const promisedImporter = (deps: ImportDeps) => {
   const imp = createImporter(deps);
   return {
@@ -25,8 +20,6 @@ const promisedImporter = (deps: ImportDeps) => {
   };
 };
 
-// 按 connectorId 分类输入字段(模拟 provider account.creds:CEX apiKey=semi + secret/passphrase=secret;
-// 链上/perp address=public、bitcoin addressOrXpub=public)。
 const ONCHAIN_ADDRESS = new Set(["evm", "solana", "sui", "cosmos", "hyperliquid"]);
 function categorize(connectorId: string): {
   publicKeys: string[];
@@ -93,12 +86,12 @@ describe("parseImportLine", () => {
     expect(parseImportLine('{"type":"meta"}')).toEqual({ type: "meta" });
     expect(parseImportLine("  ")).toBeNull();
     expect(parseImportLine("not json")).toBeNull();
-    expect(parseImportLine("123")).toBeNull(); // 非对象
+    expect(parseImportLine("123")).toBeNull();
   });
 });
 
-describe("createImporter —— 版本闸", () => {
-  it("缺 meta 头 → 报错", async () => {
+describe("createImporter: version gate", () => {
+  it("missing meta header: errors", async () => {
     const { deps } = makeDeps();
     const imp = promisedImporter(deps);
     await expect(imp.apply({ type: "account", connectorId: "manual" })).rejects.toThrow(
@@ -106,21 +99,21 @@ describe("createImporter —— 版本闸", () => {
     );
   });
 
-  it("旧版本文件(v2)→ 明确报「太旧」,不崩", async () => {
+  it('old-version file (v2): explicitly reports "too old", no crash', async () => {
     const { deps } = makeDeps();
     const imp = promisedImporter(deps);
     await expect(imp.apply({ type: "meta", version: 2 })).rejects.toThrow(/太旧|v2/);
   });
 
-  it("未来版本 → 也拒绝", async () => {
+  it("future version: also rejected", async () => {
     const { deps } = makeDeps();
     const imp = promisedImporter(deps);
     await expect(imp.apply({ type: "meta", version: 999 })).rejects.toThrow(ImportError);
   });
 });
 
-describe("createImporter —— creds 重建", () => {
-  it("CEX semi field → stored as semi_<key> placeholder(masked,待补录)", async () => {
+describe("createImporter: creds rebuild", () => {
+  it("CEX semi field: stored as a semi_<key> placeholder (masked, to be re-entered)", async () => {
     const { deps, calls } = makeDeps();
     const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
@@ -134,7 +127,7 @@ describe("createImporter —— creds 重建", () => {
     expect(JSON.parse(calls.accounts[0]!.creds)).toEqual({ semi_apiKey: "ABCD…5678" });
   });
 
-  it("onchain public field → stored whole(可重建)", async () => {
+  it("onchain public field: stored whole (rebuildable)", async () => {
     const { deps, calls } = makeDeps();
     const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
@@ -146,10 +139,10 @@ describe("createImporter —— creds 重建", () => {
       creds: { address: "0xabc" },
     });
     expect(JSON.parse(calls.accounts[0]!.creds)).toEqual({ address: "0xabc" });
-    expect(calls.accounts[0]!.archivedAt).toBeUndefined(); // 无 archivedAt → 不归档
+    expect(calls.accounts[0]!.archivedAt).toBeUndefined();
   });
 
-  it("带 archivedAt 的账户 → 归档态透传给 importAccount(恢复归档)", async () => {
+  it("account with archivedAt: archived state passed through to importAccount (archive restored)", async () => {
     const { deps, calls } = makeDeps();
     const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
@@ -165,8 +158,8 @@ describe("createImporter —— creds 重建", () => {
   });
 });
 
-describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () => {
-  it("token 记录 → importToken(带 ref),建 tokenMap", async () => {
+describe("createImporter: id remapping of tokens / snapshots / activities", () => {
+  it("token record: importToken (with ref), builds tokenMap", async () => {
     const { deps, calls } = makeDeps();
     const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
@@ -184,7 +177,7 @@ describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () =>
     expect(imp.counts.tokens).toBe(1);
   });
 
-  it("快照余额的 token_id 经 tokenMap 重映射;映射不到的行丢弃", async () => {
+  it("snapshot balance token_id remapped via tokenMap; unmappable rows dropped", async () => {
     const { deps, calls } = makeDeps();
     const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
@@ -197,16 +190,16 @@ describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () =>
       totalUsd: 100,
       balances: [
         { tokenId: "old-tk", amount: 1, usdValue: 100, kind: "spot" },
-        { tokenId: "ghost-tk", amount: 5, usdValue: 5, kind: "spot" }, // 映射不到 → 丢
+        { tokenId: "ghost-tk", amount: 5, usdValue: 5, kind: "spot" },
       ],
     });
     const snap = calls.snapshots[0]!;
-    expect(snap.accountId).toBe("acc-2"); // token 先建(n=1),account 后建(n=2)
+    expect(snap.accountId).toBe("acc-2");
     expect(snap.balances).toHaveLength(1);
-    expect(snap.balances[0]).toMatchObject({ tokenId: "tk-1", amount: 1 }); // 重映射到新 token id
+    expect(snap.balances[0]).toMatchObject({ tokenId: "tk-1", amount: 1 });
   });
 
-  it("活动记录 → recordManualActivity(accountId/tokenId 各自重映射);未知 id 跳过", async () => {
+  it("activity record: recordManualActivity (accountId/tokenId each remapped); unknown ids skipped", async () => {
     const { deps, calls } = makeDeps();
     const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
@@ -221,7 +214,6 @@ describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () =>
       occurredAt: 1000,
       createdAt: 5,
     });
-    // 未知 token → 跳过
     await imp.apply({
       type: "manualActivity",
       accountId: "old-a",
@@ -239,7 +231,6 @@ describe("createImporter —— Token / 快照 / 活动 的 id 重映射", () =>
     const imp = promisedImporter(deps);
     await imp.apply({ type: "meta", version: EXPORT_VERSION });
     await imp.apply({ type: "account", id: "old-a", connectorId: "manual", label: "M", creds: {} });
-    // 旧文件里可能残留 group/membership 记录 —— 现已无处理器,静默跳过、不炸。
     await imp.apply({ type: "group", id: "old-g", name: "G" });
     await imp.apply({ type: "membership", accountId: "old-a", groupId: "old-g" });
     expect(calls.accounts).toHaveLength(1);

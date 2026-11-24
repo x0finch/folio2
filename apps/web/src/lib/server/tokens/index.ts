@@ -8,11 +8,8 @@ import { handleListFiatOptions, ListFiatOptionsInput } from "./list-fiat-options
 import { handleGetTokenPrice, TokenPriceInput } from "./price";
 import { handleRefreshTokenPrices, RefreshTokenPricesInput } from "./refresh-prices";
 
-// 选币的 server fn 资源面(#202b:整条搬到新参考层)。只做装配,实现与入参 schema 在同目录 RESTful 文件里。
-//
-// **点中不建行。** 读端点都只是读:发目录、搜长尾、取价。代币行是提交表单时由 mint 建的 —— 用户在
-// 下拉里划过十个币不该在库里留十行垃圾。因此这里给出去的不是内部 id(那时还没有),
-// 而是一张**票**:base64url 编过的 tokenRef,前端原样搬运(红线见 core/token-model.ts 的 `TokenOption`)。
+// Picker server fns, assembly only. Read endpoints don't create rows (the token row is minted on form submit), so
+// they hand out an opaque ticket (base64url tokenRef) the client passes through unchanged (see `TokenOption`).
 
 export const listTokenCatalogue = createServerFn({ method: "GET" })
   .middleware([requireAuth])
@@ -22,7 +19,7 @@ export const getTokenEnrichment = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .handler(runEffectJson(handleGetTokenEnrichment));
 
-// requireAuth 与其余选币端点一致(只在 authed 加账户模态里调)。
+// requireAuth like the other picker endpoints.
 export const listFiatOptions = createServerFn({ method: "GET" })
   .middleware([requireAuth])
   .validator(ListFiatOptionsInput)

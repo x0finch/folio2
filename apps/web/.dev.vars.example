@@ -1,6 +1,6 @@
 BETTER_AUTH_SECRET=replace-with-openssl-rand-hex-32
-# https —— 本地 dev / preview 都配了自签名证书(vite.config.ts,为的是 HTTP/2)。这里的 scheme 必须
-# 和实际访问的 origin 逐字一致,否则 passkey 的 expectedOrigin 对不上,每个 ceremony 都失败。
+# https: dev/preview serve a self-signed cert (HTTP/2). Must match the actual origin verbatim,
+# or passkey expectedOrigin fails.
 BETTER_AUTH_URL=https://localhost:3000
 # base64 of 32 random bytes — `openssl rand -base64 32` (AES-GCM key for encrypting credentials)
 SECRETS_KEY=replace-with-openssl-rand-base64-32
@@ -11,7 +11,7 @@ SECRETS_KEY=replace-with-openssl-rand-base64-32
 COINSTATS_API_KEY=replace-with-coinstats-key
 # CoinGecko API key (OPTIONAL — free tier works keyless; a demo/pro key raises rate limits) — token pricing + FX
 # COINGECKO_API_KEY=replace-with-coingecko-key
-# Logging (P6.7): LOG_LEVEL = trace|debug|info|warning|error|fatal (default info).
+# Logging: LOG_LEVEL = trace|debug|info|warning|error|fatal (default info).
 # LOG_PRETTY=true → @logtape/pretty colored output for local dev; unset in prod → JSON Lines for Workers Logs.
 LOG_LEVEL=debug
 LOG_PRETTY=true

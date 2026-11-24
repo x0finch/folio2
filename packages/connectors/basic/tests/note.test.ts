@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Note, NoteRow } from "../src/note";
 
-describe("Note 契约(note 重设计)", () => {
-  it("note:content = 行列表(NoteRow[]),icon 5 值枚举可选", () => {
+describe("Note contract", () => {
+  it("content as a row list; icon is an optional 5-value enum", () => {
     const s = Note.parse({
       title: "Locked",
       icon: "warning",
@@ -13,26 +13,25 @@ describe("Note 契约(note 重设计)", () => {
     expect(Array.isArray(s.content)).toBe(true);
   });
 
-  it("note:content = 纯文本段(string)", () => {
+  it("content as plain text", () => {
     const s = Note.parse({ title: "Note", content: "all funds available" });
     expect(s.content).toBe("all funds available");
   });
 
-  it("icon 可省(缺省语义由渲染层退化 info)", () => {
+  it("icon is optional", () => {
     const s = Note.parse({ title: "T", content: "x" });
     expect(s.icon).toBeUndefined();
   });
 
-  it("非法 icon 名 → parse 失败", () => {
+  it("rejects an unknown icon name", () => {
     expect(Note.safeParse({ title: "T", icon: "nope", content: "x" }).success).toBe(false);
   });
 
-  it("row:value 数字/文本裸联合,unit/href 可选", () => {
+  it("row value is number or text; unit/href optional", () => {
     const numeric = NoteRow.parse({ label: "amt", value: 1.25, unit: "ETH" });
     expect(numeric.value).toBe(1.25);
     const textual = NoteRow.parse({ label: "addr", value: "bc1q…", href: "https://x/y" });
     expect(textual.href).toBe("https://x/y");
-    // value 可省(纯标签行)。
     expect(NoteRow.parse({ label: "only" }).value).toBeUndefined();
   });
 });

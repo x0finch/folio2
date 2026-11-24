@@ -21,30 +21,26 @@ import {
 import { ZerionChainsResponse, ZerionPositionsResponse } from "./types";
 
 export interface ZerionConfig {
-  // 基址,**当不透明整串用**。**这家没有 #264 那个需求**(代理覆盖是给被按地区拒的交易所用的),
-  // 但链映射缓存按它分桶,测试靠它天然隔离。
+  // Base URL, used as one opaque string. No proxy-override need here, but the chain-mapping cache is bucketed by it, so tests isolate naturally.
   readonly apiBase?: string;
 }
 
-// Zerion API 的请求层。**方法按上游端点组织,吐的是上游形状(DTO)** ——
-// `parsePositions`(spot/defi 判别、负债腿取负、displayable 过滤)、`tokenRef` 命名全在适配层。
-//
-// **apiKey 每次调用传**:它来自 ctx.creds(app 从 env 注入),client 不读 env。
-// 认证是 **HTTP Basic**:key 作 username、密码空 —— 这是 Zerion 的协议细节,归 client。
+// Request layer for the Zerion API: methods follow upstream endpoints and return upstream shapes (DTOs); `parsePositions` (spot/defi
+// discrimination, debt legs negated, displayable filter) and `tokenRef` naming are in the adapter.
+// `apiKey` is passed per call (from ctx.creds; the client reads no env). Auth is HTTP Basic: key as username, empty password.
 export interface ZerionClientApi {
-  // 该地址的全量仓位(代币 + DeFi,跨所有 EVM 链一次返回)。
+  // All positions of the address (tokens + DeFi, across all EVM chains in one response).
   readonly positions: (params: {
     readonly address: string;
     readonly apiKey: string;
   }) => Effect.Effect<ZerionPositionsResponse, UpstreamError, Outbound>;
 
-  // slug → 数字 chainId。**带 24h 缓存**(见 chains-cache.ts):链清单近静态,每轮都拉是白费。
-  // 刷新失败时回落到旧映射 —— chainId 不可变,旧的仍然正确。
+  // slug to numeric chainId, with a 24h cache (chains-cache.ts): the chain list is near-static. A failed refresh falls back to the old mapping, still correct.
   readonly chainIds: (
     apiKey: string,
   ) => Effect.Effect<Record<string, number>, UpstreamError, Outbound>;
 
-  // 轻量聚合。探活用 —— 负载远小于 positions。
+  // Light aggregate for liveness probes; far smaller than positions.
   readonly portfolio: (params: {
     readonly address: string;
     readonly apiKey: string;
@@ -56,7 +52,7 @@ export class ZerionClient extends Context.Tag("clients/Zerion")<ZerionClient, Ze
     Layer.scoped(ZerionClient, make(config));
 }
 
-// key 作 username、密码空 —— Zerion 的 Basic 认证形状。
+// Zerion's Basic auth shape: key as username, empty password.
 const basicAuth = (apiKey: string): string => `Basic ${btoa(`${apiKey}:`)}`;
 
 export function make(
@@ -73,11 +69,11 @@ export function make(
 
     const request: Requester = makeRequester({ baseUrl, upstream: UPSTREAM, limit });
 
-    // 头是每请求算的 —— key 来自调用方给的凭据,不是模块级常量,所以随每一发传进去。
+    // Headers are computed per request: the key comes from the caller's credentials, not a module constant.
     const keyed = (apiKey: string) =>
       Effect.succeed({ Authorization: basicAuth(apiKey), accept: "application/json" });
 
-    // 缓存按 baseUrl 分桶、住在模块级(见 client-core 的 stale-cache:Scope 会被每请求重置)。
+    // The cache is bucketed by baseUrl and lives at module level (client-core's stale-cache: a Scope is reset every request).
     const chainsCache = chainsCacheFor(baseUrl);
 
     return {
@@ -95,7 +91,7 @@ export function make(
         ),
 
       portfolio: ({ address, apiKey }) =>
-        // 只用来探活「这把 key + 这个地址通不通」,回什么形状不关心。
+        // Only probes whether this key + address works; the response shape does not matter.
         request(portfolioPath(address), Schema.Unknown, { headers: keyed(apiKey) }),
     };
   });

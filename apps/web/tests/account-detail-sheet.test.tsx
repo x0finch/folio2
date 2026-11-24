@@ -6,14 +6,8 @@ import { rangeSince } from "@/lib/core/history-range";
 import { messages } from "@/lib/i18n/messages";
 import type { AccountRow } from "@/routes/_authed/-accounts/list-rows";
 
-// 账户详情抽屉:头部(名称 / 市值 / 24h / 占比 / 同步时间)+ ⋯ 菜单(同步 / 归档 / 标签 / 移动 / 删除)
-// + 就地改名。图表与持仓列表各是独立组件,这里换成替身,只看抽屉交给它们什么。
-// 钉住的用户可见行为:
-// ① 头部的三种「不显示」:归档 → 不显 24h 与占比、写静态封存日期;缺凭据 → 不显 24h、给「补凭据」;
-//    该有却算不出 → 写 `—`,不是空着也不是 0;
-// ② 归档账户的历史窗口从**封存那一刻**往回算(否则一年前归档的账户默认窗口里一个点都没有);
-// ③ 菜单每一项调对的写接口、带对的参数;同步的三种下场各给对的提示;手记账户没有「同步」;
-// ④ 删除要二次确认,成功才关抽屉,失败报错留在原地;改名失败停在输入框里。
+// Account detail sheet: header, overflow menu and inline rename.
+// The chart and holdings list are stubbed; we only check what the sheet hands them.
 const {
   archiveAccount,
   removeAccount,
@@ -54,7 +48,6 @@ vi.mock("@folio/ui", async (orig) => ({
   ...(await orig<object>()),
   toast: { error: toastError, success: toastSuccess, message: toastMessage },
 }));
-// 图表、持仓列表、两个弹窗:替身只把收到的东西写出来。
 vi.mock("@/routes/_authed/-home/hero/trend-panel", () => ({ TrendPanel: () => null }));
 vi.mock("@/components/holdings-cards", () => ({
   AccountHoldingsCards: () => <div data-testid="holdings-cards" />,
@@ -142,7 +135,7 @@ function mount(account: AccountRow, opts: { total?: number } = {}) {
   return { ...utils, client, onOpenChange, onComplete };
 }
 
-// ⋯ 菜单是 hover 弹出;点触发器同样会打开(触屏走的就是这条)。
+// The menu opens on hover; clicking the trigger also opens it (the touch path).
 async function menuItem(name: string | RegExp) {
   fireEvent.click(screen.getByRole("button", { name: "More actions" }));
   return (await screen.findByRole("button", { name })) as HTMLButtonElement;
@@ -154,8 +147,8 @@ beforeEach(() => {
   getAccountHistory.mockResolvedValue({ rows: [], live: null, sampled: false });
 });
 
-describe("头部", () => {
-  it("活跃账户:名字、24h 涨跌、占比、上次同步", async () => {
+describe("header", () => {
+  it("active account: name, 24h change, share, last sync", async () => {
     mount(row());
     expect(screen.getByText("Main wallet")).toBeTruthy();
     expect(screen.getByText(/1\.50%/)).toBeTruthy();
@@ -163,7 +156,7 @@ describe("头部", () => {
     expect(screen.getByText(/Synced/)).toBeTruthy();
   });
 
-  it("归档:标「已归档」,写封存日期,不显 24h 与占比", () => {
+  it("archived: shows the archived badge and date, no 24h or share", () => {
     mount(row({ archivedAt: SEALED }));
     expect(screen.getByText("Archived")).toBeTruthy();
     expect(screen.getByText(/Sealed Jan 2, 25/)).toBeTruthy();
@@ -171,37 +164,37 @@ describe("头部", () => {
     expect(screen.queryByText(/1\.50%/)).toBeNull();
   });
 
-  it("24h 跌了 → 金额带负号,百分比只写大小(不重复负号)", () => {
+  it("24h loss → amount gets the minus sign, percent shows magnitude only", () => {
     mount(row({ gain24h: { amount: -12.34, pct: -1.5 } }));
     expect(screen.getByText(/1\.50%/)).toBeTruthy();
     expect(screen.queryByText(/-1\.50%/)).toBeNull();
   });
 
-  it("归档的手记账户 → 写封存日期,不写「实时」", () => {
+  it("archived manual account → shows the archive date, not 'live'", () => {
     mount(row({ connectorId: "manual", archivedAt: SEALED }));
     expect(screen.getByText(/Sealed Jan 2, 25/)).toBeTruthy();
     expect(screen.queryByText(/Live/)).toBeNull();
   });
 
-  it("手记账户 → 「实时」,持仓走手记面板", () => {
+  it("manual account → 'live', holdings use the manual panel", () => {
     mount(row({ connectorId: "manual" }));
     expect(screen.getByText(/Live/)).toBeTruthy();
     expect(screen.getByTestId("manual-panel").textContent).toBe("acc_1");
     expect(screen.queryByTestId("holdings-cards")).toBeNull();
   });
 
-  it("从没同步 → 「从未同步」,持仓走通用卡片", () => {
+  it("never synced → 'never synced', holdings use the generic card", () => {
     mount(row({ takenAt: null }));
     expect(screen.getByText(/Never synced/)).toBeTruthy();
     expect(screen.getByTestId("holdings-cards")).toBeTruthy();
   });
 
-  it("24h 该有但算不出 → 写 —", () => {
+  it("24h expected but not computable → shows —", () => {
     mount(row({ gain24h: null }));
     expect(screen.getByText("—")).toBeTruthy();
   });
 
-  it("缺凭据:不显 24h,点「补凭据」交回这个账户", () => {
+  it("missing creds: no 24h; 'add credentials' hands back this account", () => {
     const account = row({ needsCredentials: true });
     const { onComplete } = mount(account);
     expect(screen.queryByText(/1\.50%/)).toBeNull();
@@ -211,35 +204,35 @@ describe("头部", () => {
     expect(onComplete).toHaveBeenCalledWith(account);
   });
 
-  it("金额没到 → 不写同步时间与持仓(骨架),也不写占比", () => {
+  it("values not loaded → skeleton: no sync time, holdings or share", () => {
     mount(row({ valuesReady: false }));
     expect(screen.queryByText(/Synced/)).toBeNull();
-    // 市值位是骨架:不写 24h 那行(写了就是拿占位 0 当真)。
+    // Value slot is a skeleton: no 24h line (that would treat the placeholder 0 as real).
     expect(screen.queryByText(/1\.50%/)).toBeNull();
     expect(screen.queryByText(/of total/)).toBeNull();
     expect(screen.queryByTestId("holdings-cards")).toBeNull();
   });
 });
 
-describe("价值历史的窗口", () => {
-  it("活跃账户:默认 30 天,带上账户与 connector", async () => {
+describe("value history window", () => {
+  it("active account: defaults to 30 days, passes account and connector", async () => {
     mount(row());
     await waitFor(() => expect(getAccountHistory).toHaveBeenCalled());
     const data = getAccountHistory.mock.calls[0]?.[0].data;
     expect(data).toMatchObject({ accountId: "acc_1", range: "30d", connectorId: "evm" });
-    // 起点按「现在」往回算:离现在 30 天左右,而不是锚在某个过去时刻。
+    // Start is relative to now, not anchored at a past moment.
     expect(
       Math.abs((data.since as number) - (rangeSince("30d", Date.now()) as number)),
     ).toBeLessThan(60_000);
   });
 
-  it("归档账户:窗口从封存那一刻往回算", async () => {
+  it("archived account: window counts back from the archive moment", async () => {
     mount(row({ archivedAt: SEALED }));
     await waitFor(() => expect(getAccountHistory).toHaveBeenCalled());
     expect(getAccountHistory.mock.calls[0]?.[0].data.since).toBe(rangeSince("30d", SEALED));
   });
 
-  it("切到 7D → 按 7 天窗口重新取", async () => {
+  it("switching to 7D refetches with a 7-day window", async () => {
     mount(row());
     await waitFor(() => expect(getAccountHistory).toHaveBeenCalled());
 
@@ -253,8 +246,8 @@ describe("价值历史的窗口", () => {
   });
 });
 
-describe("⋯ 菜单:同步", () => {
-  it("成功 → 同步这个账户并提示已同步", async () => {
+describe("overflow menu: sync", () => {
+  it("success → syncs this account and toasts synced", async () => {
     syncAccountAndWait.mockResolvedValue({ ok: true });
     const { client } = mount(row());
     fireEvent.click(await menuItem("Sync"));
@@ -263,7 +256,7 @@ describe("⋯ 菜单:同步", () => {
     expect(syncAccountAndWait).toHaveBeenCalledWith(client, "acc_1");
   });
 
-  it("因缺凭据被跳过 → 告诉用户还缺凭据", async () => {
+  it("skipped for missing creds → tells the user creds are missing", async () => {
     syncAccountAndWait.mockResolvedValue({
       ok: false,
       skipped: true,
@@ -279,7 +272,7 @@ describe("⋯ 菜单:同步", () => {
     );
   });
 
-  it("失败 → 报上游原话", async () => {
+  it("failure → shows the upstream message", async () => {
     syncAccountAndWait.mockResolvedValue({ ok: false, skipped: false, error: "429 from upstream" });
     mount(row());
     fireEvent.click(await menuItem("Sync"));
@@ -287,7 +280,7 @@ describe("⋯ 菜单:同步", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("429 from upstream"));
   });
 
-  it("发起本身失败(网络)→ 通用失败文案", async () => {
+  it("request itself fails (network) → generic failure copy", async () => {
     syncAccountAndWait.mockRejectedValue(new Error("network"));
     mount(row());
     fireEvent.click(await menuItem("Sync"));
@@ -295,20 +288,20 @@ describe("⋯ 菜单:同步", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("Sync failed."));
   });
 
-  it("手记账户没有「同步」这一项", async () => {
+  it("manual account has no sync item", async () => {
     mount(row({ connectorId: "manual" }));
     await menuItem("Archive");
     expect(screen.queryByRole("button", { name: "Sync" })).toBeNull();
   });
 
-  it("归档账户的「同步」禁用", async () => {
+  it("sync is disabled for archived accounts", async () => {
     mount(row({ archivedAt: SEALED }));
     expect((await menuItem("Sync")).disabled).toBe(true);
   });
 });
 
-describe("⋯ 菜单:归档 / 标签 / 移动", () => {
-  it("活跃账户 → 归档", async () => {
+describe("overflow menu: archive / tags / move", () => {
+  it("active account → archive", async () => {
     archiveAccount.mockResolvedValue(undefined);
     mount(row());
     fireEvent.click(await menuItem("Archive"));
@@ -317,7 +310,7 @@ describe("⋯ 菜单:归档 / 标签 / 移动", () => {
     );
   });
 
-  it("归档账户 → 这一项变成「取消归档」", async () => {
+  it("archived account → item becomes unarchive", async () => {
     archiveAccount.mockResolvedValue(undefined);
     mount(row({ archivedAt: SEALED }));
     fireEvent.click(await menuItem("Unarchive"));
@@ -328,14 +321,14 @@ describe("⋯ 菜单:归档 / 标签 / 移动", () => {
     );
   });
 
-  it("归档失败 → 报错", async () => {
+  it("archive failure → error toast", async () => {
     archiveAccount.mockRejectedValue(new Error("boom"));
     mount(row());
     fireEvent.click(await menuItem("Archive"));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("Action failed."));
   });
 
-  it("标签 → 弹窗只拿本组合的 Tag、本账户已打的那几个、以及每个 Tag 的账户数", async () => {
+  it("tags → modal gets this portfolio's tags, the account's tags and per-tag account counts", async () => {
     mount(row());
     fireEvent.click(await menuItem("Tags"));
     expect(JSON.parse(screen.getByTestId("tags-modal").textContent ?? "")).toEqual({
@@ -345,14 +338,14 @@ describe("⋯ 菜单:归档 / 标签 / 移动", () => {
     });
   });
 
-  it("移动 → 组合选择弹窗拿到这个账户与它现在所在的组合", async () => {
+  it("move → portfolio picker gets this account and its current portfolio", async () => {
     mount(row());
     fireEvent.click(await menuItem("Move to…"));
     expect(screen.getByTestId("move-modal").textContent).toBe("acc_1@p1");
   });
 });
 
-describe("删除", () => {
+describe("delete", () => {
   async function confirmDelete() {
     fireEvent.click(await menuItem("Delete"));
     await screen.findByText(/Delete this account\?/);
@@ -360,14 +353,14 @@ describe("删除", () => {
     fireEvent.click(buttons[buttons.length - 1] as HTMLElement);
   }
 
-  it("点菜单里的「删除」只弹确认,不直接删", async () => {
+  it("menu delete only opens a confirmation, does not delete", async () => {
     mount(row());
     fireEvent.click(await menuItem("Delete"));
     await screen.findByText(/Delete this account\?/);
     expect(removeAccount).not.toHaveBeenCalled();
   });
 
-  it("确认框里点取消 → 收起确认框,不删", async () => {
+  it("cancel in the confirmation → closes it, no delete", async () => {
     mount(row());
     fireEvent.click(await menuItem("Delete"));
     await screen.findByText(/Delete this account\?/);
@@ -378,7 +371,7 @@ describe("删除", () => {
     expect(removeAccount).not.toHaveBeenCalled();
   });
 
-  it("确认 → 删这个账户,成功后关抽屉", async () => {
+  it("confirm → deletes this account and closes the sheet on success", async () => {
     removeAccount.mockResolvedValue(undefined);
     const { onOpenChange } = mount(row());
     await confirmDelete();
@@ -387,7 +380,7 @@ describe("删除", () => {
     expect(removeAccount).toHaveBeenCalledWith({ data: { accountId: "acc_1" } });
   });
 
-  it("删除失败 → 报错,抽屉不关", async () => {
+  it("delete failure → error toast, sheet stays open", async () => {
     removeAccount.mockRejectedValue(new Error("boom"));
     const { onOpenChange } = mount(row());
     await confirmDelete();
@@ -397,7 +390,7 @@ describe("删除", () => {
   });
 });
 
-describe("就地改名", () => {
+describe("inline rename", () => {
   async function rename(to: string) {
     fireEvent.click(screen.getByText("Main wallet"));
     const input = (await screen.findByDisplayValue("Main wallet")) as HTMLInputElement;
@@ -405,7 +398,7 @@ describe("就地改名", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
   }
 
-  it("改名 → 写这个账户的新名字,成功后退出编辑", async () => {
+  it("rename → writes the new name and exits edit mode on success", async () => {
     renameAccount.mockResolvedValue(undefined);
     mount(row());
     await rename("Cold storage");
@@ -418,7 +411,7 @@ describe("就地改名", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "Save" })).toBeNull());
   });
 
-  it("改名失败 → 报错并停在输入框里", async () => {
+  it("rename failure → error toast and stays in the input", async () => {
     renameAccount.mockRejectedValue(new Error("boom"));
     mount(row());
     await rename("Cold storage");

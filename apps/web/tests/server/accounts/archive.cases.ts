@@ -12,7 +12,6 @@ import { seedAccount, seedManualAccount } from "../_kit/seed";
 import { freshUser } from "../_kit/user";
 
 describe("accounts/archive", () => {
-  // #527 · archiveAccount(归档 / 取消归档;归档手记账户先落一张封存快照)
   const USER = "h-acc-archive";
 
   const labels = async () => {
@@ -30,20 +29,20 @@ describe("accounts/archive", () => {
   });
 
   describe("archiveAccount", () => {
-    it("归档手记账户 → 落了一张封存快照", async () => {
+    it("archiving a manual account writes a sealing snapshot", async () => {
       const acc = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
         unitPrice: 100,
         amount: 2,
       });
-      expect(await snapshotCount(acc.id)).toBe(0); // 手记平时不写快照(ADR 0018)
+      expect(await snapshotCount(acc.id)).toBe(0); // manual accounts don't snapshot otherwise
 
       await call(USER, handleArchiveAccount({ accountId: acc.id, archived: true }));
 
       expect(await snapshotCount(acc.id)).toBe(1);
     });
 
-    it("取消归档 → 回到活跃,archivedAt 清空", async () => {
+    it("unarchive → active again, archivedAt cleared", async () => {
       const acc = await seedAccount(USER, "甲", "bitcoin");
       await call(USER, handleArchiveAccount({ accountId: acc.id, archived: true }));
 
@@ -52,7 +51,7 @@ describe("accounts/archive", () => {
       expect((await db(USER).accounts.getById(acc.id))?.archivedAt).toBeNull();
     });
 
-    it("先改名再归档 → 两件事都生效", async () => {
+    it("rename then archive → both take effect", async () => {
       const acc = await seedAccount(USER, "旧名", "bitcoin");
 
       await call(USER, handleRenameAccount({ accountId: acc.id, label: "新名" }));
@@ -62,8 +61,8 @@ describe("accounts/archive", () => {
       expect((await db(USER).accounts.getById(acc.id))?.archivedAt).not.toBeNull();
     });
 
-    it("对已归档的账户再归档一次 → 不再落第二张封存快照", async () => {
-      // 落两张会让曲线在归档那一刻多出一个点 —— 而它俩的值一样,读起来像同步了两次。
+    it("archiving an already-archived account → no second sealing snapshot", async () => {
+      // Two would add a duplicate point to the curve at the archive moment.
       const acc = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
         unitPrice: 100,
@@ -77,8 +76,7 @@ describe("accounts/archive", () => {
       expect(await snapshotCount(acc.id)).toBe(1);
     });
 
-    // 否则抽屉头显示的是封存值,曲线却还在往今天长 —— 一个抽屉里两个说法。
-    it("归档手记账户之后 → 曲线末点停在封存那一刻,不再补实时点", async () => {
+    it("archived manual account → curve ends at the seal, no live point appended", async () => {
       const acc = await seedManualAccount(USER, "手记", {
         symbol: "BTC",
         unitPrice: 100,
@@ -92,7 +90,7 @@ describe("accounts/archive", () => {
         handleGetAccountHistory({ accountId: acc.id, connectorId: "manual" }),
       );
 
-      // 曲线在浏览器里装(FOL-38);「不再补实时点」在原料里就看得见:`live` 是 null。
+      // Curves are built client-side; "no live point" shows in the raw data as `live: null`.
       expect(raw.live).toBeNull();
       const series = buildAccountValueHistory(raw.rows, raw.live);
       expect(series.length).toBeGreaterThan(0);

@@ -10,8 +10,7 @@ const BatchDraftInput = z.object({
   token: z.object({
     symbol: z.string().trim().min(1),
     unitPrice: z.number().nonnegative(),
-    // 选币下拉发的那张不透明票(#202b)。这一层只校验「是个非空串」—— 解票在 ../manual/store,
-    // 解不开就当没选币。
+    // Opaque picker ticket; decoded in ../manual/store, where an invalid one means "not picked".
     ticket: z.string().trim().min(1).nullish(),
   }),
   kind: ActivityKind,
@@ -27,8 +26,7 @@ export const CreateActivitiesInput = z.object({
   drafts: z.array(BatchDraftInput).min(1),
 });
 
-// 批量新增(原子 + 整批拒;也承载"新建 token"流 —— 首条活动落 token)。
-// draft 形状直接取自 ../manual/store 的入参 —— 决策/物化都在那层,这里不复述一份会漂移的类型。
+// Atomic batch, rejected whole on oversell.
 export const handleCreateManualActivities = Effect.fn("createManualActivities")(function* (data: {
   accountId: string;
   drafts: Parameters<typeof addManualActivities>[1];
@@ -37,8 +35,7 @@ export const handleCreateManualActivities = Effect.fn("createManualActivities")(
   return result;
 });
 
-// server fn 的那一层:写成功之后给这个账户的币投一条定向的 `daily-prices`(FOL-90),新币的历史
-// 曲线不必等下一个整点。消息里的 userId 由装配点填(`enqueueForUser`)。
+// Queues a targeted `daily-prices` refill so new tokens' history needn't wait for the next hour.
 export const handleCreateManualActivitiesAndRefill = Effect.fn("createManualActivities")(function* (
   data: Parameters<typeof handleCreateManualActivities>[0],
 ) {

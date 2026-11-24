@@ -9,27 +9,16 @@ import basicSsl from "@vitejs/plugin-basic-ssl";
 import viteReact from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
-// vite 的 host 校验(防 DNS rebinding)默认只放 localhost,从别的域名访问本地 server 会被
-// "This host is not allowed" 挡掉。要额外放通哪个域名由启动脚本注入(`pnpm dev:tunnel` 用它传隧道
-// 域名)—— 命名隧道用的是各人的私有域名,不写进仓库。随机的 trycloudflare 后缀是通用的,直接留着。
-//
-// rpID 不在这里管:它从 worker 的 BETTER_AUTH_URL 派生,而 worker 的环境变量只能来自 wrangler 配置或
-// .dev.vars —— 由 dev:tunnel 脚本运行期临时改那个文件、退出时按散列校验还原,见脚本头部。
+// Vite's host check (DNS-rebinding guard) only allows localhost by default. Extra hosts are
+// injected by the launch script (`pnpm dev:tunnel`); named-tunnel domains are private, so not in the repo.
 const allowedHosts = [".trycloudflare.com", process.env.DEV_ALLOWED_HOST].filter(
   (host): host is string => !!host,
 );
 
-// 本地 server 要不要 https,**由 BETTER_AUTH_URL 一个人说了算** —— 开关只有一处,两边不可能打架。
-//
-// 为什么是它:better-auth 校验 passkey 的 expectedOrigin 是**完整 origin**(带 scheme),scheme 一旦
-// 和实际访问的对不上,每个 ceremony 都失败且没有有用的报错。既然 scheme 本来就必须一致,那就让配置
-// 从它派生,而不是让人记着「改了这个还要改那个」。
-//
-// 读哪个文件跟着 @cloudflare/vite-plugin 的规矩走:`CLOUDFLARE_ENV=x` 时它**只**加载 `.dev.vars.x`
-// (e2e 就是 `CLOUDFLARE_ENV=test`),否则是 `.dev.vars`。
-//
-// **只认 localhost**:`dev:tunnel` 会把 BETTER_AUTH_URL 临时改成隧道的 https 域名,但那条链上 TLS 是
-// 在 Cloudflare 那头终结的,cloudflared 连本地用的仍是 http —— 那时候本地 server 自己发 TLS 反而连不上。
+// Whether the local server uses https is decided solely by BETTER_AUTH_URL: better-auth checks
+// passkey expectedOrigin against the full origin (scheme included), so the scheme must match.
+// Reads `.dev.vars.<CLOUDFLARE_ENV>` when set (as @cloudflare/vite-plugin does), else `.dev.vars`.
+// Localhost only: under `dev:tunnel` TLS terminates at Cloudflare and cloudflared talks http locally.
 function localHttps() {
   const env = process.env.CLOUDFLARE_ENV;
   try {
@@ -37,12 +26,11 @@ function localHttps() {
     const url = text.match(/^BETTER_AUTH_URL=(.*)$/m)?.[1]?.trim();
     return /^https:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(url ?? "");
   } catch {
-    return false; // 还没配 .dev.vars —— 这时候 auth 本来也跑不起来,别再加一层证书告警
+    return false; // no .dev.vars yet
   }
 }
 
-// 构建期注入版本信息(设置页底部展示,便于比对线上跑的是哪份代码)。git 不可用时退回 GITHUB_SHA / 占位;
-// CI 的浅克隆可能没有 tag,git describe 会自然退回 commit(--always)。
+// Injected at build time for the settings page footer; falls back to GITHUB_SHA / placeholder without git.
 function buildInfo() {
   const sh = (cmd: string) => {
     try {
@@ -59,10 +47,9 @@ function buildInfo() {
 }
 const build = buildInfo();
 
-// 把构建版本戳进产物 sw.js(替换 public/sw.js 里的 `__SW_BUILD__` 占位)。理由:浏览器逐字节比对
-// sw.js 才认得出「有新版」,而普通发版只换 /assets 的 hash、不动 sw.js —— 不戳版本,更新检测永不触发。
-// public/ 资源不进 rollup bundle(直接拷贝),所以在 writeBundle 里就地改产物文件;只有 client 那次
-// 构建的输出目录里有 sw.js,其余构建找不到、静默跳过。
+// Stamps the build version into the built sw.js (replaces `__SW_BUILD__`): browsers detect a new
+// service worker by byte-diffing sw.js, and normal releases only change /assets hashes.
+// public/ isn't in the rollup bundle, so patch it in writeBundle; only the client build has sw.js.
 function stampSwVersion(version: string): Plugin {
   return {
     name: "stamp-sw-version",
@@ -74,7 +61,7 @@ function stampSwVersion(version: string): Plugin {
       try {
         src = readFileSync(swPath, "utf8");
       } catch {
-        return; // 这次构建输出里没有 sw.js
+        return; // no sw.js in this build output
       }
       if (src.includes("__SW_BUILD__")) {
         writeFileSync(swPath, src.replaceAll("__SW_BUILD__", version));
@@ -91,35 +78,23 @@ const config = defineConfig({
   },
   resolve: { tsconfigPaths: true },
   server: { allowedHosts },
-  // preview 也要:`dev:tunnel --preview` 跑的是构建产物。
+  // preview too: `dev:tunnel --preview` serves the build output.
   preview: { allowedHosts },
   plugins: [
-    // **要的其实是 HTTP/2**:vite 只在配了证书时才用 `node:http2` 起 server,否则是 `node:http`
-    // (HTTP/1.1)—— 而 HTTP/1.1 同域最多 6 条连接,超出的排队,线上的 Cloudflare 是 HTTP/2 多路
-    // 复用、没有这个上限。差的时间不多(一次首页导航约 200ms),但它会让**本地测出来的形状和线上不是
-    // 一回事** —— 查 #485 时就差点把「排队」当成「查询慢」。
-    //
-    // 证书是现签的自签名证书(缓存在 node_modules/.vite),没有 CA 认它:浏览器第一次会拦一下,点
-    // 「继续前往」之后地址栏会一直挂着 Not Secure —— 只是提示,`isSecureContext` 仍为真,WebAuthn
-    // 照常。dev 和 preview 都配上:e2e 在 CI 上跑的正是 preview。
-    //
-    // **构建期 prerender 那个 preview 不配证书**(ADR 0049 补记):SPA 模式在构建里用本配置再起一个
-    // preview、用 Node 的 fetch 去取 `/`,而 Node 不认自签名证书 —— 配上就 `DEPTH_ZERO_SELF_SIGNED_CERT`、
-    // 整个 build 失败(CI 的 e2e 用 `CLOUDFLARE_ENV=test` 构建,`.dev.vars.test` 正是 https)。
-    // `TSS_PRERENDERING` 是 TanStack 在起那个 preview 之前、在同一个进程里设的。
+    // HTTP/2 is the real goal: vite only uses `node:http2` when a cert is configured, and HTTP/1.1's
+    // 6-connections-per-host limit makes local timings differ in shape from production.
+    // The self-signed cert is untrusted (browser warns once; WebAuthn still works).
+    // Skipped for the build-time prerender preview: Node's fetch rejects the self-signed cert
+    // (`DEPTH_ZERO_SELF_SIGNED_CERT`), failing the build. TanStack sets `TSS_PRERENDERING` in-process.
     localHttps() && process.env.TSS_PRERENDERING !== "true" && basicSsl(),
     stampSwVersion(build.version),
     devtools(),
     cloudflare({ viteEnvironment: { name: "ssr" } }),
     tailwindcss(),
-    // **HTML 文档是静态资源**(ADR 0049 补记):SPA 模式在构建期把 `/` prerender 一次,落成
-    // `dist/client/index.html`;wrangler 的 `assets.not_found_handling` 把所有导航都回这一份,
-    // Worker 一次都不进。免费档 10ms CPU,而「零数据骨架壳」在请求里 SSR 一次实测就要 9.2ms。
-    //
-    // outputPath 必须是 `/index`(默认 `/_shell` 落成 `_shell.html`,平台的 SPA 兜底只认 index.html)。
-    // 框架的「壳模式」短路在 CF 的 prerender worker 里不生效(`TSS_PRERENDERING` 读不到宿主进程的
-    // env),所以 prerender 渲的是一次真实的 `/` —— 壳干不干净靠根路由没有任何服务端输入来保证,
-    // 见 routes/__root.tsx 与 -root/root-document。
+    // The HTML shell is prerendered once at build (`dist/client/index.html`) and served for all
+    // navigations, since SSR'ing it per request costs ~9ms of the 10ms CPU budget. outputPath must
+    // be `/index`: the platform SPA fallback only recognises index.html. The framework's shell-mode
+    // shortcut doesn't apply in CF's prerender worker, so the root route must take no server input.
     tanstackStart({ spa: { enabled: true, prerender: { outputPath: "/index" } } }),
     viteReact(),
   ],

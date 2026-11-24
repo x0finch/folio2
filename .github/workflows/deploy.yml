@@ -1,58 +1,53 @@
 name: Deploy
 
-# 发版部署,两条路都触发本 workflow:
-#   1) **打 v* tag**(`git tag v1.2.0 && git push origin v1.2.0`）—— 命令行发版。
-#   2) **手机友好**:GitHub 网页 / App → Actions → Deploy → Run workflow,填个版本号点一下
-#      (workflow_dispatch)。这条先由 CI 自己把 tag 打上(github-actions bot 推,需 contents:write),
-#      再照常 verify + 迁移 + 部署 —— 手机上不必敲 git。
-#      ⚠️ 若仓库对 tag 设了保护规则(Settings → Rules),把 github-actions 加进 bypass,否则这条推 tag 会 403。
-#      (GITHUB_TOKEN 推的 tag **不会**再触发上面的 push:tags —— GitHub 防递归 —— 所以不会重复部署。)
-# 需要一个仓库 secret:CLOUDFLARE_API_TOKEN(权限 Workers Scripts:Edit + D1:Edit)。
-# account_id 已在 apps/web/wrangler.jsonc,worker 运行时 secrets(SECRETS_KEY 等)是一次性
-# `wrangler secret put` 设好、存在 Worker 里的,CI 不碰。见 apps/web/DEPLOY.md。
+# Release deploy, triggered two ways:
+#   1) pushing a v* tag (`git tag v1.2.0 && git push origin v1.2.0`).
+#   2) GitHub UI / mobile: Actions, Deploy, Run workflow with a version (workflow_dispatch); CI pushes the tag first (needs contents:write), then verifies, migrates and deploys as usual.
+#      If tags are protected, add github-actions to the bypass list or the tag push gets 403.
+#      A tag pushed by GITHUB_TOKEN does not retrigger the push:tags trigger, so no double deploy.
+# Needs the repo secret CLOUDFLARE_API_TOKEN (Workers Scripts:Edit + D1:Edit). account_id is in apps/web/wrangler.jsonc; runtime secrets (SECRETS_KEY etc.) are set once with `wrangler secret put` and stored in the Worker. See apps/web/DEPLOY.md.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
-        description: "版本号,形如 v0.14.1(CI 会打成 tag)"
+        description: "Version like v0.14.1 (CI tags it)"
         required: true
         type: string
 
 concurrency:
   group: deploy
-  cancel-in-progress: false # 部署进行中不取消,免得半途中断留下不一致状态
+  cancel-in-progress: false # don't cancel an in-flight deploy: it could leave inconsistent state
 
 jobs:
-  # 仅 workflow_dispatch 用:把输入的版本号打成 tag 推上去,让下面 job 的 git describe / 设置页页脚拿到版本。
-  # tag 触发时本 job 跳过(下面 verify 用 `needs.tag.result` 兼容这两种情形)。
+  # Only for workflow_dispatch: pushes the input version as a tag so `git describe` in the jobs below gets it. Skipped on tag triggers (verify handles both via `needs.tag.result`).
   tag:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
-      contents: write # 推 tag 要写权限
+      contents: write # pushing a tag needs write
     steps:
       - name: Validate version
         run: |
           echo "${{ inputs.version }}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' \
-            || { echo "版本号要形如 v0.14.1(v + 三段数字)"; exit 1; }
+            || { echo "Version must look like v0.14.1 (v + three numbers)"; exit 1; }
       - uses: actions/checkout@v7
       - name: Create & push tag
         run: |
           git tag "${{ inputs.version }}"
           git push origin "${{ inputs.version }}"
 
-  # 部署前再过一遍四闸(安全网:防 tag 打在没过 CI 的 commit 上)。
+  # Re-run the gates before deploy, in case the tag landed on a commit that never passed CI.
   verify:
     needs: tag
-    # tag 触发时 tag job 跳过 → 这里照跑;dispatch 时等 tag 成功。tag 失败(如版本号非法)则不跑。
+    # On tag triggers the tag job is skipped and this runs; on dispatch it waits for the tag; if tagging fails (e.g. invalid version) it doesn't run.
     if: ${{ always() && (needs.tag.result == 'success' || needs.tag.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # 拉全历史 + tag,让 vite 的 git describe 得到真实版本号(设置页页脚)
+          fetch-depth: 0 # full history + tags so vite's git describe yields the real version
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -69,17 +64,16 @@ jobs:
   deploy:
     needs: verify
     runs-on: ubuntu-latest
-    # 部署历史留痕。要加人工审批闸,就在 repo Settings → Environments → production 配 required
-    # reviewers —— workflow 无需改动,届时这里会自动等待 approve。
+    # Deploy history; for a manual approval gate, configure required reviewers under Settings, Environments, production.
     environment: production
     permissions:
-      contents: write # 建 GitHub Release 要写权限(见末尾 Create GitHub Release 步)
+      contents: write # creating a GitHub Release needs write
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 0 # 拉全历史 + tag,让 vite 的 git describe 得到真实版本号(设置页页脚)
+          fetch-depth: 0 # full history + tags so vite's git describe yields the real version
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -87,33 +81,26 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # 先迁移 remote D1。这一步失败 → job 停,下面 deploy 不跑 → 不会出现「代码上了但 schema 没迁」。
-      # ⚠️ 破坏性迁移(删列等)自动上生产不可回滚 —— 发版前自查迁移内容(见 DEPLOY.md)。
+      # Migrate remote D1 first: if it fails the job stops before deploy, so code never ships without its schema. Destructive migrations can't be rolled back; review them before release (see DEPLOY.md).
       - name: Apply D1 migrations (remote)
         run: pnpm --filter @folio/web run db:migrate:remote
 
-      # vite build + wrangler deploy(account_id 在 wrangler.jsonc,只用 API token 认证)。
-      # 必须用 `run deploy`:裸 `pnpm deploy` 会撞上 pnpm 内置的 deploy 命令(部署包到目录),
-      # 而不是跑 package.json 的 deploy script。
+      # Must use `run deploy`: bare `pnpm deploy` hits pnpm's built-in deploy command.
       - name: Build & deploy
         run: pnpm --filter @folio/web run deploy
 
-      # 部署后把日汇总(`account_daily_totals`)按全部快照重算一遍(review #10):迁移与部署之间那几分钟,
-      # 旧代码写的快照不维护日汇总、就进不去了。`INSERT OR REPLACE`,幂等,每次部署都跑也只是几千行写。
-      # 语句直接取自迁移 0009,见 apps/web/scripts/backfill-daily-totals.mjs。
+      # Recompute the daily rollup (`account_daily_totals`) from all snapshots: snapshots written by old code between migration and deploy didn't maintain it. Idempotent INSERT OR REPLACE. Statement taken from migration 0009 (apps/web/scripts/backfill-daily-totals.mjs).
       - name: Backfill daily totals
         run: pnpm --filter @folio/web run db:backfill-daily-totals
 
-      # 部署成功后,给这个版本建一个 GitHub Release(自动从 commit 生成更新日志)——
-      # 这样 Releases 页跟着发版走,不必手工补。tag 早已存在(tag job 或 push 触发),这里只挂 Release。
-      # 版本号两条路都取:手动触发用输入,tag 触发用 ref_name。已存在则跳过(重跑不报错)。
+      # Create a GitHub Release for this version after a successful deploy (auto-generated notes). The version comes from the input (dispatch) or ref_name (tag); skipped if it already exists.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG 已存在,跳过。"
+            echo "Release $TAG already exists, skipping."
           else
             gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag
           fi

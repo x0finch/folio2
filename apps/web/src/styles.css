@@ -1,19 +1,15 @@
-/* @folio/ui 拥有 Tailwind 入口 + 主题令牌(@import "tailwindcss" 在该文件内)。
-   这里只做一次引入,避免重复 import tailwindcss。 */
+/* @folio/ui owns the Tailwind entry and theme tokens; import it once here. */
 @import "@folio/ui/globals.css";
 
-/* Geist 变体字体(自托管 via @fontsource;CF Workers 走静态资源)。--font-sans/mono 映射在 @folio/ui @theme。 */
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
-/* Newsreader 变体 serif(v2 PageHeader 大标题);--font-serif 映射在 @folio/ui @theme。 */
 @import "@fontsource-variable/newsreader";
 
-/* 显式扫描本应用源码(Tailwind 入口在 @folio/ui,故此处补声明 app 自身的 class 来源)。 */
+/* Tailwind doesn't scan node_modules, so declare this app's own class sources. */
 @source "./**/*.{ts,tsx}";
 
-/* 自动填充探针:浏览器给 <input> 套上 autofill 样式时,借这个无副作用动画触发一次
-   animationstart —— 登录页据此识别「这是密码管理器自动填的、非手输」,以便自动提交。
-   opacity 1→1 无视觉变化;1ms 时长仅为让 animation 真正启动(0s 不触发事件)。 */
+/* Autofill probe: fires animationstart so the login form can detect password-manager autofill.
+   1ms because a 0s animation never fires the event. */
 @keyframes folio-autofill {
   from {
     opacity: 1;
@@ -23,11 +19,9 @@ input:-webkit-autofill {
   animation: folio-autofill 1ms;
 }
 
-/* 颜色要抢回来:Chrome/Safari 给自动填充过的 input 刷一层自己的浅色底,而且 `background` 改不动
-   (UA 样式优先级更高)—— 深色主题下就是白底,配上浅色的 caret-color = 白光标画在白底上,看不见。
-   绕法是内阴影铺满把底盖掉,文字用 -webkit-text-fill-color(同理 color 改不动),光标色再写一次。
-   :hover/:focus 也带上,因为浏览器会在这些态重新刷它那层底。
-   **动画不写进这一组**:那是「被自动填充」的探针(见上),多挂 :hover/:focus 会让它在悬停时重放。 */
+/* UA autofill styles beat `background`/`color`, leaving a white field with a white caret in dark
+   mode: paint over it with an inset shadow. The probe animation stays out of this group, or
+   it would replay on hover. */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus {
@@ -36,11 +30,9 @@ input:-webkit-autofill:focus {
   caret-color: var(--foreground);
 }
 
-/* 触摸手感的三条基线(片3 / #470)。全部写在 @layer base 里 —— utilities 层在它之后,
-   所以 `select-text`、`touch-pan-y` 这类工具类能按需盖掉它们(反过来就盖不动了)。 */
+/* Kept in @layer base so utilities like `select-text` / `touch-pan-y` can override them. */
 @layer base {
-  /* 长按不弹系统动作面板(链接/按钮那套「打开 / 拷贝链接 / 分享」)。
-     它管的是 callout,不管文字选中 —— 选中是下一条的事。 */
+  /* No long-press action sheet on links/buttons. */
   a,
   button,
   [role="button"],
@@ -48,9 +40,8 @@ input:-webkit-autofill:focus {
     -webkit-touch-callout: none;
   }
 
-  /* 控件与外壳本身不参与选中:长按 Dock、顶栏、tab、卡片不该冒出蓝色高亮。
-     **内容要单独放回来**:金额、代币名、账户名、备注正文都带 `select-text` —— 全站目前
-     没有任何复制按钮,长按复制是唯一的复制途径,一刀切会把它砍掉。 */
+  /* Chrome isn't selectable; content opts back in with `select-text`, since long-press is the
+     only way to copy anything. */
   header,
   nav,
   button,
@@ -60,7 +51,6 @@ input:-webkit-autofill:focus {
     user-select: none;
   }
 
-  /* 输入与可编辑区照旧可选可编辑(凭据表单、手记资产、内联改名)。 */
   input,
   textarea,
   [contenteditable="true"] {
@@ -68,8 +58,7 @@ input:-webkit-autofill:focus {
     user-select: text;
   }
 
-  /* 连点两下不再缩放,顺带去掉那约 300ms 的点击延迟。`manipulation` 只砍双击缩放,
-     滚动与双指缩放都留着 —— 比 `touch-action: none` 温和,不会连带禁掉平移。 */
+  /* Kills double-tap zoom (and the ~300ms tap delay) while keeping pan and pinch-zoom. */
   body {
     touch-action: manipulation;
   }
@@ -86,14 +75,14 @@ body,
 }
 
 html {
-  /* 移动横竖屏切换时禁止 iOS 自动放大字号(独立窗口里更像原生)。 */
+  /* Stop iOS from enlarging text on orientation change. */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
-  /* 去掉点击高亮灰块;禁止整页 overscroll 回弹(装成独立 App 时避免露出浏览器/白边)。 */
+  /* No tap highlight; no overscroll bounce exposing the browser behind an installed app. */
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
 }

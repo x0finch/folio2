@@ -7,10 +7,9 @@ import { priceTickets } from "./pricing";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
 
-// 选币下拉的 SWR 刷价:一批票 → 现价 + 涨跌(#226)。展示时对价过期/缺失的可见行批量走一次
-// `/simple/price` 回填。**POST 不是 GET**:一批票可到几十条、每条几十字符,塞进 GET 的 query
-// 会把 URL 撑爆(正是 #245 那类 414);而且这是用户触发的实时刷,不该走边缘缓存。
-// **不建行、不写缓存**(pricesByRefs 语义)—— 用户还在划,行只在提交时由 mint 建。
+// SWR price refresh for the picker: tickets -> price + change for visible rows with stale or missing prices.
+// POST because dozens of tickets in a GET query overflow the URL (414), and it's a user-triggered live refresh that
+// shouldn't hit the edge cache. Creates no rows and writes no cache.
 export const RefreshTokenPricesInput = z.object({
   tickets: z.array(z.string().min(1)).max(200),
 });
@@ -18,10 +17,9 @@ export const RefreshTokenPricesInput = z.object({
 export const handleRefreshTokenPrices = Effect.fn("refreshTokenPrices")(function* (
   data: z.infer<typeof RefreshTokenPricesInput>,
 ) {
-  // 票携带当前上游(加密币)或 `fiat`(法币)命名者,两者都放行(同 getTokenPrice / mintHolding)——
-  // 只收 NAMER 的话「已有代币」组里的法币持仓会被丢掉、价格列恒显 "—"(法币无代币市价,得走 FX)。
-  // 分流(法币走 FX / 其余走代币源)在纯函数 priceTickets 里,两个选币端点共用、可单测。
-  // 法币只读汇率缓存(`fx` 队列活暖着它),请求里不 `fx.warm`(FOL-88)。
+  // Both the current upstream's and the `fiat` namer are allowed (NAMER only would drop fiat holdings and leave the
+  // price column "—"). Fiat routing is in the pure `priceTickets`, shared with the other picker endpoint; fiat is
+  // read from the FX cache only, never warmed here.
   const out = yield* priceTickets(data.tickets, { namers: [NAMER, FIAT_NAMER] });
   tokenLog.debug("refreshTokenPrices: ok", { asked: data.tickets.length, got: out.length });
   return out;

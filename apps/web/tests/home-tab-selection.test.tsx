@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { useHomeTabSelection } from "@/routes/_authed/-home/tab/selection";
 import { HomeViewStateProvider } from "@/routes/_authed/-home/view-state";
 
-// 首页 tab 条的选中逻辑:切 tab、刚建的 pin 还没挂上时药丸不闪回 Tokens、pin 被删后回落默认 tab。
+// Home tab selection: a fresh pin not yet mounted doesn't flash the pill back to Tokens; a deleted pin falls back.
 
 type Api = ReturnType<typeof useHomeTabSelection>;
 
@@ -26,13 +26,13 @@ function mount(initialPins: { id: string }[]) {
 }
 
 describe("useHomeTabSelection", () => {
-  it("默认是 Tokens", () => {
+  it("defaults to Tokens", () => {
     const { api } = mount([]);
     expect(api.current.active).toBe("tokens");
     expect(api.current.shownActive).toBe("tokens");
   });
 
-  it("切到视角 tab / 已有的 pin", () => {
+  it("switches to a view tab / an existing pin", () => {
     const { api } = mount([{ id: "pin-1" }]);
     act(() => api.current.selectTab("perps"));
     expect(api.current.shownActive).toBe("perps");
@@ -41,7 +41,7 @@ describe("useHomeTabSelection", () => {
     expect(api.current.shownActive).toBe("pin-1");
   });
 
-  it("刚建的 pin 还没挂上:显示停在上一个有效 tab,挂上后自动切过去", () => {
+  it("fresh pin not yet mounted: stays on the last valid tab, switches once it mounts", () => {
     const { api, setPins } = mount([]);
     act(() => api.current.selectTab("defi"));
     act(() => api.current.selectTab("pin-new"));
@@ -51,7 +51,7 @@ describe("useHomeTabSelection", () => {
     expect(api.current.shownActive).toBe("pin-new");
   });
 
-  it("选中的 pin 被删了:回落默认 tab,不空白", () => {
+  it("selected pin deleted: falls back to the default tab, not blank", () => {
     const { api, setPins } = mount([{ id: "pin-1" }]);
     act(() => api.current.selectTab("pin-1"));
     setPins([]);

@@ -1,19 +1,18 @@
-// 刷 `global_token_ref_index`(链上合约 → CoinGecko 的叫法,ADR 0022)。FOL-85 起它不在 Worker 里跑了
-// —— 那一趟拉 2.6 MB、比对几万行,生产 480–520ms CPU,而免费计划一次调用只有 10ms(ADR 0056)。
+// Refreshes `global_token_ref_index` (on-chain contract to CoinGecko name). It doesn't run in the Worker: the pass costs 480-520ms CPU against the free plan's 10ms.
 //
-//   pnpm --filter @folio/web ref-index:refresh               # 远端 D1(要 CLOUDFLARE_API_TOKEN)
-//   pnpm --filter @folio/web ref-index:refresh --dry-run     # 对着远端算差量,一行不写
-//   pnpm --filter @folio/web ref-index:refresh --env preview # wrangler.jsonc 里 preview 那个库
-//   pnpm --filter @folio/web ref-index:local                 # 本地 `pnpm dev` 那个 D1(.wrangler/state)
+//   pnpm --filter @folio/web ref-index:refresh               # remote D1 (needs CLOUDFLARE_API_TOKEN)
+//   pnpm --filter @folio/web ref-index:refresh --dry-run     # compute the diff against remote, write nothing
+//   pnpm --filter @folio/web ref-index:refresh --env preview # the preview DB in wrangler.jsonc
+//   pnpm --filter @folio/web ref-index:local                 # the local D1 behind `pnpm dev` (.wrangler/state)
 //
-// 定时跑的是 `.github/workflows/ref-index-refresh.yml`(每天 23:00 UTC)。
+// Scheduled by `.github/workflows/ref-index-refresh.yml` (daily 23:00 UTC).
 //
-// 环境变量:
-//   CLOUDFLARE_API_TOKEN   远端必需(Account › D1 › Edit;部署用的那把已经有)。**只进请求头,从不打印。**
-//   COINGECKO_API_KEY      可选;设了走 pro/demo 额度
-//   COINGECKO_API_BASE     可选;上游基址覆盖(perf 压测指到本机假上游),与 Worker 同一套读法
+// Env:
+//   CLOUDFLARE_API_TOKEN   required for remote (Account > D1 > Edit; the deploy token has it). Only in request headers, never printed.
+//   COINGECKO_API_KEY      optional; enables pro/demo quota
+//   COINGECKO_API_BASE     optional; upstream base override (perf tests point it at a local fake)
 //
-// 退出码:0 成功;1 失败(上游 / D1 / 参数)。
+// Exit codes: 0 success; 1 failure (upstream / D1 / arguments).
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { coinGeckoConfigOf } from "@/lib/server/coingecko-config";
@@ -23,7 +22,7 @@ import { openSqliteFile, resolveLocalDb } from "./sqlite-file";
 
 const WEB_ROOT = join(import.meta.dirname, "..", "..");
 const WRANGLER_CONFIG = join(WEB_ROOT, "wrangler.jsonc");
-// wrangler.jsonc 里 `test` 那个 env 的 database_id 在 Cloudflare 上并不存在,只配本地用(见那里的注释)。
+// The `test` env's database_id in wrangler.jsonc doesn't exist on Cloudflare; it's for local use only.
 const LOCAL_ONLY_ENVS = new Set(["test"]);
 
 const USAGE = `usage: ref-index:refresh [--dry-run] [--env <wrangler env>] [--local <sqlite file | persist dir>]
@@ -52,8 +51,7 @@ function parseOptions(argv: string[]) {
   };
 }
 
-// 目标 → 传输。远端要 token;本地是一个 SQLite 文件。
-// `./target` 按需才加载:它拉起整个 wrangler(约 1s),本地那条路用不着。
+// Target to transport: remote needs the token; local is a SQLite file. `./target` loads lazily because it pulls in all of wrangler (~1s).
 async function openTarget(opts: ReturnType<typeof parseOptions>) {
   if (opts.local !== undefined) {
     const path = resolveLocalDb(opts.local);
@@ -99,7 +97,7 @@ async function main(): Promise<void> {
       seconds: ((Date.now() - started) / 1000).toFixed(1),
     };
     for (const [k, v] of Object.entries(lines)) console.log(`${k}: ${v}`);
-    // 链对照失配是静默故障(那条链的币从此没价没图,却不报错)—— 在 Actions 里标成 warning,运行页一眼可见。
+    // A chain-map mismatch is a silent failure (that chain's tokens get no price or logo): surface it as a warning in Actions.
     if (report.unmatchedPlatforms.length > 0) {
       const list = report.unmatchedPlatforms.join(", ");
       if (process.env.GITHUB_ACTIONS === "true")

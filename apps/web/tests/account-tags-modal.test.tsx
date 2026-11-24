@@ -5,15 +5,8 @@ import { IntlProvider } from "use-intl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "@/lib/i18n/messages";
 
-// 打标签弹窗的乐观层(#428 片 4)。四条写从 `.then().catch()` 换成了 mutation,而这套
-// 「点即生效不闪」的 overlay 是 #415 里逐帧调出来的 —— 换发起方式时最容易被悄悄改坏的就是它。
-//
-// 所以这份测的不是「调没调对 server fn」,是**乐观发生在哪一刻、失败之后回没回去**:
-// ① 点一下,在服务端还没回来的时候界面就得已经变了(不是等 refresh);
-// ② 失败要把那一格放回原样,而不是留着一个假的「已打上」;
-// ③ 新建的占位 chip 同理;
-// ④ **create 成功但 attach 失败**这条中间路径,要同时撤掉占位与那笔乐观挂载 ——
-//    少撤后者,chip 会永远显示「已打上」,把「你可以手动再挂一次」这条退路挡死。
+// Optimistic layer of the tag modal: what matters is when the optimistic update lands and whether a failure
+// rolls it back. Create-ok-but-attach-failed must undo both the placeholder and the optimistic attach.
 const { attachTag, detachTag, createTag, renameTag, deleteTag, toastError } = vi.hoisted(() => ({
   attachTag: vi.fn(),
   detachTag: vi.fn(),
@@ -60,7 +53,7 @@ function mount(attachedTagIds: string[] = []) {
       </IntlProvider>
     </QueryClientProvider>,
   );
-  // chip 的「已打上」在 DOM 上就是那一格的 aria-pressed(见 TagInput)。
+  // A chip's "attached" state is its aria-pressed (see TagInput).
   const chip = (name: string) =>
     [...document.querySelectorAll("[aria-pressed]")].find((e) =>
       e.textContent?.includes(`#${name}`),
@@ -72,7 +65,7 @@ function mount(attachedTagIds: string[] = []) {
   return { ...utils, chip, attached, input, names };
 }
 
-// 一个永不 resolve 的调用:用来把「服务端还没回来」这一刻定住。
+// Never resolves: freezes the "server hasn't answered yet" moment.
 const neverResolves = () => new Promise(() => {});
 
 beforeEach(() => {
@@ -80,24 +73,23 @@ beforeEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("打标签弹窗的乐观层", () => {
-  it("点一下就已经打上了 —— 不等服务端回来", async () => {
+describe("tag modal optimistic layer", () => {
+  it("a click attaches immediately — without waiting for the server", async () => {
     attachTag.mockImplementation(neverResolves);
     const { chip, attached } = mount([]);
     expect(attached("longterm")).toBe(false);
 
     fireEvent.click(chip("longterm") as HTMLElement);
 
-    // 同一个同步流程里就该已经变了(onMutate 是在第一个 await 之前被调用的)。
-    // 这一句必须是**同步**的:改成 await 就测不出「点即生效」,只测出「最终会生效」。
+    // Must be synchronous (onMutate runs before the first await); awaiting would only prove "eventually".
     expect(attached("longterm")).toBe(true);
-    // server fn 反而是异步才发出的(mutationFn 在 onMutate 之后一个微任务),所以这句要等。
+    // The server fn fires a microtask after onMutate, so wait for it.
     await waitFor(() =>
       expect(attachTag).toHaveBeenCalledWith({ data: { accountId: "a1", tagId: "t1" } }),
     );
   });
 
-  it("摘标签同理:点完立刻是未打上", async () => {
+  it("detach likewise: unattached right after the click", async () => {
     detachTag.mockImplementation(neverResolves);
     const { chip, attached } = mount(["t1"]);
     expect(attached("longterm")).toBe(true);
@@ -108,18 +100,18 @@ describe("打标签弹窗的乐观层", () => {
     await waitFor(() => expect(detachTag).toHaveBeenCalled());
   });
 
-  it("打标签失败 → 那一格回到未打上,并报一句", async () => {
+  it("attach failure → the chip reverts and an error is toasted", async () => {
     attachTag.mockRejectedValue(new Error("boom"));
     const { chip, attached } = mount([]);
 
     fireEvent.click(chip("longterm") as HTMLElement);
-    expect(attached("longterm")).toBe(true); // 先乐观
+    expect(attached("longterm")).toBe(true); // optimistic first
 
-    await waitFor(() => expect(attached("longterm")).toBe(false)); // 再回退
+    await waitFor(() => expect(attached("longterm")).toBe(false)); // then rolled back
     expect(toastError).toHaveBeenCalled();
   });
 
-  it("新建:回车即先摆一个已选中的占位 chip", async () => {
+  it("create: Enter places a selected placeholder chip right away", async () => {
     createTag.mockImplementation(neverResolves);
     const { input, names } = mount([]);
 
@@ -132,7 +124,7 @@ describe("打标签弹窗的乐观层", () => {
     );
   });
 
-  it("新建失败 → 占位撤掉", async () => {
+  it("create failure → placeholder removed", async () => {
     createTag.mockRejectedValue(new Error("boom"));
     const { input, names } = mount([]);
 
@@ -144,8 +136,7 @@ describe("打标签弹窗的乐观层", () => {
     expect(toastError).toHaveBeenCalled();
   });
 
-  // 这条是整份文件最该在的一条:建出来了、没挂上。
-  it("建成功但挂失败 → 占位撤掉,那笔乐观挂载也撤掉(不能留个假的已打上)", async () => {
+  it("create ok but attach fails → placeholder and optimistic attach both undone (no fake attached)", async () => {
     createTag.mockResolvedValue({ id: "t3", name: "newtag" });
     attachTag.mockRejectedValue(new Error("boom"));
     const { input, names, attached } = mount([]);
@@ -154,19 +145,19 @@ describe("打标签弹窗的乐观层", () => {
     fireEvent.keyDown(input(), { key: "Enter" });
 
     await waitFor(() => expect(toastError).toHaveBeenCalled());
-    // 占位没了,列表回到两条既有 Tag,而且没有任何一格因为那笔乐观挂载而显示成已打上。
+    // Placeholder gone, back to the two existing tags, none showing as attached.
     expect(names().some((n) => n.includes("#newtag"))).toBe(false);
     expect(attached("longterm")).toBe(false);
     expect(attached("cold")).toBe(false);
   });
 
-  it("删除:确认后立刻从列表消失;失败则放回去", async () => {
+  it("delete: gone from the list right after confirm; restored on failure", async () => {
     deleteTag.mockRejectedValue(new Error("boom"));
     const { getByText } = mount([]);
 
-    // 删除在「管理」页:先切过去,点那一行的垃圾桶,再点二次确认的勾。
+    // Delete lives on the manage view: switch, click the row's trash, then confirm.
     fireEvent.click(getByText(messages.en.Tags.manage));
-    // 管理页每行是一个 input(可改名),行在不在就看它的 value 在不在。
+    // Each manage row is a rename input; a row exists iff its value does.
     const rowNames = () =>
       [...document.querySelectorAll("input")].map((i) => (i as HTMLInputElement).value);
     expect(rowNames()).toContain("cold");
@@ -174,17 +165,17 @@ describe("打标签弹窗的乐观层", () => {
     const trash = [...document.querySelectorAll("button")].find(
       (b) => b.getAttribute("aria-label") === `${messages.en.Common.delete} cold`,
     );
-    if (!trash) throw new Error("找不到 #cold 的删除按钮");
-    fireEvent.click(trash); // 进二次确认(这一行此刻换成确认条,没有 input)
+    if (!trash) throw new Error("delete button for #cold not found");
+    fireEvent.click(trash); // enter confirmation (the row becomes a confirm bar, no input)
     const confirm = [...document.querySelectorAll("button")].find(
       (b) => b.getAttribute("aria-label") === messages.en.Common.delete,
     );
-    if (!confirm) throw new Error("找不到二次确认按钮");
+    if (!confirm) throw new Error("confirm button not found");
 
     fireEvent.click(confirm);
-    expect(rowNames()).not.toContain("cold"); // 即时消失
+    expect(rowNames()).not.toContain("cold"); // gone immediately
 
-    await waitFor(() => expect(rowNames()).toContain("cold")); // 失败 → 放回去
+    await waitFor(() => expect(rowNames()).toContain("cold")); // failure → restored
     expect(toastError).toHaveBeenCalled();
   });
 });

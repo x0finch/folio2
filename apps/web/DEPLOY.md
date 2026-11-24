@@ -1,290 +1,134 @@
-# Deploying Folio to Cloudflare Workers (self-host)
+# Deploying Folio to Cloudflare Workers
 
-Folio runs on Cloudflare Workers + D1. This is a one-time setup; afterwards `pnpm run deploy` ships updates.
+Folio runs on Cloudflare Workers + D1. Setup is one-time; afterwards `pnpm run deploy` (or a tag) ships updates.
 
-**Prerequisites:** a Cloudflare account; this repo cloned with `pnpm install` done (Wrangler is a dev dependency). Run everything below from `apps/web/`.
+**Prerequisites:** a Cloudflare account and this repo with `pnpm install` done (Wrangler is a dev dependency). Run everything from `apps/web/`.
 
-## What you provide (secrets)
+## Secrets
 
-Production needs **4 secrets** + 1 plaintext var (already in `wrangler.jsonc`: `LOG_LEVEL=info`).
-Generate the two random ones locally:
+Production needs these Worker secrets (the plaintext `LOG_LEVEL=info` is already in `wrangler.jsonc`):
 
-```sh
-openssl rand -base64 32   # → SECRETS_KEY      (AES-GCM key; encrypts the `secret` creds fields)
-openssl rand -hex 32      # → BETTER_AUTH_SECRET (session signing)
-```
+- `SECRETS_KEY` — `openssl rand -base64 32` (AES-GCM key for secret credential fields).
+- `BETTER_AUTH_SECRET` — `openssl rand -hex 32`.
+- `BETTER_AUTH_URL` — the deployed origin (set in step 6).
+- `COINSTATS_API_KEY` — Solana / Sui / Cosmos (free at openapi.coinstats.app). EVM (Rabby) and Bitcoin (public Blockbook) need no key.
+- Optional: `COINGECKO_API_KEY` (lifts the keyless rate limit), `ZERION_API_KEY` (alternative EVM source).
 
-`COINSTATS_API_KEY` (free: openapi.coinstats.app) is the only on-chain provider key you need — Solana/Sui/Cosmos. **EVM needs no key** (Rabby) and neither does Bitcoin (public Blockbook). `ZERION_API_KEY` (free tier: developers.zerion.io) is optional: Zerion is kept as an alternate EVM source, not the default. `BETTER_AUTH_URL` is your deployed origin (set after step 5).
+Exchange API keys are not deployment config: users enter them per account in the UI and they are encrypted into D1.
 
-> Exchange API keys (Binance/OKX) are **not** deployment config — you enter them per-account in the UI; they're encrypted into D1. Only the 4 secrets below are env.
-
-## Steps
+## First deploy
 
 ```sh
 cd apps/web
 
-# 1. Authenticate Wrangler with your Cloudflare account
+# 1. Authenticate
 pnpm exec wrangler login
 
-# 2. Create the remote D1 database, then paste the printed `database_id`
-#    into wrangler.jsonc → d1_databases[0].database_id
+# 2. Create the remote D1, then paste the printed database_id into
+#    wrangler.jsonc → d1_databases[0].database_id
 pnpm exec wrangler d1 create folio
 
-# 3. Apply migrations to the REMOTE D1 (local & remote are separate DBs)
+# 3. Apply migrations to the REMOTE D1 (local and remote are separate databases)
 pnpm exec wrangler d1 migrations apply folio --remote
 
-# 3b. Background jobs need no setup step (FOL-100 / ADR 0058). They run in a SQLite-backed
-#     Durable Object (`JobRunner`) that `wrangler deploy` creates from wrangler.jsonc → migrations.
-#     (The old Cloudflare Queues `folio-jobs` / `folio-jobs-dlq` are no longer used; if you created
-#     them for the FOL-86 version you can delete them: `wrangler queues delete folio-jobs` etc.
-#     Messages still sitting in that queue at switch-over are dropped — at most an hour of jobs,
-#     which the next hourly cron re-enqueues.)
-
-# 4. Set secrets (each prompts for the value — never written to git)
+# 4. Secrets (each prompts for its value)
 pnpm exec wrangler secret put SECRETS_KEY
 pnpm exec wrangler secret put BETTER_AUTH_SECRET
 pnpm exec wrangler secret put COINSTATS_API_KEY
-pnpm exec wrangler secret put BETTER_AUTH_URL    # placeholder for now (e.g. https://example.com); fixed in step 6
-# Optional — token prices/logos (CoinGecko). Works without a key on the free tier (low rate limit);
-# set one (demo/pro) to lift limits. Skip this line to run keyless.
-pnpm exec wrangler secret put COINGECKO_API_KEY
+pnpm exec wrangler secret put BETTER_AUTH_URL     # placeholder for now, fixed in step 6
+pnpm exec wrangler secret put COINGECKO_API_KEY   # optional
 
-# 5. Build + deploy (the `deploy` script runs `vite build` then `wrangler deploy`)
-pnpm run deploy
-# → note the printed URL, e.g. https://folio.<your-subdomain>.workers.dev
-
-# 6. better-auth needs BETTER_AUTH_URL to match the real origin → set it and redeploy
-pnpm exec wrangler secret put BETTER_AUTH_URL     # the workers.dev URL from step 5
+# 5. Build + deploy → note the printed https://folio.<subdomain>.workers.dev
 pnpm run deploy
 
-# 7. Fill the global token map once (contract address → CoinGecko coin). Until it has rows,
-#    on-chain tokens can't be matched to a coin (no price, no logo). From then on the
-#    "Ref index refresh" GitHub Actions workflow keeps it fresh daily — see below.
+# 6. better-auth needs BETTER_AUTH_URL to match the real origin
+pnpm exec wrangler secret put BETTER_AUTH_URL
+pnpm run deploy
+
+# 7. Fill the global token map once (contract address → CoinGecko coin); without it on-chain
+#    tokens get no price or logo. The daily workflow keeps it fresh afterwards.
 CLOUDFLARE_API_TOKEN=<token with D1:Edit> pnpm run ref-index:refresh
 ```
 
-**Custom domain:** bind a Workers Custom Domain in the Cloudflare dashboard, then use that domain for `BETTER_AUTH_URL` in step 6.
+Background jobs need no setup: they run in the `JobRunner` Durable Object, which `wrangler deploy` creates from the `migrations` in `wrangler.jsonc`.
 
-Worth doing even if the workers.dev URL is fine for you: **the Cache API only works on a custom
-domain.** On `*.workers.dev` every `cache.put`/`cache.match` is a silent no-op ([Cloudflare
-docs](https://developers.cloudflare.com/workers/runtime-apis/cache/)) — the cache in front of the
-token catalogue and token search (`src/lib/server/tokens/edge-cache.ts`, used by `catalogue.ts`/`list.ts`) never hits, so both fall through to
-CoinGecko more often than they need to. Nothing breaks; it just costs extra upstream calls. To
-check which side you are on, look for `edge cache: hit` in `wrangler tail` — only ever seeing
-`edge cache: stored` means it is not in effect.
+**Custom domain:** bind a Workers Custom Domain in the dashboard and use it for `BETTER_AUTH_URL`. Worth doing even if `workers.dev` is fine: **the Cache API is a silent no-op on `*.workers.dev`**, so the edge cache in front of the token catalogue and search never hits and more requests go to CoinGecko. In `wrangler tail`, only ever seeing `edge cache: stored` (never `edge cache: hit`) means the cache isn't in effect.
 
 ## Verify
 
-1. Open the URL → **sign up** → you land on the overview.
-2. Add a **manual** account (symbol/amount/usd) → **Sync now** → it appears with a total.
-3. (Optional) add an on-chain wallet (EVM needs no key) → Sync.
-4. Logs: `pnpm exec wrangler tail` — structured JSON lines (`account synced` with `userId`/`accountId`/`type`, etc.). Two crons auto-run: the hourly sync sweep (`30 * * * *` UTC) and the daily jobs (`0 23 * * *` UTC). Trigger the **hourly** one manually from the dashboard (Workers → folio → Triggers / Cron) to see a `cron sweep enqueued` line (with `jobs` and an `alarms` estimate), followed (one `JobRunner` alarm invocation per job) by `job done` / `account synced` lines and a `queued round done` line per portfolio. The daily one logs `daily jobs enqueued`. Jobs that still fail on their last retry are **buried** in the runner's own storage (the sync round is marked failed first) and logged as `job failed on final attempt, burying it` (or `job never finished its final attempt, burying it` if the Durable Object died mid-job); they're kept 7 days and never run again. **First deploy of the runner:** check `pnpm --filter @folio/web perf:cpu:online` (or Workers Logs, filtered to the `JobRunner` alarm invocations) — if they show `exceededCpu`, the free plan's Durable Object CPU limit is lower than documented (ADR 0058 "Premise") and you should revert this change.
+1. Open the URL → sign up → you land on the overview.
+2. Add a manual account → Sync now → it appears with a total. Optionally add an EVM wallet (no key needed).
+3. `pnpm exec wrangler tail` shows structured JSON lines. Crons: hourly sync sweep (`30 * * * *` UTC) and daily jobs (`0 23 * * *` UTC). Triggering the hourly one from the dashboard (Workers → folio → Triggers) logs `cron sweep enqueued`, then `job done` / `account synced` per job and `queued round done` per portfolio.
+4. Jobs that fail their last retry are buried in the runner's storage for 7 days and logged as `job failed on final attempt, burying it`.
+5. Check Durable Object CPU with `pnpm perf:cpu:online` (or Workers Logs for `JobRunner` alarms): `exceededCpu` means the free plan's DO CPU limit is lower than documented.
 
-**Existing deployment upgrading past FOL-91 (migration `0009_account_daily_totals`):** the
-Deploy workflow does this automatically as its last step. For a manual deploy, run it once
-**right after that deploy finishes**:
-
-```sh
-cd apps/web && pnpm run db:backfill-daily-totals   # re-runs 0009's backfill on the remote D1
-```
-
-Why: the migration backfills the daily rollup from snapshots, but it runs *before* the deploy, and
-the old Worker keeps writing snapshots (hourly cron, manual sync) until the new one is live — and
-the old code doesn't maintain the rollup. Those in-between snapshots would otherwise stay out of
-the 30d/1y/all charts for good. The statement is read straight from the migration file,
-`INSERT OR REPLACE`, so it's safe to run again any time (append `-- --local` for the dev DB).
-
-## Updating later (manual)
+## Updating
 
 ```sh
 cd apps/web
-# if schema changed: pnpm --filter @folio/db exec drizzle-kit generate, then:
+# if the schema changed: pnpm --filter @folio/db db:generate, then
 pnpm exec wrangler d1 migrations apply folio --remote
 pnpm run deploy
-# first deploy past FOL-91 only: pnpm run db:backfill-daily-totals (see "Verify" above)
 ```
 
-## Auto-deploy (CI, on tag)
+## Auto-deploy on tag
 
-`.github/workflows/deploy.yml` deploys on a `v*` tag push (e.g. `v1.2.0`). `main` never
-touches production on its own — you tag a release when you want to ship.
+`.github/workflows/deploy.yml` deploys on a `v*` tag push; `main` never reaches production by itself.
 
-**One-time setup:**
+One-time setup: create a Cloudflare API token with **Workers Scripts → Edit** and **D1 → Edit**, and add it as the repo secret `CLOUDFLARE_API_TOKEN` (repo-level, so the preview workflows can read it too). Runtime secrets stay on the Worker; CI never handles them.
 
-1. Create a Cloudflare API token (Dashboard → My Profile → API Tokens → Create Token).
-   Permissions: **Account → Workers Scripts → Edit** and **Account → D1 → Edit**.
-2. Add it as a repo secret named **`CLOUDFLARE_API_TOKEN`** (Settings → Secrets and variables
-   → Actions). That's the only secret CI needs — `account_id` lives in `wrangler.jsonc`, and
-   the Worker's runtime secrets (`SECRETS_KEY`, `BETTER_AUTH_SECRET`, …) are already set on the
-   Worker via `wrangler secret put`; CI never handles them.
-
-**What a tag does:** re-runs the four gates (safety net), then **applies remote D1 migrations,
-then deploys** — in that order, fail-stop. If the migration fails the deploy is skipped, so you
-never end up with new code against an un-migrated schema. After a successful deploy it also
-**creates a GitHub Release** for the tag with auto-generated notes (skipped if one already
-exists), so the Releases page keeps up on its own.
+A tag re-runs the CI gates, **applies remote migrations, then deploys** (fail-stop: a failed migration skips the deploy), then creates a GitHub Release.
 
 ```sh
-git tag v1.2.0 && git push origin v1.2.0   # → CI migrates remote D1, then deploys
+git tag v1.2.0 && git push origin v1.2.0
 ```
 
-**Phone-friendly path (no git):** GitHub → **Actions → Deploy → Run workflow**, enter a version
-like `v1.2.1`, run. CI creates+pushes that tag itself (github-actions bot), then does the same
-verify → migrate → deploy. Same result as the tag command, just tappable from mobile.
+From a phone: Actions → Deploy → Run workflow with a version like `v1.2.1`; the bot creates the tag. If a tag protection ruleset covers `v*`, add `github-actions` to its bypass list or the push is rejected (403).
 
-> If the repo has a **tag protection ruleset** for `v*`, add **github-actions** to its bypass list
-> (Settings → Rules), otherwise the workflow's tag push is rejected (403). The command-line path
-> above is unaffected — it pushes as you, not the bot.
+> **Remote D1 migrations are irreversible.** Additive ones are safe to auto-apply; review any destructive migration before tagging. To require approval, add required reviewers to the `production` environment.
 
-> ⚠️ **Remote D1 migrations are irreversible.** Additive migrations (new tables/columns) are
-> safe to auto-apply; a destructive one (dropping a column, etc.) would hit production with no
-> rollback. Review the pending migration before tagging. To gate deploys behind manual approval,
-> add **required reviewers** to the `production` environment (repo Settings → Environments) —
-> the workflow already targets it and will then wait for an approval before migrating/deploying.
+## Global token map refresh (daily)
 
-## Global token map refresh (CI, daily)
+`.github/workflows/ref-index-refresh.yml` refreshes `global_token_ref_index` daily at 23:00 UTC (plus manual runs; tick *dry run* for counts only). It runs `scripts/ref-index/refresh.ts` on a GitHub runner against the production D1 via the REST API, because the diff costs far more CPU than a Worker invocation allows.
 
-`global_token_ref_index` (on-chain contract → the CoinGecko coin it is; ADR 0022) is refreshed by
-**`.github/workflows/ref-index-refresh.yml`**, not by the Worker (FOL-85, ADR 0056): pulling the
-2.6 MB coin list and diffing ~23k rows cost ~500 ms CPU per run, and the free plan gives one
-invocation 10 ms. The workflow runs `apps/web/scripts/ref-index/refresh.ts` on a GitHub runner,
-which talks to the production D1 through the Cloudflare D1 REST API (`account_id` and
-`database_id` are read from `wrangler.jsonc`) and only writes the rows that changed.
+- Uses the same `CLOUDFLARE_API_TOKEN`; optional repo secret `COINGECKO_API_KEY`.
+- GitHub schedules are best-effort (often late) and pause after 60 days without a commit on a public repo — re-enable on the workflow page.
+- Locally: `pnpm --filter @folio/web ref-index:refresh` (`--dry-run`, `--env preview`); `ref-index:local` fills the `pnpm dev` database.
+- A run ends with `rows` / `skipped` / `inserted` / `updated` / `deleted`; steady state is near 0 changes. `unmatchedPlatforms` > 0 is a warning (a chain whose coins will have no price).
 
-- **Schedule:** daily at 23:00 UTC, plus **Actions → Ref index refresh → Run workflow** by hand
-  (tick *dry run* to only print the counts). GitHub's schedule is best-effort — runs are often
-  10–60 minutes late and occasionally skipped under load; that's fine for a map that is allowed to
-  lag a day. On a public repo GitHub pauses schedules after 60 days without a commit — re-enable it
-  on the workflow page if that happens.
-- **Secrets:** the same repo-level **`CLOUDFLARE_API_TOKEN`** the deploy uses — it already has
-  **D1 → Edit**, which is all this needs. Optional repo secret **`COINGECKO_API_KEY`** (demo/pro);
-  without it the run is keyless, which is fine for its two requests.
-- **After the first deploy** (or when upgrading a deployment from before FOL-85), run the workflow
-  once by hand — the Worker's 23:00 cron no longer fills the table. Locally, the equivalent is
-  `CLOUDFLARE_API_TOKEN=… pnpm --filter @folio/web ref-index:refresh` (add `--dry-run` to only
-  compute the diff, `--env preview` for the preview D1).
-- **Local dev:** `pnpm --filter @folio/web ref-index:local` fills the `pnpm dev` database
-  (`.wrangler/state`) the same way, straight into the local SQLite file (no token needed).
-- **Reading a run:** the log ends with `rows` / `skipped` / `inserted` / `updated` / `deleted`.
-  In the steady state inserted/updated/deleted are near 0; `unmatchedPlatforms` above 0 shows up as
-  a warning annotation (a chain whose coins will have no price until the slug table is fixed).
-  A failed run (CoinGecko down, D1 error, bad token) exits non-zero and the run turns red.
+## PR previews (label `preview`)
 
-## PR preview (CI, on demand via label)
+`.github/workflows/pr-preview.yml` uploads a labeled PR as a version of a separate Worker, `folio-preview`, at `https://pr-<N>-folio-preview.<subdomain>.workers.dev`, and comments the URL on the PR. Every push updates it while the label is on. `preview-main.yml` deploys `main` to the same Worker's active deployment (the fixed preview domain = staging). All previews share one Worker and one `folio-preview` D1, whose data and migrations persist across PRs.
 
-`.github/workflows/pr-preview.yml` deploys a **preview** of a PR to a separate Worker `folio-preview`
-(a different Worker from production `folio` — production is never touched), and posts the URL back as
-a sticky PR comment. It reuses the same `CLOUDFLARE_API_TOKEN` as the tag deploy; no new token needed.
+Config that must stay right (a preview once overwrote production):
 
-**Opt-in per PR:** it only runs when the PR carries the **`preview`** label — nothing deploys
-automatically on open. Add the label = "I want a preview of this PR"; while it's labeled, every push
-updates the preview; remove the label and it stops. (Create a `preview` label the first time straight
-from the PR's Labels box.)
+- `env.preview` sets `"name": "folio-preview"` — without it `--env preview` deploys over the production `folio` Worker.
+- Preview builds use `CLOUDFLARE_ENV=preview` at **build** time; with `@cloudflare/vite-plugin`, `--env` at deploy time is ignored. Check `dist/server/wrangler.json` shows `folio-preview`.
+- Preview logins use email/password: `PREVIEW_TRUSTED_ORIGINS` lets better-auth accept the alias hosts (never set it in production); passkeys don't work across aliases.
 
-**How it's shaped (chosen deliberately):**
-
-- **One shared preview Worker + one shared preview D1 (`folio-preview`), but a per-PR URL.** Each
-  labeled PR runs `wrangler versions upload --env preview --preview-alias pr-<N>` (not `deploy`), so it
-  uploads a **version** with a stable per-PR preview URL `https://pr-<N>-folio-preview.<subdomain>.workers.dev`
-  and never promotes to the fixed domain — **multiple PRs can be previewed at once without clobbering**.
-  All versions share the one Worker (same secrets) and the one `folio-preview` D1. Deploys are still
-  serialized via `concurrency` (so shared-D1 migrations don't race).
-- **The fixed domain `preview.folio.009003.xyz` tracks `main` (staging).** `preview-main.yml` deploys
-  (promotes) `main` to the Worker's **active deployment** on every push to main — so the custom domain
-  always shows the latest merged code, while per-PR previews live on their version aliases. This is the
-  Cloudflare "deployments vs versions" split: active deployment = staging/main, versions = PR previews.
-  `preview-main.yml` shares the `pr-preview` concurrency group so a main deploy and PR uploads serialize.
-- **Login on the per-PR URLs uses email/password.** better-auth cookies are host-only by default, so
-  they stick to whatever preview host served them; `env.preview` sets `PREVIEW_TRUSTED_ORIGINS`
-  (`https://*-folio-preview.*.workers.dev`) which better-auth adds to `trustedOrigins`, so the
-  Origin/CSRF check passes on the alias hosts. **Production never sets this var** → strict there.
-  Passkey still binds its rpID to the fixed `BETTER_AUTH_URL` host, so passkey won't work across the
-  alias domains — sign in with password on a preview. (Tighten the middle `*` to your account
-  subdomain in `wrangler.jsonc` if you want to scope trust to your own workers.dev subdomain.)
-- **The preview DB is not reset on every deploy** — it keeps its data/login across PRs (so you can
-  sign up a test user once and keep using it). Migrations **accumulate** onto it, applied before each
-  deploy with the same fail-stop order as production.
-- **Additive migrations** (new table/column) accumulate harmlessly. **Destructive migrations**
-  (drop/rename a column) are the one hazard of a shared DB: a migration from PR-A drops a column,
-  then a PR that doesn't have that migration renders against a DB that lost it → that preview breaks,
-  and D1 has no down-migration to roll back. When that happens, run the manual reset below.
-
-**Critical config (learned the hard way — a preview deploy once clobbered production):**
-
-- **`env.preview` must set `"name": "folio-preview"`.** Wrangler v4 removed service environments; an
-  env without its own `name` falls back to the top-level `folio`, so `wrangler deploy --env preview`
-  overwrites the **production** Worker instead of a separate one.
-- **`deploy:preview` must build with `CLOUDFLARE_ENV=preview`.** With `@cloudflare/vite-plugin`,
-  `wrangler deploy` ships the *build artifact's* config — `--env` at deploy time is a no-op. The env is
-  picked at **build** time via `CLOUDFLARE_ENV` (same mechanism as e2e's `CLOUDFLARE_ENV=test`). Verify:
-  after `CLOUDFLARE_ENV=preview pnpm build`, `dist/server/wrangler.json` should show `name`/`d1` as
-  `folio-preview`.
-- **`CLOUDFLARE_API_TOKEN` must be a repo-level secret**, not only the `production` environment secret
-  the tag deploy uses — `pr-preview.yml` declares no `environment:`, so it reads the repo-level one.
-- `wrangler secret put --env preview` **does** target `folio-preview` correctly even without the `name`
-  above (secret put keeps the legacy `-preview` suffix); only `deploy` needed the two fixes.
-
-**One-time setup:**
+One-time setup:
 
 ```sh
 cd apps/web
-# 1. Create the preview D1, then paste the printed database_id into
-#    wrangler.jsonc → env.preview.d1_databases[0].database_id (replacing the REPLACE_WITH_… placeholder)
+# 1. Create the preview D1; paste its database_id into wrangler.jsonc → env.preview.d1_databases[0]
 pnpm exec wrangler d1 create folio-preview
 
-# 2. Set the preview Worker's secrets. Use `--name folio-preview`, NOT `--env preview`:
-#    env.preview now sets its own `name`, so `--env preview` resolves to a non-existent
-#    `folio-preview-preview` (the legacy env suffix stacks on top of the name).
-#    Mirror the FULL production secret set — a partial set fails silently at sync time
-#    (e.g. binance 403s from CF IPs unless the *_BASE proxy endpoints are present).
-pnpm exec wrangler secret put SECRETS_KEY        --name folio-preview   # openssl rand -base64 32
-pnpm exec wrangler secret put BETTER_AUTH_SECRET --name folio-preview   # openssl rand -hex 32
-pnpm exec wrangler secret put BETTER_AUTH_URL    --name folio-preview   # the fixed custom domain, e.g. https://preview.folio.009003.xyz
+# 2. Secrets: use --name folio-preview, NOT --env preview (that resolves to folio-preview-preview).
+#    Mirror the full production set — a partial set fails silently at sync time.
+pnpm exec wrangler secret put SECRETS_KEY        --name folio-preview
+pnpm exec wrangler secret put BETTER_AUTH_SECRET --name folio-preview
+pnpm exec wrangler secret put BETTER_AUTH_URL    --name folio-preview   # the fixed preview domain; set before the first sign-up
 pnpm exec wrangler secret put COINSTATS_API_KEY  --name folio-preview
 pnpm exec wrangler secret put COINGECKO_API_KEY  --name folio-preview
 pnpm exec wrangler secret put ZERION_API_KEY     --name folio-preview
-pnpm exec wrangler secret put BINANCE_API_BASE   --name folio-preview   # proxy base — binance 403s from CF IPs without these three
+pnpm exec wrangler secret put BINANCE_API_BASE   --name folio-preview   # Binance 403s Cloudflare IPs without these three proxy bases
 pnpm exec wrangler secret put BINANCE_FAPI_BASE  --name folio-preview
 pnpm exec wrangler secret put BINANCE_DAPI_BASE  --name folio-preview
 ```
 
-You get the exact `<your-subdomain>` from the first deploy's printed URL (or the tag deploy's).
-Set `BETTER_AUTH_URL` **before** the first preview sign-up (WebAuthn RP is derived from it). No
-`production` environment / approval gate applies to previews — they deploy on every PR push.
-
-> On `*.workers.dev` the Cache API is a silent no-op (same as the workers.dev note above), so
-> logo/token caching doesn't take effect in previews — functionally fine, just extra upstream calls.
-
-**Manual reset (rare — only when a destructive migration broke a preview):**
-`.github/workflows/preview-reset.yml`, run from the Actions tab (`workflow_dispatch`, type `RESET` to
-confirm). It **wipes all data in `folio-preview`** (drops every table + clears `d1_migrations`), then
-re-applies all migrations from scratch. It only ever touches `folio-preview`, never production.
-
-> ⚠️ The reset's drop-all (`scripts/reset-preview-db.mjs`) has **not yet been verified against a real
-> D1**. On the first run, watch the logs: confirm the drop step doesn't error on FK/PRAGMA behavior,
-> and that `wrangler … --json` output parsed cleanly. **Manual fallback if it fails:**
-> `pnpm exec wrangler d1 delete folio-preview` then `d1 create folio-preview`, paste the **new**
-> `database_id` into `wrangler.jsonc` env.preview, and `pnpm run db:migrate:preview`.
+**Reset** (only when a destructive migration from one PR broke another's preview): run `.github/workflows/preview-reset.yml` from Actions and type `RESET`. It drops every table in `folio-preview` and re-applies all migrations; it never touches production. The drop-all script hasn't been verified against real D1 — if it fails, `wrangler d1 delete folio-preview`, `d1 create folio-preview`, paste the new id, and `pnpm run db:migrate:preview`.
 
 ## Notes
 
-- **Local vs remote D1 are separate.** `pnpm dev` uses a local SQLite file; production uses the remote D1. Always `migrations apply … --remote` after a schema change.
-- **Logging:** production emits JSON Lines into **Workers Logs** (Dashboard → Observability, queryable; 7-day retention). `LOG_PRETTY` is intentionally unset in prod (it's local-dev only). Adjust verbosity via the `LOG_LEVEL` var in `wrangler.jsonc`.
-- **Secrets** are encrypted and only exist in the deployed Worker; rotate with another `wrangler secret put <NAME>`. They are never in git.
-- **Rolling back past the precompute rename (FOL-36) needs one manual cleanup.** The home
-  overview, tab strip and both 24h-gain endpoints read values stored under `pc1:*` keys in
-  `user_cache`, and "is this value still valid?" is decided by a watermark key in the same
-  family. The previous release used `gain24h:*` values with a `gain24h-mark*` watermark, and the
-  two generations do not touch each other — which is what makes rolling *forward* safe. Rolling
-  **back** is the direction that bites: the old code resumes reading `gain24h:*` values that are
-  up to 90 minutes old, against a watermark no write has bumped since the upgrade, so every one
-  of them looks fresh. Any account change made while the new version was live is invisible in
-  those numbers until the TTL runs out. Clear them by hand right after rolling back:
-
-  ```sh
-  wrangler d1 execute folio --remote \
-    --command "DELETE FROM user_cache WHERE k LIKE 'gain24h%'"
-  ```
-
-  (Deleting cache rows is always safe — worst case the next page load is a little slower. The
-  `pc1:*` rows can be left alone; they cost a few KB and expire on their own.)
+- Production logs are JSON Lines in Workers Logs (Dashboard → Observability, 7-day retention). Set verbosity with `LOG_LEVEL`; `LOG_PRETTY` is for local dev only.
+- Rotate a secret with another `wrangler secret put <NAME>`. Secrets never go in git.

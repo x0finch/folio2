@@ -9,7 +9,7 @@ import savings from "./fixtures/savings.json";
 import staking from "./fixtures/staking.json";
 import valuation from "./fixtures/valuation.json";
 
-// 打桩打在 `HttpClient` 服务上,不再是 `globalThis.fetch` —— 那才是生产走的路。
+// Stubs the `HttpClient` service, not `globalThis.fetch`, which is the path production takes.
 const json = (body: unknown, init?: ResponseInit): Response =>
   new Response(JSON.stringify(body), {
     status: 200,
@@ -18,7 +18,7 @@ const json = (body: unknown, init?: ResponseInit): Response =>
   });
 const empty = () => json({ code: "0", data: [] });
 
-// 按 pathname 分派。没给的桶默认空,不匹配的落到交易账户 —— 每个用例只写它关心的那几个。
+// Dispatch by pathname. Buckets not given default to empty and unmatched ones fall to the trading account: each case writes only what it cares about.
 function upstream(routes: Record<string, () => Response> = {}): HttpStub {
   return httpStub((request) => {
     const path = request.url.pathname;
@@ -50,11 +50,11 @@ const failing = (
 ): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
 
 describe("fetchBalances", () => {
-  it("并发全桶(交易 / 资金 / 赚币)→ 合并 spot;earn 残差合成行计进净值", async () => {
+  it("all buckets concurrently (trading / funding / earn): merged into spot; the earn residual synthetic row counts into net worth", async () => {
     const stub = upstream();
     const { balances, note } = await run(stub, okxProvider.fetchBalances(ctx()));
 
-    expect(balances).toHaveLength(10); // 交易 4 + 资金 3 + 赚币 2 + earn 残差合成行 1
+    expect(balances).toHaveLength(10); // trading 4 + funding 3 + earn 2 + earn residual synthetic row 1
     const uncategorized = balances.find((b) => b.tokenRef === "okx/custom:EARN-UNCATEGORIZED");
     expect(uncategorized).toMatchObject({ value: 1000, kind: "spot" });
     expect(uncategorized?.note?.group).toBe("earn");
@@ -62,7 +62,7 @@ describe("fetchBalances", () => {
     expect(note).toBeUndefined();
   });
 
-  it("四个 OK-ACCESS 头都带上,现货解析对得上", async () => {
+  it("all four OK-ACCESS headers are sent, and spot parsing matches", async () => {
     const stub = upstream({ "/api/v5/asset/balances": empty });
     const { balances } = await run(stub, okxProvider.fetchBalances(ctx()));
 
@@ -74,16 +74,16 @@ describe("fetchBalances", () => {
     expect(headers["ok-access-passphrase"]).toBe("p");
   });
 
-  it("asset-valuation 挂了 → 不阻断同步,只是本轮没残差", async () => {
+  it("asset-valuation down: does not block sync, there is just no residual this round", async () => {
     const stub = upstream({ "/asset/asset-valuation": () => json({}, { status: 500 }) });
     const { balances, note } = await run(stub, okxProvider.fetchBalances(ctx()));
     expect(balances).toHaveLength(9);
     expect(note).toBeUndefined();
   });
 
-  it("部分桶失败(赚币没权限)→ 其余照返回 + 账户级 Note;整次同步成功", async () => {
-    // **401 而不是 504**(FOL-31):瞬时故障现在会升级成整账户失败(见下一条),到不了 Note。
-    // 尽力而为只留给「等也没用」的失败 —— 权限没勾,重试变不出权限来。
+  it("a partial bucket failure (earn lacks permission): the rest are returned + an account-level Note; the whole sync succeeds", async () => {
+    // 401 rather than 504: a transient fault now escalates to whole-account failure (next case) and never reaches the Note.
+    // Best effort is only for failures where "waiting does not help": a permission not granted cannot be fixed by retrying.
     const stub = upstream({
       "/finance/savings/balance": () => json({}, { status: 401 }),
       "/finance/staking-defi/orders-active": () => json({}, { status: 401 }),
@@ -91,25 +91,25 @@ describe("fetchBalances", () => {
     });
     const { balances, note } = await run(stub, okxProvider.fetchBalances(ctx()));
 
-    expect(balances).toHaveLength(7); // 交易 4 + 资金 3
+    expect(balances).toHaveLength(7); // trading 4 + funding 3
     expect(balances.some((b) => b.note?.group === "earn")).toBe(false);
     const failNote = note?.find((n) => n.title === "Buckets not synced");
     expect(String(failNote?.content)).toContain("Savings");
     expect(String(failNote?.content)).toContain("Staking");
     expect(String(failNote?.content)).toContain("permissions");
-    // earn 桶失败时**不产**未细分合成行:那 $12k 是没拉到、不是未细分,凭空计进净值会虚增。
+    // When the earn bucket fails no uncategorised synthetic row is produced: that $12k was not fetched, not uncategorised, and counting it would inflate net worth.
     expect(balances.some((b) => b.tokenRef === "okx/custom:EARN-UNCATEGORIZED")).toBe(false);
   });
 
-  // —— FOL-31:瞬时部分失败升级 ——
-  it("**部分桶瞬时失败(交易桶 504)→ 整账户失败**进重试,不写残缺快照", async () => {
-    // 交易桶通常是大头,降级写出去就是「资产掉一块」—— 与 binance 那次生产事故同一种症状。
+  // A transient partial failure escalates
+  it("a transient partial bucket failure (trading bucket 504): the whole account fails into retry, no partial snapshot written", async () => {
+    // The trading bucket is usually the bulk; degrading would drop a chunk of assets, the same symptom as the binance production incident.
     const stub = upstream({ "/account/balance": () => json({}, { status: 504 }) });
     const err = await failing(stub, okxProvider.fetchBalances(ctx()));
     expect(isRetryable(err)).toBe(true);
   });
 
-  it("瞬时错混着权限错 → 仍整账户失败(瞬时那个才是重试的理由)", async () => {
+  it("transient mixed with permission errors: still whole-account failure (the transient one is the reason to retry)", async () => {
     const stub = upstream({
       "/finance/savings/balance": () => json({}, { status: 401 }),
       "/asset/balances": () => json({}, { status: 429 }),
@@ -118,7 +118,7 @@ describe("fetchBalances", () => {
     expect(isRetryable(err)).toBe(true);
   });
 
-  it("auth 类失败(HTTP 200 + 50xxx)→ 失败 Note 提示查权限", async () => {
+  it("an auth-class failure (HTTP 200 + 50xxx): a failure Note prompting a permissions check", async () => {
     const stub = upstream({
       "/api/v5/asset/balances": () => json({ code: "50111", msg: "Invalid Key" }),
       "/finance/": empty,
@@ -130,14 +130,14 @@ describe("fetchBalances", () => {
     expect(String(failNote?.content)).toContain("permissions");
   });
 
-  it("**四个余额桶全失败(429 打光所有端点)→ 失败**,不拿空快照覆盖", async () => {
+  it("all four balance buckets fail (429 on every endpoint): failure, no empty snapshot overwriting", async () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     expect((await failing(stub, okxProvider.fetchBalances(ctx())))._tag).toBe(
       "ConnectorRateLimitError",
     );
   });
 
-  it("positions 非空 → 挂「合约浮盈暂未纳入」兜底 Note", async () => {
+  it("positions non-empty: attaches the fallback Note about contract unrealised profit not yet included", async () => {
     const stub = upstream({
       "/api/v5/account/positions": () =>
         json({ code: "0", data: [{ instId: "BTC-USDT-SWAP", pos: "1", upl: "123" }] }),
@@ -149,7 +149,7 @@ describe("fetchBalances", () => {
     expect(note?.some((n) => n.title === "Futures positions detected")).toBe(true);
   });
 
-  it("positions 全是已平仓行(pos=0)→ 不虚报", async () => {
+  it("positions all closed rows (pos=0): no false report", async () => {
     const stub = upstream({
       "/api/v5/account/positions": () =>
         json({ code: "0", data: [{ instId: "BTC-USDT-SWAP", pos: "0", upl: "0" }] }),
@@ -161,7 +161,7 @@ describe("fetchBalances", () => {
     expect(note?.some((n) => n.title === "Futures positions detected")).toBeFalsy();
   });
 
-  it("四桶对账:classic 桶 > 0(folio 不拉)→ 挂「经典账户未同步」Note", async () => {
+  it("four-bucket reconciliation: classic bucket > 0 (folio does not fetch it): attaches a classic-account-not-synced Note", async () => {
     const stub = upstream({
       "/asset/asset-valuation": () =>
         json({ code: "0", data: [{ details: { classic: "8888", earn: "0" } }] }),
@@ -174,7 +174,7 @@ describe("fetchBalances", () => {
     );
   });
 
-  it("asset-valuation 必须带 ccy=USD(该端点默认 BTC 计价,不传就单位错位)", async () => {
+  it("asset-valuation must carry ccy=USD (the endpoint defaults to BTC pricing, so omitting it misaligns units)", async () => {
     const stub = upstream();
     await run(stub, okxProvider.fetchBalances(ctx()));
     const valuationCall = stub.calls.find((c) =>
@@ -183,9 +183,9 @@ describe("fetchBalances", () => {
     expect(valuationCall?.request.url.searchParams.get("ccy")).toBe("USD");
   });
 
-  it("base 覆盖生效,默认 host 一个不留", async () => {
+  it("base override takes effect, no default host left", async () => {
     const overrides = { OKX_API_BASE: "https://px.example/okx" };
-    // 声明的 key 正是这里注入后真生效的那一个(app 按声明从 env 注入 ctx.creds);全 public(不加密 / 不导出)。
+    // The declared key is the one that really takes effect when injected here (the app injects ctx.creds from env per the declaration); all public (not encrypted / exported).
     expect(okxProvider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
     expect(okxProvider.creds.every((f) => f.type === "public")).toBe(true);
 
@@ -203,18 +203,18 @@ describe("validateAccount", () => {
     expect(await run(stub, okxProvider.validateAccount(ctx()))).toBe(true);
   });
 
-  it("凭据被拒(HTTP 200 + 50111)→ false,不进错误通道", async () => {
+  it("credentials rejected (HTTP 200 + 50111): false, not through the error channel", async () => {
     const stub = httpStub(() => json({ code: "50111", msg: "Invalid Key" }));
     expect(await run(stub, okxProvider.validateAccount(ctx()))).toBe(false);
   });
 
-  it("非凭据码 → 走错误通道,不压成 false", async () => {
+  it("a non-credentials code goes through the error channel, not squashed into false", async () => {
     const stub = httpStub(() => json({ code: "50011", msg: "rate limited" }));
     const err = await failing(stub, okxProvider.validateAccount(ctx()));
     expect(err._tag).toBe("ConnectorUnavailableError");
   });
 
-  it("429 → 限流(可重试)", async () => {
+  it("429 gives rate-limited (retryable)", async () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     expect((await failing(stub, okxProvider.validateAccount(ctx())))._tag).toBe(
       "ConnectorRateLimitError",

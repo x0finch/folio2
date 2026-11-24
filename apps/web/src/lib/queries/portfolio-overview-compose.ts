@@ -28,7 +28,7 @@ import { tokenEnrichmentQuery } from "@/lib/queries/tokens";
 import { getFiatRefs, resolvePlatformMeta } from "@/lib/server/portfolio";
 import { accountHoldingsSnapshotQueries } from "./snapshots";
 
-// 首页总览:原子资源在浏览器合并(FOL-54 / FOL-56)。key 用 hour-floor 锚;当下快照 `at` 用墙钟。
+// Home overview: atoms composed in the browser. Keys use the hour-floored anchor; the current snapshot's `at` uses wall clock.
 
 export const fiatRefsQuery = (portfolioId: string) =>
   queryOptions({
@@ -88,7 +88,7 @@ export function usePortfolioOverview(portfolioId: string, pin?: PinScopeKey): Po
               mode,
               now,
             },
-            // 真墙钟,不是 floored 锚点 `now` —— 否则首次同步窗被撑大最多 ~1 小时,轮询会多空转。
+            // Real wall clock, not the floored anchor: that would widen the first-sync window by up to ~1 h and poll idly.
             Date.now(),
           );
           return pollWhilePending(query, pending);
@@ -138,8 +138,7 @@ export function usePortfolioOverview(portfolioId: string, pin?: PinScopeKey): Po
           fiatRefs: fiatRefsData.fiatRefs,
           now,
         },
-        // pending 判定用真墙钟;`now`(floored 锚点)只喂快照 key。每次 memo 重算取新的 Date.now(),
-        // 阈值就不会被 hour-floor 低估最多 ~1 小时(见 isFirstSyncPending)。
+        // Pending check uses the real wall clock; `now` (floored) only feeds snapshot keys, else the threshold is underestimated by up to ~1 h.
         Date.now(),
       ),
     [
@@ -156,7 +155,7 @@ export function usePortfolioOverview(portfolioId: string, pin?: PinScopeKey): Po
   );
 }
 
-/** 未收窄 pin 的快照原料 —— 首页 tab 条 `computeHomeTabStrip` 用。 */
+/** Snapshot atoms for the un-narrowed pin; used by the home tab strip's `computeHomeTabStrip`. */
 export function usePortfolioSnapshotAtoms(portfolioId: string) {
   const now = floorToHour(Date.now());
   const snapshotQueries = accountHoldingsSnapshotQueries(portfolioId, now);
@@ -217,7 +216,7 @@ export function usePortfolioSnapshotAtoms(portfolioId: string) {
   );
 }
 
-/** 非 hook 路径:从 query 缓存拉原子资源并组装快照原料(pin 写后刷新 tab 条用)。 */
+/** Non-hook path: pulls atoms from the query cache for refreshing the tab strip after a pin write. */
 export async function fetchPortfolioSnapshotAtoms(
   queryClient: QueryClient,
   portfolioId: string,

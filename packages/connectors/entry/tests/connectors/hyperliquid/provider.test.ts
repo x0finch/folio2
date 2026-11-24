@@ -30,7 +30,7 @@ const failing = (
 ): Promise<ConnectorError> => runClient(stub, Effect.flip(effect));
 
 describe("fetchBalances", () => {
-  it("POST /info,body 里带 type 与 user,再解析", async () => {
+  it("POST /info, with type and user in the body, then parses", async () => {
     const stub = httpStub(() => json(fixture));
     const { balances } = await run(stub, hyperliquidProvider.fetchBalances(ctx()));
 
@@ -40,9 +40,9 @@ describe("fetchBalances", () => {
     expect(JSON.parse(String(sent.body))).toEqual({ type: "clearinghouseState", user: ADDR });
   });
 
-  it("**没有闸** —— 连发 20 个账户不产生任何等待", async () => {
-    // 这家上游按地址查、每账户一发,装闸拦不到东西还会把互不相干的账户排成一队白等。
-    // 判据是**虚拟时钟走了多远**:走了 0ms 就是一次都没等过,与调度快慢无关(比数时刻稳)。
+  it("no gate: 20 accounts back to back produce no waiting", async () => {
+    // This upstream is queried by address, one request per account; a gate would block nothing and queue unrelated accounts.
+    // The criterion is how far the virtual clock moved: 0ms means nothing ever waited, independent of scheduling speed.
     const stub = httpStub(() => json(fixture));
     const elapsed = await runClient(
       stub,
@@ -62,24 +62,24 @@ describe("fetchBalances", () => {
     expect(stub.calls).toHaveLength(20);
   });
 
-  it("5xx → 够不到上游(可重试)", async () => {
+  it("5xx gives unreachable (retryable)", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     const err = await failing(stub, hyperliquidProvider.fetchBalances(ctx()));
     expect(err._tag).toBe("ConnectorUnavailableError");
     expect(isRetryable(err)).toBe(true);
   });
 
-  it("429 → 限流(可重试)", async () => {
+  it("429 gives rate-limited (retryable)", async () => {
     const stub = httpStub(() => json({}, { status: 429 }));
     const err = await failing(stub, hyperliquidProvider.fetchBalances(ctx()));
     expect(err._tag).toBe("ConnectorRateLimitError");
   });
 });
 
-describe("base 覆盖", () => {
-  it("设了就打覆盖的 base,不设就直连官方", async () => {
+describe("base override", () => {
+  it("a set base hits the override, an unset one goes direct to the official host", async () => {
     const overrides = { HYPERLIQUID_API_BASE: "http://127.0.0.1:3399/hyperliquid" };
-    // 声明的 key 正是这里注入后真生效的那一个(app 按声明从 env 注入 ctx.creds);全 public(不加密 / 不导出)。
+    // The declared key is the one that really takes effect when injected here (the app injects ctx.creds from env per the declaration); all public (not encrypted / exported).
     expect(hyperliquidProvider.creds.map((f) => f.key)).toEqual(Object.keys(overrides));
     expect(hyperliquidProvider.creds.every((f) => f.type === "public")).toBe(true);
 
@@ -94,13 +94,13 @@ describe("base 覆盖", () => {
 });
 
 describe("validateAccount", () => {
-  it("200 → true(未交易过的地址也是 200 + 空状态)", async () => {
-    // 真实录制:从没交易过的地址(0x…01)也回 200 —— assetPositions 空,只有别人打进来的一点零头权益。
+  it("200 gives true (an address that never traded is also 200 + empty state)", async () => {
+    // Recorded for real: an address that never traded (0x…01) also answers 200: assetPositions empty, only a little stray equity sent in by others.
     const stub = httpStub(() => json(neverTraded));
     expect(await run(stub, hyperliquidProvider.validateAccount(ctx()))).toBe(true);
   });
 
-  it("够不到上游 → 走错误通道,不压成 false", async () => {
+  it("unreachable goes through the error channel, not squashed into false", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     const err = await failing(stub, hyperliquidProvider.validateAccount(ctx()));
     expect(err._tag).toBe("ConnectorUnavailableError");

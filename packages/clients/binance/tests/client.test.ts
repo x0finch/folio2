@@ -22,10 +22,9 @@ import tickerFixture from "./fixtures/ticker-price.json" with { type: "json" };
 
 const CREDS = { apiKey: "the-key", secret: "the-secret" } as const;
 
-// 参考实现:**不调被测代码的 `hmacSha256`**,在测试里独立走一遍 WebCrypto。
-// 要验的是「client 到底把哪一串拿去签了、signature 放在第几位」—— HMAC 算法本身由 WebCrypto 保证,
-// 不是这里的被测对象。(不用 `node:crypto` 是为了不给 client 包引 `@types/node`:
-// 仓里只有 `db` 与 `apps/web` 装了它,为一个断言拉进来不值。)
+// Reference implementation: does not call the code under test's `hmacSha256` but goes through WebCrypto independently in the test.
+// What is verified is which string the client signed and where `signature` sits; the HMAC algorithm is WebCrypto's guarantee. Not `node:crypto`,
+// so the client package needs no `@types/node` (only `db` and `apps/web` install it).
 async function hmacHex(secret: string, message: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -40,28 +39,24 @@ async function hmacHex(secret: string, message: string): Promise<string> {
   return [...sig].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-// 假出网:记下每一发,按 pathname 回不同的 body。
-// 顶替的是 **`HttpClient` 服务**而不是 `globalThis.fetch` —— 请求层底下是官方客户端,
-// 在那一层顶替才测得到真实路径(签名头、method、中断都经过它)。
+// Fake egress that records every request and replies with a different body per pathname.
+// Replaces the `HttpClient` service, not `globalThis.fetch`, so the real path (signature headers, method, abort) is exercised.
 function stub(reply: (url: URL) => Response | Promise<Response>) {
   const s = httpStub((request) => reply(request.url));
   return { fn: s, calls: s.calls };
 }
 
-// client 的构造本身是 Effect(闸要 Scope),所以每个 case 在一个 scope 里建了用、用完就扔。
-//
-// **闸一律用 `memory` 档** —— 那是 Effect 官方实现,桶绑在 scope 上、每次 make 一份,天然隔离。
-// 生产走 `isolated`(跨 isolate 共享游标),它的算法行为在 `@folio/client-core` 的测试里验;
-// 这里只验**结构**:哪些端点过闸、哪些刻意不过。
-//
-// TestClock 下 `Clock.currentTimeMillis` 从 0 起 —— 于是签名串是确定的,可以拿参考实现对。
+// Constructing the client is itself an Effect (the gate needs a Scope), so each case builds it in a scope, uses it and drops it.
+// The gate always uses the `memory` tier, Effect's official implementation with the bucket bound to the scope and one per make, so cases are isolated.
+// Production uses `isolated` (cross-isolate cursor), whose algorithm behaviour is tested in `@folio/client-core`; here only the structure
+// (which endpoints pass the gate and which deliberately do not).
+// Under TestClock `Clock.currentTimeMillis` starts at 0, so the signing string is deterministic and can be checked against the reference.
 const withClient = <A, E>(
   fn: HttpStub,
   use: (client: BinanceClientApi) => Effect.Effect<A, E, Outbound>,
   over: Partial<BinanceConfig> = {},
 ): Promise<A> =>
-  // `runClient` 装的是「假出网 + `memory` 档限频 + TestClock」——**九个包共用一份**
-  // (以前是九份手抄的,有几份漏了限频档,于是偷偷跑在了模块级共享游标的那一档上)。
+  // `runClient` wires fake egress + `memory` rate-limit tier + TestClock, shared by all client packages.
   runClient(
     fn,
     Effect.gen(function* () {
@@ -70,14 +65,14 @@ const withClient = <A, E>(
     }),
   );
 
-// 拿失败:同上,但翻到成功通道。
+// Failure case: same, but flipped into the success channel.
 const failing = (
   fn: HttpStub,
   use: (client: BinanceClientApi) => Effect.Effect<unknown, UpstreamError, Outbound>,
 ): Promise<UpstreamError> => withClient(fn, (c) => Effect.flip(use(c)));
 
-describe("签名", () => {
-  it("签的是「除 signature 外、按发送顺序拼起来的 query」,signature 追加在最后", async () => {
+describe("signing", () => {
+  it("signs the query except signature, joined in send order, with signature appended last", async () => {
     const { fn, calls } = stub(() => json(accountFixture));
     await withClient(fn, (c) => c.spotAccount(CREDS));
 
@@ -85,7 +80,7 @@ describe("签名", () => {
     const signature = sent.get("signature");
     expect(signature).toBeTruthy();
 
-    // 去掉 signature,保持原顺序重拼一遍 —— 这就是被签的那一串。
+    // Strip signature and re-join in the original order: this is the signed string.
     const parts: string[] = [];
     sent.forEach((v, k) => {
       if (k !== "signature") parts.push(`${k}=${encodeURIComponent(v)}`);
@@ -94,13 +89,13 @@ describe("签名", () => {
 
     expect(signature).toBe(await hmacHex(CREDS.secret, signable));
 
-    // signature 必须是最后一个参数(binance 按发送顺序验)。
+    // signature must be the last param (binance verifies in send order).
     expect([...sent.keys()].at(-1)).toBe("signature");
-    // TestClock 下 timestamp 确定 → 这串就是它。
+    // Under TestClock the timestamp is deterministic, so this string is it.
     expect(signable).toBe("recvWindow=5000&timestamp=0");
   });
 
-  it("apiKey 走 header 而不是 query(它是标识符,不是签名材料)", async () => {
+  it("apiKey goes in a header, not the query (it is an identifier, not signing material)", async () => {
     const { fn, calls } = stub(() => json(accountFixture));
     await withClient(fn, (c) => c.spotAccount(CREDS));
     expect(calls[0].request.headers["x-mbx-apikey"]).toBe(CREDS.apiKey);
@@ -109,8 +104,8 @@ describe("签名", () => {
   });
 });
 
-describe("端点打对 host / 路径 / method", () => {
-  it("现货、U 本位、币本位各打自己的 host", async () => {
+describe("endpoints hit the right host / path / method", () => {
+  it("spot, USD-M and COIN-M each hit their own host", async () => {
     const { fn, calls } = stub((url) =>
       json(url.pathname.includes("dapi") ? coinmFixture : futuresFixture),
     );
@@ -125,7 +120,7 @@ describe("端点打对 host / 路径 / method", () => {
     expect(calls[2].request.url.pathname).toBe("/dapi/v1/account");
   });
 
-  it("资金账户是 POST(参数仍走 query)", async () => {
+  it("the funding account is a POST (params still go in the query)", async () => {
     const { fn, calls } = stub(() => json(fundingFixture));
     await withClient(fn, (c) => c.fundingAssets(CREDS));
     expect(calls[0].request.method).toBe("POST");
@@ -133,7 +128,7 @@ describe("端点打对 host / 路径 / method", () => {
     expect(calls[0].request.url.searchParams.has("signature")).toBe(true);
   });
 
-  it("三个 base 可各自覆盖,且当不透明整串用(代理 #264)", async () => {
+  it("the three bases can each be overridden and are used as opaque strings (proxy)", async () => {
     const { fn, calls } = stub(() => json(futuresFixture));
     await withClient(fn, (c) => Effect.all([c.spotAccount(CREDS), c.usdmAccount(CREDS)]), {
       apiBase: "http://localhost:3099",
@@ -141,42 +136,42 @@ describe("端点打对 host / 路径 / method", () => {
       dapiBase: "http://localhost:3097",
     });
     expect(calls[0].request.url.origin).toBe("http://localhost:3099");
-    // 覆盖串里带路径前缀也照用 —— client 不解析它。
+    // A path prefix in the override is used as is: the client does not parse it.
     expect(calls[1].request.url.href).toContain("/fapi-proxy/fapi/v2/account");
   });
 });
 
 describe("tickerPrices", () => {
-  it("数组翻成 symbol → price 的表", async () => {
+  it("an array becomes a symbol to price table", async () => {
     const { fn } = stub(() => json(tickerFixture));
     const table = await withClient(fn, (c) => c.tickerPrices);
-    // 上游给的是字符串价 —— 表里要是数字。
+    // Upstream gives string prices: the table needs numbers.
     expect(table.BTCUSDT).toBe(60000);
     expect(table.ETHUSDT).toBe(3000);
     expect(Object.keys(table)).toHaveLength(tickerFixture.length);
   });
 
-  it("免签:不带 signature、不带 apiKey 头", async () => {
+  it("unsigned: no signature, no apiKey header", async () => {
     const { fn, calls } = stub(() => json(tickerFixture));
     await withClient(fn, (c) => c.tickerPrices);
     expect(calls[0].request.url.searchParams.has("signature")).toBe(false);
-    // 公开端点不该带凭据头(请求对象上的 headers 总是存在,所以断言的是「里面没有它」)。
+    // A public endpoint must not carry credential headers (the request's headers always exist, so the assertion is that it is not in there).
     expect(calls[0].request.headers["x-mbx-apikey"]).toBeUndefined();
   });
 });
 
-describe("翻页(理财)", () => {
+describe("pagination (earn)", () => {
   const rowsOf = (n: number, asset = "BTC") =>
     Array.from({ length: n }, () => ({ asset, totalAmount: "1" }));
 
-  it("末页(不足一页)即停", async () => {
+  it("a last page (less than a full page) stops", async () => {
     const { fn, calls } = stub(() => json({ rows: rowsOf(3) }));
     const rows = await withClient(fn, (c) => c.earnFlexible(CREDS));
     expect(rows).toHaveLength(3);
     expect(calls).toHaveLength(1);
   });
 
-  it("满页则继续翻,收全", async () => {
+  it("a full page continues, collecting everything", async () => {
     let page = 0;
     const { fn, calls } = stub(() => {
       page++;
@@ -190,22 +185,22 @@ describe("翻页(理财)", () => {
     expect(calls[0].request.url.searchParams.get("size")).toBe(String(EARN_PAGE_SIZE));
   });
 
-  it("收满 total 即停(哪怕这一页是满的)", async () => {
+  it("stops once total is reached (even if this page is full)", async () => {
     const { fn, calls } = stub(() => json({ rows: rowsOf(EARN_PAGE_SIZE), total: EARN_PAGE_SIZE }));
     const rows = await withClient(fn, (c) => c.earnFlexible(CREDS));
     expect(rows).toHaveLength(EARN_PAGE_SIZE);
     expect(calls).toHaveLength(1);
   });
 
-  it("页数上限护栏兜住不肯结束的上游", async () => {
-    // 每页都满、total 撒谎说 0 —— 没有护栏就是死循环。
+  it("the page-count guard catches an upstream that will not end", async () => {
+    // Every page full and total lying as 0: without the guard it is an infinite loop.
     const { fn, calls } = stub(() => json({ rows: rowsOf(EARN_PAGE_SIZE), total: 0 }));
     const rows = await withClient(fn, (c) => c.earnFlexible(CREDS));
     expect(calls).toHaveLength(50); // EARN_MAX_PAGES
     expect(rows).toHaveLength(50 * EARN_PAGE_SIZE);
   });
 
-  it("活期与定期各打自己的端点", async () => {
+  it("flexible and fixed-term each hit their own endpoint", async () => {
     const { fn, calls } = stub(() => json({ rows: [] }));
     await withClient(fn, (c) => Effect.all([c.earnFlexible(CREDS), c.earnLocked(CREDS)]));
     expect(calls[0].request.url.pathname).toBe("/sapi/v1/simple-earn/flexible/position");
@@ -213,26 +208,25 @@ describe("翻页(理财)", () => {
   });
 });
 
-describe("错误归类", () => {
+describe("error classification", () => {
   const failWith = (init: ResponseInit) => {
     const { fn } = stub(() => json({ code: -1022, msg: "signature invalid" }, init));
     return failing(fn, (c) => c.spotAccount(CREDS));
   };
 
-  // **这条是 binance 唯一的归类差异**(它的 `override`):默认规则会把 400 归成「上游的锅」而去
-  // 重试它 —— 重试没用,还会拿错凭据再打一次,binance 把重复认证失败当探测行为(#240)。
-  // 其余几条验的是默认规则在这条链路上确实通了;规则本身在 `@folio/client-core` 的测试里。
-  it("400 → 凭据问题(binance 用 400 表达签名请求被拒)", async () => {
+  // The one binance-specific classification (its `override`): the default rules would class 400 as "upstream's fault" and retry it, which is useless
+  // and repeats a wrong credential; binance treats repeated auth failures as probing. The rest check the default rules do work here; the rules are tested in `@folio/client-core`.
+  it("400 gives a credentials problem (binance uses 400 for a rejected signed request)", async () => {
     expect((await failWith({ status: 400 }))._tag).toBe("UpstreamAuthError");
   });
 
-  it("401 / 403 → 凭据问题", async () => {
+  it("401 / 403 give a credentials problem", async () => {
     for (const status of [401, 403]) {
       expect((await failWith({ status }))._tag).toBe("UpstreamAuthError");
     }
   });
 
-  it("429 与 418 同类,且带上 Retry-After", async () => {
+  it("429 is the same kind as 418, with Retry-After", async () => {
     for (const status of [429, 418]) {
       const err = await failWith({ status, headers: { "retry-after": "7" } });
       expect(err._tag).toBe("UpstreamRateLimitError");
@@ -240,23 +234,23 @@ describe("错误归类", () => {
     }
   });
 
-  it("5xx → 够不到上游", async () => {
+  it("5xx gives unreachable", async () => {
     expect((await failWith({ status: 503 }))._tag).toBe("UpstreamUnavailableError");
   });
 
-  it("读不成 JSON → parse", async () => {
+  it("unreadable JSON gives parse", async () => {
     const { fn } = stub(() => new Response("<html>", { status: 200 }));
     expect((await failing(fn, (c) => c.spotAccount(CREDS)))._tag).toBe("UpstreamParseError");
   });
 
-  it("出不去 → 够不到上游", async () => {
+  it("unreachable gives unreachable", async () => {
     const { fn } = stub(() => {
       throw new Error("dns");
     });
     expect((await failing(fn, (c) => c.spotAccount(CREDS)))._tag).toBe("UpstreamUnavailableError");
   });
 
-  it("失败信息不带 query(签名/凭据在里面,原则 #5 红线)", async () => {
+  it("the failure info carries no query (signature / credentials are in it)", async () => {
     const err = await failWith({ status: 503 });
     const dump = JSON.stringify(err);
     expect(dump).not.toContain(CREDS.secret);
@@ -265,12 +259,10 @@ describe("错误归类", () => {
   });
 });
 
-describe("限频:哪些端点过闸", () => {
-  // **这里验的是结构,不是算法。** 闸本身(GCRA / 跨 isolate 游标)的行为在 `@folio/client-core`
-  // 的测试里;这两条只回答「公开端点过闸了吗、签名端点是不是刻意没过」。
-  //
-  // 用 `memory` 档 = Effect 官方 token-bucket:limit 6 / 15s → 每 2500ms 补一个令牌,
-  // 前 6 发满额突发、第 7 发等一个令牌。
+describe("rate limiting: which endpoints pass the gate", () => {
+  // This verifies structure, not the algorithm (the gate itself is tested in `@folio/client-core`): does the public endpoint pass the gate,
+  // and is the signed endpoint deliberately not gated.
+  // The `memory` tier is the official token bucket: limit 6 / 15s refills a token every 2500ms; the first 6 requests burst and the 7th waits.
   const settledAfter = (
     ms: number,
     use: (c: BinanceClientApi) => Effect.Effect<unknown, never, Outbound>,
@@ -282,9 +274,9 @@ describe("限频:哪些端点过闸", () => {
         const client = yield* make({});
         const fiber = yield* Effect.fork(use(client));
         yield* TestClock.adjust(Duration.millis(ms));
-        // 假出网是 `Promise.resolve`,**不归 TestClock 管** —— 推完虚拟时钟不等于它已经跑完。
-        // 只 adjust 就 poll 的话「没被闸拦住」那一侧是靠运气过的。让出几轮微任务把它跑干净;
-        // 被闸拦住的那一侧在等虚拟时钟,让多少轮都不会完成,所以两侧都仍然准。
+        // The fake egress is a `Promise.resolve`, which TestClock does not govern: advancing the virtual clock does not mean it has finished.
+        // Polling after only adjusting would let the "not gated" side pass by luck. Yield a few microtask turns to drain it; the gated side
+        // waits on the virtual clock and never completes however many turns, so both sides stay accurate.
         yield* Effect.repeatN(Effect.yieldNow(), 50);
         return Option.isSome(yield* Fiber.poll(fiber));
       }),
@@ -296,18 +288,17 @@ describe("限频:哪些端点过闸", () => {
     (c: BinanceClientApi) =>
       Effect.all(Array.from({ length: n }, () => one(c)));
 
-  it("公开价表过闸:超出突发的那一发要等", async () => {
+  it("the public price table passes the gate: the request beyond the burst waits", async () => {
     const seven = nTimes(7, (c) => Effect.orDie(c.tickerPrices));
     expect(await settledAfter(2499, seven)).toBe(false);
     expect(await settledAfter(2500, seven)).toBe(true);
   });
 
-  it("签名端点不过闸:连发多少都不等", async () => {
-    // 每账户一发、不并发 —— 装闸拦不到东西,还会把互不相干的账户排成一队白等。
-    //
-    // **这条不能照上面 fork + poll 那套写**:签名端点链路里有 `crypto.subtle`,在 Node 上走线程池 ——
-    // 那是**宏任务**,`yieldNow` 只让微任务,推不动它,于是 poll 到的「还没完成」是假的(全量跑时挂过)。
-    // 改成跑到底再问虚拟时钟走了多远:走了 0ms 就是一发都没等过,与调度快慢无关。
+  it("signed endpoints do not pass the gate: any number back to back, no waiting", async () => {
+    // One request per account, no concurrency: a gate would block nothing and queue unrelated accounts.
+    // Not written with the fork + poll above: the signed path has `crypto.subtle`, which on Node runs on the thread pool as a macrotask that
+    // `yieldNow` (microtasks only) cannot advance, so a polled "not finished" would be false (it hung in full runs).
+    // Instead run to the end and ask how far the virtual clock moved: 0ms means no request ever waited, independent of scheduling speed.
     const fn = stub(() => json(accountFixture)).fn;
     const elapsed = await runClient(
       fn,
@@ -322,11 +313,10 @@ describe("限频:哪些端点过闸", () => {
   });
 });
 
-// **走 Tag / Layer 那一条路。** 生产只走它,而在这之前**九个包的测试一条都没走过** ——
-// 全部直接调 `make`,于是「`layer()` 装出来的东西和 `make` 是不是同一个」从来没人验证。
-// 这是复审点出来的真空档(#12)。
-describe("装配:Tag 路径", () => {
-  it("`BinanceClient.layer(...)` 装出来的就是 `make` 那个 client", async () => {
+// Goes through the Tag / Layer path: production uses only it, and tests otherwise all call `make` directly, so whether what `layer()` assembles
+// equals `make` was never verified.
+describe("wiring: the Tag path", () => {
+  it("what `BinanceClient.layer(...)` assembles is the `make` client", async () => {
     const { fn, calls } = stub(() => json(tickerFixture));
     const out = await runClient(
       fn,

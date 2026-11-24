@@ -6,21 +6,19 @@ import { blockOutbound } from "../_kit/outbound";
 import { call, callExit, failureOf, readTabStrip } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 tab-pins/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
+// Runs inside tab-pins/index.test.ts: each vitest file re-evaluates the whole import graph in workerd (~9s/file), so cases are merged per directory.
 describe("tab-pins/update-target", () => {
-  // #527 · updateTabPinTarget
   const USER = "h-pins-update";
 
   const seed = async (userId: string) => {
     const pf = await db(userId).portfolios.ensureDefault();
     const account = await db(userId).accounts.create({
       connectorId: "manual",
-      label: "甲",
+      label: "Alpha",
       creds: null,
     });
     await db(userId).portfolios.assignAccount(account.id, pf.id);
-    const tag = await db(userId).tags.create({ portfolioId: pf.id, name: "长期" });
+    const tag = await db(userId).tags.create({ portfolioId: pf.id, name: "Long-term" });
     const pin = await db(userId).tabPins.create({ kind: "connector", connectorId: "manual" });
     return { pf, account, tag, pin };
   };
@@ -32,17 +30,17 @@ describe("tab-pins/update-target", () => {
   });
 
   describe("updateTabPinTarget", () => {
-    it("从 connector 改成 tag → tab 条上的标签跟着变", async () => {
+    it("changing from connector to tag -> the label on the tab strip follows", async () => {
       const { pin, tag } = await seed(USER);
 
       await call(USER, handleUpdateTabPinTarget({ pinId: pin.id, kind: "tag", tagId: tag.id }));
 
       const strip = await readTabStrip(USER, {});
-      expect(strip.pins[0].name).toBe("长期");
+      expect(strip.pins[0].name).toBe("Long-term");
       expect(strip.pins[0].kind).toBe("tag");
     });
 
-    it("改完还是同一个 pin —— id 不变、不多出一个", async () => {
+    it("after the change it's still the same pin -- id unchanged, no extra one", async () => {
       const { pin, account } = await seed(USER);
 
       await call(
@@ -55,9 +53,9 @@ describe("tab-pins/update-target", () => {
       expect(strip.pins[0].id).toBe(pin.id);
     });
 
-    it("改成三个 pin 里中间那个 → 另外两个的顺序不动", async () => {
+    it("changing the middle one of three pins -> the other two keep their order", async () => {
       const { tag } = await seed(USER);
-      // 每个被 pin 的 connector 都得在这个组合里有账户,否则那个 pin 压根不摆(ADR 0047)。
+      // Each pinned connector needs an account in this portfolio, or the pin doesn't show at all.
       for (const c of ["bitcoin", "binance"] as const) {
         await db(USER).accounts.create({ connectorId: c, label: c, creds: null });
       }
@@ -70,20 +68,20 @@ describe("tab-pins/update-target", () => {
       expect((await readTabStrip(USER, {})).pins.map((p) => p.id)).toEqual(before);
     });
 
-    // review 抓的洞:改指向以前一句校验都没有 —— 把 pin 改指向一个 connector,它会出现在
-    // 别的组合里,把那边顶到 4 个,而那边的 ＋ 因为 >=3 藏着,界面自相矛盾。
-    it("改指向也过上限:新目标会把某个组合顶到 4 个 → 拒,原指向保留", async () => {
-      const { pf } = await seed(USER); // seed 里已有 1 个 manual pin
+    // Retargeting must be capped too: pointing a pin at a connector makes it appear in another portfolio, which could reach 4
+    // while its + button is hidden at >=3.
+    it("retargeting also respects the cap: a new target that pushes a portfolio to 4 -> rejected, original target kept", async () => {
+      const { pf } = await seed(USER); // seed already has 1 manual pin
       for (const c of ["binance", "okx"] as const) {
         const acc = await db(USER).accounts.create({ connectorId: c, label: c, creds: null });
         await db(USER).portfolios.assignAccount(acc.id, pf.id);
         await db(USER).tabPins.create({ kind: "connector", connectorId: c });
       }
-      // 默认组合现在满 3 个。另一个组合里有个 pin,把它改指向默认组合里的 connector → 拒。
+      // The default portfolio now has 3. Another portfolio has a pin; retargeting it at a connector in the default one -> rejected.
       const watch = await db(USER).portfolios.create({ name: "Watch" });
       const there = await db(USER).accounts.create({
         connectorId: "bitcoin",
-        label: "那边的",
+        label: "Over there",
         creds: null,
       });
       await db(USER).portfolios.assignAccount(there.id, watch.id);
@@ -95,12 +93,12 @@ describe("tab-pins/update-target", () => {
       );
 
       expect(failureOf(exit)).toBeInstanceOf(InvalidInput);
-      // 原指向保留:Watch 里那个还是 bitcoin。
+      // Original target kept: the one in Watch is still bitcoin.
       const strip = await readTabStrip(USER, { portfolioId: watch.id });
       expect(strip.pins.map((p) => p.connectorId)).toEqual(["bitcoin"]);
     });
 
-    it("改指向不与自己抢名额:满 3 个的组合里改其中一个,照样能改", async () => {
+    it("retargeting doesn't compete with itself for quota: in a full portfolio, changing one of its pins still works", async () => {
       const { pf, tag } = await seed(USER);
       for (const c of ["binance", "okx"] as const) {
         const acc = await db(USER).accounts.create({ connectorId: c, label: c, creds: null });
@@ -108,13 +106,13 @@ describe("tab-pins/update-target", () => {
         await db(USER).tabPins.create({ kind: "connector", connectorId: c });
       }
       const pins = await db(USER).tabPins.list();
-      // 满 3 个;把其中一个改指向同组合的 tag —— 旧的那次出现不占名额,这一下必须能过。
+      // 3 full; retarget one at a tag in the same portfolio -- its old appearance doesn't hold quota, so this must pass.
       await call(USER, handleUpdateTabPinTarget({ pinId: pins[0].id, kind: "tag", tagId: tag.id }));
 
       expect((await readTabStrip(USER, {})).pins).toHaveLength(3);
     });
 
-    it("改成指向别人的 tag → 拒,原指向保留", async () => {
+    it("retargeting at someone else's tag -> rejected, original target kept", async () => {
       const { pin } = await seed(USER);
       const theirs = await seed(otherUser(USER));
 
@@ -127,7 +125,7 @@ describe("tab-pins/update-target", () => {
       expect((await readTabStrip(USER, {})).pins[0].kind).toBe("connector");
     });
 
-    it("pinId 空串 → schema 拒", () => {
+    it("empty pinId -> rejected by schema", () => {
       expect(UpdateTabPinInput.safeParse({ pinId: "", kind: "connector" }).success).toBe(false);
     });
   });

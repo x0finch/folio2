@@ -4,15 +4,6 @@ import { IntlProvider } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "@/lib/i18n/messages";
 
-// 登录页(邮箱密码 + passkey)。这里钉住的是「点了之后调了谁、带了什么、落到哪」:
-// ① 登录 / 注册各调对的那个认证接口,注册时 Name 留空兜底取邮箱 @ 前那段;
-// ② 失败(回错 / 抛异常)都要落成屏幕上的错误,且不跳走;
-// ③ passkey 入口只在浏览器支持时出现,只在登录态出现;
-// ④ 密码登录后的 passkey 引导:够条件才弹(支持 + 没点过「别再问」+ 账户还没 passkey),
-//    「别再问」按设备记下,「添加」限定本机认证器并记下 credentialID;成败都进主页;
-// ⑤ 离开登录页前**先**掐掉挂起的 conditional-UI autofill(iOS 上它会泄漏到总览,见源文件注释);
-// ⑥ 密码管理器把两格都 autofill 了才自动提交,手输永不自动提交。
-// 真 WebAuthn ceremony 不在这里测 —— jsdom 没有,得靠 E2E。
 const {
   signInEmail,
   signInPasskey,
@@ -71,12 +62,10 @@ function mount() {
   return { ...utils, field, type, submit, passkeyButton };
 }
 
-// 支持 WebAuthn 的浏览器。conditional UI 缺省不可用,要测 autofill 的用例自己打开。
 function stubWebAuthn(conditional = false) {
   vi.stubGlobal(
     "PublicKeyCredential",
-    // 替身必须是类:真身 `PublicKeyCredential` 是构造器。
-    // biome-ignore lint/complexity/noStaticOnlyClass: 仿造的是平台构造器,见上
+    // biome-ignore lint/complexity/noStaticOnlyClass: fakes a platform constructor, see above
     class {
       static isConditionalMediationAvailable() {
         return Promise.resolve(conditional);
@@ -96,8 +85,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("邮箱密码登录", () => {
-  it("提交 → 用填的邮箱密码调 signIn.email,成功进主页", async () => {
+describe("email and password sign-in", () => {
+  it("submit: calls signIn.email with the entered credentials, goes home on success", async () => {
     signInEmail.mockResolvedValue({ data: {} });
     const { type, submit } = mount();
     type("email", "alice@example.com");
@@ -112,7 +101,7 @@ describe("邮箱密码登录", () => {
     expect(signUpEmail).not.toHaveBeenCalled();
   });
 
-  it("服务端回错 → 显示那条错误,不跳走", async () => {
+  it("server returns an error: shows it, does not navigate", async () => {
     signInEmail.mockResolvedValue({ error: { message: "Invalid email or password" } });
     const { type, submit } = mount();
     type("email", "alice@example.com");
@@ -123,7 +112,7 @@ describe("邮箱密码登录", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("请求抛异常(断网)→ 显示通用失败文案,按钮恢复可点", async () => {
+  it("request throws (offline): shows the generic failure copy, button is clickable again", async () => {
     signInEmail.mockRejectedValue(new Error("network"));
     const { type, submit, container } = mount();
     type("email", "alice@example.com");
@@ -137,8 +126,8 @@ describe("邮箱密码登录", () => {
   });
 });
 
-describe("注册", () => {
-  it("Name 留空 → 用邮箱 @ 前那段作名字调 signUp.email", async () => {
+describe("sign-up", () => {
+  it("empty Name: uses the part of the email before @ as the name for signUp.email", async () => {
     signUpEmail.mockResolvedValue({ data: {} });
     const { type, submit } = mount();
     fireEvent.click(screen.getByRole("tab", { name: "Sign up" }));
@@ -155,7 +144,7 @@ describe("注册", () => {
     expect(signInEmail).not.toHaveBeenCalled();
   });
 
-  it("填了 Name → 去掉两侧空白后作名字", async () => {
+  it("Name filled: trimmed and used as the name", async () => {
     signUpEmail.mockResolvedValue({ data: {} });
     const { type, submit } = mount();
     fireEvent.click(screen.getByRole("tab", { name: "Sign up" }));
@@ -168,7 +157,7 @@ describe("注册", () => {
     expect(signUpEmail.mock.calls[0]?.[0]).toMatchObject({ name: "Carol C" });
   });
 
-  it("切换登录/注册会清掉上一次的错误", async () => {
+  it("switching sign-in/sign-up clears the previous error", async () => {
     signInEmail.mockResolvedValue({ error: { message: "Invalid email or password" } });
     const { type, submit } = mount();
     type("email", "alice@example.com");
@@ -182,13 +171,13 @@ describe("注册", () => {
   });
 });
 
-describe("passkey 显式入口", () => {
-  it("浏览器不支持 WebAuthn → 不露入口", () => {
+describe("explicit passkey entry", () => {
+  it("browser without WebAuthn: entry hidden", () => {
     const { passkeyButton } = mount();
     expect(passkeyButton()).toBeNull();
   });
 
-  it("支持 → 登录态露入口,注册态不露(还没账号)", async () => {
+  it("supported: entry shown in sign-in mode, hidden in sign-up (no account yet)", async () => {
     stubWebAuthn();
     const { passkeyButton } = mount();
     await waitFor(() => expect(passkeyButton()).not.toBeNull());
@@ -196,12 +185,12 @@ describe("passkey 显式入口", () => {
     expect(passkeyButton()).toBeNull();
   });
 
-  it("点入口 → signIn.passkey,成功先掐 autofill 再进主页", async () => {
+  it("click the entry: signIn.passkey, on success cancels autofill first then goes home", async () => {
     stubWebAuthn();
     signInPasskey.mockResolvedValue({ data: {} });
     const { passkeyButton } = mount();
     const btn = await waitFor(() => passkeyButton() as HTMLElement);
-    cancelCeremony.mockClear(); // 只看点击之后那一次离开
+    cancelCeremony.mockClear();
     fireEvent.click(btn);
 
     await waitFor(() => expect(navigate).toHaveBeenCalledWith({ to: "/" }));
@@ -212,7 +201,7 @@ describe("passkey 显式入口", () => {
     );
   });
 
-  it("passkey 回错 → 显示错误,不跳走", async () => {
+  it("passkey returns an error: shows it, does not navigate", async () => {
     stubWebAuthn();
     signInPasskey.mockResolvedValue({ error: { message: "No passkey found" } });
     const { passkeyButton } = mount();
@@ -222,7 +211,7 @@ describe("passkey 显式入口", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("passkey 抛异常(用户取消)→ 通用失败文案", async () => {
+  it("passkey throws (user cancelled): generic failure copy", async () => {
     stubWebAuthn();
     signInPasskey.mockRejectedValue(new Error("NotAllowedError"));
     const { passkeyButton } = mount();
@@ -233,7 +222,7 @@ describe("passkey 显式入口", () => {
 });
 
 describe("conditional-UI autofill", () => {
-  it("浏览器支持 → 进页即静默发起 autofill,选中即进主页", async () => {
+  it("browser supports it: starts autofill silently on page load, selecting goes home", async () => {
     stubWebAuthn(true);
     signInPasskey.mockResolvedValue({ data: {} });
     mount();
@@ -242,14 +231,14 @@ describe("conditional-UI autofill", () => {
     expect(signInPasskey).toHaveBeenCalledWith({ autoFill: true });
   });
 
-  it("不支持 conditional UI → 不发起", async () => {
+  it("no conditional UI support: not started", async () => {
     stubWebAuthn(false);
     const { passkeyButton } = mount();
     await waitFor(() => expect(passkeyButton()).not.toBeNull());
     expect(signInPasskey).not.toHaveBeenCalled();
   });
 
-  it("卸载登录页 → 掐掉挂起的 autofill", async () => {
+  it("unmounting the login page: aborts the pending autofill", async () => {
     stubWebAuthn(true);
     signInPasskey.mockImplementation(() => new Promise(() => {}));
     const { unmount } = mount();
@@ -262,16 +251,16 @@ describe("conditional-UI autofill", () => {
   });
 });
 
-describe("密码登录后的 passkey 引导", () => {
+describe("passkey onboarding after password sign-in", () => {
   async function signInWithPassword(utils: ReturnType<typeof mount>) {
     signInEmail.mockResolvedValue({ data: {} });
-    await waitFor(() => expect(utils.passkeyButton()).not.toBeNull()); // 支持检测已落地
+    await waitFor(() => expect(utils.passkeyButton()).not.toBeNull());
     utils.type("email", "alice@example.com");
     utils.type("password", "hunter2hunter2");
     utils.submit();
   }
 
-  it("账户还没 passkey → 弹引导,先不跳走", async () => {
+  it("account has no passkey yet: shows the prompt, does not navigate yet", async () => {
     stubWebAuthn();
     listUserPasskeys.mockResolvedValue({ data: [] });
     const utils = mount();
@@ -281,7 +270,7 @@ describe("密码登录后的 passkey 引导", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it("账户已有 passkey → 不弹,直接进主页", async () => {
+  it("account already has a passkey: no prompt, goes home", async () => {
     stubWebAuthn();
     listUserPasskeys.mockResolvedValue({ data: [{ id: "pk1" }] });
     const utils = mount();
@@ -291,7 +280,7 @@ describe("密码登录后的 passkey 引导", () => {
     expect(screen.queryByText("Sign in faster next time")).toBeNull();
   });
 
-  it("本设备点过「别再问」→ 连列表都不查,直接进主页", async () => {
+  it('"don\'t ask again" already clicked on this device: does not even query the list, goes home', async () => {
     stubWebAuthn();
     localStorage.setItem(DISMISSED_KEY, "1");
     const utils = mount();
@@ -301,7 +290,7 @@ describe("密码登录后的 passkey 引导", () => {
     expect(listUserPasskeys).not.toHaveBeenCalled();
   });
 
-  it("「别再问」→ 本设备记下,进主页", async () => {
+  it('"don\'t ask again": remembered on this device, goes home', async () => {
     stubWebAuthn();
     listUserPasskeys.mockResolvedValue({ data: [] });
     const utils = mount();
@@ -314,7 +303,7 @@ describe("密码登录后的 passkey 引导", () => {
     expect(addPasskey).not.toHaveBeenCalled();
   });
 
-  it("「添加」→ 只收本机认证器,记下 credentialID,但不打开闲置锁", async () => {
+  it('"Add": only accepts a platform authenticator, records the credentialID, but does not enable the idle lock', async () => {
     stubWebAuthn();
     listUserPasskeys.mockResolvedValue({ data: [] });
     addPasskey.mockResolvedValue({ data: { id: "row_1", credentialID: "cred_1" } });
@@ -330,7 +319,7 @@ describe("密码登录后的 passkey 引导", () => {
     expect(localStorage.getItem(DISMISSED_KEY)).toBeNull();
   });
 
-  it("「添加」失败 → 不记凭据,照样进主页(引导不该卡住登录)", async () => {
+  it('"Add" fails: no credential recorded, still goes home (onboarding must not block sign-in)', async () => {
     stubWebAuthn();
     listUserPasskeys.mockResolvedValue({ data: [] });
     addPasskey.mockRejectedValue(new Error("cancelled"));
@@ -344,9 +333,7 @@ describe("密码登录后的 passkey 引导", () => {
   });
 });
 
-describe("密码管理器 autofill 自动提交", () => {
-  // jsdom 没有 AnimationEvent:React 因此退到带厂商前缀的事件名(webkitAnimationStart)去监听,
-  // fireEvent 传进去的 animationName 也会被丢掉 → 手造一个事件,按 React 实际监听的名字派发。
+describe("password manager autofill auto-submit", () => {
   const animate = (el: HTMLElement, animationName: string) => {
     const ev = new Event("webkitAnimationStart", { bubbles: true });
     Object.defineProperty(ev, "animationName", { value: animationName });
@@ -354,7 +341,7 @@ describe("密码管理器 autofill 自动提交", () => {
   };
   const autofill = (el: HTMLElement) => animate(el, "folio-autofill");
 
-  it("两格都被 autofill 填上 → 自动登录,只提交一次", async () => {
+  it("both fields autofilled: signs in automatically, submitting once", async () => {
     signInEmail.mockResolvedValue({ error: { message: "Invalid email or password" } });
     const { type, field } = mount();
     type("email", "alice@example.com");
@@ -370,7 +357,7 @@ describe("密码管理器 autofill 自动提交", () => {
     });
   });
 
-  it("只有一格被 autofill → 不提交", async () => {
+  it("only one field autofilled: no submit", async () => {
     const { type, field } = mount();
     type("email", "alice@example.com");
     type("password", "hunter2hunter2");
@@ -379,7 +366,7 @@ describe("密码管理器 autofill 自动提交", () => {
     expect(signInEmail).not.toHaveBeenCalled();
   });
 
-  it("别的动画不算 autofill → 不提交", async () => {
+  it("other animations do not count as autofill: no submit", async () => {
     const { type, field } = mount();
     type("email", "alice@example.com");
     type("password", "hunter2hunter2");
@@ -389,7 +376,7 @@ describe("密码管理器 autofill 自动提交", () => {
     expect(signInEmail).not.toHaveBeenCalled();
   });
 
-  it("注册态下即使被 autofill 也不自动提交", async () => {
+  it("sign-up mode does not auto-submit even when autofilled", async () => {
     const { type, field } = mount();
     fireEvent.click(screen.getByRole("tab", { name: "Sign up" }));
     type("email", "alice@example.com");

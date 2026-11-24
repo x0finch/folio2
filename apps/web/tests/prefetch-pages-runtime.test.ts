@@ -2,9 +2,8 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { account, resetWorld, server, world } from "./helpers/fake-portfolio-server";
 
-// 各 page 的数据预取(loader 与切换器预热共用)**真跑一遍**:发出即返回不等结果、
-// 以及预取的 key 与页面真正去读的 key 对得上(对不上 = 首屏白拉一遍)。
-// 源码文本层面的「取什么 / 不 await」由 home-loader 等测试钉;这里钉的是运行出来的结果。
+// Runs each page's prefetch for real: it returns without awaiting, and its keys match the keys
+// the page reads (a mismatch means the first paint fetches everything again).
 
 vi.mock("@/lib/server/accounts", () =>
   import("./helpers/fake-portfolio-server").then((m) => m.modules.accounts),
@@ -46,7 +45,7 @@ const T0 = Date.UTC(2026, 9, 4, 10, 25);
 
 let qc: QueryClient;
 
-// 让发出去的请求都落地(fake 只伪造 Date,微任务照常)。
+// Let issued requests settle (fake timers only fake Date; microtasks run normally).
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
@@ -56,13 +55,13 @@ beforeEach(() => {
   vi.setSystemTime(T0);
 });
 
-// 不 `qc.clear()`:那会取消还在路上的预取,而预取是发出即忘的 —— 取消会变成没人接的拒绝。
+// No `qc.clear()`: it would cancel in-flight fire-and-forget prefetches into unhandled rejections.
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("发出即返回", () => {
-  it("请求还在路上时预取函数已经返回(不是 Promise)", () => {
+describe("Returns immediately", () => {
+  it("prefetch has returned (not a Promise) while requests are still in flight", () => {
     server.getSnapshots.mockImplementation(() => new Promise(() => {}));
     expect(prefetchOverview(qc, "p1")).toBeUndefined();
     expect(prefetchInsights(qc, "p1")).toBeUndefined();
@@ -72,8 +71,8 @@ describe("发出即返回", () => {
   });
 });
 
-describe("预取的 key 与页面读的 key 对得上", () => {
-  it("总览预取之后,同一小时内组装快照原料不再回服务器取原料", async () => {
+describe("Prefetch keys match the keys pages read", () => {
+  it("after the overview prefetch, assembling snapshot inputs within the hour does not refetch", async () => {
     world.accounts = { p1: [account({ id: "a1" })] };
     prefetchOverview(qc, "p1");
     await settle();

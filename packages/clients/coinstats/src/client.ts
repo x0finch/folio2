@@ -19,29 +19,24 @@ import {
 import { CoinstatsCoin } from "./types";
 
 export interface CoinstatsConfig {
-  // 基址,**当不透明整串用**。**这家没有 #264 那个需求**(代理覆盖是给被按地区拒的交易所用的),
-  // 留这个口子是为了七个 client 形状一致,不是因为已经有人要用。
+  // Base URL, used as one opaque string. No proxy-override need here; the knob keeps the clients' shape uniform.
   readonly apiBase?: string;
 }
 
-// CoinStats OpenAPI 的请求层。**方法按上游端点组织,吐的是上游形状(DTO)** ——
-// `parseBalances`、`tokenRef` 命名、「无 chain 的 coin 回落到 connectionId」那条规则,全在适配层。
-//
-// **apiKey 每次调用传**,不在建 client 时绑:它来自 ctx.creds(app 从 env 注入),而 client
-// 不读 env、不知道那个变量叫什么(ADR 0036 边界决定 2)。
-//
-// **connectionId 也是每次传**:它是 CoinStats 协议里的链标识(query 参数),而「solana 这条链
-// 对应哪个 connectionId」是适配层的知识 —— 老代码里那个工厂就住在适配层该住的位置。
+// Request layer for the CoinStats OpenAPI: methods follow upstream endpoints and return upstream shapes (DTOs); `parseBalances`, `tokenRef`
+// naming and the "coin without chain falls back to connectionId" rule are in the adapter.
+// `apiKey` and `connectionId` are passed per call, not bound at construction: the key comes from ctx.creds (the client reads no env), and
+// connectionId is CoinStats' chain identifier (a query param) whose mapping to a chain is adapter knowledge.
 export interface CoinstatsClientApi {
-  // 钱包代币余额。上游直接吐一个 coin 数组(不是 { data: [...] })。
+  // Wallet token balances. Upstream returns a coin array directly (not { data: [...] }).
   readonly balance: (params: {
     readonly connectionId: string;
     readonly address: string;
     readonly apiKey: string;
   }) => Effect.Effect<readonly CoinstatsCoin[], UpstreamError, Outbound>;
 
-  // 支持的链列表。**只需 key、不需地址** —— 用来实测 key 本身有没有效,而不是只检查它非空。
-  // 返回值没人看(调用方只关心成没成),所以类型是 `unknown`:声明一个假的形状不如说实话。
+  // List of supported chains. Needs only a key, no address: verifies the key is actually valid, not just non-empty.
+  // The return value is unread (callers care only about success), so the type is `unknown`: better than declaring a fake shape.
   readonly blockchains: (apiKey: string) => Effect.Effect<unknown, UpstreamError, Outbound>;
 }
 
@@ -69,7 +64,7 @@ export function make(
       limit,
     });
 
-    // 头是每请求算的 —— key 来自调用方给的凭据,不是模块级常量,所以随每一发传进去。
+    // Headers are computed per request: the key comes from the caller's credentials, not a module constant.
     const keyed = (apiKey: string) =>
       Effect.succeed({ [API_KEY_HEADER]: apiKey, accept: "application/json" });
 
@@ -80,7 +75,7 @@ export function make(
           headers: keyed(apiKey),
         }),
 
-      // 只用来探活「这把 key 通不通」,回什么形状不关心 —— 所以不声明形状。
+      // Only probes whether this key works; the response shape does not matter, so none is declared.
       blockchains: (apiKey) =>
         request(BLOCKCHAINS_PATH, Schema.Unknown, { headers: keyed(apiKey) }),
     };

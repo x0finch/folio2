@@ -49,11 +49,7 @@ import { Portal } from "./portal";
 import { Sensitive } from "./sensitive";
 import { buildOwnedOptions } from "./token-search";
 
-// manual 账户详情抽屉的多 token 面板(A5 F → T4:接服务端)。Tokens|Activity 双 tab(全圆 pill,默认 Tokens)+
-// tab 行右 ghost plus(一律开 Add activity)。两个 SwipeableList 去卡片(surface = 抽屉底色平铺 + hover:bg-muted,
-// 与主页 SharedLayoutBg 药丸同色);Tokens 复用主页 <TokenRowContent>。token 行 swipe:编辑=开 Add activity 并锁定该
-// token(记一笔 set 校准)、删除=确认 modal;activity 行 swipe:编辑=预填 modal、删除=确认 modal。
-// 数据由 getManualAccountDetail 现读(token + 活动账本),写走 T3 server fn,成功后失效明细查询 + router 刷新(真持久)。
+// Data is read live from getManualAccountDetail; writes invalidate that query.
 
 const kindTone: Record<string, string> = {
   add: "text-pos",
@@ -61,8 +57,7 @@ const kindTone: Record<string, string> = {
   set: "text-muted-foreground",
 };
 
-// swipe 行去卡片:surface 用抽屉底色 bg-background(不透明遮住滑出前的操作轨);flex items-center 垂直居中;
-// min-h-[68px](= 主页代币行高)让 Tokens 与 Activity 两列表行高一致;hover:bg-muted 给悬停反馈。
+// Opaque bg-background hides the action rail before the swipe; min-h matches the home token row.
 const flatSwipe: SwipeableListClassNames = {
   item: "rounded-xl bg-background",
   surface:
@@ -70,13 +65,11 @@ const flatSwipe: SwipeableListClassNames = {
   action: "[&>span]:group-hover:bg-muted!",
 };
 
-// 账本活动 + 展示用 symbol/logo(logo 自 balances 富化,缺则用 symbol 首字母)。
 interface ActivityRow extends ManualActivity {
   symbol: string;
   logo?: string;
 }
 
-// 活动时间按本地时区展示(见 useLocalDateFormat)。列表行只显日期;hover 明细显日期 + 时间(到秒)。
 const LIST_DATE_FMT = { dateStyle: "medium" } as const;
 const DETAIL_DATETIME_FMT = { dateStyle: "medium", timeStyle: "medium" } as const;
 
@@ -87,7 +80,7 @@ export function ManualTokensPanel({
 }: {
   accountId: string;
   balances: OverviewBalance[];
-  /** 24h 盈亏还在取 —— 现货行增量位走小骨架,跟抽屉头同一个数。 */
+  /** Shows a skeleton in the 24h change slot while it loads. */
   gainPending?: boolean;
 }) {
   const t = useTranslations("Activity");
@@ -103,15 +96,13 @@ export function ManualTokensPanel({
   const tokens = useMemo(() => detailQuery.data?.tokens ?? [], [detailQuery.data]);
   const activities = useMemo(() => detailQuery.data?.activities ?? [], [detailQuery.data]);
 
-  // balances(overview,实时富化)提供 logo/name/实时市值;按大写 symbol 匹配账本 token(账本只出事实数量/单价/标识)。
+  // Balances supply logo/name/live value; matched to ledger tokens by uppercase symbol.
   const balBySymbol = useMemo(
     () => new Map(balances.map((b) => [(b.symbol ?? "").toUpperCase(), b])),
     [balances],
   );
   const tokenById = useMemo(() => new Map(tokens.map((tk) => [tk.id, tk])), [tokens]);
 
-  // 选币「已有代币」组(#269):这个侧边栏账户账本里的持仓 → 可选中项。逻辑在 buildOwnedOptions
-  //(纯,含测):只收有票的,不看余额(已清仓的旧持仓也留着)。
   const ownedOptions = useMemo<TokenOption[]>(
     () => buildOwnedOptions(tokens, balBySymbol),
     [tokens, balBySymbol],
@@ -124,11 +115,10 @@ export function ManualTokensPanel({
       ticket: tk.ticket ?? undefined,
       logo: bal?.logo,
       name: bal?.name,
-      unitPrice: tk.unitPrice ?? 0, // 0 = 没声明过
+      unitPrice: tk.unitPrice ?? 0, // 0 = never declared
     };
   };
 
-  // 合并账本(跨 token,新→旧),附展示 symbol/logo。
   const merged = useMemo<ActivityRow[]>(() => {
     return [...activities]
       .sort((a, b) => b.occurredAt - a.occurredAt || b.createdAt - a.createdAt)
@@ -139,7 +129,6 @@ export function ManualTokensPanel({
       });
   }, [activities, tokenById, balBySymbol]);
 
-  // 活动明细「此时账户总额」+ 卖超提示的纯逻辑输入:全 token 的账本(compute-on-read,无 oracle 注入 → 走账本价②③)。
   const historyTokens = useMemo<HistoryToken[]>(
     () =>
       tokens.map((tk) => ({
@@ -186,8 +175,6 @@ export function ManualTokensPanel({
 
   const closeActivity = () => setActivity((s) => ({ ...s, open: false }));
 
-  // 写后刷新:一句就够。手记明细那条查询住在账户域前缀之下,`account.write` 顺带盖住它 ——
-  // 以前要「明细 + 整页」两句,是因为整页那句根本碰不到 react-query 缓存。
   const refresh = () => invalidateFor(queryClient, "account.write");
 
   const removeTokenMut = useMutation({
@@ -201,12 +188,9 @@ export function ManualTokensPanel({
     onError: () => toast.error(ta("actionFailed")),
   });
 
-  // 活动的新增 / 编辑。这两条与上面两条删除不同的地方:**它们有一种「服务端好好地拒绝了你」**——
-  // 卖超时返回 `{ ok: false }`,不是抛错。所以 onSuccess 里还要再分一次岔:
-  // 只有 `ok` 才刷新 + 关窗,`ok === false` 保持弹窗开着,让用户就地改数字。
-  //
-  // 失败提示走弹窗内部(`submitResult`)而不是 toast —— 用户此刻眼睛在弹窗上,
-  // 而 toast 在 modal 之下,报了也白报。上面两条删除没有弹窗,所以照旧 toast。
+  // An oversell returns `{ ok: false }` rather than throwing, so only `ok` refreshes and closes;
+  // otherwise the modal stays open. Errors show inside the modal, since a toast would sit
+  // underneath it.
   const addActivitiesMut = useMutation({
     mutationFn: (drafts: ActivityDraft[]) =>
       createManualActivities({
@@ -228,7 +212,7 @@ export function ManualTokensPanel({
         },
       }),
     onSuccess: async (res) => {
-      if (!res.ok) return; // 卖超:弹窗留着报原因
+      if (!res.ok) return;
       await refresh();
       closeActivity();
       setTab("activity");
@@ -263,13 +247,11 @@ export function ManualTokensPanel({
         ? "over"
         : null;
 
-  // 默认选中最新一笔活动的 token(供 plus 预选)。
   const latest = merged[0];
   const latestTokenRow = latest?.tokenId ? tokenById.get(latest.tokenId) : undefined;
   const latestToken = latestTokenRow ? pickedTokenOf(latestTokenRow) : null;
 
-  // 每次开弹窗都把两条 mutation 的结果清掉。mutation 的状态活在组件上、不随弹窗卸载而消失,
-  // 不清的话上一轮的「卖超」红字会原样出现在下一次打开的空表单里。
+  // Mutation state outlives the modal; reset it so a previous "oversold" error doesn't reappear.
   const openActivity = (next: Omit<typeof activity, "open">) => {
     addActivitiesMut.reset();
     editActivityMut.reset();
@@ -279,7 +261,6 @@ export function ManualTokensPanel({
   const openPlus = () => openActivity({ token: latestToken, lock: false, edit: null });
   const openTokenEdit = (tk: (typeof tokens)[number]) =>
     openActivity({ token: pickedTokenOf(tk), lock: true, edit: null });
-  // 活动行「编辑」:锁定该 token,预填这笔活动的全部字段(kind/数量/单价/手续费/日期/备注)。
   const openActivityEdit = (a: ActivityRow) => {
     const tk = a.tokenId ? tokenById.get(a.tokenId) : undefined;
     const token = tk ? pickedTokenOf(tk) : { symbol: a.symbol, logo: a.logo, unitPrice: 0 };
@@ -302,7 +283,6 @@ export function ManualTokensPanel({
 
   const tokenItems: SwipeableListItem[] = tokens.map((tk) => {
     const bal = balBySymbol.get(tk.symbol.toUpperCase());
-    // 市值:优先 balances 实时市值(与抽屉头/首页同源);缺则回退 数量 × 单价。
     const value = bal ? bal.usdValue : tk.amount * (tk.unitPrice ?? 0);
     const rightActions: SwipeAction[] = [
       {
@@ -334,8 +314,7 @@ export function ManualTokensPanel({
             symbol: tk.symbol.toUpperCase(),
             amount: tk.amount,
             value,
-            // 24h 盈亏(ADR 0040):与抽屉头 / 首页同源的那个数。**别漏** —— 漏了 `TokenRowContent`
-            // 收到 undefined,整行静默不渲染增量,看起来像「手记账户没有这个功能」。
+            // Required: without it TokenRowContent silently omits the 24h change.
             gain24h: bal?.gain24h,
           }}
           gainPending={gainPending}
@@ -346,7 +325,6 @@ export function ManualTokensPanel({
   });
 
   const activityItems: SwipeableListItem[] = merged.map((a) => {
-    // 卖超(reduce 超过当时持有):行内在数量·symbol 后挂 warning icon + 明细里如实提示(不改折叠结果)。
     const oversold = a.tokenId ? isReduceOversold(actsByToken.get(a.tokenId) ?? [], a) : false;
     return {
       id: a.id,
@@ -370,7 +348,6 @@ export function ManualTokensPanel({
             }),
         },
       ],
-      // 字体与 <TokenRowContent> 同位对齐:第一行 = 名称位(font-medium 基号)、第二行 = 数量·symbol 位(text-xs)。
       content: (
         <div className="flex w-full items-center gap-3">
           <LogoAvatar src={a.logo} fallback={a.symbol} size="md" />
@@ -390,7 +367,6 @@ export function ManualTokensPanel({
                 }
               >
                 <Sensitive>{formatNumber(a.amount)}</Sensitive> {a.symbol.toUpperCase()}
-                {/* 卖超警示 icon 并入 hover 触发区(尺寸同 CEX 代币行的 NoteIndicator glyph:size-3;色用语义 --warn)。 */}
                 {oversold ? (
                   <AlertTriangle
                     className="ml-1 inline size-3 align-middle text-warn"
@@ -527,7 +503,7 @@ function ConfirmModal({
 }) {
   const isDesktop = useMediaQuery("(min-width: 640px)");
   return (
-    // Portal 到 body:同 ManualActivityModal —— 逃出 BottomSheet 的 transform/overflow 包含块。
+    // Portal to body to escape the BottomSheet's transform/overflow containing block.
     <Portal>
       <MorphingModal
         viewId={open ? "confirm" : null}
@@ -555,8 +531,6 @@ function ConfirmModal({
   );
 }
 
-// 活动行 hover 明细:该笔活动的完整信息(类型/数量/单价/价值/手续费/日期/备注)。
-// 缺省字段(未记单价/手续费/备注)不显示;类型/数量/日期恒有。
 function DetailRow({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4">
@@ -589,7 +563,7 @@ function ActivityDetail({
         <span className={kindTone[row.kind]}>{t(row.kind)}</span>
       </DetailRow>
       <DetailRow label={t("amountLabel")}>
-        {/* 遮数量,留 symbol;单价是市场价 → 不遮,下面的 value/fee 是你的钱 → 遮。 */}
+        {/* Unit price is market data, so it isn't masked; amount, value and fee are. */}
         <Sensitive>{formatNumber(row.amount)}</Sensitive> {row.symbol.toUpperCase()}
       </DetailRow>
       {row.price != null && <DetailRow label={t("priceLabel")}>{usd(row.price)}</DetailRow>}
@@ -605,7 +579,6 @@ function ActivityDetail({
       )}
       <DetailRow label={t("dateLabel")}>{dateTimeFmt.format(row.occurredAt)}</DetailRow>
 
-      {/* 此时账户总额(该活动发生时刻,账户全部 token 现算);卖超时如实提示,不改折叠结果。 */}
       <div className="flex flex-col gap-1.5 border-border border-t pt-2">
         <DetailRow label={t("accountTotalThen")}>
           <Sensitive>{usd(totalThen)}</Sensitive>

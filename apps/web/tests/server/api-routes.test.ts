@@ -7,13 +7,11 @@ import { Route as SyncRoute } from "@/routes/api/sync";
 import { db } from "./_kit/db";
 import { appRequest, type SignedIn, signUp } from "./_kit/session";
 
-// `/api/export`、`/api/import`、`/api/sync` 三个**路由 handler**(不是 server fn)的 HTTP 契约:
-//   · 没登录 → 401,且什么都不做;
-//   · 认人只认会话 cookie(真 better-auth 会话,见 `_kit/session.ts`),数据按那个人隔离;
-//   · 导入的三种下场映射成 200 / 400 / 500,导出的文件能原样导进另一个人的空库;
-//   · 同步开轮、把活投给运行器、回这一轮此刻的样子;重复 POST 不叠第二轮。
-// 运行器那个 Durable Object 在测试 Worker 里没有绑定 —— 换成一个把投来的活收进数组的假绑定
-// (它是这个 Worker 的出口,与假 fetch 同一个位置)。
+// HTTP contract of the `/api/export`, `/api/import`, `/api/sync` route handlers (not server fns): no login -> 401 and nothing happens;
+// identity comes only from the session cookie (real better-auth session, see `_kit/session.ts`) and data is isolated per user;
+// import outcomes map to 200 / 400 / 500 and an exported file imports into another user's empty DB;
+// sync opens a round, hands jobs to the runner and returns the round's current state, with repeat POSTs not stacking a second round.
+// The runner Durable Object has no binding in the test Worker, so a fake binding collects the jobs (this Worker's egress, like the fake fetch).
 
 type Handler = (ctx: { request: Request }) => Promise<Response>;
 const handler = (route: unknown, method: "GET" | "POST"): Handler =>
@@ -25,7 +23,7 @@ const exportGet = handler(ExportRoute, "GET");
 const importPost = handler(ImportRoute, "POST");
 const syncPost = handler(SyncRoute, "POST");
 
-// —— 假运行器绑定 ——
+// -- fake runner binding --
 let sent: Enqueued[] = [];
 const runnerEnv = env as unknown as { JOB_RUNNER?: unknown };
 beforeEach(() => {
@@ -44,7 +42,7 @@ afterEach(() => {
 
 const ndjson = (records: unknown[]) => records.map((r) => `${JSON.stringify(r)}\n`).join("");
 
-/** 把文本切成小块喂进流 —— 行跨块、最后一行不带换行,都是真上传会遇到的形状。 */
+/** Splits text into small chunks for the stream: lines span chunks and the last line has no newline, as in real uploads. */
 const chunkedBody = (text: string, size = 7): ReadableStream<Uint8Array> => {
   const bytes = new TextEncoder().encode(text);
   let at = 0;
@@ -69,8 +67,8 @@ beforeEach(async () => {
   bob = await signUp("api-routes-bob@example.test");
 });
 
-describe("没登录", () => {
-  it("三个端点都回 401,不碰任何人的数据", async () => {
+describe("not logged in", () => {
+  it("all three endpoints return 401 and touch nobody's data", async () => {
     await db(alice.userId).accounts.create({ connectorId: "manual", label: "A", creds: null });
     const body = ndjson([{ type: "meta", version: 3 }]);
 
@@ -84,7 +82,7 @@ describe("没登录", () => {
     expect(sent).toEqual([]);
   });
 
-  it("伪造的 cookie 不算登录", async () => {
+  it("a forged cookie doesn't count as logged in", async () => {
     const forged = { userId: alice.userId, cookie: "better-auth.session_token=forged.sig" };
     const res = await exportGet({ request: appRequest("/api/export", {}, forged) });
     expect(res.status).toBe(401);
@@ -92,7 +90,7 @@ describe("没登录", () => {
 });
 
 describe("GET /api/export", () => {
-  it("回一份 NDJSON 附件,只含本人的账户", async () => {
+  it("returns an NDJSON attachment containing only the caller's accounts", async () => {
     await db(alice.userId).accounts.create({
       connectorId: "manual",
       label: "Alice Cash",
@@ -116,7 +114,7 @@ describe("GET /api/export", () => {
 });
 
 describe("POST /api/import", () => {
-  it("别人导出的文件能导进我的空库:回计数、行落在我名下、原主不受影响", async () => {
+  it("a file exported by someone else imports into my empty DB: counts returned, rows land under me, the original owner is unaffected", async () => {
     await db(alice.userId).accounts.create({ connectorId: "manual", label: "Cash", creds: null });
     await db(alice.userId).accounts.create({
       connectorId: "evm",
@@ -129,7 +127,7 @@ describe("POST /api/import", () => {
     const res = await importPost({
       request: appRequest(
         "/api/import",
-        // 去掉末尾换行:最后一行只能靠流读完后的那一次解析收进来。
+        // Strip the trailing newline: the last line is only picked up by the parse after the stream ends.
         { method: "POST", body: chunkedBody(file.trimEnd()) },
         bob,
       ),
@@ -141,7 +139,7 @@ describe("POST /api/import", () => {
     });
     const mine = await db(bob.userId).accounts.list();
     expect(mine.map((a) => a.label).sort()).toEqual(["Cash", "Wallet"]);
-    // 公开字段(地址)按真字段规格原样带过来 —— 钱包导进来就能同步,不用补录。
+    // Public fields (address) carry over per the real field spec, so an imported wallet syncs without re-entry.
     const wallet = mine.find((a) => a.label === "Wallet");
     expect(
       JSON.parse((await db(bob.userId).accounts.getRawCreds(wallet?.id ?? "")) ?? "{}"),
@@ -152,7 +150,7 @@ describe("POST /api/import", () => {
     ]);
   });
 
-  it("文件头不对 → 400 带上原因,一行都不写", async () => {
+  it("bad file header -> 400 with the reason, nothing written", async () => {
     const body = ndjson([{ type: "account", id: "a1", connectorId: "manual", label: "X" }]);
     const res = await importPost({
       request: appRequest("/api/import", { method: "POST", body }, bob),
@@ -163,7 +161,7 @@ describe("POST /api/import", () => {
     expect(await db(bob.userId).accounts.list()).toEqual([]);
   });
 
-  it("版本不对 → 400", async () => {
+  it("bad version -> 400", async () => {
     const res = await importPost({
       request: appRequest(
         "/api/import",
@@ -175,7 +173,7 @@ describe("POST /api/import", () => {
     expect(await res.text()).toContain("unsupported export version");
   });
 
-  it("写库那一步炸了(坏快照)→ 500,不把内部错误回给客户端", async () => {
+  it("the DB write step blows up (bad snapshot) -> 500, internal error not returned to the client", async () => {
     const file = await exportOf(alice);
     const meta = file.split("\n")[0];
     const body = [
@@ -198,7 +196,7 @@ describe("POST /api/import", () => {
     expect(await res.text()).toBe("import failed");
   });
 
-  it("没有请求体 → 400", async () => {
+  it("no request body -> 400", async () => {
     const res = await importPost({
       request: appRequest("/api/import", { method: "POST" }, bob),
     });
@@ -215,11 +213,11 @@ describe("POST /api/sync", () => {
       creds: JSON.stringify({ address: "0xabc" }),
     });
 
-  it("开一轮:回这一轮此刻的样子(不可缓存),本人的账户各投一条同步活", async () => {
+  it("opens a round: returns the round's current state (uncacheable), one sync job per own account", async () => {
     const wallet = await seedWallet(alice);
     await seedWallet(bob);
 
-    // 坏 JSON 当默认(默认组合、手动全量),不 400。
+    // A bad JSON body falls back to the default (default portfolio, manual full), not a 400.
     const res = await syncPost({
       request: appRequest("/api/sync", { method: "POST", body: "{not json" }, alice),
     });
@@ -238,7 +236,7 @@ describe("POST /api/sync", () => {
     expect(syncJobs[0]?.job).toMatchObject({ userId: alice.userId, accountId: wallet.id });
   });
 
-  it("轮还在跑时再点一次 → 原样回那一轮,不叠第二拨活", async () => {
+  it("clicking again while the round is still running -> returns that round as is, no second batch of jobs", async () => {
     await seedWallet(alice);
     const first = await syncPost({
       request: appRequest("/api/sync", { method: "POST", body: "{}" }, alice),

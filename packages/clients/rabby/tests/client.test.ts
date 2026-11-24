@@ -22,15 +22,14 @@ import protocolsFixture from "./fixtures/complex-protocol-list.json" with { type
 
 const ADDR = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
-// 假出网:记下每一发。顶替的是 **`HttpClient` 服务**而不是 `globalThis.fetch` ——
-// 请求层底下是官方客户端,在那一层顶替才测得到真实路径(签名头、method、body 都经过它)。
+// Fake egress that records every request. Replaces the `HttpClient` service, not `globalThis.fetch`, so the real path is exercised.
 function stub(reply: (url: URL) => Response | Promise<Response>) {
   const s = httpStub((request) => reply(request.url));
   return { fn: s, calls: s.calls };
 }
 
-// 假签名器:记下**它被要求签的是什么**。真家伙靠 wasm(只在 Workers 里跑得动),而这里要验的是
-// **接线** —— 递进去的 params 是不是真正发出去那份、头有没有带全。签名算法本身不是被测对象。
+// Fake signer that records what it was asked to sign. The real one needs wasm (runs only in Workers); what is verified here is the wiring:
+// is the params passed in the copy actually sent, are all headers present. The signature algorithm is not under test.
 function fakeSigner() {
   const signed: Array<{ method: string; path: string; params: Record<string, unknown> }> = [];
   const sign: SignRequest = (method, path, params) => {
@@ -47,7 +46,7 @@ function fakeSigner() {
   return { sign, signed };
 }
 
-// 缓存按 baseUrl 分桶 → 每个用例给自己一个 base 就天然隔离,不需要 resetForTests。
+// The cache is bucketed by baseUrl, so each case gets its own base and is isolated with no reset.
 let bases = 0;
 const freshBase = () => `https://rabby-${bases++}.test`;
 
@@ -79,8 +78,8 @@ const byPath = () =>
         : json(tokensFixture),
   );
 
-describe("签名", () => {
-  it("签的 params 就是真正发出去的 query(上游按 key 排序后哈希,差一个就白签)", async () => {
+describe("signing", () => {
+  it("the signed params are the query actually sent (upstream hashes it sorted by key; one difference wastes the signature)", async () => {
     const { fn, calls } = byPath();
     const signer = fakeSigner();
     await withClient(fn, (c) => c.tokens(ADDR), {}, signer.sign);
@@ -88,12 +87,12 @@ describe("签名", () => {
     expect(signer.signed[0].method).toBe("GET");
     expect(signer.signed[0].path).toBe("/v1/user/cache_token_list");
     expect(signer.signed[0].params).toEqual({ id: ADDR });
-    // 发出去的 query 与被签的那份一致。
+    // The query sent matches the one signed.
     expect(calls[0].request.url.searchParams.get("id")).toBe(ADDR);
     expect([...calls[0].request.url.searchParams.keys()]).toEqual(["id"]);
   });
 
-  it("六个签名头全带上(少一个就掉回「每 40 秒一发」的档位)", async () => {
+  it("all six signature headers are sent (without one it falls back to the one-request-per-40s tier)", async () => {
     const { fn, calls } = byPath();
     await withClient(fn, (c) => c.tokens(ADDR));
     const h = calls[0].request.headers;
@@ -110,7 +109,7 @@ describe("签名", () => {
     expect(h.accept).toBe("application/json");
   });
 
-  it("无 query 的端点签的是空 params", async () => {
+  it("an endpoint without a query signs empty params", async () => {
     const { fn } = byPath();
     const signer = fakeSigner();
     await withClient(fn, (c) => c.chainIds, {}, signer.sign);
@@ -118,7 +117,7 @@ describe("签名", () => {
     expect(signer.signed[0].params).toEqual({});
   });
 
-  it("签不出来 → 凭据问题,不是传输故障(重试白赔,通常是上游改了签名协议)", async () => {
+  it("signing fails: a credentials problem, not a transport fault (retrying is a wasted round trip; usually upstream changed the signing protocol)", async () => {
     const { fn } = byPath();
     const boom: SignRequest = (_m, path) => Effect.fail(new SigningFailure({ where: path }));
     const err = await withClient(fn, (c) => Effect.flip(c.tokens(ADDR)), {}, boom);
@@ -126,21 +125,21 @@ describe("签名", () => {
   });
 });
 
-describe("端点", () => {
-  it("tokens:一次回全链,地址走 id", async () => {
+describe("endpoints", () => {
+  it("tokens: all chains in one response, the address goes in id", async () => {
     const { fn, calls } = byPath();
     const rows = await withClient(fn, (c) => c.tokens(ADDR), { apiBase: RABBY_API_BASE });
     expect(calls[0].request.url.origin).toBe(RABBY_API_BASE);
     expect(calls[0].request.url.pathname).toBe("/v1/user/cache_token_list");
-    // 值不翻译,但只吐声明过的字段(schema 的默认行为)—— DTO 就是「我们读的那些字段」,
-    // 夹具里的 `asset` / `cex_ids` 之类从来没读过,所以也不跟着出去。
+    // Values are not translated, but only declared fields come out (schema default): the DTO is "the fields we read"; `asset` / `cex_ids`
+    // and the like in the fixture were never read, so they do not come out either.
     expect(rows).toHaveLength(tokensFixture.length);
     expect(rows[0].symbol).toBe(tokensFixture[0].symbol);
     expect(rows[0].amount).toBe(tokensFixture[0].amount);
     expect("cex_ids" in rows[0]).toBe(false);
   });
 
-  it("protocols:同样一次回全链", async () => {
+  it("protocols: likewise all chains in one response", async () => {
     const { fn, calls } = byPath();
     const rows = await withClient(fn, (c) => c.protocols(ADDR));
     expect(calls[0].request.url.pathname).toBe("/v1/user/complex_protocol_list");
@@ -152,13 +151,13 @@ describe("端点", () => {
     expect("has_supported_portfolio" in rows[0]).toBe(false);
   });
 
-  it("totalBalance:最轻的端点,探活用", async () => {
+  it("totalBalance: the lightest endpoint, for liveness probes", async () => {
     const { fn, calls } = stub(() => json({ total_usd_value: 1 }));
     await withClient(fn, (c) => c.totalBalance(ADDR));
     expect(calls[0].request.url.pathname).toBe("/v1/user/total_balance");
   });
 
-  it("apiBase 可覆盖,且当不透明整串用", async () => {
+  it("apiBase can be overridden and is used as one opaque string", async () => {
     const { fn, calls } = byPath();
     await withClient(fn, (c) => c.tokens(ADDR), { apiBase: "http://localhost:3099/rabby-proxy" });
     expect(calls[0].request.url.href).toContain("/rabby-proxy/v1/user/cache_token_list");
@@ -166,23 +165,23 @@ describe("端点", () => {
 });
 
 describe("chainIds", () => {
-  it("community_id 就是规范 chainId", () => {
+  it("community_id is the canonical chainId", () => {
     const map = parseChainIds([
       { id: "eth", community_id: 1 },
       { id: "bsc", community_id: 56 },
       { id: "arb", community_id: 42161 },
-      { id: "broken" }, // 没有 community_id → 跳过,不产兜底形
+      { id: "broken" }, // no community_id: skipped, no fallback form
     ]);
     expect(map).toEqual({ eth: 1, bsc: 56, arb: 42161 });
   });
 
-  it("缓存住:连问两次只拉一发", async () => {
+  it("cached: asking twice fetches once", async () => {
     const { fn, calls } = byPath();
     await withClient(fn, (c) => Effect.all([c.chainIds, c.chainIds]));
     expect(calls).toHaveLength(1);
   });
 
-  it("并发问也只拉一发", async () => {
+  it("concurrent asks also fetch once", async () => {
     const { fn, calls } = byPath();
     await withClient(fn, (c) =>
       Effect.all([c.chainIds, c.chainIds, c.chainIds], { concurrency: "unbounded" }),
@@ -190,7 +189,7 @@ describe("chainIds", () => {
     expect(calls).toHaveLength(1);
   });
 
-  it("刷新失败但有旧映射 → 用旧的", async () => {
+  it("refresh fails but an old mapping exists: uses the old one", async () => {
     const base = freshBase();
     let dead = false;
     const { fn } = stub(() => (dead ? json({}, { status: 503 }) : json(chainListFixture)));
@@ -207,7 +206,7 @@ describe("chainIds", () => {
     expect(Object.keys(map).length).toBeGreaterThan(0);
   });
 
-  it("一个映射都没有 → 硬失败,绝不退化成 slug 兜底形", async () => {
+  it("no mapping at all: hard failure, never degrading to the slug fallback form", async () => {
     const { fn } = stub(() => json([]));
     const err = await failing(fn, (c) => c.chainIds);
     expect(err._tag).toBe("UpstreamUnavailableError");
@@ -215,9 +214,9 @@ describe("chainIds", () => {
   });
 });
 
-describe("限频:limit=1,不许突发", () => {
-  // rabby 掐的是**瞬时并发**不是总量,而且 429 不带 Retry-After —— 策略是「从不撞」。
-  // `memory` 档 = 官方 token-bucket:limit 1 / 125ms → 第 2 发就要等 125ms。
+describe("rate limiting: limit=1, no bursts", () => {
+  // Rabby throttles instantaneous concurrency, not total volume, and its 429 carries no Retry-After: the policy is "never hit it".
+  // The `memory` tier is the official token bucket: limit 1 / 125ms makes the 2nd request wait 125ms.
   const settledAfter = (
     ms: number,
     use: (c: RabbyClientApi) => Effect.Effect<unknown, never, Outbound>,
@@ -233,7 +232,7 @@ describe("限频:limit=1,不许突发", () => {
       }).pipe(Effect.provideService(RabbySigner, fakeSigner().sign)),
     );
 
-  it("第二发就要等(不许突发)", async () => {
+  it("the second request waits (no bursts)", async () => {
     const two = (c: RabbyClientApi) =>
       Effect.all([Effect.orDie(c.tokens(ADDR)), Effect.orDie(c.tokens(ADDR))]);
     expect(await settledAfter(124, two)).toBe(false);
@@ -241,45 +240,44 @@ describe("限频:limit=1,不许突发", () => {
   });
 });
 
-describe("错误归类", () => {
+describe("error classification", () => {
   const failWith = (init: ResponseInit) => {
     const { fn } = stub(() => json({ err: 1 }, init));
     return failing(fn, (c) => c.tokens(ADDR));
   };
 
-  it("429 → 限流(rabby 不给 Retry-After,所以 retryAfterMs 是 undefined)", async () => {
+  it("429 gives rate-limited (rabby gives no Retry-After, so retryAfterMs is undefined)", async () => {
     const err = await failWith({ status: 429 });
     expect(err._tag).toBe("UpstreamRateLimitError");
     expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBeUndefined();
   });
 
-  it("5xx / 出不去 → 够不到上游", async () => {
+  it("5xx / unreachable give unreachable", async () => {
     expect((await failWith({ status: 503 }))._tag).toBe("UpstreamUnavailableError");
   });
 
-  it("读不成 JSON → parse", async () => {
+  it("unreadable JSON gives parse", async () => {
     const { fn } = stub(() => new Response("<html>", { status: 200 }));
     expect((await failing(fn, (c) => c.tokens(ADDR)))._tag).toBe("UpstreamParseError");
   });
 
-  it("失败信息不带 query / 地址(原则 #5 红线)", async () => {
+  it("the failure info carries no query / address", async () => {
     const err = await failWith({ status: 503 });
     expect(err.where).toBe("/v1/user/cache_token_list");
     expect(JSON.stringify(err)).not.toContain(ADDR);
   });
 });
 
-// **走 Tag / Layer 那一条路。** 生产只走它,而在这之前**九个包的测试一条都没走过** ——
-// 全部直接调 `make`,于是「`layer()` 装出来的东西和 `make` 是不是同一个」从来没人验证。
-// 这是复审点出来的真空档(#12)。
-describe("装配:Tag 路径", () => {
-  it("`RabbyClient.layer(...)` 装出来的就是 `make` 那个 client", async () => {
+// Goes through the Tag / Layer path: production uses only it, and tests otherwise all call `make` directly, so whether what `layer()` assembles
+// equals `make` was never verified.
+describe("wiring: the Tag path", () => {
+  it("what `RabbyClient.layer(...)` assembles is the `make` client", async () => {
     const { fn, calls } = stub(() => json({ total_usd_value: 1 }));
     const out = await runClient(
       fn,
       Effect.flatMap(RabbyClient, (client) => client.totalBalance(ADDR)).pipe(
         Effect.provide(RabbyClient.layer({ apiBase: freshBase() })),
-        // 签名器仍是假的 —— 真家伙是 wasm,只在 Workers 里跑得动。
+        // The signer is still fake: the real one is wasm and runs only in Workers.
         Effect.provideService(RabbySigner, fakeSigner().sign),
       ),
     );

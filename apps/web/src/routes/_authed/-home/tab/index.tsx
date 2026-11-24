@@ -30,13 +30,12 @@ export function TabStripIsland() {
     : "tokens";
   const activeValue = isPinView ? shownActive : activeKind;
 
-  // 手机端 tab 条横向滚动:选中在可视区外/半露的 tab 要滚进可视区,两侧留余量(不贴裁剪缘/合计)。
-  // 手写横向校正而非 scrollIntoView:后者会连带滚 overflow-hidden 祖先和页面纵向;且选中 pin 后合计
-  // 宽度变化(「—」→ 金额)会把 strip 压窄、刚滚好的 tab 又被裁掉(实测)→ ResizeObserver 盯住
-  // strip 尺寸,变了就再校正一次。选中的 trigger 自己握 ref,不靠满条去搜 aria-selected。
+  // Mobile strip scrolls horizontally: a selected tab that is off-screen is scrolled into view with
+  // margin. Hand-rolled (see revealTab); a ResizeObserver re-corrects when the total's width
+  // change narrows the strip and clips the tab again. The selected trigger holds its own ref.
   const stripRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLSpanElement>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: activeValue 是「何时滚」的信号(选中变了,ref 已经挪到新 trigger 上),回调里读的是 ref 不是这个值。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: activeValue only signals when to scroll (the ref already moved to the new trigger); the callback reads the ref
   useLayoutEffect(() => {
     const elStrip = stripRef.current;
     if (!elStrip) return;
@@ -52,18 +51,16 @@ export function TabStripIsland() {
 
   return (
     <div className="flex items-center gap-4">
-      {/* 视角(现货/永续/DeFi)与自定义 pin 共用**同一个** beUI Tabs(无背景轨道、共享滑动药丸,ADR 0034 UI 微调):
-              选 pin 只是把药丸滑过去,视角 tab 原样保留、动效不变。＋ 作 Tabs 外的相邻加钮。 */}
-      {/* tab 超宽(手机端 pin 多)→ **横向滚动**、隐藏滚动条(不换行);最右侧合计不进滚动区、固定不动。
-                pin 面板不受此容器裁剪 —— 它整个经 Portal 浮出(见 PinPanel)。 */}
+      {/* Perspective and pin tabs share one beUI Tabs (transparent track, shared sliding pill); the +
+          button sits beside it. The strip scrolls horizontally with the scrollbar hidden; the total
+          stays fixed outside it. Pin panels aren't clipped: they render through a Portal (see PinPanel). */}
       <div
         ref={stripRef}
         className="min-w-0 flex-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         <Tabs value={activeValue} onValueChange={selectTab} variant="pill">
-          {/* 覆盖 beUI pill 默认的 bg-card 轨道底 → 无背景(twMerge 覆盖 vendored className,不改组件)。
-                    ＋ 加钮住在 TabsList 内(非 tab,只做占位),与各 tab 共享同一 gap-1 —— 和 tab 间距一致。
-                    pr-4:滚动区末端留内边距,滚到底时最后一个 tab/＋ 不贴着右侧合计。 */}
+          {/* Overrides beUI's default track background via twMerge. The + button lives inside TabsList
+              as a placeholder sharing the tab gap; pr-4 keeps the last tab/+ off the total. */}
           <TabsList className="bg-transparent p-0 pr-4">
             <SelectedSlot on={activeValue === "tokens"} selectedRef={selectedRef}>
               <TabsTrigger value="tokens">{t("tokensTab")}</TabsTrigger>
@@ -120,12 +117,11 @@ function TabTotal() {
     : "tokens";
 
   return (
-    // min-w-24 与 TabTotalSkeleton 同宽:切 pin 合计从金额变成占位时条子不能变宽,否则裁掉的 tab 会闪出来。
+    // min-w-24 matches TabTotalSkeleton so the strip doesn't widen when the total swaps for a placeholder (clipped tabs would flash).
     <span className="inline-flex min-w-24 shrink-0 justify-end text-muted-foreground text-sm tabular-nums">
-      {/* pin 视图:过滤后数据到位才显其总额;未到位走骨架,别显未收窄的全量总额。
-                数据由子组件自己拉 —— `useSuspenseQuery` 没有条件启用,所以「只在 pin 视图下才要的查询」
-                只能靠「不在 pin 视图时这个组件压根不挂」来表达(ADR 0038)。总额与列表是两个子组件、
-                同一个 queryKey,react-query 自然合成一次请求。 */}
+      {/* Pin view: show the total only once the filtered data arrives, never the unfiltered one.
+          useSuspenseQuery can't be conditional, so the pin-only query is expressed by not mounting
+          this component outside pin view. Total and list share a queryKey, so one request. */}
       {activePin && pinScope ? (
         <QueryBoundary
           key={activePin.id}
@@ -161,7 +157,7 @@ function KindTotal({ portfolioId, kind }: { portfolioId: string; kind: KindTab }
   return <Sensitive>{usd(viewSubtotal)}</Sensitive>;
 }
 
-// 自定义 Tab 的右上角合计。与下方列表**同一个 queryKey**,react-query 只发一次请求。
+// Top-right total of a custom tab; same queryKey as the list below, so one request.
 function PinTotal({ portfolioId, pin }: { portfolioId: string; pin: PinScopeKey }) {
   const usd = useDisplayValue();
   const data = usePortfolioOverview(portfolioId, pin);

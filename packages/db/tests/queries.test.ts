@@ -2,21 +2,20 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import { getDb } from "../src/connect";
-// 测试可用包内私有句柄:userId→user 外键已启用,业务行需先有 user 行。
+// In-package tests may use the package-private handle: the userId to user FK is enforced, so business rows need a user row first.
 import { user } from "../src/schema/auth";
-import { forDomain, forGlobal } from "./effect"; // 包内测试白盒:公开面只出 createDb 门面(见 encapsulation.test)
+import { forDomain, forGlobal } from "./effect"; // white-box in-package tests: the public surface exports only the aggregate tickets (see encapsulation.test)
 
 const snapshotsOf = forDomain((db) => db.snapshots);
 
 const accounts = forDomain((db) => db.accounts);
-// cron 那条:没有 userId,所以它在 `GlobalDatabase` 上。
+// The cron path has no userId, so it lives on `GlobalDatabase`.
 const globalAccounts = forGlobal((db) => db.accounts);
 
 const USER_A = "user-a";
 const USER_B = "user-b";
 
-// pool-workers 此版本不隔离每个测试的存储。每个测试前重置:删 user 行(级联清掉其
-// accounts/portfolios/snapshots/...),再插入干净的 user 行(满足业务表的 userId 外键)。
+// pool-workers doesn't isolate storage per test: before each test, delete the user row (cascades accounts/portfolios/snapshots/...) and insert a clean one (satisfies the userId FK).
 async function resetUser(userId: string): Promise<void> {
   const db = getDb(env);
   await db.delete(user).where(eq(user.id, userId));
@@ -67,16 +66,16 @@ describe("accounts", () => {
   });
 
   it("listUserIds returns distinct user ids that own accounts (cron sweep)", async () => {
-    expect(await globalAccounts().listUserIds()).toEqual([]); // 无账户
+    expect(await globalAccounts().listUserIds()).toEqual([]); // no accounts
     await accounts(USER_A).create({ connectorId: "manual", label: "A1", creds: "x" });
-    await accounts(USER_A).create({ connectorId: "manual", label: "A2", creds: "x" }); // 同用户两账户 → 去重
+    await accounts(USER_A).create({ connectorId: "manual", label: "A2", creds: "x" }); // two accounts for one user: deduped
     await accounts(USER_B).create({ connectorId: "manual", label: "B1", creds: "x" });
     const ids = await globalAccounts().listUserIds();
     expect([...ids].sort()).toEqual([USER_A, USER_B].sort());
   });
 
   it("round-trips the creds map (incl. semi_ placeholder) and rehydrates via setAccountCredentials", async () => {
-    // 导入的缺凭据 CEX:creds 只含 semi 打码占位(无真 apiKey/secret)。
+    // Imported CEX missing credentials: creds holds only masked semi placeholders (no real apiKey/secret).
     const imported = JSON.stringify({ semi_apiKey: "ABCD…5678" });
     const acc = await accounts(USER_A).create({
       connectorId: "okx",
@@ -84,11 +83,11 @@ describe("accounts", () => {
       creds: imported,
     });
     expect(await accounts(USER_A).getRawCreds(acc.id)).toBe(imported);
-    // creds 不进安全形状(含 secret 密文)。
+    // creds never enter the safe shape (they hold secret ciphertext).
     const got = await accounts(USER_A).getById(acc.id);
     expect(Object.keys(got!)).not.toContain("creds");
 
-    // 补录:整张 map 覆盖。
+    // Backfill: the whole map is overwritten.
     const sealed = JSON.stringify({ apiKey: "REAL", secret: "<enc>", passphrase: "<enc>" });
     await accounts(USER_A).setCredentials(acc.id, sealed);
     expect(await accounts(USER_A).getRawCreds(acc.id)).toBe(sealed);
@@ -102,7 +101,7 @@ describe("accounts", () => {
     });
     await accounts(USER_A).rename(acc.id, "New");
     expect((await accounts(USER_A).getById(acc.id))?.label).toBe("New");
-    // 越权:另一用户改不动。
+    // Foreign ownership: another user can't change it.
     await accounts(USER_B).rename(acc.id, "Hacked");
     expect((await accounts(USER_A).getById(acc.id))?.label).toBe("New");
   });
@@ -116,7 +115,7 @@ describe("accounts", () => {
     expect((await accounts(USER_A).getById(acc.id))?.archivedAt).toBeNull();
   });
 
-  it("listRawCredsByUser returns each account's raw creds (user-scoped; for safeView 富化)", async () => {
+  it("listRawCredsByUser returns each account's raw creds (user-scoped; for safeView enrichment)", async () => {
     const a1 = await accounts(USER_A).create({ connectorId: "manual", label: "M", creds: "{}" });
     const a2 = await accounts(USER_A).create({
       connectorId: "evm",
@@ -144,7 +143,7 @@ describe("snapshots", () => {
     const id = await snapshotsOf(USER_A).write(acc.id, {
       takenAt: 1000,
       totalUsd: 150,
-      // symbol 不再落快照(#243);行按 token_id 区分。
+      // symbol isn't stored on snapshots; rows are told apart by token_id.
       balances: [
         {
           tokenId: "tk-btc",
@@ -174,17 +173,15 @@ describe("snapshots", () => {
     expect(latest).toHaveLength(1);
     expect(latest[0]!.balances).toHaveLength(2);
     expect(latest[0]!.balances.find((b) => b.tokenId === "tk-eth")!.metaJson).toContain("note");
-    // 无 note 写入 → 各行 note 省略。
+    // With no note written, each row's note is omitted.
     expect(latest[0]!.balances.every((b) => b.note === undefined)).toBe(true);
-    // self_price 落库/读回(估值原料,Phase 3):BTC 行有、ETH 行无(null)。
+    // self_price round-trips: the BTC row has it, the ETH row doesn't (null).
     expect(latest[0]!.balances.find((b) => b.tokenId === "tk-btc")!.selfPrice).toBe(100000);
     expect(latest[0]!.balances.find((b) => b.tokenId === "tk-eth")!.selfPrice).toBeNull();
   });
 
-  // 24h 盈亏的「起点」端(ADR 0050):每账户 `[floor, t]` 窗口内**最近**一张 + 其余额。
-  //   · **≤ t,不是 ≥ t**:往后找最近一张等于拿几小时前的数冒充 24 小时前;
-  //   · `floor`(7 天断线线):窗口内一张都没有的账户不出现(该账户起点空 → 涨跌当 0)。
-  it("asOf:取 [floor, t] 窗口内最近一张 —— 更晚的不顶上、窗口外的不出现", async () => {
+  // asOf (the 24h P&L start): per account, the nearest snapshot in `[floor, t]` plus its balances. It is <= t, not >= t (a later one would pass hours-old numbers as 24h ago), and the floor drops accounts with no snapshot in the window.
+  it("asOf: takes the nearest in the [floor, t] window; later ones don't stand in, ones outside don't appear", async () => {
     const acc = await accounts(USER_A).create({ connectorId: "binance", label: "B", creds: "x" });
     await snapshotsOf(USER_A).write(acc.id, {
       takenAt: 1000,
@@ -194,24 +191,23 @@ describe("snapshots", () => {
     await snapshotsOf(USER_A).write(acc.id, { takenAt: 2000, totalUsd: 20, balances: [] });
     await snapshotsOf(USER_A).write(acc.id, { takenAt: 3000, totalUsd: 30, balances: [] });
 
-    // t=2500, floor=0 → ≤ 2500 里最近那张是 2000(3000 不许顶上来)。
+    // t=2500, floor=0: the nearest <= 2500 is 2000 (3000 must not stand in).
     const at2500 = await snapshotsOf(USER_A).asOf(2500, 0);
     expect(at2500).toHaveLength(1);
     expect(at2500[0]!.snapshot.takenAt).toBe(2000);
 
-    // 等于 t 的算数(≤)。
+    // Equal to t counts (<=).
     expect((await snapshotsOf(USER_A).asOf(1000, 0))[0]!.snapshot.takenAt).toBe(1000);
     expect((await snapshotsOf(USER_A).asOf(1000, 0))[0]!.balances).toHaveLength(1);
 
-    // floor 把窗口下界卡住:t=2500 但 floor=2100 → 窗口 [2100,2500] 内一张都没有 → 不出现。
+    // floor bounds the window: t=2500 but floor=2100 means nothing in [2100,2500], so absent.
     expect(await snapshotsOf(USER_A).asOf(2500, 2100)).toEqual([]);
-    // 比最早那张还早 → 空。
+    // Earlier than the earliest: empty.
     expect(await snapshotsOf(USER_A).asOf(500, 0)).toEqual([]);
   });
 
-  // 单账户曲线的数据源(FOL-38):两列 + `since` 窗口。窗口是这条读接口的**上界** ——
-  // 它发的是原样的点,不裁的话「攒了多久就发多大」。
-  it("listTotalsByAccount:按 since 裁窗口,升序,只给 (takenAt, totalUsd)", async () => {
+  // Source for per-account curves: two columns plus a `since` window, which is this read's upper bound: it emits points as-is, so without trimming the size would track history.
+  it("listTotalsByAccount: trims by since, ascending, returns only (takenAt, totalUsd)", async () => {
     const acc = await accounts(USER_A).create({ connectorId: "binance", label: "B", creds: "x" });
     await snapshotsOf(USER_A).write(acc.id, { takenAt: 300, totalUsd: 30, balances: [] });
     await snapshotsOf(USER_A).write(acc.id, { takenAt: 100, totalUsd: 10, balances: [] });
@@ -223,7 +219,7 @@ describe("snapshots", () => {
       { takenAt: 200, totalUsd: 20 },
       { takenAt: 300, totalUsd: 30 },
     ]);
-    // 窗口在 SQL 里,不是查回来再过滤 —— 窗口外那行不出库。
+    // The window is in SQL, not filtered after the query: the row outside the window never leaves the db.
     expect(await snapshotsOf(USER_A).listTotalsByAccount(acc.id, 200)).toEqual([
       { takenAt: 200, totalUsd: 20 },
       { takenAt: 300, totalUsd: 30 },
@@ -231,7 +227,7 @@ describe("snapshots", () => {
     expect(await snapshotsOf(USER_A).listTotalsByAccount(acc.id, 999)).toEqual([]);
   });
 
-  it("listTokenValueTotals:该 token 每 (账户 × 快照) 的现货合计,窗口 + 桶在 SQL 里", async () => {
+  it("listTokenValueTotals: per-token spot total per (account x snapshot), window + bucket in SQL", async () => {
     const acc = await accounts(USER_A).create({ connectorId: "binance", label: "B", creds: "x" });
     const other = await accounts(USER_B).create({ connectorId: "binance", label: "X", creds: "x" });
     const DAY = 86_400_000;
@@ -240,9 +236,9 @@ describe("snapshots", () => {
       totalUsd: 30,
       balances: [
         { tokenId: "tk-btc", amount: 1, usdValue: 10, kind: "spot", platform: "binance" },
-        // 同一张快照里同一个币在两条链上 → 合计
+        // The same coin on two chains in one snapshot: summed
         { tokenId: "tk-btc", amount: 1, usdValue: 5, kind: "spot", platform: "ethereum" },
-        // 非现货不算(与 viewKind 口径一致)
+        // Non-spot doesn't count (matches viewKind)
         { tokenId: "tk-btc", amount: 1, usdValue: 99, kind: "defi", platform: "binance" },
         { tokenId: "tk-eth", amount: 1, usdValue: 20, kind: "spot", platform: "binance" },
       ],
@@ -273,7 +269,7 @@ describe("snapshots", () => {
       { accountId: acc.id, takenAt: 300, totalUsd: 30 },
       { accountId: acc.id, takenAt: DAY + 5, totalUsd: 40 },
     ]);
-    // 按日:每账户每个 UTC 日留最后一行。
+    // Per day: keep each account's last row per UTC day.
     expect(await store.listTokenValueTotals("tk-btc", undefined, "day")).toEqual([
       { accountId: acc.id, takenAt: 300, totalUsd: 30 },
       { accountId: acc.id, takenAt: DAY + 5, totalUsd: 40 },
@@ -283,7 +279,7 @@ describe("snapshots", () => {
     expect(await store.listTokenValueTotals("tk-doge", undefined, "snapshot")).toEqual([]);
   });
 
-  it("latestRaw / asOfRaw:与 latest / asOf 同一组快照,原样元组、note 不解析", async () => {
+  it("latestRaw / asOfRaw: the same snapshots as latest / asOf, raw tuples, notes unparsed", async () => {
     const a = await accounts(USER_A).create({ connectorId: "binance", label: "A", creds: "x" });
     const b = await accounts(USER_A).create({ connectorId: "binance", label: "B", creds: "x" });
     const theirs = await accounts(USER_B).create({
@@ -340,7 +336,7 @@ describe("snapshots", () => {
     );
     expect(raw.balances).toHaveLength(2);
 
-    // 同一个窗口判据:[floor, t] 里最新那张;窗口里没有的账户不出现。
+    // Same window rule: the newest in [floor, t]; accounts with none in the window are absent.
     const prev = await snapshotsOf(USER_A).asOfRaw(120, 50);
     expect(prev.snapshots).toEqual([[a.id, 100, 1, null]]);
     expect(prev.balances.map((r) => r[7])).toEqual(["tk-old"]);
@@ -348,19 +344,19 @@ describe("snapshots", () => {
     expect(parsed.map((s) => s.snapshot.accountId)).toEqual([a.id]);
   });
 
-  it("persists per-balance note (single Note) + account-level note (Note[]) and safeParses back (note 重设计)", async () => {
+  it("persists per-balance note (single Note) + account-level note (Note[]) and safeParses back", async () => {
     const acc = await accounts(USER_A).create({
       connectorId: "bitcoin",
       label: "BTC",
       creds: "x",
     });
-    // balance 级:单个 Note(CEX 锁仓口径示例)。
+    // Balance-level: a single Note (a CEX locked-balance example).
     const note = {
       title: "Locked",
       icon: "warning" as const,
       content: [{ label: "BTC", value: 0.005, unit: "BTC" }],
     };
-    // account 级:Note[](整钱包)。
+    // Account-level: Note[] (whole wallet).
     const accountNote = [
       {
         title: "Unconfirmed",
@@ -375,15 +371,15 @@ describe("snapshots", () => {
       note: accountNote,
       balances: [
         { tokenId: "tk-btc", amount: 0.08, usdValue: 0, kind: "spot", platform: "binance", note },
-        { tokenId: "tk-eth", amount: 1, usdValue: 0, kind: "spot", platform: "binance" }, // 无 note 的行
+        { tokenId: "tk-eth", amount: 1, usdValue: 0, kind: "spot", platform: "binance" }, // row without a note
       ],
     });
     const latest = await snapshotsOf(USER_A).latest();
     expect(latest).toHaveLength(1);
-    // balance 级 note 挂在该 balance 上(per-balance),safeParse 回单个 Note;无 note 的行为 undefined。
+    // Balance-level note hangs on that balance (per balance), safeParses back to a single Note; a row without one is undefined.
     expect(latest[0]!.balances.find((b) => b.tokenId === "tk-btc")!.note).toEqual(note);
     expect(latest[0]!.balances.find((b) => b.tokenId === "tk-eth")!.note).toBeUndefined();
-    // account 级 note(Note[])从 snapshot.note safeParse。
+    // Account-level note (Note[]) is read from snapshot.note via safeParse.
     expect(latest[0]!.note).toEqual(accountNote);
   });
 
@@ -393,7 +389,7 @@ describe("snapshots", () => {
       label: "Big wallet",
       creds: "x",
     });
-    // 60 条余额 × 每行多列 = 数百绑定参数,远超 D1 单条 100 上限 → 必须分块,否则 "too many SQL variables"。
+    // 60 balances x several columns = hundreds of bound params, far above D1's 100 per statement: must chunk, or "too many SQL variables".
     const balances = Array.from({ length: 60 }, (_, i) => ({
       tokenId: `tk-${i}`,
       amount: i,
@@ -405,7 +401,7 @@ describe("snapshots", () => {
 
     const latest = await snapshotsOf(USER_A).latest();
     expect(latest).toHaveLength(1);
-    expect(latest[0]!.balances).toHaveLength(60); // 全部分块写入、无丢失
+    expect(latest[0]!.balances).toHaveLength(60); // all written in chunks, none lost
   });
 
   it("returns only the latest snapshot per account, with its balances", async () => {
@@ -419,10 +415,10 @@ describe("snapshots", () => {
       label: "A2",
       creds: "x",
     });
-    // 一个没有快照的账户:不应出现在结果里。
+    // An account with no snapshots must not appear in the result.
     await accounts(USER_A).create({ connectorId: "manual", label: "A3", creds: "x" });
 
-    // a1:先旧后新两份快照 → 应只回最新那份(takenAt 2000),余额是 NEW 不是 OLD。
+    // a1: older then newer snapshot: only the latest comes back (takenAt 2000), balances NEW not OLD.
     await snapshotsOf(USER_A).write(a1.id, {
       takenAt: 1000,
       totalUsd: 10,
@@ -433,7 +429,7 @@ describe("snapshots", () => {
       totalUsd: 20,
       balances: [{ tokenId: "tk-new", amount: 2, usdValue: 20, kind: "spot", platform: "binance" }],
     });
-    // a2:单份快照。
+    // a2: a single snapshot.
     await snapshotsOf(USER_A).write(a2.id, {
       takenAt: 1500,
       totalUsd: 5,
@@ -441,21 +437,21 @@ describe("snapshots", () => {
     });
 
     const latest = await snapshotsOf(USER_A).latest();
-    expect(latest).toHaveLength(2); // a3 无快照 → 不计
+    expect(latest).toHaveLength(2); // a3 has no snapshots: not counted
 
     const byAcc = new Map(latest.map((r) => [r.snapshot.accountId, r]));
     const r1 = byAcc.get(a1.id)!;
     expect(r1.snapshot.takenAt).toBe(2000);
     expect(r1.snapshot.totalUsd).toBe(20);
     expect(r1.balances).toHaveLength(1);
-    expect(r1.balances[0]!.tokenId).toBe("tk-new"); // 旧快照的 OLD 不应混入
+    expect(r1.balances[0]!.tokenId).toBe("tk-new"); // OLD from the older snapshot must not leak in
 
     const r2 = byAcc.get(a2.id)!;
     expect(r2.snapshot.takenAt).toBe(1500);
     expect(r2.balances[0]!.tokenId).toBe("tk-atom");
   });
 
-  // 同毫秒并列(不折叠的写入才会有):每账户恰好一张,取后写的那张 —— latest 与 asOf 同一条规则。
+  // Same-millisecond ties (only non-collapsing writes produce them): exactly one per account, the later write; latest and asOf follow one rule.
   it("same-ms tie: exactly one snapshot per account, the later-written one", async () => {
     const acc = await accounts(USER_A).create({ connectorId: "manual", label: "A", creds: "x" });
     await snapshotsOf(USER_A).write(acc.id, { takenAt: 1000, totalUsd: 1, balances: [] });
@@ -512,14 +508,14 @@ describe("snapshots", () => {
       label: "B1",
       creds: "x",
     });
-    // 跨账户、错时写入(乱序),验证升序返回。
+    // Cross-account, out-of-order writes: verifies ascending return.
     await snapshotsOf(USER_A).write(a1.id, { takenAt: 2000, totalUsd: 20, balances: [] });
     await snapshotsOf(USER_A).write(a1.id, { takenAt: 1000, totalUsd: 10, balances: [] });
     await snapshotsOf(USER_A).write(a2.id, { takenAt: 1500, totalUsd: 5, balances: [] });
     await snapshotsOf(USER_B).write(b1.id, { takenAt: 1200, totalUsd: 999, balances: [] });
 
     const totals = await snapshotsOf(USER_A).listTotals();
-    expect(totals.map((t) => t.takenAt)).toEqual([1000, 1500, 2000]); // 升序、不含 user B
+    expect(totals.map((t) => t.takenAt)).toEqual([1000, 1500, 2000]); // ascending, excludes user B
     expect(totals.map((t) => t.totalUsd)).toEqual([10, 5, 20]);
     expect(totals.find((t) => t.accountId === b1.id)).toBeUndefined();
   });
@@ -551,7 +547,7 @@ describe("snapshots", () => {
     const page2 = await snapshotsOf(USER_A).listPage(2, 2);
     expect(page1.map((s) => s.takenAt)).toEqual([1000, 2000]); // asc, user A only
     expect(page2.map((s) => s.takenAt)).toEqual([3000]);
-    expect(page2[0]!.accountId).toBe(a.id); // 不含 user B
+    expect(page2[0]!.accountId).toBe(a.id); // excludes user B
 
     const bal = await snapshotsOf(USER_A).balancesFor(page1.map((s) => s.id));
     expect(bal).toHaveLength(2);

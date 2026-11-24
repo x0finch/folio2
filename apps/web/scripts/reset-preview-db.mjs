@@ -1,20 +1,17 @@
-// 清空共享 preview 库(方案 B 的兜底):drop 所有业务表 + d1_migrations,好让紧接着的
-// `db:migrate:preview` 从零全量重建 schema。只碰 folio-preview(env.preview),**永不碰生产**。
-// 由 .github/workflows/preview-reset.yml 手动触发调用。
+// Wipes the shared preview DB (fallback): drops all business tables + d1_migrations so the following `db:migrate:preview` rebuilds the schema from scratch. Touches only folio-preview (env.preview), never production. Run manually via .github/workflows/preview-reset.yml.
 //
-// ⚠️ drop-all 尚未在真 D1 上验证过 —— 首次运行盯日志确认 drop 段没报 FK/PRAGMA 错、且
-// `wrangler … --json` 解析干净;失败按 DEPLOY.md「PR preview」的手动兜底(delete + create)处理。
+// Unverified on real D1: on the first run, check that the drop block hits no FK/PRAGMA error and `wrangler ... --json` parses cleanly; otherwise use DEPLOY.md's manual fallback (delete + create).
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
-// 通过 pnpm script 调用时,apps/web/node_modules/.bin 已在 PATH,直接跑 `wrangler` 即可。
+// Run via a pnpm script, apps/web/node_modules/.bin is on PATH, so call `wrangler` directly.
 const BASE = ["d1", "execute", "folio-preview", "--remote", "--env", "preview"];
 
 function wrangler(args) {
   return execFileSync("wrangler", args, { encoding: "utf8" });
 }
 
-// 查出所有业务表(排除 SQLite 内部表和 D1 的 _cf_ 表)。d1_migrations 也一并 drop,让全量迁移重跑。
+// All business tables (excluding SQLite internals and D1's _cf_ tables); d1_migrations is dropped too so the full migration reruns.
 const raw = wrangler([
   ...BASE,
   "--json",
@@ -22,7 +19,7 @@ const raw = wrangler([
   "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'",
 ]);
 
-// wrangler --json 可能夹带非 JSON 的横幅行 → 截取第一个 [ 到最后一个 ] 再解析。
+// wrangler --json may carry non-JSON banner lines: parse from the first [ to the last ].
 const start = raw.indexOf("[");
 const end = raw.lastIndexOf("]");
 if (start === -1 || end === -1) {
@@ -37,7 +34,7 @@ if (tables.length === 0) {
   process.exit(0);
 }
 
-// 一个 execute 里先关 FK 再逐个 drop,避开父子表删除顺序问题。
+// Turn FK off first in one execute, then drop each, to dodge parent/child ordering.
 const sql = ["PRAGMA foreign_keys=OFF;", ...tables.map((t) => `DROP TABLE IF EXISTS "${t}";`)].join(
   "\n",
 );

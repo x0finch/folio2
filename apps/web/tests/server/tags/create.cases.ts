@@ -7,10 +7,8 @@ import { blockOutbound } from "../_kit/outbound";
 import { call, callExit } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
 
-// 合并进 tags/index.test.ts 跑(#527 后续件 2):每个 vitest 文件要在 workerd 里
-// 重新评估整张 import 图(实测 ~9s/文件),按目录合并把这笔钱只付一次。
+// Runs inside tags/index.test.ts: each vitest file re-evaluates the whole import graph in workerd (~9s/file), so cases are merged per directory.
 describe("tags/create", () => {
-  // #527 · createTag
   const USER = "h-tags-create";
 
   beforeEach(async () => {
@@ -20,77 +18,78 @@ describe("tags/create", () => {
   });
 
   describe("createTag", () => {
-    it("建一个 → 出现在列表里,归在指定 Portfolio 下", async () => {
+    it("create one -> appears in the list, under the given portfolio", async () => {
       const pf = await db(USER).portfolios.ensureDefault();
 
-      const tag = await call(USER, handleCreateTag({ portfolioId: pf.id, name: "长期" }));
+      const tag = await call(USER, handleCreateTag({ portfolioId: pf.id, name: "Long-term" }));
 
-      expect(tag.name).toBe("长期");
+      expect(tag.name).toBe("Long-term");
       expect(tag.portfolioId).toBe(pf.id);
       expect(await call(USER, handleListTags())).toHaveLength(1);
     });
 
-    it("名字两头带空格 → trim 之后才进 handler", () => {
-      // **trim 在入参 schema 上,不在 handler 里。** 所以这条断言的是 schema —— 从 handler 进
-      // 是测不到的(它拿到的已经是 trim 过的值)。清单里凡是「脏入参」那一类都落在这一层。
-      expect(CreateTagInput.parse({ portfolioId: "p1", name: "  长期  " }).name).toBe("长期");
+    it("name with surrounding spaces -> trimmed before reaching the handler", () => {
+      // The trim lives in the input schema, not the handler, so this asserts the schema; it can't be seen through the handler (it already gets the trimmed value).
+      expect(CreateTagInput.parse({ portfolioId: "p1", name: "  Long-term  " }).name).toBe(
+        "Long-term",
+      );
     });
 
-    it("名字是空串 / 纯空格 → schema 拒", () => {
+    it("empty name / whitespace only -> rejected by schema", () => {
       expect(CreateTagInput.safeParse({ portfolioId: "p1", name: "" }).success).toBe(false);
       expect(CreateTagInput.safeParse({ portfolioId: "p1", name: "   " }).success).toBe(false);
     });
 
-    it("portfolioId 是别人的 → 拒,不许把 tag 建到别人名下", async () => {
+    it("someone else's portfolioId -> rejected, no tag can be created under another user", async () => {
       const theirs = await db(otherUser(USER)).portfolios.ensureDefault();
 
       const exit = await callExit(
         USER,
-        handleCreateTag({ portfolioId: theirs.id, name: "偷来的" }),
+        handleCreateTag({ portfolioId: theirs.id, name: "Stolen" }),
       );
 
       expect(Exit.isFailure(exit)).toBe(true);
       expect(await call(otherUser(USER), handleListTags())).toEqual([]);
     });
 
-    it("同一 Portfolio 内重名 → 拒(大小写不敏感),第一条完好", async () => {
-      // **盘点时我写错过一次:** 初稿说「规则未定、两条都落」—— 没量就说。实际规则早就定了:
-      // 唯一索引 `tags_user_portfolio_name_uidx` 按 lower(name) 拒,`db tags.test.ts` 一直测着。
-      // 这条钉的是 handler 那条路也走得到这个拒。
+    it("duplicate name within one portfolio -> rejected (case-insensitive), the first is intact", async () => {
+      // The unique index `tags_user_portfolio_name_uidx` rejects by lower(name) (covered by `db tags.test.ts`); this pins that the handler path hits it too.
       const pf = await db(USER).portfolios.ensureDefault();
-      await call(USER, handleCreateTag({ portfolioId: pf.id, name: "长期" }));
+      await call(USER, handleCreateTag({ portfolioId: pf.id, name: "Long-term" }));
 
-      const exit = await callExit(USER, handleCreateTag({ portfolioId: pf.id, name: "长期" }));
-      const upper = await callExit(USER, handleCreateTag({ portfolioId: pf.id, name: "长期 " }));
+      const exit = await callExit(USER, handleCreateTag({ portfolioId: pf.id, name: "Long-term" }));
+      const upper = await callExit(
+        USER,
+        handleCreateTag({ portfolioId: pf.id, name: "Long-term " }),
+      );
 
       expect(Exit.isFailure(exit)).toBe(true);
-      expect(Exit.isFailure(upper)).toBe(true); // trim 后同名也算重
+      expect(Exit.isFailure(upper)).toBe(true); // same name after trim also counts as a duplicate
       expect(await call(USER, handleListTags())).toHaveLength(1);
     });
 
-    it("跨 Portfolio 同名 → 允许,各自独立", async () => {
+    it("same name across portfolios -> allowed, independent of each other", async () => {
       const a = await db(USER).portfolios.ensureDefault();
-      const b = await db(USER).portfolios.create({ name: "另一个" });
+      const b = await db(USER).portfolios.create({ name: "Another" });
 
-      await call(USER, handleCreateTag({ portfolioId: a.id, name: "长期" }));
-      await call(USER, handleCreateTag({ portfolioId: b.id, name: "长期" }));
+      await call(USER, handleCreateTag({ portfolioId: a.id, name: "Long-term" }));
+      await call(USER, handleCreateTag({ portfolioId: b.id, name: "Long-term" }));
 
-      // **一个组合问一次**:`listTags` 按当前组合筛(ADR 0047),不再一把回全部。
-      // 要钉的性质没变 —— 两个组合各有一份同名的,互不打架。
+      // One portfolio per query: `listTags` filters by the current portfolio; the property is that each portfolio holds its own same-named tag without clashing.
       expect(await call(USER, handleListTags({ portfolioId: a.id }))).toHaveLength(1);
       expect(await call(USER, handleListTags({ portfolioId: b.id }))).toHaveLength(1);
     });
 
-    it("双击提交两次 → 第二下被重名拒住,不出现两条", async () => {
+    it("double-click submit twice -> the second is rejected as a duplicate, no two rows", async () => {
       const pf = await db(USER).portfolios.ensureDefault();
-      const body = { portfolioId: pf.id, name: "长期" };
+      const body = { portfolioId: pf.id, name: "Long-term" };
 
       const [a, b] = await Promise.all([
         callExit(USER, handleCreateTag(body)),
         callExit(USER, handleCreateTag(body)),
       ]);
 
-      // 至少一下成功、至多一条落库 —— 并发下两下都成功才是要抓的那种坏。
+      // At least one succeeds and at most one persists; both succeeding under concurrency is the bad case.
       expect([a, b].some((e) => e._tag === "Success")).toBe(true);
       expect(await call(USER, handleListTags())).toHaveLength(1);
     });

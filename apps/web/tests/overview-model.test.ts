@@ -17,12 +17,8 @@ import {
 } from "@/lib/core/portfolio";
 import { type OracleStub, runWithOracle } from "./oracle-stub";
 
-// 纯 buildOverview 可脱离 server fn 测(依赖注入)—— 这是 #3 抽读模型的收益。
-// 用假 tokens/platforms + 最小 fixture,覆盖:eligible 过滤 → enrich 附回 → 聚合 → 平台装饰 → 总额。
-//
-// FOL-45 起 buildOverview 是**纯函数**:富化 / 现推净值 / 平台元数据都由调用点在
-// Effect 里备好再传进去。这个 `overviewEffect` 就是那层薄适配(与生产总览装配逐字同款),
-// 让每条用例仍旧 `runWithOracle(stub, …)`,只是被测的算术已从 Effect 里拆出来了。
+// buildOverview is pure; `overviewEffect` is the thin Effect adapter (same as the production
+// assembly) so cases can still use `runWithOracle(stub, ...)`.
 type OverviewDeps = Omit<OverviewInput, "enriched" | "liveTotals" | "platformMeta">;
 const overviewEffect = (
   accounts: AccountSafe[],
@@ -31,7 +27,7 @@ const overviewEffect = (
 ) =>
   Effect.gen(function* () {
     const { tokens, platforms } = yield* Oracle;
-    // 与生产总览装配同款:参考层读出的完整行经 `toTokenView` 收窄再喂 buildOverview。
+    // Same as production: full oracle rows are narrowed via `toTokenView` before buildOverview.
     const enrichedRecords = yield* tokens.enrich(
       overviewEnrichIds(accounts, byAccount, deps.prevByAccount),
     );
@@ -56,7 +52,7 @@ const overviewEffect = (
 const account = (id: string, label: string, connectorId = "evm", platform: string | null = null) =>
   ({ id, label, connectorId, platform, archivedAt: null }) as unknown as AccountSafe;
 
-// 默认都带同一个 token_id —— 认定在写快照时就定死了,读端拿到的就是这个(#201)。
+// All share one token_id by default; identity is fixed when the snapshot is written.
 const bal = (over: Partial<OverviewBalance>): OverviewBalance => ({
   id: crypto.randomUUID(),
   symbol: "USDC",
@@ -74,8 +70,7 @@ const snap = (accountId: string, totalUsd: number, balances: OverviewBalance[]) 
     balances,
   }) as unknown as SnapshotWithBalances;
 
-// 假 tokens:**按 token_id 查表**返回整行(证明富化结果被正确挂回并进聚合)。
-// 不给价 → liveValue 退回冻结的 usdValue,与迁移前这个 fake 的行为一致。
+// Fake tokens: look up whole rows by token_id. No price -> liveValue falls back to frozen usdValue.
 const record = (id: string): TokenRecord => ({
   id,
   ref: "coingecko/issued:usd-coin",
@@ -88,8 +83,8 @@ const tokens = {
   enrich: (ids: readonly string[]) => Effect.succeed(new Map(ids.map((id) => [id, record(id)]))),
 };
 
-// 假 platforms:每个 key 回 "NAME:<key>";manual 无上游图(真实 resolve 对未收录/未 warm 的 key
-// 不带 logo)。验证读路径装饰覆写占位名,并把有图的平台 logo 改写成代理 URL、无图的置 undefined。
+// Fake platforms: each key resolves to "NAME:<key>"; manual has no logo. Checks that the read path
+// overrides placeholder names and rewrites logos to proxy URLs (undefined when none).
 const platforms = {
   resolve: (keys: readonly string[]) =>
     Effect.succeed(
@@ -102,11 +97,11 @@ const platforms = {
     ),
 };
 
-// 这一组的默认桩:富化按 token_id 查表、平台按 key 造名。用例只在需要时换掉其中一个。
+// Default stubs for this group; cases swap one out only when needed.
 const stub: OracleStub = { tokens, platforms };
 
 describe("buildOverview", () => {
-  it("跨账户聚合成一个 Holding + 平台装饰 + 总额", async () => {
+  it("aggregates across accounts into one Holding + platform decoration + total", async () => {
     const accounts = [account("a1", "Arb"), account("a2", "Cold", "manual")];
     const byAccount = new Map([
       [
@@ -122,7 +117,7 @@ describe("buildOverview", () => {
       [
         "a2",
         snap("a2", 50, [
-          // 手记:ref 的命名者是数据源,平台却是 manual —— 平台只能由 provider 报。
+          // Manual: the ref's namer is a data source, but the platform is manual.
           bal({
             kind: "manual",
             platform: "manual",
@@ -135,37 +130,37 @@ describe("buildOverview", () => {
 
     const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, {}));
 
-    // 两笔 USDC(不同账户/平台)并成一条 Holding。
+    // Two USDC rows (different accounts/platforms) merge into one Holding.
     expect(view.holdings).toHaveLength(1);
     expect(view.holdings[0].token.symbol).toBe("USDC");
     expect(view.holdings[0].totalValue).toBe(150);
     expect(view.holdings[0].sources).toHaveLength(2);
 
-    // 平台名由 platforms.resolve 装饰(覆写 aggregate 的 key 占位):链前缀 + manual。
+    // Platform names come from platforms.resolve (overriding the aggregate key placeholder).
     expect(view.holdings[0].sources.map((s) => s.platform.name).sort()).toEqual([
       "NAME:evm:42161",
       "NAME:manual",
     ]);
 
-    // 平台 logo:有图的链平台改写成 folio 代理 URL(key 含 `:` → 编码);manual 无图 → undefined
-    //(token-sheet 对 manual 走 WalletIcon,不请求)。客户端不直引 CoinGecko。
+    // Logos with an image become folio proxy URLs (`:` in the key is encoded); manual -> undefined.
+    // The client never hits CoinGecko directly.
     const platformLogos = view.holdings[0].sources.map((s) => s.platform.logo);
     expect(platformLogos).toContain("/api/logo/platform/evm%3A42161");
     expect(platformLogos).toContain(undefined);
 
     expect(view.totalUsd).toBe(150);
     expect(view.holdingsSubtotal).toBe(150);
-    expect(view.sections).toHaveLength(0); // 无 defi/perp
+    expect(view.sections).toHaveLength(0); // no defi/perp
   });
 
-  it("场馆键(= connectorId)走 connectorMeta 装饰,不进 platforms.resolve(#52)", async () => {
-    // binance CEX 账户 → provider 报 platform = "binance"(场馆键即 connectorId)。
-    const accounts = [account("cex", "币安", "binance")];
+  it("venue key (= connectorId) is decorated via connectorMeta, not platforms.resolve", async () => {
+    // A binance CEX account reports platform = "binance" (the venue key is the connectorId).
+    const accounts = [account("cex", "Binance", "binance")];
     const byAccount = new Map([
       ["cex", snap("cex", 100, [bal({ platform: "binance", amount: 100, usdValue: 100 })])],
     ]);
 
-    // 记录 platforms.resolve 实际被问了哪些 key —— 断言场馆键被排除(无多余 CoinGecko 往返)。
+    // Record which keys platforms.resolve is asked for; the venue key must be excluded.
     const asked: string[] = [];
     const recordingPlatforms = {
       resolve: (keys: readonly string[]) =>
@@ -186,12 +181,12 @@ describe("buildOverview", () => {
 
     const src = view.holdings[0].sources[0];
     expect(src.platform.id).toBe("binance");
-    expect(src.platform.name).toBe("Binance"); // 连接器自带,非 "NAME:binance"
-    expect(src.platform.logo).toBe("/api/logo/platform/binance"); // 代理 URL(无 `:` → 无需编码)
-    expect(asked).not.toContain("binance"); // 关键:未进 platforms.resolve → 无 CoinGecko 往返
+    expect(src.platform.name).toBe("Binance"); // from the connector, not "NAME:binance"
+    expect(src.platform.logo).toBe("/api/logo/platform/binance"); // proxy URL, no `:` to encode
+    expect(asked).not.toContain("binance"); // no CoinGecko round-trip
   });
 
-  it("非 eligible(defi)不进 Holdings,进次级分区", async () => {
+  it("non-eligible (defi) goes to secondary sections, not Holdings", async () => {
     const accounts = [account("a1", "Arb")];
     const byAccount = new Map([
       [
@@ -216,13 +211,13 @@ describe("buildOverview", () => {
 
     const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, {}));
 
-    expect(view.holdings).toHaveLength(1); // 只 spot USDC
+    expect(view.holdings).toHaveLength(1); // spot USDC only
     expect(view.holdings[0].totalValue).toBe(100);
-    expect(view.sections).toHaveLength(1); // defi 进次级分区
+    expect(view.sections).toHaveLength(1); // defi goes to a secondary section
     expect(view.defiSubtotal).toBe(10);
   });
 
-  it("perp 权益不计入代币聚合(#129),改在 sections 的 Perps tab 展示", async () => {
+  it("perp equity is not in the token aggregate; it shows in the sections' Perps tab", async () => {
     const accounts = [account("h", "Hyper", "hyperliquid")];
     const meta = JSON.stringify({
       role: "equity",
@@ -234,17 +229,17 @@ describe("buildOverview", () => {
       ["h", snap("h", 1000, [bal({ kind: "perp", amount: 1000, usdValue: 1000, metaJson: meta })])],
     ]);
     const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, {}));
-    // 代币聚合只认现货 → 权益不在 Holdings、小计里也没有它(避免与 Perps tab 双算)。
+    // The aggregate is spot-only, so equity is absent from Holdings and subtotal (no double count).
     expect(view.holdings).toHaveLength(0);
     expect(view.holdingsSubtotal).toBe(0);
-    // 但权益仍在 Perps tab:sections 的 perp.equity 载着账户净值。
+    // Equity still shows in the Perps tab via sections' perp.equity.
     expect(view.sections[0].perp?.equity?.accountValue).toBe(1000);
   });
 
-  it("脏 metaJson 的遗留 perp 权益行:代币聚合空(权益本就不进聚合,#129)", async () => {
+  it("legacy perp equity row with corrupt metaJson: token aggregate is empty", async () => {
     const accounts = [account("h", "Hyper", "hyperliquid")];
     const byAccount = new Map([
-      // 损坏 metaJson:viewKind→perp_equity。#129 后 perp 权益一律不进代币聚合(与是否可解析无关)。
+      // Corrupt metaJson: viewKind -> perp_equity. Perp equity never enters the aggregate anyway.
       [
         "h",
         snap("h", 0, [bal({ kind: "perp", amount: 1000, usdValue: 1000, metaJson: "not json" })]),
@@ -256,11 +251,11 @@ describe("buildOverview", () => {
   });
 });
 
-// —— #271:法币身份(isFiat)由注入的 fiatRefs(tokenId → fiat 命名者 ref)经 fiatCodeOf 推出 ——
-// 身份驱动、**不看裸 symbol**:enrich 记录的 ref 是上游那一档(法币恒 null),故身份单独注入。
-describe("buildOverview —— 法币身份 isFiat", () => {
-  it("tokenId 命中白名单 fiat/issued ref → Holding.token.isFiat 置真", async () => {
-    const accounts = [account("m", "现金", "manual")];
+// Fiat identity (isFiat) is derived from injected fiatRefs (tokenId -> fiat namer ref) via
+// fiatCodeOf, never from the bare symbol: the enrich ref is the upstream namer's (null for fiat).
+describe("buildOverview — fiat identity isFiat", () => {
+  it("tokenId maps to an allowlisted fiat/issued ref -> Holding.token.isFiat is true", async () => {
+    const accounts = [account("m", "Cash", "manual")];
     const byAccount = new Map([
       [
         "m",
@@ -273,11 +268,11 @@ describe("buildOverview —— 法币身份 isFiat", () => {
     const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, { fiatRefs }));
     expect(view.holdings).toHaveLength(1);
     expect(view.holdings[0].token.isFiat).toBe(true);
-    expect(view.holdings[0].totalValue).toBe(100); // 计入净值/聚合
+    expect(view.holdings[0].totalValue).toBe(100); // counts toward net value / aggregate
   });
 
-  it("非美元法币(EUR)同样置真", async () => {
-    const accounts = [account("m", "现金", "manual")];
+  it("non-USD fiat (EUR) is also true", async () => {
+    const accounts = [account("m", "Cash", "manual")];
     const byAccount = new Map([
       [
         "m",
@@ -289,18 +284,18 @@ describe("buildOverview —— 法币身份 isFiat", () => {
     expect(view.holdings[0].token.isFiat).toBe(true);
   });
 
-  it("ref 非白名单 fiat(如上游 usd 代币)→ 不算法币(以 ref 为准,不撞 symbol)", async () => {
+  it("ref is not an allowlisted fiat (e.g. an upstream usd token) -> not fiat (ref wins over symbol)", async () => {
     const accounts = [account("a1", "W")];
     const byAccount = new Map([
       ["a1", snap("a1", 100, [bal({ tokenId: "tk-x", amount: 100, usdValue: 100 })])],
     ]);
-    // symbol 恰好是 USD,但 fiatRefs 给的是上游命名的普通代币 ref → fiatCodeOf 判非法币。
+    // Symbol happens to be USD, but fiatRefs gives an ordinary upstream token ref -> not fiat.
     const fiatRefs = new Map([["tk-x", "coingecko/issued:some-usd-token"]]);
     const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, { fiatRefs }));
     expect(view.holdings[0].token.isFiat).toBe(false);
   });
 
-  it("无 fiatRefs 注入 → 一律非法币(缺省安全)", async () => {
+  it("no fiatRefs injected -> never fiat (safe default)", async () => {
     const accounts = [account("a1", "W")];
     const byAccount = new Map([
       ["a1", snap("a1", 100, [bal({ tokenId: "tk-usd", amount: 100, usdValue: 100 })])],
@@ -310,9 +305,9 @@ describe("buildOverview —— 法币身份 isFiat", () => {
   });
 });
 
-// —— H5 评审:sections.account 带平台展示(永续节头体现场馆) ——
+// sections.account carries the platform (perp section headers show the venue).
 describe("buildOverview —— sections.account.platform", () => {
-  it("connectorMeta 命中 → name + 代理 logo;未注入 → undefined", async () => {
+  it("connectorMeta hit -> name + proxy logo; not injected -> undefined", async () => {
     const accounts = [account("h", "watch", "hyperliquid")];
     const meta = JSON.stringify({ withdrawable: 1, totalMarginUsed: 0, totalNtlPos: 0 });
     const pos = JSON.stringify({
@@ -347,9 +342,9 @@ describe("buildOverview —— sections.account.platform", () => {
   });
 });
 
-// —— code review #7:仅权益、无持仓的 perp 账户保留在 sections(Perps tab 权益条可见) ——
-describe("buildOverview —— equity-only perp 账户不被过滤", () => {
-  it("有权益无仓位 → sections 保留(perp.equity 非空、positions 空)", async () => {
+// An equity-only perp account (no positions) stays in sections so the Perps equity bar shows.
+describe("buildOverview — equity-only perp account is not filtered out", () => {
+  it("equity but no positions -> kept in sections (perp.equity set, positions empty)", async () => {
     const accounts = [account("h", "Hyper", "hyperliquid")];
     const meta = JSON.stringify({ withdrawable: 900, totalMarginUsed: 0, totalNtlPos: 0 });
     const byAccount = new Map([
@@ -367,15 +362,15 @@ describe("buildOverview —— equity-only perp 账户不被过滤", () => {
   });
 });
 
-describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
+describe("buildOverview — 24h gain wiring (difference of two endpoints)", () => {
   const accounts = [account("a1", "Arb")];
-  // 当下:1 个 USDC,现推市值 110(默认桩不给价 → liveValue 退回冻结的 usdValue,所以直接写 110)。
+  // Now: 1 USDC worth 110 (default stub has no price, so liveValue falls back to frozen usdValue).
   const byAccount = new Map([["a1", snap("a1", 110, [bal({ amount: 1, usdValue: 110 })])]]);
-  // 「24 小时前」那一组,与当前组同一个瘦身形状(snap)。
+  // The "24h ago" group uses the same slim shape (snap).
   const prev = (id: string, ...balances: OverviewBalance[]) =>
     new Map([[id, snap(id, 0, balances)]]);
 
-  it("有起点 → 行上带真实盈亏(现值 − 24 小时前值)", async () => {
+  it("with a start point -> row carries the real gain (now - 24h ago)", async () => {
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, byAccount, {
@@ -386,11 +381,11 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
     expect(view.holdings[0].gain24h?.pct).toBeCloseTo(10, 6);
   });
 
-  it("当天新买的币 —— 起点账户没这个币 → 起点 0,整份市值算成今天赚的(充提计入)", async () => {
+  it("token bought today: start account lacked it -> start 0, whole value counts as today's gain (flows included)", async () => {
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, byAccount, {
-        // 24 小时前账户里是另一个币 → USDC 起点 0(bought today)。
+        // 24h ago the account held a different token -> USDC starts at 0 (bought today).
         prevByAccount: prev(
           "a1",
           bal({ tokenId: "eth", symbol: "ETH", amount: 1, usdValue: 3000 }),
@@ -398,13 +393,13 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
       }),
     );
     const g = view.holdings.find((h) => h.key === "usdc")?.gain24h;
-    expect(g?.amount).toBeCloseTo(110, 6); // 起点 0 → 现值全算进
-    expect(g?.pct).toBeNull(); // 分母 0 → 百分比 null
+    expect(g?.amount).toBeCloseTo(110, 6); // start 0 -> all of the current value
+    expect(g?.pct).toBeNull(); // zero denominator -> pct null
   });
 
-  // 最终两档口径:**无基准(空起点组)一律 `—`** —— 新账户 / 新建 / 断线都一样,不硬算、不区分
-  // new/stale。(账户在不在起点组里就是全部判据。)
-  it("无基准(空起点组)→ 组合与持仓都 null,由界面渲染 `—`,不是 0", async () => {
+  // No baseline (empty start group) is always `—`, for new accounts and gaps alike; whether the
+  // account is in the start group is the only criterion.
+  it("no baseline (empty start group) -> portfolio and holdings null, UI renders `—`, not 0", async () => {
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, byAccount, { prevByAccount: new Map() }),
@@ -413,16 +408,16 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
     expect(view.holdings[0].gain24h).toBeNull();
   });
 
-  // 回归(code-review 修 #1):无 token_id 的持仓没有起点可比(`start.token` 按 token_id 建键)——
-  // 该行盈亏应为 `null`(`—`),**绝不**是 `endpointGain(0, current)` 冒充的「今天全额涨」。
-  it("无 token_id 的持仓 → gain null,不是全额涨", async () => {
+  // A holding without token_id has nothing to compare against (start is keyed by token_id), so its
+  // gain must be null, never `endpointGain(0, current)` posing as a full-value gain.
+  it("holding without token_id -> gain null, not a full-value gain", async () => {
     const noTokenNow = new Map([
       ["a1", snap("a1", 110, [bal({ tokenId: null, amount: 1, usdValue: 110 })])],
     ]);
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, noTokenNow, {
-        // a1 有起点(有 eligible 账户),但那张里也没有 token_id → start.token 空。
+        // a1 has a start point, but it has no token_id either -> start.token is empty.
         prevByAccount: prev("a1", bal({ tokenId: null, amount: 1, usdValue: 100 })),
       }),
     );
@@ -431,13 +426,13 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
     expect(h?.gain24h).toBeNull();
   });
 
-  it("不传起点组 → 不算盈亏(字段缺席)", async () => {
+  it("no start group passed -> no gain (field absent)", async () => {
     const view = await runWithOracle(stub, overviewEffect(accounts, byAccount, {}));
     expect(view.holdings[0].gain24h).toBeUndefined();
     expect(view.gain24h).toBeUndefined();
   });
 
-  it("各行金额相加 = 组合层那个数 —— 两端相减天然可加", async () => {
+  it("row amounts sum to the portfolio figure (endpoint differences are additive)", async () => {
     const two = [account("a1", "Arb"), account("a2", "Cold", "manual")];
     const snaps = new Map([
       ["a1", snap("a1", 110, [bal({ amount: 1, usdValue: 110 })])],
@@ -449,11 +444,11 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
     ]);
     const view = await runWithOracle(stub, overviewEffect(two, snaps, { prevByAccount: prevMap }));
     const sum = view.holdings.reduce((s, h) => s + (h.gain24h?.amount ?? 0), 0);
-    expect(sum).toBeCloseTo(12, 6); // +10(USDC)+2(ETH)
+    expect(sum).toBeCloseTo(12, 6); // +10 (USDC) + 2 (ETH)
     expect(view.gain24h?.amount).toBeCloseTo(sum, 6);
   });
 
-  it("组合百分比 = Σ金额 ÷ Σ起点,不是各行百分比取平均", async () => {
+  it("portfolio pct = sum of amounts / sum of starts, not the mean of row pcts", async () => {
     const two = [account("a1", "Arb"), account("a2", "Cold", "manual")];
     const snaps = new Map([
       ["a1", snap("a1", 110, [bal({ amount: 1, usdValue: 110 })])],
@@ -464,21 +459,21 @@ describe("buildOverview —— 24h 盈亏接线(ADR 0050,两端相减)", () => {
       ["a2", snap("a2", 0, [bal({ tokenId: "eth", symbol: "ETH", amount: 2, usdValue: 60 })])],
     ]);
     const view = await runWithOracle(stub, overviewEffect(two, snaps, { prevByAccount: prevMap }));
-    // 各行:+10%(100→110)与 +3.33%(60→62);组合起点 160 → 12/160 = 7.5%,不是平均 6.67%
+    // Rows: +10% (100->110) and +3.33% (60->62); portfolio start 160 -> 12/160 = 7.5%, not 6.67%.
     const avg = view.holdings.reduce((s, h) => s + (h.gain24h?.pct ?? 0), 0) / view.holdings.length;
     expect(view.gain24h?.pct).toBeCloseTo(7.5, 4);
     expect(view.gain24h?.pct).not.toBeCloseTo(avg, 2);
   });
 });
 
-// 「各行相加 = 顶部那个数」(CONTEXT.md 24h 盈亏)。以前**卖光的币**没有行 —— 持仓只收现值 ≠ 0 的币 ——
-// 它的那笔亏损(或赚头)就从行上消失了:24 小时前 1 ETH(3000),现在换成 3000 USDC,顶部是 0,
-// 行上却只剩「USDC +3000」(FOL-110)。卖光的币现在留一行:现值 0,盈亏 = 0 − 24 小时前的值。
-describe("buildOverview —— 卖光的币(FOL-110)", () => {
+// Rows must sum to the headline. Holdings only include nonzero current value, so a sold-out token
+// would drop its gain from the rows (1 ETH -> 3000 USDC shows "USDC +3000" vs a 0 headline).
+// Sold-out tokens keep a row: current value 0, gain = 0 - value 24h ago.
+describe("buildOverview — sold-out tokens", () => {
   const accounts = [account("a1", "Arb")];
   const ethThen = bal({ tokenId: "eth", symbol: "ETH", amount: 1, usdValue: 3000 });
 
-  it("ETH 全换成 USDC → ETH 留一行:现值 0、盈亏 −3000;各行相加 = 顶部", async () => {
+  it("all ETH swapped to USDC -> ETH keeps a row: value 0, gain -3000; rows sum to headline", async () => {
     const now = new Map([["a1", snap("a1", 3000, [bal({ amount: 3000, usdValue: 3000 })])]]);
     const prevMap = new Map([["a1", snap("a1", 0, [ethThen])]]);
     const view = await runWithOracle(
@@ -493,7 +488,7 @@ describe("buildOverview —— 卖光的币(FOL-110)", () => {
     expect(sum).toBeCloseTo(view.gain24h?.amount ?? Number.NaN, 9);
   });
 
-  it("卖光的那行沿用富化出来的名字与图标(不是空白行)", async () => {
+  it("sold-out row keeps the enriched name and icon (not a blank row)", async () => {
     const now = new Map([["a1", snap("a1", 0, [])]]);
     const prevMap = new Map([["a1", snap("a1", 0, [ethThen])]]);
     const view = await runWithOracle(
@@ -501,11 +496,11 @@ describe("buildOverview —— 卖光的币(FOL-110)", () => {
       overviewEffect(accounts, now, { prevByAccount: prevMap }),
     );
     const eth = view.holdings.find((h) => h.token.id === "eth");
-    expect(eth?.token).toMatchObject({ id: "eth", name: "USD Coin" }); // 桩把每个 id 富化成 USDC 那行
+    expect(eth?.token).toMatchObject({ id: "eth", name: "USD Coin" }); // stub enriches every id as USDC
     expect(eth?.token.logo).toBeDefined();
   });
 
-  it("24 小时前就是 0 的币不凭空多出一行", async () => {
+  it("a token already at 0 24h ago does not get a phantom row", async () => {
     const now = new Map([["a1", snap("a1", 10, [bal({ amount: 10, usdValue: 10 })])]]);
     const prevMap = new Map([
       ["a1", snap("a1", 0, [bal({ amount: 10, usdValue: 10 }), { ...ethThen, usdValue: 0 }])],
@@ -517,10 +512,9 @@ describe("buildOverview —— 卖光的币(FOL-110)", () => {
     expect(view.holdings.map((h) => h.token.id)).toEqual(["usdc"]);
   });
 
-  // 不变量,随机组合压一遍(固定种子):只有现货、每行都有 token_id 时,**各行盈亏之和恰好等于顶部**。
-  // 随机生成:几个账户(有的没有 24 小时前基准)、几个币,每个币在起点/现在各自可能有、没有或为 0 ——
-  // 卖光、新买、归零、只在无基准账户里,全都会碰到。
-  it("随机组合:各持仓行的盈亏相加 = 顶部盈亏", async () => {
+  // Invariant under seeded random portfolios: spot only, every row has token_id -> row gains sum
+  // exactly to the headline. Covers sold out, newly bought, zeroed, and baseline-less accounts.
+  it("random portfolios: holding-row gains sum to the headline gain", async () => {
     let seed = 7;
     const rand = () => {
       seed = (seed * 1103515245 + 12345) % 2 ** 31;
@@ -551,14 +545,14 @@ describe("buildOverview —— 卖光的币(FOL-110)", () => {
         if (rand() < 0.8) prevMap.set(a.id, snap(a.id, 0, held(0.5)));
       }
       const view = await runWithOracle(stub, overviewEffect(accs, now, { prevByAccount: prevMap }));
-      if (view.gain24h == null) continue; // 一个有基准的账户都没有 → 顶部 `—`,没有可比的数
+      if (view.gain24h == null) continue; // no baseline anywhere -> headline `—`
       const sum = view.holdings.reduce((s, h) => s + (h.gain24h?.amount ?? 0), 0);
       expect(sum).toBeCloseTo(view.gain24h.amount, 6);
     }
   });
 });
 
-describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相减)", () => {
+describe("buildOverview — DeFi protocol row 24h gain (difference of two endpoints)", () => {
   const lidoMeta = JSON.stringify({ protocol: "Lido", positionType: "staked" });
   const accounts = [account("w", "Wallet")];
   const byAccount = new Map([
@@ -571,7 +565,7 @@ describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相�
   ]);
   const defiPrev = (...balances: OverviewBalance[]) => new Map([["w", snap("w", 0, balances)]]);
 
-  it("该协议现在的净值 − 24 小时前的净值", async () => {
+  it("protocol net value now minus 24h ago", async () => {
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, byAccount, {
@@ -583,8 +577,8 @@ describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相�
     expect(view.sections[0].defi[0].gain24h?.amount).toBeCloseTo(10, 6);
   });
 
-  it("分母 = 起点净值(总敞口分母已废止)—— 对冲仓拿净值当分母,涨 1 万算成 +100%", async () => {
-    // 存 101 万 / 借 99 万:净值 2 万。起点净值 1 万 → +1 万即 +100%(FOL-51 接受这个口径)。
+  it("denominator = start net value: a hedged position gaining 10k on 10k net shows +100%", async () => {
+    // Supply 1.01M / borrow 0.99M: net 20k. Start net 10k -> +10k is +100% (accepted definition).
     const hedged = new Map([
       [
         "w",
@@ -604,12 +598,12 @@ describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相�
       }),
     );
     const gain = view.sections[0].defi[0].gain24h;
-    expect(gain?.amount).toBeCloseTo(10_000, 6); // 净值 2 万 − 1 万
-    expect(gain?.pct).toBeCloseTo(100, 4); // 分母 = 起点净值 1 万
-    expect(gain?.start).toBeCloseTo(10_000, 6); // 起点净值带着走(合并那一侧要用)
+    expect(gain?.amount).toBeCloseTo(10_000, 6); // net 20k - 10k
+    expect(gain?.pct).toBeCloseTo(100, 4); // denominator = start net value 10k
+    expect(gain?.start).toBeCloseTo(10_000, 6); // carried for the merge side
   });
 
-  it("空起点组 → null,由界面渲染 `—`", async () => {
+  it("empty start group -> null, UI renders `—`", async () => {
     const view = await runWithOracle(
       stub,
       overviewEffect(accounts, byAccount, { prevByAccount: new Map() }),
@@ -618,11 +612,11 @@ describe("buildOverview —— DeFi 协议行的 24h 盈亏(ADR 0050,两端相�
   });
 });
 
-// 首次同步中的判据(FOL-48 回归修复):有账户、还没有任何快照 = 显加载态,不是把 $0 当答案。
-// 只读 `accounts` / `snapshots` 两片,构造最小原料即可。
+// First-sync pending: accounts exist but no snapshot yet -> show loading, not $0 as the answer.
+// Only reads the `accounts` / `snapshots` slices.
 describe("isFirstSyncPending", () => {
   const NOW_T = 1_700_000_000_000;
-  // 各账户的「年龄」(距 now 的毫秒);快照条数。
+  // Per-account age (ms before now); snapshot count.
   const raw = (accountAges: number[], snapshots: number): PortfolioSnapshotData =>
     ({
       now: NOW_T,
@@ -630,30 +624,30 @@ describe("isFirstSyncPending", () => {
       snapshots: Array.from({ length: snapshots }, (_, i) => [`a${i}`, {}]),
     }) as unknown as PortfolioSnapshotData;
 
-  it("刚建账户、零快照 → 首次同步中", () => {
+  it("fresh account, zero snapshots -> first sync pending", () => {
     expect(isFirstSyncPending(raw([0, 0], 0))).toBe(true);
   });
 
-  it("零账户(真的空组合)→ 不是 pending,照常画空态", () => {
+  it("zero accounts (truly empty portfolio) -> not pending, render the empty state", () => {
     expect(isFirstSyncPending(raw([], 0))).toBe(false);
   });
 
-  it("至少一张快照落地 → 不再 pending", () => {
+  it("at least one snapshot landed -> no longer pending", () => {
     expect(isFirstSyncPending(raw([0, 0], 1))).toBe(false);
   });
 
-  // **回归(code-review 修 #1)**:账户建了很久、却一张快照都没有(坏凭据 / 从没同步成功)——
-  // **不能永久 pending**,否则 hero 永远卡加载骨架。超过首次同步窗 → 显 $0 / 空态,让用户去查凭据。
-  it("账户都过了首次同步窗、仍零快照 → 不是 pending(显 $0,不永久卡加载)", () => {
+  // Accounts long past the first-sync window with no snapshots (bad creds / never synced) must not
+  // stay pending forever, or the hero is stuck on the skeleton; show $0 / empty instead.
+  it("all accounts past the first-sync window, still zero snapshots -> not pending (show $0)", () => {
     const old = FIRST_SYNC_WINDOW_MS + 60_000;
     expect(isFirstSyncPending(raw([old, old], 0))).toBe(false);
   });
 
-  it("混合:一个老账户 + 一个刚建的、零快照 → 仍 pending(刚建那个还在首次同步)", () => {
+  it("mixed: one old account + one fresh, zero snapshots -> still pending (the fresh one is syncing)", () => {
     expect(isFirstSyncPending(raw([FIRST_SYNC_WINDOW_MS + 60_000, 0], 0))).toBe(true);
   });
 
-  it("原料还没到(undefined)→ 不是 pending", () => {
+  it("inputs not loaded yet (undefined) -> not pending", () => {
     expect(isFirstSyncPending(undefined)).toBe(false);
   });
 });

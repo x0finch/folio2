@@ -6,11 +6,11 @@ const query = (pending: boolean, dataUpdateCount = 1) => ({
 });
 
 describe("pollWhilePending", () => {
-  it("非 pending 时不轮询", () => {
+  it("does not poll when not pending", () => {
     expect(pollWhilePending(query(false), false)).toBe(false);
   });
 
-  it("pending 时指数退避,八次后放弃", () => {
+  it("exponential backoff while pending, gives up after eight tries", () => {
     const q = { state: { dataUpdateCount: 1, data: { pending: true as const } } };
     expect(pollWhilePending(q, true)).toBe(POLL_INTERVAL.pending);
     q.state.dataUpdateCount = 2;
@@ -23,13 +23,12 @@ describe("pollWhilePending", () => {
     expect(pollWhilePending(q, true)).toBe(false);
   });
 
-  // 必须是**同一个** query 对象:计数记在以 query 实例为键的 WeakMap 上,换个新对象就从没进过
-  // 那张表,「pending 消失 → 清记录」那条路根本没跑。
-  it("pending 消失后下轮从头数", () => {
+  // Must be the same query object: counts live in a WeakMap keyed by the query instance.
+  it("counting restarts after pending clears", () => {
     const q = query(true, 1);
     expect(pollWhilePending(q, true)).toBe(POLL_INTERVAL.pending);
     q.state.dataUpdateCount = 5;
-    expect(pollWhilePending(q, true)).not.toBe(POLL_INTERVAL.pending); // 已退避了几档
+    expect(pollWhilePending(q, true)).not.toBe(POLL_INTERVAL.pending); // already backed off
     q.state.dataUpdateCount = 6;
     expect(pollWhilePending(q, false)).toBe(false);
     q.state.dataUpdateCount = 7;

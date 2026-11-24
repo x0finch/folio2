@@ -37,8 +37,8 @@ function ListSkeleton() {
   );
 }
 
-// 现货/永续/DeFi 三段的拆解(从某份数据的 sections 里挑出永续项 + DeFi 分组 + 永续权益小计)。
-// 纯函数 —— 自定义 Tab 的内容由子组件自己拉数据、自己拆(见 PinContent);tab 条右侧合计也用它。
+// Splits a data set's sections into perp items, DeFi groups and the perp equity subtotal. Pure:
+// custom tabs split in their own subcomponent (PinContent), and the strip's total uses it too.
 export function derive(secs: PortfolioOverview["sections"]) {
   const defiGroups = mergeDefiGroups(secs);
   const perpItems = secs.flatMap((s) =>
@@ -60,9 +60,9 @@ export function derive(secs: PortfolioOverview["sections"]) {
   return { defiGroups, perpItems, perpEquitySubtotal };
 }
 
-// 持仓列表。**总览已经由外层边界等过**,而 24h 盈亏(FOL-51 起两端相减、随总览原料一起算好)
-// 就挂在 `overview.holdings[].gain24h` / `overview.sections` 上 —— 不再是后到的一条,不需要自己的
-// 挂起边界。自定义 Tab(pin)是另一份总览查询,仍走它的边界(等的是那份原料,不是盈亏)。
+// The overview was awaited by the outer boundary and 24h PnL rides on `overview.holdings[].gain24h`
+// / `overview.sections`, so no suspense boundary here. Custom tabs (pins) use their own overview
+// query and boundary.
 export function HoldingsIsland() {
   const { selectedId } = usePortfolio();
   const tct = useTranslations("CustomTabs");
@@ -101,7 +101,7 @@ export function HoldingsIsland() {
   return <KindBody overview={portfolioData} activeKind={activeKind} />;
 }
 
-// 一份渲染:盈亏已挂在 `overview.holdings` / `overview.sections` 上,直接读。
+// PnL is already on `overview.holdings` / `overview.sections`; read it directly.
 function KindBody({
   overview,
   activeKind,

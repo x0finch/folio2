@@ -51,25 +51,19 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # --error-on-warnings:warning 也算红。少了它,`biome ci` 只拦 error,warning 会一路
-      # 堆到没人看(#427 那次堆了 13 条)。本地 `pnpm lint` 带同一个开关,两边判定一致。
+      # --error-on-warnings: warnings fail too; `pnpm lint` uses the same flag locally.
       - run: pnpm exec biome ci --error-on-warnings
       - run: pnpm typecheck
       - run: pnpm knip
-      # catalog 是约定,pnpm 不强制 —— 这一步是它的执行者(#370)。放在 knip 后面同一个理由:
-      # 便宜、只读 package.json,让「版本又开始各写一遍」在 review 之前就红。
+      # The catalog convention isn't enforced by pnpm; this step enforces it (cheap, reads only package.json).
       - run: pnpm check:catalog
       - run: pnpm build
-      # 跑的就是 `pnpm test` 那三趟(根目录各包 / apps/web 单测 / apps/web 的 D1 workers 池),
-      # 只是带着 istanbul 插桩,跑完合并成一个全仓行覆盖率,**低于 80% 就红**(FOL-103 / FOL-106)。
-      # 不另起一步「先跑测试、再跑覆盖率」—— 那是把整套测试跑两遍。口径与排除清单见
-      # scripts/coverage.mjs 顶上。
+      # Runs the same three passes as `pnpm test` with istanbul instrumentation and merges them into one repo-wide line coverage; below 80% fails. Details in scripts/coverage.mjs.
       - run: pnpm coverage --min 80
 
   # Stays its own job, and earns its own minute: it needs a browser and a real server, neither of
   # which the job above wants, and it is the only one that can't run on a 2-core box in under a
-  # minute anyway. Runs the WebAuthn ceremonies that mocks structurally cannot cover — see
-  # apps/web/playwright.config.ts and #354.
+  # minute anyway. Runs the WebAuthn ceremonies that mocks structurally cannot cover.
   e2e:
     runs-on: ubuntu-latest
     steps:

@@ -10,63 +10,59 @@ import {
   UpstreamUnavailableError,
 } from "../src/upstream-error";
 
-// 默认归类规则。**所有 client 共用这一份** —— 上游特有的差异在各自包的出口 `catchTag` 里,
-// 不在这个函数的参数上(见下面那条用例)。
+// Default classification, shared by every client; upstream quirks live in each client's `catchTag`.
 const classify = classifyFailure({ upstream: "acme" });
 
 const http = (fields: Partial<ConstructorParameters<typeof HttpFailure>[0]> = {}) =>
   new HttpFailure({ kind: "upstream", where: "/v1/t", ...fields });
 
 describe("classifyFailure", () => {
-  it("五种传输归类各自落到该落的那一类", () => {
+  it("each transport kind lands in its class", () => {
     expect(classify(http({ kind: "auth", status: 401 }))._tag).toBe("UpstreamAuthError");
     expect(classify(http({ kind: "rate-limited", status: 429 }))._tag).toBe(
       "UpstreamRateLimitError",
     );
     expect(classify(http({ kind: "parse" }))._tag).toBe("UpstreamParseError");
-    // 压根没出去 与 其余非 2xx 合成一类 —— 对消费者是同一件事:够不到上游。
+    // Network failures and other non-2xx are one class to the consumer: upstream unavailable.
     expect(classify(http({ kind: "network" }))._tag).toBe("UpstreamUnavailableError");
     expect(classify(http({ kind: "upstream", status: 503 }))._tag).toBe("UpstreamUnavailableError");
   });
 
-  it("签不出来 → 凭据问题,不是传输故障", () => {
-    // 归到网络类会让它吃满退避全白打,还把真正的原因盖掉(rabby 的 wasm 签名靠这条)。
+  it("signing failure → auth problem, not a transport failure", () => {
     const err = classify(new SigningFailure({ where: "/v1/t", cause: "bad secret" }));
     expect(err._tag).toBe("UpstreamAuthError");
   });
 
-  it("上游给的 Retry-After 带到错误上", () => {
+  it("carries the upstream's Retry-After onto the error", () => {
     const err = classify(http({ kind: "rate-limited", status: 429, retryAfterMs: 7000 }));
     expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(7000);
   });
 
-  it("每个错误都带 upstream —— 类型合并之后「是谁失败的」只能靠数据带", () => {
+  it("every error carries `upstream`", () => {
     expect(classify(http()).upstream).toBe("acme");
     expect(classify(new SigningFailure({ where: "/v1/t" })).upstream).toBe("acme");
   });
 
-  it("上游特有的差异**不在这里** —— 400 照默认规则归「够不到上游」", () => {
-    // binance 要把 400 读成「签名请求被拒」,那一条由它自己在出口 `catchTag` 改判(它的测试钉住)。
-    // 以前这里收一个 `override` 回调,和被删掉的 `toFailure` 同一个毛病:把流水线上的一步
-    // 藏进配置对象里。归类函数只管**默认规则**,保持一个上游一份判断、看得见。
+  it("upstream quirks don't live here — 400 follows the default rule (unavailable)", () => {
+    // binance reclassifies 400 at its own exit (pinned by its tests).
     expect(classify(http({ status: 400 }))._tag).toBe("UpstreamUnavailableError");
   });
 });
 
-describe("值不值得再打一发", () => {
+describe("isRetryable", () => {
   const of = (upstream = "acme", where = "/v1/t") => ({ upstream, where });
 
-  it("被限流 / 够不到上游 → 重试有用", () => {
+  it("rate limited / unavailable → retryable", () => {
     expect(isRetryable(new UpstreamRateLimitError(of()))).toBe(true);
     expect(isRetryable(new UpstreamUnavailableError(of()))).toBe(true);
   });
 
-  it("凭据不对 / 形状读不动 → 再打一发还是同一个答案", () => {
+  it("auth / parse → not retryable", () => {
     expect(isRetryable(new UpstreamAuthError(of()))).toBe(false);
     expect(isRetryable(new UpstreamParseError(of()))).toBe(false);
   });
 
-  it("Retry-After 只有被限流那一类给得出", () => {
+  it("only rate-limit errors carry Retry-After", () => {
     expect(retryAfterOf(new UpstreamRateLimitError({ ...of(), retryAfterMs: 1500 }))).toBe(1500);
     expect(retryAfterOf(new UpstreamRateLimitError(of()))).toBeUndefined();
     expect(retryAfterOf(new UpstreamUnavailableError(of()))).toBeUndefined();

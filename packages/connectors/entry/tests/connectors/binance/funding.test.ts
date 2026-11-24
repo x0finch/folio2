@@ -3,15 +3,14 @@ import { parseFundingAssets } from "../../../src/connectors/binance/parse";
 import expected from "./fixtures/expected-funding-balances.json";
 import assets from "./fixtures/funding-assets.json";
 
-// 资金账户当 spot:free+locked+freeze+withdrawing 合并为持有量,ticker 估值(同现货),零余额跳过。
 const PRICES = { BTCUSDT: 60000 };
 
 describe("parseFundingAssets (golden)", () => {
-  it("合并各状态余额、ticker 估值、零余额(DUST)跳过", () => {
+  it("sums all balance states, values via ticker, skips zero (dust) balances", () => {
     expect(parseFundingAssets(assets, PRICES)).toEqual(expected);
   });
 
-  it("无价的币 → value 0(price 省略)", () => {
+  it("an unpriced coin → value 0, price omitted", () => {
     expect(parseFundingAssets([{ asset: "XYZ", free: "5" }], {})).toEqual([
       {
         symbol: "XYZ",

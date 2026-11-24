@@ -1,8 +1,4 @@
-// PWA 图标生成(一次性,构建期工具,绝不进 Workers 运行时)。
-// 从 public/icon.svg 的 Folio 折页标(白底黑标,42×42)产出可安装 App 图标:
-//   pwa-192 / pwa-512(purpose any)、pwa-maskable-512(留安全边)、apple-touch-icon-180(实底)。
-// 品牌标设计成白底上看(黑路径在上带镂空,白矩形在下),故图标一律白方底 + 标居中留边。
-// 改品牌图 = 改下面的 LOGO_PATHS(取自 icon.svg)后重跑:`pnpm --filter @folio/web gen:icons`。
+// PWA icon generation (one-off, build-time tool, never in the Workers runtime). Produces installable icons from the Folio mark in public/icon.svg: pwa-192 / pwa-512 (purpose any), pwa-maskable-512 (safe margin), apple-touch-icon-180 (solid). The mark is designed for a white background, so every icon is a white square with the mark centred. To change the brand mark, edit LOGO_PATHS below (from icon.svg) and rerun `pnpm --filter @folio/web gen:icons`.
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,7 +7,7 @@ import sharp from "sharp";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, "..", "public");
 
-// icon.svg 的三条路径(viewBox 0 0 42 42),按原序:白矩形、白矩形、黑折页标(在上、带镂空)。
+// The three icon.svg paths (viewBox 0 0 42 42), in original order: white rect, white rect, black folded mark (on top, with cutout).
 const LOGO_PATHS = [
   {
     fill: "white",
@@ -27,9 +23,9 @@ const LOGO_PATHS = [
   },
 ];
 
-const LOGO_BOX = 42; // icon.svg viewBox 边长
+const LOGO_BOX = 42; // icon.svg viewBox side
 
-// 白方底 + 标居中留边的 SVG 字符串。pad = 单边留白占比(maskable 需更大以进安全区)。
+// SVG string: white square with the mark centred. pad = per-side margin fraction (maskable needs more to fit the safe zone).
 function iconSvg(size, pad) {
   const inner = size * (1 - pad * 2);
   const scale = inner / LOGO_BOX;
@@ -55,6 +51,6 @@ async function render(name, size, pad) {
 console.log("gen-icons → public/");
 await render("pwa-192.png", 192, 0.16);
 await render("pwa-512.png", 512, 0.16);
-await render("pwa-maskable-512.png", 512, 0.22); // maskable 安全区:标在中央 80% 内
-await render("apple-touch-icon.png", 180, 0.16); // iOS 自带圆角,实底即可
+await render("pwa-maskable-512.png", 512, 0.22); // maskable safe zone: mark within the central 80%
+await render("apple-touch-icon.png", 180, 0.16); // iOS rounds corners itself; solid is enough
 console.log("done");

@@ -2,48 +2,34 @@ import { getLogger } from "@logtape/logtape";
 
 const logoLog = getLogger(["folio", "web", "logos"]);
 
-// logo **字节**的边缘缓存(Cache API,按机房一份,FOL-93)。
-//
-// **键只由上游图 URL 派生,与「谁在问」无关。** 这是它能跨用户共享的唯一理由:
-// 缓存里存的是「这个公开 URL 返回了什么字节」,谁命中都一样 —— 前提是他**自己**先按自己的
-// 参考层 / 缓存把 id 解析到了同一个 URL(路由里的鉴权 + 查找照旧)。反过来,**不按路径里的
-// id / key 做键**:token 的 id 是 per-user 的行 id,defi 的协议 → URL 来自用户自己同步下来的
-// meta —— 按路径做键,就等于让 A 库里那条 URL 决定 B 看到的图(跨用户投毒)。
-// 键里没有 userId、Cookie、会话,构造键的 Request 也不带任何头(`logoCacheKey` 单测钉着)。
-//
-// 存进去的副本只带 content-type + 一条 `public, max-age` —— 后者只是告诉 Cache API 它能存多久,
-// **不会发给浏览器**:命中时 `serve.ts` 用自己的 `okHeaders` 重建头(token 等照旧 `private`)。
-//
-// 只存「上游 200 + 栅格图 content-type」:404 / 5xx / 网络故障 / svg·html(降级成 octet-stream 的)
-// 一律不进 —— 瞬时故障不该被钉住一个月,非图更没有理由占这份缓存。
-//
-// 与 `tokens/edge-cache.ts` 同一个前提:**`*.workers.dev` 上 Cache API 是静默空转**,只在自定义域
-// 生效(见 DEPLOY.md)。空转不抛错 → 只见 `stored` 不见 `hit` 就是没生效。
-//
-// **在生产里怎么看得见**(review #15):生产 `LOG_LEVEL` 是 info,debug 不出。
-// · `stored` 记 **info** —— 每个上游 URL 每个机房三十天才一行,量不成问题。
-// · 命中与否**不打日志**,而是回在响应头 `x-folio-logo-cache: hit|miss` 上(`serve.ts`):
-//   命中是每张图每次请求都发生的事,记 info 会让日志量跟着页面上的图标数涨;响应头零成本,
-//   浏览器开发者工具里点开任一张 logo 就看得到。`hit` 那行 debug 留给本地排查。
-// 读写失败一律不阻断:退化成每次回源,只慢不错。
+// Edge cache (Cache API, per datacenter) for logo bytes, keyed only by the upstream image URL.
+// Never key by path id / user: token ids are per-user rows and defi URLs come from the user's own synced
+// meta, so path keys would let one user's URL decide what another sees (cross-user poisoning). The key
+// request carries no headers (`logoCacheKey` test pins this). The stored `public, max-age` only tells the
+// Cache API how long to keep it; `serve.ts` rebuilds headers on hit.
+// Only upstream 200 + raster content-type is stored; transient failures and non-images must not be pinned.
+// Like `tokens/edge-cache.ts`, the Cache API silently no-ops on `*.workers.dev` (see DEPLOY.md): `stored`
+// logs at info without any `hit` means it isn't working. Hits are reported via the `x-folio-logo-cache`
+// response header, not logs, so log volume doesn't scale with icons per page.
+// Read/write failures never block: fall back to the origin.
 
-// 30 天:与浏览器侧的 SWR 窗(`serve.ts` 的 CACHE_HIT)同长。logo 几乎不变;缓存满了 CF 会自己逐出。
+// 30 days, matching the browser SWR window (`serve.ts` CACHE_HIT); logos barely change.
 export const LOGO_EDGE_TTL_S = 30 * 24 * 60 * 60;
 const LOGO_CACHE_NAME = "folio-logo-bytes";
-// 键只是个名字(Cache API 强制它长成 http URL);`v1` 留给「换了存法要整体作废」的那一天。
+// Cache API requires an http URL; bump `v1` to invalidate everything.
 const KEY_PREFIX = "https://folio.internal/logo/v1?u=";
 
 const reason = (err: unknown): string => (err instanceof Error ? err.message : "unknown");
 
-// 本地 node(单测默认)/ 某些 dev 形态没有 `caches` —— 当没缓存,不打日志。
+// No `caches` in node tests / some dev setups: act as no cache, no log.
 const openCache = (): Promise<Cache> | null =>
   typeof caches === "undefined" ? null : caches.open(LOGO_CACHE_NAME);
 
-/** 缓存键:只由上游 URL 派生;不带任何头(Cookie / 会话都进不来)。 */
+/** Derived from the upstream URL only; no headers, so no cookie or session can leak in. */
 export const logoCacheKey = (upstream: string): Request =>
   new Request(KEY_PREFIX + encodeURIComponent(upstream));
 
-/** 命中 → 缓存里那份响应(body + content-type);没命中 / 缓存不可用 → null。 */
+/** The cached response (body + content-type), or null on miss / unavailable cache. */
 export async function matchLogo(upstream: string): Promise<Response | null> {
   try {
     const cache = await openCache();
@@ -57,7 +43,7 @@ export async function matchLogo(upstream: string): Promise<Response | null> {
   }
 }
 
-/** 写回一份字节(调用方已确认是 200 + 栅格图)。失败只记一行,绝不抛。 */
+/** Callers have confirmed 200 + raster. Failures log one line and never throw. */
 export async function storeLogo(
   upstream: string,
   body: ReadableStream<Uint8Array>,

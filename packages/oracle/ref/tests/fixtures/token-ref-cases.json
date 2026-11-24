@@ -1,82 +1,77 @@
 {
   "_": [
-    "tokenRef 文法的黄金表(ADR 0020)。一眼扫完整套行为,不用在断言里翻。",
-    "",
-    "construct —— 造串:给结构,拿串。`value` 按 kind 解释(contract=地址,issued=标识,custom=名字,native 不用)。",
-    "parse —— 拆串:`parsed` 为 null 表示读不懂(kind=unknown)。`canonical` 缺省即等于 raw;",
-    "        给了就表示 raw 不是规范形,拼回去会变成 canonical。",
-    "",
-    "每条都同时被三种断言吃:parse 出这个结构 / 语义形拼回去是 canonical / 两段形拼回去也是 canonical。",
-    "",
-    "**四形状都带标记(native 是完整保留字),兜底 = unknown**(第四轮):没有标记的右段一律读不懂,",
-    "而不是掉进一个「信任」的桶里 —— 那正是 `manual/USDC` 被当成命名者发的标识、拿去认币的原因。"
+    "Golden table for the tokenRef grammar.",
+    "construct: structure in, string out; `value` is the address (contract), id (issued) or name (custom); unused for native.",
+    "parse: `parsed` null means unreadable (kind=unknown); `canonical` defaults to raw, else raw is non-canonical.",
+    "Every row is checked three ways: parse gives the structure, the semantic form rebuilds to canonical, the two-part form rebuilds to canonical.",
+    "All four shapes carry a marker (native is a full reserved word); anything else is unknown, never a trusted bucket."
   ],
 
   "construct": [
     {
-      "note": "EVM 合约:hex 大小写不敏感 → 小写成稳定 key",
+      "note": "EVM contract: hex is case-insensitive, lowercased to a stable key",
       "kind": "contract",
       "namer": "evm:42161",
       "value": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
       "ref": "evm:42161/contract:0xaf88d065e77c8cc2239327c5edb3a432268e5831"
     },
     {
-      "note": "Solana 是 base58,大小写敏感 —— 小写下去就是个不存在的地址,原样保留",
+      "note": "Solana base58 is case-sensitive: lowercasing yields a nonexistent address, keep as is",
       "kind": "contract",
       "namer": "solana",
       "value": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       "ref": "solana/contract:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     },
     {
-      "note": "Sui 的 coin type 带 `::`,同样非 EVM → 不动",
+      "note": "Sui coin type contains `::`, not EVM, untouched",
       "kind": "contract",
       "namer": "sui",
       "value": "0x2::sui::SUI",
       "ref": "sui/contract:0x2::sui::SUI"
     },
     {
-      "note": "非 EVM 命名者的地址不小写,但命名者自己一律小写",
+      "note": "non-EVM addresses keep case; the namer itself is always lowercased",
       "kind": "contract",
       "namer": "Solana",
       "value": "0xAbC",
       "ref": "solana/contract:0xAbC"
     },
     {
-      "note": "原生币:保留字,命名者归一",
+      "note": "native coin: reserved word, namer normalised",
       "kind": "native",
       "namer": "Bitcoin",
       "ref": "bitcoin/native"
     },
     {
-      "note": "两端空白 trim",
+      "note": "surrounding whitespace trimmed",
       "kind": "contract",
       "namer": " evm:1 ",
       "value": " 0xABC ",
       "ref": "evm:1/contract:0xabc"
     },
     {
-      "note": "命名者发的标识一个字不动 —— 归一是生产者的事(币安 connector 自己保证大写)",
+      "note": "namer-issued id untouched: normalising is the producer's job",
       "kind": "issued",
       "namer": "binance",
       "value": "USDC",
       "ref": "binance/issued:USDC"
     },
     {
-      "note": "上游 coin id 同样原样(小写 kebab 由生产者归一)",
+      "note": "upstream coin id kept as is (producer normalises lowercase kebab)",
       "kind": "issued",
       "namer": "coingecko",
       "value": "Wrapped-BTC",
       "ref": "coingecko/issued:Wrapped-BTC"
     },
     {
-      "note": "调用方自造的名字:**文法**归一成大写,不靠调用点自觉 —— 否则 custom:usdc 与 custom:USDC 是两行",
+      "note": "caller-made name: the grammar uppercases it, else custom:usdc and custom:USDC would be two rows",
       "kind": "custom",
       "namer": "manual",
       "value": "usdc",
       "ref": "manual/custom:USDC"
     },
     {
-      "note": "自造的名字也 trim",
+      "note": "custom name also trimmed",
       "kind": "custom",
       "namer": "Manual",
       "value": "  my-coin  ",
@@ -86,7 +81,7 @@
 
   "parse": [
     {
-      "note": "EVM 合约",
+      "note": "EVM contract",
       "raw": "evm:42161/contract:0xaf88d065e77c8cc2239327c5edb3a432268e5831",
       "parsed": {
         "kind": "contract",
@@ -96,17 +91,17 @@
       }
     },
     {
-      "note": "命名者里的冒号不参与切分 —— 切的是斜杠",
+      "note": "colons in the namer do not split; the slash does",
       "raw": "evm:1/native",
       "parsed": { "kind": "native", "namer": "evm:1", "localName": "native" }
     },
     {
-      "note": "非 EVM 原生币",
+      "note": "non-EVM native coin",
       "raw": "bitcoin/native",
       "parsed": { "kind": "native", "namer": "bitcoin", "localName": "native" }
     },
     {
-      "note": "标记按前缀认 → 地址本身带 `::` 的照样是合约,不会被当成第三段",
+      "note": "marker is read by prefix: an address containing `::` is still a contract, not a third part",
       "raw": "sui/contract:0x2::sui::SUI",
       "parsed": {
         "kind": "contract",
@@ -116,7 +111,7 @@
       }
     },
     {
-      "note": "base58 地址原样",
+      "note": "base58 address kept as is",
       "raw": "solana/contract:EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
       "parsed": {
         "kind": "contract",
@@ -126,7 +121,7 @@
       }
     },
     {
-      "note": "上游 coin id —— coingecko 发的,它为这个标识负责",
+      "note": "upstream coin id: coingecko issues it and vouches for it",
       "raw": "coingecko/issued:usd-coin",
       "parsed": {
         "kind": "issued",
@@ -136,7 +131,7 @@
       }
     },
     {
-      "note": "场馆上架代号 —— 大小写不动",
+      "note": "venue listing ticker: case untouched",
       "raw": "binance/issued:USDC",
       "parsed": {
         "kind": "issued",
@@ -146,7 +141,7 @@
       }
     },
     {
-      "note": "永续场馆同理",
+      "note": "perp venue likewise",
       "raw": "hyperliquid/issued:BTC",
       "parsed": {
         "kind": "issued",
@@ -156,7 +151,7 @@
       }
     },
     {
-      "note": "用户自己敲的 symbol —— 有形状了,再不会被认成「命名者发的标识」",
+      "note": "user-typed symbol: now has a shape, never mistaken for a namer-issued id",
       "raw": "manual/custom:USDC",
       "parsed": {
         "kind": "custom",
@@ -167,7 +162,7 @@
     },
 
     {
-      "note": "非规范形:大小写先归一再拆,拼回去是规范形",
+      "note": "non-canonical: case normalised before parsing, rebuilds to canonical",
       "raw": "EVM:1/CONTRACT:0xAbC",
       "canonical": "evm:1/contract:0xabc",
       "parsed": {
@@ -178,13 +173,13 @@
       }
     },
     {
-      "note": "保留字大小写不敏感",
+      "note": "reserved word is case-insensitive",
       "raw": "bitcoin/NATIVE",
       "canonical": "bitcoin/native",
       "parsed": { "kind": "native", "namer": "bitcoin", "localName": "native" }
     },
     {
-      "note": "标记本身大小写不敏感,标记后面的标识不动(那是命名者的写法)",
+      "note": "marker is case-insensitive; the id after it is untouched (namer's spelling)",
       "raw": "binance/ISSUED:USDC",
       "canonical": "binance/issued:USDC",
       "parsed": {
@@ -195,7 +190,7 @@
       }
     },
     {
-      "note": "自造的名字归一成大写 —— 归一在文法里,所以拆出来就已经是规范形",
+      "note": "custom name uppercased in the grammar, so the parse is already canonical",
       "raw": "manual/custom:usdc",
       "canonical": "manual/custom:USDC",
       "parsed": {
@@ -206,44 +201,44 @@
       }
     },
 
-    { "note": "空串", "raw": "", "parsed": null },
-    { "note": "纯空白", "raw": "   ", "parsed": null },
-    { "note": "只有分隔符", "raw": "/", "parsed": null },
-    { "note": "缺左段", "raw": "/native", "parsed": null },
-    { "note": "缺右段", "raw": "bitcoin/", "parsed": null },
-    { "note": "没有分隔符", "raw": "evm:1", "parsed": null },
-    { "note": "不成形", "raw": "nonsense", "parsed": null },
+    { "note": "empty string", "raw": "", "parsed": null },
+    { "note": "whitespace only", "raw": "   ", "parsed": null },
+    { "note": "separator only", "raw": "/", "parsed": null },
+    { "note": "missing left part", "raw": "/native", "parsed": null },
+    { "note": "missing right part", "raw": "bitcoin/", "parsed": null },
+    { "note": "no separator", "raw": "evm:1", "parsed": null },
+    { "note": "malformed", "raw": "nonsense", "parsed": null },
     {
-      "note": "三段(NFT 的 tokenId 之类)在本文法里没有意义 —— 不折进 localName",
+      "note": "three parts (e.g. NFT tokenId) are meaningless here: not folded into localName",
       "raw": "evm:1/contract:0xabc/1234",
       "parsed": null
     },
-    { "note": "三段", "raw": "a/b/c", "parsed": null },
-    { "note": "空地址", "raw": "evm:1/contract:", "parsed": null },
-    { "note": "标记后面空着 —— issued 同理", "raw": "binance/issued:", "parsed": null },
-    { "note": "标记后面空着 —— custom 同理", "raw": "manual/custom:", "parsed": null },
+    { "note": "three parts", "raw": "a/b/c", "parsed": null },
+    { "note": "empty address", "raw": "evm:1/contract:", "parsed": null },
+    { "note": "empty after marker: issued likewise", "raw": "binance/issued:", "parsed": null },
+    { "note": "empty after marker: custom likewise", "raw": "manual/custom:", "parsed": null },
     {
-      "note": "**没有标记的右段一律读不懂**(第四轮的兜底):这一条正是 `manual/USDC` 那个 bug 的形状",
+      "note": "a right part without a marker is always unreadable: the shape of the `manual/USDC` bug",
       "raw": "manual/USDC",
       "parsed": null
     },
     {
-      "note": "同一个形状换个命名者也一样 —— 兜底不看是谁在说",
+      "note": "same shape under another namer: the fallback ignores who speaks",
       "raw": "coingecko/usd-coin",
       "parsed": null
     },
     {
-      "note": "旧文法 `erc20:` —— 不容旧,否则「symbol 可不可信」又变成猜的(ADR 0020 第三轮)",
+      "note": "legacy `erc20:` grammar rejected, else symbol trust becomes a guess",
       "raw": "evm:1/erc20:0xabc",
       "parsed": null
     },
-    { "note": "旧文法 `token:`", "raw": "solana/token:EPjF", "parsed": null },
-    { "note": "旧文法 `native:`", "raw": "bitcoin/native:btc", "parsed": null },
+    { "note": "legacy `token:` grammar", "raw": "solana/token:EPjF", "parsed": null },
+    { "note": "legacy `native:` grammar", "raw": "bitcoin/native:btc", "parsed": null },
     {
-      "note": "producer 自创的标记 —— 也不容,标记是文法自己的常量",
+      "note": "producer-invented marker rejected: markers are the grammar's own constants",
       "raw": "evm:1/spl:0xabc",
       "parsed": null
     },
-    { "note": "无斜杠的旧串", "raw": "coingecko:usd-coin", "parsed": null }
+    { "note": "legacy string without a slash", "raw": "coingecko:usd-coin", "parsed": null }
   ]
 }

@@ -1,12 +1,9 @@
-// 凭据加解密 + 签名原语(Web Crypto,Workers 原生支持)。皆为【纯运算】:密钥恒由调用方传入
-//(encrypt/decrypt 收 app 的 env.SECRETS_KEY,hmacSha256 收用户交易所 secret)——【本模块不读 env】、
-// 永不把 SECRETS_KEY 当环境隐式量看。安全边界(原则 #5):契约层只做纯密码学运算,存储/塑形归 app lib/creds.ts。
+// Pure crypto: keys are always passed in by the caller; this module never reads env.
 
 const ALGORITHM = "AES-GCM";
-const KEY_BYTES = 32; // 256-bit 密钥
-const IV_BYTES = 12; // GCM 推荐 96-bit IV
+const KEY_BYTES = 32; // AES-256
+const IV_BYTES = 12; // 96-bit IV, as GCM recommends
 
-/** 解密失败 / 密钥或载荷格式非法时抛出。 */
 export class CryptoError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
@@ -44,7 +41,7 @@ async function importKey(secret: string): Promise<CryptoKey> {
   return crypto.subtle.importKey("raw", raw, { name: ALGORITHM }, false, ["encrypt", "decrypt"]);
 }
 
-/** 加密明文,返回 base64( 随机IV(12) ‖ 密文+GCMTag )。同明文每次密文不同。 */
+/** Returns base64(random IV(12) ‖ ciphertext+GCM tag). */
 export async function encrypt(plaintext: string, secret: string): Promise<string> {
   const key = await importKey(secret);
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
@@ -56,7 +53,6 @@ export async function encrypt(plaintext: string, secret: string): Promise<string
   return bytesToBase64(payload);
 }
 
-/** 解密 encrypt 产出的载荷;错误密钥/被篡改数据/格式非法均抛 CryptoError。 */
 export async function decrypt(payload: string, secret: string): Promise<string> {
   const key = await importKey(secret);
   let bytes: Uint8Array<ArrayBuffer>;
@@ -78,15 +74,11 @@ export async function decrypt(payload: string, secret: string): Promise<string> 
   }
 }
 
-/** 生成一个新的 SECRETS_KEY:base64(32 随机字节)。用于部署初始化。 */
 export function generateSecret(): string {
   return bytesToBase64(crypto.getRandomValues(new Uint8Array(KEY_BYTES)));
 }
 
-/**
- * HMAC-SHA256 签名(Web Crypto,零依赖)。CEX 请求签名公用件:binance 用 hex、okx 用 base64,
- * 后续交易所复用同一原语。纯函数 → 可对参考实现(openssl dgst -sha256 -hmac)做 golden。
- */
+/** Binance signs with hex, OKX with base64. */
 export async function hmacSha256(
   secret: string,
   message: string,

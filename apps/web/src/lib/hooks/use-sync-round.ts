@@ -6,43 +6,27 @@ import { invalidateFor } from "@/lib/queries/refresh";
 import { syncRoundQuery } from "@/lib/queries/sync-round";
 import type { SyncRoundView } from "@/lib/server/sync/status";
 
-// 自动补同步的冷却(FOL-18 子票 2):按组合记「上一次自动发起」的时刻,**跨组件重挂生效**。
-// 模块级是有意的 —— 它要活得比组件久:切组合来回、自动那轮失败后重挂,都靠它挡住「每次重挂补一枪」。
-// 一次页面加载内有效,整页重载后自然清零(那时本来就该重新判一次)。
+// Auto-sync cooldown per portfolio. Module-level on purpose: it must outlive remounts
+// (switching portfolios, remount after a failed auto round) so each remount doesn't fire again.
 const AUTO_SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 const lastAutoSyncAt = new Map<string, number>();
 
-// 一轮同步在前端这一侧只剩两件事:**发起它**,和**读它**(ADR 0048)。
-//
-// 以前这里有一整套:模块级的轮 store(每组合一格)、从 mutationCache 侧面问出来的 busy、
-// 随 mutation variables 走的展示名表与刷新节流器、以及一个 NDJSON 流读取器。它们全都是
-// 「进度记在浏览器里」这个错位的补丁 —— 跨页要活、跨组合别互踩、刷新别失忆。进度搬到服务端
-// 之后,那些问题连提都提不出来:换页重新读一次就是了,而 cron 跑的轮也终于看得见。
-//
-// 节流器也一并没了:它管的是「一秒钟连刷好几次」,而现在进度本来就 1.5s 才前进一格 ——
-// 轮询间隔自己就是那个节流。
-
-/** 在跑 = 未收官且心跳还在。判据在服务端(`syncRoundView`),这里只是把它念出来。 */
+// Progress lives on the server; the client only starts a round and polls it.
 export const isRoundBusy = (round: SyncRoundView | null | undefined): boolean =>
   round?.state === "running";
 
 export interface SyncRoundHandle {
-  /** 这个组合最近一轮;从没同步过 → null。 */
   round: SyncRoundView | null;
   busy: boolean;
-  /** 点了也没用的时候 —— 正在跑、请求在飞、或者这个组合没有可同步的账户。 */
   disabled: boolean;
-  /** **发起**同步这个请求本身失败了。与「这一轮里某个账户失败了」是两回事。 */
+  /** Starting the round failed, as opposed to an account failing within the round. */
   startError: string | null;
   sync: () => void;
 }
 
-/**
- * 自动补同步的开关(FOL-18 子票 2)。**只有首页传**;传了才在数据过期时自动补一轮,
- * 账户页 / 洞察页不传、维持现状。
- */
+/** Only the home page passes this. */
 export interface AutoSyncOption {
-  /** 组合最新一次快照(来自摘要)。超过 1 小时(或从未同步)就自动补一轮。 */
+  /** Latest snapshot; older than an hour (or never synced) triggers an auto round. */
   lastSyncedAt: number | null;
 }
 
@@ -57,10 +41,9 @@ export function useSyncRound(
   const busy = isRoundBusy(round);
 
   const mutation = useMutation({
-    // `auto` 区分「进首页自动补」和「手动点同步」(FOL-18 子票 4):自动那轮服务端按新鲜度跳过,
-    // 手动强制全量。默认 false —— `sync()` 走手动。
+    // `auto` lets the server skip fresh accounts; a manual sync forces all of them.
     mutationFn: async (vars: { auto: boolean } = { auto: false }): Promise<SyncRoundView> => {
-      // **只递「我在看哪个组合」+「是不是自动」,不递账户名单**(ADR 0047):跑哪些账户由服务端算。
+      // The server decides which accounts to run; the client only names the portfolio.
       const response = await fetch("/api/sync", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -69,37 +52,29 @@ export function useSyncRound(
       if (!response.ok) throw new Error(`sync failed: ${response.status}`);
       return (await response.json()) as SyncRoundView;
     },
-    // 服务端刚回的那一份就是此刻的事实 —— 直接落进缓存,面板不必空等第一次轮询(1.5s)。
-    // **先取消在飞的那发 GET 再落**(react-query 标准手法):它可能在开轮前就出发了,
-    // 读的是旧轮,落地晚于这句 set 的话会把新轮盖回旧的。
+    // Seed the cache with the response. Cancel the in-flight GET first: it may have left before
+    // the round started and would overwrite the new round with the old one.
     onSuccess: async (view) => {
       await queryClient.cancelQueries({ queryKey: syncKeys.round(portfolioId) });
       queryClient.setQueryData(syncKeys.round(portfolioId), view);
     },
-    // 响应丢了 ≠ 轮没开:服务端可能已经抢下这一轮、消息已经投进队列,而轮询只在读到
-    // running 时自转 —— 什么都不做,面板就对着旧数据坐到天荒地老。补一发 refetch:
-    // 真开了会读到 running、轮询恢复;真没开也只是多读一次空键。
+    // A lost response doesn't mean no round started; polling only self-starts on `running`,
+    // so refetch once to pick it up.
     onError: () => queryClient.invalidateQueries({ queryKey: syncKeys.round(portfolioId) }),
   });
 
-  // 「上一次看见的样子」:哪个组合、什么 mark。**mark 与组合绑在一起存**,因为两个泄漏同根:
-  // B 组合的轮当然与 A 的 mark 不同,但那不是「进度前进了」;A 组合发起失败那句话挂到 B 的
-  // 面板上就是对着 B 说 A 的事。
+  // The mark is stored with its portfolio so a round from portfolio B isn't read as progress
+  // on A, and A's start error isn't shown on B.
   const seen = useRef<{ portfolioId: string; mark: string | null }>({ portfolioId, mark: null });
   const reset = mutation.reset;
   useEffect(() => {
-    // 切组合 = 换一个话题:清 mark(下一眼走首见分支)、清发起失败那句话。
     if (seen.current.portfolioId !== portfolioId) {
       seen.current = { portfolioId, mark: null };
       reset();
     }
     if (!round) return;
-    // 进度前进一格 → 定向刷新数据域(余额、账户行、摘要)。
-    //
-    // **按「轮 id + 已完成数 + 状态」比,不按对象引用**:react-query 的结构共享确实会在数据
-    // 没变时保留同一个引用,但那是它的实现细节 —— 靠它等于把「多久刷一次首页」交给别处的
-    // 一个优化。**首次看见也不刷**:那只是「页面加载时这里有一轮旧记录」,数据本来就是新的 ——
-    // 切组合后的第一眼(刚把 mark 清空)走的也是这条。
+    // Compare by value, not reference (structural sharing is an implementation detail).
+    // The first sighting is an old round from page load, so it doesn't invalidate.
     const mark = `${round.roundId}:${round.settled}:${round.state}`;
     if (seen.current.mark === mark) return;
     const first = seen.current.mark === null;
@@ -108,25 +83,21 @@ export function useSyncRound(
     void invalidateFor(queryClient, "sync.round");
   }, [round, queryClient, portfolioId, reset]);
 
-  // 进首页自动补同步(FOL-18 子票 2):数据过期就在后台跑一轮,**静默** —— 这个 hook 从不弹 toast
-  // (那只在账户详情的单账户同步里),所以自动与手动共用同一发,唯一的差别是没人点。药丸照常转圈。
-  //
-  // 防重复三层:
-  //   ① 这个组合这次挂载只发一枪(`autoFired` 记住给谁发过;切组合 → 记录换人 → 允许给新组合补)。
-  //   ② 冷却(`lastAutoSyncAt`,模块级、跨重挂):切组合来回、失败后重挂都不会每次重挂补一枪。
-  //   ③ 正在跑不补(busy / isPending)。
+  // Silent auto-sync on the home page when data is stale. Guards: once per portfolio per mount,
+  // a module-level cooldown across remounts, and never while a round is running.
   const mutate = mutation.mutate;
   const pending = mutation.isPending;
   const autoFired = useRef<string | null>(null);
   useEffect(() => {
-    if (!autoSync) return; // 只有首页传;账户页 / 洞察页不自动补
-    if (roundPending) return; // 轮状态还没读到 → 先别判(否则首帧 busy 恒 false,会抢在一轮在跑之前补)
-    if (busy || pending) return; // ③ 正在跑不补
-    if (syncableCount === 0) return; // 没有可同步的账户(纯手记组合等)
-    if (autoFired.current === portfolioId) return; // ① 本组合本次挂载已发过
-    if (!isSyncDue(autoSync.lastSyncedAt, Date.now())) return; // 数据还新,不补
+    if (!autoSync) return;
+    // Until the round is loaded `busy` reads false and would race a round already running.
+    if (roundPending) return;
+    if (busy || pending) return;
+    if (syncableCount === 0) return;
+    if (autoFired.current === portfolioId) return;
+    if (!isSyncDue(autoSync.lastSyncedAt, Date.now())) return;
     const now = Date.now();
-    if (now - (lastAutoSyncAt.get(portfolioId) ?? 0) < AUTO_SYNC_COOLDOWN_MS) return; // ② 冷却
+    if (now - (lastAutoSyncAt.get(portfolioId) ?? 0) < AUTO_SYNC_COOLDOWN_MS) return;
     autoFired.current = portfolioId;
     lastAutoSyncAt.set(portfolioId, now);
     mutate({ auto: true });

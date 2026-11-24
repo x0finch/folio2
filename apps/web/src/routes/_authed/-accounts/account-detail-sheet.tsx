@@ -52,8 +52,8 @@ import { TrendPanel } from "@/routes/_authed/-home/hero/trend-panel";
 import { deltaTone, GainSkeleton, NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
 import { type AccountRow, accountShare, shareLabel } from "./list-rows";
 
-// 账户详情抽屉(A2):桌面右滑 Drawer、移动 BottomSheet 承载同一份 <DetailBody>(照 token-sheet 模式)。
-// 头部 = 账户价值历史图垫底 + 窗口切换 + ⋯ 菜单(同步/归档/删除);点名字内联重命名。全部持仓复用主页组件。
+// Account detail drawer: desktop Drawer / mobile BottomSheet around one <DetailBody>. The header
+// is a value-history chart backdrop with window switch and a ⋯ menu; holdings reuse the home components.
 export function AccountDetailSheet({
   account,
   total,
@@ -65,17 +65,17 @@ export function AccountDetailSheet({
   onComplete,
 }: {
   account: AccountRow | null;
-  total: number; // 活跃账户总计 —— 抽屉头占比分母(见 accounts.tsx)
-  allTags: Tag[]; // 全部 Tag 定义(打标签弹窗按账户 Portfolio 过滤)
-  tagLinks: AccountTagLink[]; // 全部 账户→Tag 关联(算已打 + 每 Tag 账户数)
-  /** 24h 盈亏还在取 —— 抽屉头与现货行走小骨架,跟列表行同一个数。 */
+  total: number; // active-accounts total: denominator of the share in the drawer header
+  allTags: Tag[]; // all tag definitions (the tag modal filters by the account's portfolio)
+  tagLinks: AccountTagLink[]; // all account -> tag links (attached state + per-tag counts)
+  /** 24h PnL still loading: header and spot rows show a small skeleton. */
   gainPending?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onComplete: (account: AccountRow) => void; // 补录:打开加账户 modal 的补录模式(A3)
+  onComplete: (account: AccountRow) => void; // opens the add-account modal in credential re-entry mode
 }) {
   const isDesktop = useMediaQuery("(min-width: 640px)");
-  // key={account.id} 重挂 → 切账户自动清空 rename/confirm/range 等本地态。
+  // key={account.id} remounts, resetting rename/confirm/range local state on account switch.
   const body = account && (
     <DetailBody
       key={account.id}
@@ -102,7 +102,7 @@ export function AccountDetailSheet({
       </Drawer>
     );
   }
-  // title 不传:内容头部已渲染账户名,避免 BottomSheet 自带标题区重复。
+  // No title: the body header already renders the account name.
   return (
     <BottomSheet open={open} onOpenChange={onOpenChange} snapPoints={[0.6, 0.92]}>
       {body}
@@ -110,7 +110,7 @@ export function AccountDetailSheet({
   );
 }
 
-// 封存日期的格式:与账户页那一行同款(2 位年 + 月 + 日),不带时分 —— 归档是「哪一天封的」这个粒度。
+// Seal date format: year, month, day, no time (archiving is day-granular).
 const SEALED_DATE = { year: "2-digit", month: "short", day: "numeric" } as const;
 
 const menuItemClass =
@@ -135,21 +135,19 @@ function DetailBody({
 }) {
   const t = useTranslations("Accounts");
   const format = useFormatter();
-  // 活时钟 + 钳位收在 hook 里;抽屉是**晚挂载**的,正是那份注释里「等一跳才自愈」的受害者。
+  // The drawer mounts late, so it is exposed to the clock's one-tick settle delay.
   const syncedAt = useRelativeSyncedAt();
-  // 划动读数(#470 片7)。
+  // Chart scrub reading.
   const scrub = useChartScrub();
   const writes = useAccountSheetWrites(account, onClose);
 
   const sealedAt = account.archivedAt;
   const archived = sealedAt != null;
-  // 头部 24h 增量与账户行同源;占比 = 本账户市值 / 活跃账户总计。
-  // **归档行两个都不显**(ADR 0039):市值冻在封存那一刻,而 24h 涨跌幅是富化带来的实时行情 ——
-  // 一个停着一个在动,说的不是同一件事;占比的分母是活跃账户总计,归档不在里面,显示了会让
-  // 各行的百分比加起来超过 100%。缺凭据不显增量是同一个道理。
-  // 这两种是「**不该有**这个数」→ 整块省略;而「该有却**算不出**」是另一回事 → `—`。三态口径见
-  // -home/holdings/value-delta,与行内 <ValueDelta> 共用 —— 这里字号不同(大字),故手搓而非复用组件。
-  // 数由 server 算好(ADR 0040),与账户行同源 —— 抽屉头和列表行显示同一个数,不再各算各的。
+  // The header's 24h delta and share are omitted for archived accounts: value is frozen at seal
+  // time while 24h change is live, and the share denominator excludes archived accounts (shares
+  // would exceed 100%). Missing credentials omit the delta likewise. "Shouldn't have the number"
+  // omits the block; "should but can't compute" renders `—` (see -home/holdings/value-delta). Font
+  // size differs here, hence not reusing <ValueDelta>.
   const hasDayChange = !(account.needsCredentials || archived);
   const dayChange = hasDayChange ? account.gain24h : undefined;
   const sharePct = accountShare(account.totalUsd, total) * 100;
@@ -158,7 +156,7 @@ function DetailBody({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [moving, setMoving] = useState(false);
   const [tagsOpen, setTagsOpen] = useState(false);
-  // 打标签弹窗的数据(ADR 0034):账户所在 Portfolio 的全部 Tag + 本账户已打 id + 每 Tag 账户数。
+  // Data for the tag modal: the portfolio's tags + this account's attached ids + per-tag counts.
   const portfolioTags = useMemo(
     () => allTags.filter((tg) => tg.portfolioId === account.portfolioId),
     [allTags, account.portfolioId],
@@ -178,25 +176,23 @@ function DetailBody({
     ...accountHistoryQuery({
       accountId: account.id,
       range,
-      // **归档账户的窗口从封存那一刻往回算**(ADR 0039)。用「现在」当锚点的话,一年前归档的账户
-      // 在默认 30 天窗口下一个数据点都没有,图整个不渲染 —— 一个冻住的账户,「最近 30 天」本来
-      // 就没有意义。锚在封存时刻之后,30D 读作「封存前 30 天」,窗口切换照常能用。
+      // Archived accounts anchor the window at the seal time: anchored at now, a year-old
+      // archive has no points in the default 30D window and the chart wouldn't render.
       since: rangeSince(range, sealedAt ?? Date.now()),
       connectorId: account.connectorId,
     }),
     placeholderData: keepPreviousData,
   });
   const raw = historyQuery.data;
-  // 曲线在浏览器里画(FOL-38):接口发窗口内的原样快照点,阶梯重建 + 降采样在这儿。
+  // The curve is drawn in the browser from the raw snapshot points in the window.
   const series = useMemo(
     () =>
       raw == null ? [] : buildAccountValueHistory(raw.rows, raw.live, { sampled: raw.sampled }),
     [raw],
   );
 
-  // **先判归档,再判是不是 manual**(ADR 0039):归档 = 封存,数据停在那一刻,所以显示的是
-  // **静态日期**而不是相对时间 —— 相对时间会一天天长下去,看着像同步坏了。manual 那一支原本
-  // 无条件显示「实时」,封存之后它显然不是,所以归档必须判在前面。
+  // Archived first, then manual: archived data is frozen, so show the static seal date, not a
+  // relative time that would grow like a broken sync.
   const lastSynced =
     sealedAt != null
       ? t("sealedAt", { when: format.dateTime(new Date(sealedAt), SEALED_DATE) })
@@ -208,8 +204,8 @@ function DetailBody({
 
   return (
     <>
-      {/* 头部:价值历史图垫底;窗口切换叠右下角、⋯ 菜单叠右上角;名称/市值/占比浮其上。
-          预留固定高度(min-h-44)→ 图异步到达不撑高、不挤压列表。 */}
+      {/* Header: chart backdrop, window switch bottom-right, ⋯ menu top-right, text over it. Fixed
+          min-h-44 so the async chart doesn't resize the list. */}
       <div className="relative">
         <div className="relative min-h-44">
           <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
@@ -219,8 +215,7 @@ function DetailBody({
           </div>
 
           <div className="relative flex flex-col gap-1.5">
-            {/* 就地重命名走全站统一的 EditableName;pr-10 给右上角 ⋯ 让位,名称不钻到按钮下。
-                badge 作 children:展示态跟在名字后,编辑态自动隐藏。 */}
+            {/* Inline rename via EditableName; pr-10 leaves room for the ⋯ button. */}
             <EditableName
               value={account.label}
               editing={renaming}
@@ -237,7 +232,7 @@ function DetailBody({
                   {t("archivedBadge")}
                 </span>
               )}
-              {/* Tag(#351):与 connector 徽章同排,muted 纯展示、**不可点** —— 编辑走 ⋯ 菜单里的「标签」。 */}
+              {/* Tags sit beside the connector badge, display-only; editing is in the ⋯ menu. */}
               <TagBadges tags={account.tags} />
             </EditableName>
             <div>
@@ -333,12 +328,11 @@ function useAccountSheetWrites(account: AccountRow, onClose: () => void) {
   const refreshArchive = () => invalidateFor(queryClient, "account.archive");
 
   const syncMut = useMutation({
-    // 发起 + 等它在队列里跑完(FOL-89):`syncPending` 覆盖整段,菜单项在那期间保持禁用。
+    // Covers trigger plus waiting for the queued job: `syncPending` keeps the menu item disabled throughout.
     mutationFn: () => syncAccountAndWait(queryClient, account.id),
     onSuccess: async (r) => {
       if (r.ok) toast.success(t("synced", { count: 1 }));
-      // 缺凭据也是「跳过」,但它是用户能修的那种(#527 裁定 2):以前和手记账户共用一个静默
-      // 分支,点了同步屏幕上什么都不发生 —— 而唯一的下一步恰恰是「把凭据填完」。
+      // Missing credentials is a skip the user can fix, so it gets a toast instead of staying silent.
       else if (r.skipped) {
         if (r.skipReason === "missing-credentials") toast.message(t("syncNeedsCredentials"));
       } else toast.error(r.error ?? t("syncGenericError"));
@@ -359,8 +353,7 @@ function useAccountSheetWrites(account: AccountRow, onClose: () => void) {
     },
     onError: () => toast.error(t("actionFailed")),
   });
-  // 改名走 mutateAsync:EditableName 靠 onSave 抛不抛来决定保不保住编辑态,
-  // 而 mutateAsync 失败时会 reject —— 失败仍停在输入框里,用户接着改就行。
+  // mutateAsync so a failure rejects: EditableName keeps edit mode when onSave throws.
   const renameMut = useMutation({
     mutationFn: (label: string) => renameAccount({ data: { accountId: account.id, label } }),
     onSuccess: refresh,
@@ -510,7 +503,7 @@ function SheetHeaderValue({
   hasDayChange: boolean;
   gainPending: boolean;
   dayChange: Gain | null | undefined;
-  /** 正划在图上的那个点(#470 片7);`null` = 没在划,显示实时值。 */
+  /** The point being scrubbed on the chart; `null` = not scrubbing, show the live value. */
   scrubbed: HistoryPoint | null;
   scrubLabel: string | null;
 }) {
@@ -523,11 +516,10 @@ function SheetHeaderValue({
       </div>
     );
   }
-  // 划到图上某点 → 顶替成该点的值,24h 那行换成那一刻的时间:「今天涨跌」摆在一个历史时刻的
-  // 数值旁边是两件事对不上。
+  // While scrubbing, the point's value replaces the live one and the 24h row shows that moment's time.
   return (
     <>
-      {/* 滚动与「整数/小数怎么拆」走 AmountTicker(hero、代币抽屉同一份);字号是这一处的事。 */}
+      {/* Rolling and integer/decimal split use AmountTicker (shared with hero and token drawer). */}
       <AmountTicker
         value={scrubbed ? scrubbed.total : totalUsd}
         scrubbing={!!scrubbed}
@@ -565,7 +557,7 @@ function SheetHeaderGain({
   }
   return (
     <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayChange.amount))}>
-      {/* 遮盈亏金额,留百分比(ADR 0052)。 */}
+      {/* Masks the PnL amount, not the percentage. */}
       <Sensitive>{signedUsd(usd, dayChange.amount)}</Sensitive>
       {dayChange.pct != null ? ` ${Math.abs(dayChange.pct).toFixed(2)}%` : ""}
     </div>

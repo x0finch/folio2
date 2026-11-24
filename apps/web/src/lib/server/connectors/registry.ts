@@ -12,31 +12,25 @@ import { Context, Duration, Effect, Schedule } from "effect";
 import { platformLogoUrl } from "@/lib/core/logo";
 import type { InputSpec } from "@/lib/server/creds";
 
-// 探活重试参数(原则 #8)。**刻意比 sync 的 3 次 / 5s 紧得多**:那条路是后台同步,没人在等;
-// 这条路用户正盯着表单提交。1 次重试只为躲瞬时抖动;单次最多等 1.5s —— 再久就不如让他自己再点
-// 一次(上游给的 Retry-After 超过它就直接失败,不把表单挂死)。
-const VALIDATE_RETRY_ATTEMPTS = 2; // 总尝试次数(1 + 1 次重试)
+// Liveness-probe retry: much tighter than sync's (background, nobody waiting) because the user is watching the
+// form. One retry only dodges transient blips; waits are capped at 1.5 s.
+const VALIDATE_RETRY_ATTEMPTS = 2; // total attempts (1 + 1 retry)
 const VALIDATE_RETRY_MAX_WAIT_MS = 1500;
 const VALIDATE_RETRY_BASE_MS = 200;
 
-// 加账户时的探活重试。**用户在等**,所以只赔一次往返、封顶 1.5 秒 —— 与后台同步那份
-// (`@folio/sync` 的 `retryPolicy`,没人等所以宁可多等)刻意不同,不共用。
-//
-// 形状照抄它替掉的那个手搓 `withRetry`,三条语义一条不改:
+// Not shared with `@folio/sync`'s `retryPolicy`.
 const validateRetryPolicy = Schedule.exponential(Duration.millis(VALIDATE_RETRY_BASE_MS)).pipe(
-  // ① 只重试可重试的;**并且上游建议的等待超过我们肯等的上限就直接放弃**。
-  //    夹到 1.5 秒再打大概率还是 429,白赔一次往返,而用户正盯着表单 —— 抛出去让表单报错更好。
-  //    这是 `withRetry` 的 `exceedsMaxWait: "throw"`,与后台同步那份的 clamp 语义**刻意相反**:
-  //    那边没人等,夹住继续等更划算。(第一版我写成了 clamp,是行为退化。)
-  //    **必须排在 passthrough 前** —— 它负责把输入类型钉成 ConnectorError。
+  // ① Retry only retryable errors, and give up if the upstream's suggested wait exceeds our cap: clamping would likely
+  //    hit 429 again, and surfacing the error beats a hung form (opposite of sync's clamp, deliberately).
+  //    Must precede `passthrough`, which pins the input type to ConnectorError.
   Schedule.whileInput((e: ConnectorError) => {
     if (!isRetryable(e)) return false;
     const suggested = retryAfterOf(e);
     return suggested === undefined || suggested <= VALIDATE_RETRY_MAX_WAIT_MS;
   }),
-  // 把输出换成输入(错误本身),下一行才看得见 Retry-After。
+  // Output becomes the error itself, so the next step can read Retry-After.
   Schedule.passthrough,
-  // ② 上游说了等多久就听它的,没说才用指数值;两者都夹在单次上限内。
+  // ② Use the upstream's stated delay, else the exponential value; both clamped to the cap.
   Schedule.modifyDelay((err, computed) => {
     const suggested = retryAfterOf(err);
     return Duration.min(
@@ -44,29 +38,25 @@ const validateRetryPolicy = Schedule.exponential(Duration.millis(VALIDATE_RETRY_
       suggested !== undefined ? Duration.millis(suggested) : computed,
     );
   }),
-  // ③ 抖动**不是可选的**:同一把 key 上常有多个调用者同时撞 429,都按同一个 Retry-After 醒来
-  //    会精确地再撞一次。加性(+0~baseMs)不用 Effect 自带的 `jittered`(乘性会让退避短于基数)。
+  // ③ Jitter is required: callers on one key all wake at the same Retry-After and would collide again.
+  //    Additive (+0..baseMs) because Effect's multiplicative `jittered` can undercut the base.
   Schedule.addDelay(() => Duration.millis(Math.random() * VALIDATE_RETRY_BASE_MS)),
   Schedule.intersect(Schedule.recurs(VALIDATE_RETRY_ATTEMPTS - 1)),
 );
 
-// app 侧 connector 分派中枢(server-only,引 cloudflare:workers)。集中管:
-// 字段规格投影(credentialSpecs)、创建时凭据校验(validateAccountCreds)、目录(connectorCatalog)。
-// 【只被 server fn 的 handler 体引用】—— 引 cloudflare:workers,绝不可进客户端 bundle;对外的 server fn
-// 门面在 ./connectors(handler 体经编译剥离,故本模块不入客户端)。
-// account.connectorId 直接就是 connectorId(#37d 后并存期分派表已退场)。
-// 安全边界(原则 #5):此处【不碰 SECRETS_KEY】—— 创建/校验拿到的是表单明文,只做形状闸 + 可选活性探活;
-// 存库前的加密塑形在 lib/creds.ts。
+// App-side connector dispatch hub (server-only: imports cloudflare:workers, so only referenced inside handler bodies;
+// the server fn facade is ./connectors). Owns spec projection, creation-time credential validation and the catalog.
+// Never touches SECRETS_KEY: it sees plaintext from the form and does only a shape gate + optional liveness probe;
+// encryption lives in lib/server/creds.ts.
 
 export interface ConnectorCatalogEntry {
   label: string;
-  // 已代理:http 图 → /api/logo/platform/<cid>,manual 的 data: 直挂(platformLogoUrl);无图 → undefined。
+  // Proxied: http images via /api/logo/platform/<cid>, manual data: URIs inline (platformLogoUrl); none -> undefined.
   logo?: string;
 }
 
-// connector 展示目录(connectorId → {label, logo}):遍历 registry(单一事实源),供前端网格/徽章展示。
-// logo 取 manifest 自带图并经 platformLogoUrl 代理(privacy,ADR 0008)—— /api/logo/platform 对场馆/manual
-// 键即按 connectorId 认 manifest(见 connectorPlatformMeta),故这里直接拿 cid 当代理 key。
+// connectorId -> {label, logo} over the registry (single source of truth). The logo is the manifest's image through
+// the `platformLogoUrl` proxy (privacy); /api/logo/platform resolves venue / manual keys by connectorId.
 const buildCatalog = (): Record<string, ConnectorCatalogEntry> => {
   const out: Record<string, ConnectorCatalogEntry> = {};
   for (const [cid, manifest] of connectorRegistry) {
@@ -75,8 +65,7 @@ const buildCatalog = (): Record<string, ConnectorCatalogEntry> => {
   return out;
 };
 
-// 各 connectorId 的账户输入规格(可序列化):遍历 connector registry → 取 manifest 的 account.creds(CredField[]),
-// 投影成 {key,type,label,desc}(剥掉不可序列化的 validator)。业务层据 type 做 seal/mask/complete/categorize。
+// Serializable per-connector account input specs: the manifest's `account.creds` minus the non-serializable validator.
 const buildSpecs = (): Partial<Record<ConnectorId, InputSpec[]>> => {
   const specs: Partial<Record<ConnectorId, InputSpec[]>> = {};
   for (const [cid, manifest] of connectorRegistry) {
@@ -90,29 +79,16 @@ const buildSpecs = (): Partial<Record<ConnectorId, InputSpec[]>> => {
   return specs;
 };
 
-// 上游那边的错误都是 `Data.TaggedError`(自身 extends Error),原样透传即可;别的兜成 Error。
+// Upstream errors are `Data.TaggedError` (already Error) and pass through; anything else is wrapped.
 const asError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
 
-/**
- * **app 侧的 connector 服务**(#504 T14)。
- *
- * 以前这里是三个模块级函数,其中 `validateAccountCreds` 自己读 `env`、自己 `Effect.runPromise` ——
- * 于是它既不能在装配点被换掉,也在一次请求里另起一条根 fiber。现在它与 `Database` / `Oracle`
- * 一样是一张门票:handler `yield* ConnectorRegistry` 取用,探活那一步是这次请求的 effect 的一部分
- *(中断、超时、日志上下文都传得下去)。
- *
- * **无参**:`env` 在建服务这一刻读(`Effect.sync` 的回调里),不是模块加载期 ——
- * Workers 的启动 CPU 限制那条(CLAUDE.md)。
- *
- * 目录与字段规格是 registry 的纯投影,建服务时各算一次;它们不碰 `env`,也不碰 SECRETS_KEY
- *(原则 #5:creds 的塑形在 `lib/server/creds.ts`,这一层只做形状闸 + 活性探活)。
- */
+/** App-side connector service. Built once with no args; reads `env` at build time (not module load), and never touches SECRETS_KEY. Catalog and specs are pure projections of the registry. */
 const makeRegistry = () => ({
   catalog: buildCatalog(),
   specs: buildSpecs(),
 
-  // 创建/补录时的凭据校验:按 connector 的 account.creds 跑形状闸;opts.liveness 时再
-  // provider.validateAccount 探活。不过即失败(**类型化**,表单要原样显示这句话)。
+  // Credential validation on create / completion: shape gate per `account.creds`, then (with opts.liveness)
+  // `provider.validateAccount`. Failures are typed; the form shows the message verbatim.
   validate: (
     connectorId: string,
     values: Record<string, string>,
@@ -124,23 +100,21 @@ const makeRegistry = () => ({
         return yield* Effect.fail(new Error(`no connector for connectorId ${connectorId}`));
       }
 
-      // 形状闸:逐字段跑 CredField 的 Standard Schema(脏/缺 → CredentialValidationError)。
+      // Shape gate: each CredField's Standard Schema (bad / missing -> CredentialValidationError).
       const validated = yield* Effect.tryPromise({
         try: () => validateCredentials(manifest.account.creds, values),
         catch: asError,
       });
       if (!opts?.liveness) return;
 
-      // **没有 provider 的 connector 没有「探活」这回事**(manual:无外部 API,#203 起它连
-      // provider 都没了)。形状闸已经过了,直接放行。与「声明了 provider 却选不出来」区分开
-      // —— 那是配置错误,仍要失败。
+      // A connector without providers (manual) has no liveness check; the shape gate already passed.
+      // Declared providers that can't be selected is a config error and still fails.
       if (manifest.balance.providers.length === 0) return;
       const provider = selectProvider(manifest);
       if (!provider) {
         return yield* Effect.fail(new Error(`no provider for connector ${connectorId}`));
       }
-      // PC 注入:从 env 按 provider 声明的 creds key 取默认值(最小权限:只注入声明的 key)
-      // ——与 sync 的 fetchViaConnector 同形。
+      // Default creds come from env by the provider's declared keys (least privilege), same as sync's fetchViaConnector.
       const providerCreds: Record<string, string> = {};
       for (const f of provider.creds) {
         const v = (env as unknown as Record<string, string | undefined>)[f.key];
@@ -150,23 +124,11 @@ const makeRegistry = () => ({
         account: { id: "new", label: opts.label ?? "", connectorId, creds: validated },
         creds: providerCreds,
       };
-      // 探活加一次重试。这条路**不走 @folio/sync 的编排**,所以 sync 那套退避重试完全没覆盖它 ——
-      // 上游一次瞬时 429 / 5xx 就让用户看到「添加失败」,而他填的东西完全没错。
-      //
-      // 参数比 sync 紧得多(见常量注释),而且**不加限速闸**:用户正盯着表单,"提交后转 5 秒圈"
-      // 比"失败请重试"更糟 —— 他不知道还要等多久。探活也是一次性单发,不存在突发。
-      //
-      // 重试只吃「够不到上游」这一类:`validateAccount` 的契约(#240,见 connectors/basic 的 connector.ts)
-      // 是 —— 凭据被拒**成功返回 `false`**、传输故障(429/5xx/网络)走错误通道。于是这里:
-      // 瞬时 429 → 错误通道 + `isRetryable` 为真 → 再打一发;凭据真错 → 返回 false(不是失败)→
-      // 压根进不了重试、直接报「could not verify」。**不**改成「false 也重试」:false 现在只剩
-      // 「这个 key 就是错的」,给它多赔往返还会拿着错凭据再打上游。
-      // tests/server/validate-retry.test.ts 钉住这两条。
-      //
-      // 策略从 `@folio/shared` 的手搓 `withRetry` 换成 Effect 的 `Schedule`(**这是 shared 的第一个
-      // 消费者被摘掉**,它整体退场在 #362 第 3 站)。判据同样是 `_tag`,与 `@folio/sync` 那份用的是
-      // 同一个 `isRetryable` —— 两处重试对「什么值得再打一发」必须给同一个答案,所以那个函数住在
-      // 契约包里而不是各自抄一遍。
+      // One retry for the probe: this path bypasses @folio/sync, so a transient 429 / 5xx would show "add failed"
+      // for correct input. No rate gate: a spinner is worse than "retry", and probes are single shots.
+      // Only unreachable-upstream errors retry: `validateAccount` returns `false` for rejected credentials and uses the
+      // error channel for transport failures, so a wrong key reports "could not verify" without re-hitting upstream.
+      // Pinned by tests/server/validate-retry.test.ts. Uses the same `isRetryable` as `@folio/sync`.
       const alive = yield* provider
         .validateAccount(ctx)
         .pipe(
@@ -187,9 +149,6 @@ export class ConnectorRegistry extends Effect.Service<ConnectorRegistry>()(
   { sync: makeRegistry },
 ) {}
 
-/**
- * 同一张门票,**不经 Layer** 造成一份 context —— `runtime.ts` 手搭 isolate 运行时用(FOL-83 第二轮,
- * 理由见那里)。与 `ConnectorRegistry.Default` 是同一个 `makeRegistry`。
- */
+/** The same ticket as a Context built without Layer, for `runtime.ts`'s hand-assembled runtime. */
 export const connectorRegistryContext = (): Context.Context<ConnectorRegistry> =>
   Context.make(ConnectorRegistry, ConnectorRegistry.make(makeRegistry()));

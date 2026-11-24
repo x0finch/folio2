@@ -4,27 +4,19 @@ import { Namer } from "@folio/oracle-basic/ports";
 import { Effect, Layer } from "effect";
 import { OVERRIDES, UPSTREAM_ID } from "./constants";
 
-// 三个端口的 layer 共用的两件事。
-//
-// ① **传输层在这里被关掉,不外泄。** 端口的签名是 `Effect<A, UpstreamError>`(`R = never`),
-//    所以 client 与 `HttpClient` 由本包自己 provide —— 参考层的 `R` 里因此只有端口本身,
-//    不会长出一条 `Outbound`。谁提供这个端口是谁的事。
-//
-// ② **方法体的 `R` 用「装配时抓住 context」关掉。** adapter 的实现面(`makeUpstreamEffects` 等)
-//    要 `CoinGeckoClient | Outbound`,而端口方法不能要 —— 于是建服务时抓一份 context,
-//    每个方法出口 `Effect.provide` 进去。这样实现面仍是纯 Effect(测试直接 provide 一个假
-//    `HttpClient` 就能跑,见 tests/harness.ts),而端口那一侧是干净的。
-//
-// `transport` 只在 `coinGeckoUpstreamLayers`(./upstreams.ts)里调一次:三个端口挂在同一个引用上,
-// 一次构建只建一个 client(建 client 不是免费的,profile 里每次约 1.7ms CPU),而出口仍是三个
-// 各自可换供应商的 layer(ADR 0023)。`makeRateLimit` 的游标按 key 存在模块级(CF Workers 上
-// 跨请求活着的那份,见 client-core),所以建几份 client 都是同一个闸。
+// Shared by the three port layers.
+// The transport is closed here: port signatures are `Effect<A, UpstreamError>` (`R = never`), so the client and
+// `HttpClient` are provided by this package and no `Outbound` leaks into the reference layer.
+// Method bodies capture the context at build time and `Effect.provide` it on exit, so the implementation
+// stays plain Effect (tests provide a fake `HttpClient`) while the port side stays clean.
+// The rate-limit cursor lives at module level keyed by key (survives across requests on Workers), so
+// however many clients are built, they share one gate.
 export type Needs = CoinGeckoClient | Outbound;
 
 export const transport = (config: CoinGeckoConfig): Layer.Layer<Needs> =>
   Layer.merge(CoinGeckoClient.layer(config), FolioHttpClient);
 
-// 抓 context → 得到一个「把实现面的 effect 收成端口形状」的函数。
+// Capture context once; returns a function that narrows implementation effects to port shape.
 export const closeOver: Effect.Effect<
   <A>(effect: Effect.Effect<A, UpstreamError, Needs>) => Effect.Effect<A, UpstreamError>,
   never,
@@ -36,10 +28,7 @@ export const closeOver: Effect.Effect<
       Effect.provide(effect, ctx),
 );
 
-// **命名身份**(id + 策展表)。不需要 client,也不需要 config —— 它是纯粹的「这一家怎么称呼币」。
-//
-// `OVERRIDES` 因此不再由装配点从本包转手一遍(以前是 `OracleConfig.overrides`):
-// 它逐条写的都是 CoinGecko 的 coin id,交给它自己的 layer 带出去,少一次搬运、也少一次接错的机会。
+// Naming identity (id + curated overrides); needs no client or config.
 export const coinGeckoNamerLayer: Layer.Layer<Namer> = Layer.succeed(Namer, {
   id: UPSTREAM_ID,
   overrides: OVERRIDES,

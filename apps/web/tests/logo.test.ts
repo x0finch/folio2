@@ -2,29 +2,29 @@ import { describe, expect, it } from "vitest";
 import { platformLogoUrl, tokenLogoUrl, toLogoSource } from "@/lib/core/logo";
 
 describe("tokenLogoUrl", () => {
-  it("有内部 id + 有图 → 代理 URL(客户端不引用第三方 CDN;URL 由 id 派生,不进 payload)", () => {
+  it("internal id + image: proxy URL (client never references a third-party CDN; URL derives from the id, not in the payload)", () => {
     expect(tokenLogoUrl({ id: "uuid-1", hasLogo: true })).toBe("/api/logo/token/uuid-1");
   });
 
-  it("内部 id 特殊字符被编码", () => {
+  it("special characters in the internal id are encoded", () => {
     expect(tokenLogoUrl({ id: "a/b c", hasLogo: true })).toBe("/api/logo/token/a%2Fb%20c");
   });
 
-  it("有内部 id 但无图 → undefined(不代理空图)", () => {
+  it("internal id but no image: undefined (empty images are not proxied)", () => {
     expect(tokenLogoUrl({ id: "uuid-3", hasLogo: false })).toBeUndefined();
   });
 
-  it("有图但无内部 id → undefined(URL 不再进 payload,无 id 无从派生)", () => {
+  it("image but no internal id: undefined (URL is not in the payload, nothing to derive it from without an id)", () => {
     expect(tokenLogoUrl({ hasLogo: true })).toBeUndefined();
   });
 
-  it("完全无图 → undefined(客户端首字母,不发请求)", () => {
+  it("no image at all: undefined (client shows the initial, sends no request)", () => {
     expect(tokenLogoUrl({})).toBeUndefined();
   });
 });
 
-describe("toLogoSource(上游 URL → 有没有图)", () => {
-  it("有 canonical / provider http 图 → hasLogo true", () => {
+describe("toLogoSource (upstream URL: has image or not)", () => {
+  it("canonical / provider http image: hasLogo true", () => {
     expect(toLogoSource({ id: "x", logo: "https://cgk/usdc.png" })).toEqual({
       id: "x",
       hasLogo: true,
@@ -35,7 +35,7 @@ describe("toLogoSource(上游 URL → 有没有图)", () => {
     });
   });
 
-  it("data: 内嵌图也算「有图」→ hasLogo true(由 id 经代理拿,不再进 payload)", () => {
+  it("inline data: image also counts as having an image: hasLogo true (fetched via the proxy by id, not in the payload)", () => {
     expect(toLogoSource({ id: "x", providerLogo: "data:image/png;base64,AA" })).toEqual({
       id: "x",
       hasLogo: true,
@@ -46,21 +46,21 @@ describe("toLogoSource(上游 URL → 有没有图)", () => {
     });
   });
 
-  it("一张图都没有 → hasLogo false", () => {
+  it("no image at all: hasLogo false", () => {
     expect(toLogoSource({ id: "x" })).toEqual({ id: "x", hasLogo: false });
   });
 });
 
 describe("platformLogoUrl", () => {
-  it("有上游图 → 代理 URL(平台 key 即稳定 id)", () => {
+  it("upstream image: proxy URL (platform key is the stable id)", () => {
     expect(platformLogoUrl("bitcoin", "https://cgk/btc.png")).toBe("/api/logo/platform/bitcoin");
   });
 
-  it("key 含特殊字符(:)被编码", () => {
+  it("key with special characters (:) is encoded", () => {
     expect(platformLogoUrl("evm:1", "https://cgk/eth.png")).toBe("/api/logo/platform/evm%3A1");
   });
 
-  it("无上游图 → undefined(客户端 fallback,不发请求)", () => {
+  it("no upstream image: undefined (client fallback, no request)", () => {
     expect(platformLogoUrl("bitcoin")).toBeUndefined();
     expect(platformLogoUrl("exchange:binance", undefined)).toBeUndefined();
   });

@@ -6,24 +6,14 @@ import { PlatformService } from "../src/platforms";
 import { TokenService } from "../src/tokens";
 import { harness, now0, upstreamDown } from "./fakes";
 
-// 装配层。两件事只能在这一层被验到:
-//   ① `oracleLayer` 到底提供了哪几个服务、要哪几个端口(装配点照着它接线)
-//   ② **写路径不为目录新鲜度出网**(#216)—— mint 与候选源各自的单测都看不见「装配时把哪个
-//      实现接了进去」,而洞恰恰在那一行
-//
-// **`DefiLogoResolver` 不在这一层了**(移回 app):它的 `R` 里一个上游都没有,那本身就是
-// 「不属于参考层」的类型级写法;现在是 app 的 `defi-logo-store.ts`,测试在 apps/web 那边。
-//
-// **「每个用户一份」的保证换了地方**:以前是 `createOracleFor(cfg)(userId)` 那个显式工厂,
-// 现在是 app 侧按 userId 现建的三个 per-user store layer(`oracleLayerFor(userId)`)。
-// 服务的方法签名里依旧一个 user 参数都没有 —— 拿错用户在编译期就发生不了,而这一层压根不知道
-// 有 userId 这回事(所以这里也测不了它;真正的隔离由 `@folio/db` 那几个 store 自己的测试盯)。
+// Assembly layer: verifies which services `oracleLayer` provides and which ports it needs, and that the write path never goes
+// to the network for catalogue freshness (mint and candidate-source unit tests cannot see which implementation is wired in).
+// Per-user isolation is not testable here (the layer knows no userId); the `@folio/db` store tests pin it.
 
-describe("oracleLayer —— 一次装配拿到三个服务", () => {
-  // **聚合挂的是本尊,不是同名的另一份。** `Oracle` 只把三个域服务放到三个字段上,所以
-  // `(yield* Oracle).fx` 必须和 `yield* FxService` 是同一个对象 —— 不是的话就意味着装配里
-  // 有人又建了一套,那份的缓存、SWR 状态跟另一份对不上(#504 T15)。
-  it("Oracle 的三个字段就是三个域服务本尊", async () => {
+describe("oracleLayer: one assembly yields three services", () => {
+  // The aggregate holds the actual services, not copies: `(yield* Oracle).fx` must be the same object as `yield* FxService`,
+  // or a second set was built whose cache / SWR state diverges.
+  it("the three fields of Oracle are the three domain services themselves", async () => {
     const h = harness();
     await h.run(
       Effect.gen(function* () {
@@ -35,20 +25,19 @@ describe("oracleLayer —— 一次装配拿到三个服务", () => {
     );
   });
 
-  it("`oracleLayer` 是纯装配 —— 建它本身不碰任何端口", async () => {
+  it("`oracleLayer` is pure assembly: building it touches no port", async () => {
     const h = harness();
     await h.run(Effect.void);
-    // build 三个服务只是把端口从 context 里取出来存进闭包:一次读、一次写都不该发生。
+    // Building only takes ports from context into closures: no read or write should happen.
     expect(h.cache.reads + h.cache.writes).toBe(0);
     expect(h.upstream.calls).toEqual([]);
     expect(h.store.rows.size).toBe(0);
   });
 });
 
-describe("全局维护任务不挂 per-user 门面", () => {
-  // `GlobalRefIndexService` 不进 `oracleLayer`:它的依赖只有两个全局端口,cron 单独 provide
-  // 那个 layer 就能跑 —— 不必先假造一个用户、也不必建 per-user 的三张 store。
-  it("刷全局映射表不要 userId、也不要 per-user store:拉 → 一次整份灌 → 记得刷新时刻", async () => {
+describe("global maintenance job is not on the per-user facade", () => {
+  // `GlobalRefIndexService` is not in `oracleLayer`: cron provides just its layer and the two global ports, no fake user.
+  it("refreshing the global ref-index needs no userId or per-user store: fetch, one whole write, record the refresh time", async () => {
     const h = harness();
     h.upstream.globalRefIndex = {
       rows: [
@@ -65,7 +54,7 @@ describe("全局维护任务不挂 per-user 门面", () => {
         expect(yield* svc.refreshedAt()).toEqual(Option.none());
 
         const summary = yield* svc.warm();
-        // 差量写(#FOL-68):空库首刷 → 两行都是新增,改/删各 0。计数从 store 一路传到 cron 日志。
+        // Diff write: first refresh on an empty db gives two added rows, 0 changed / removed; counts flow from the store to the cron log.
         expect(summary).toEqual({
           rows: 2,
           unmatchedPlatforms: [],
@@ -74,16 +63,15 @@ describe("全局维护任务不挂 per-user 门面", () => {
           inserted: 2,
           deleted: 0,
         });
-        expect(h.globalRefIndex.writes).toBe(1); // 一次整份写
-        // 时刻取自 `Clock`(不再由调用方传一个 `now` 进来)。
+        expect(h.globalRefIndex.writes).toBe(1); // one whole write
+        // The time comes from `Clock`.
         expect(yield* svc.refreshedAt()).toEqual(Option.some(now0));
       }),
     );
   });
 
-  // 迁移前这是 `OracleWarmConfig.onWarn` 一个配置回调。现在走 Effect 的日志系统,
-  // 落到哪由 cron 提供的 Logger layer 决定 —— 少一个配置字段,而且任何调用点都能记。
-  it("失配落一条 warning(带 namer 与链名);没有失配就不吵", async () => {
+  // Warnings go through Effect's logger; where they land is decided by the Logger layer the cron provides.
+  it("a mismatch logs one warning (with namer and chain name); no mismatch, no noise", async () => {
     const h = harness();
     h.upstream.globalRefIndex = { rows: [], unmatchedPlatforms: ["sui"], skipped: 0 };
     await h.run(Effect.flatMap(GlobalRefIndexService, (s) => s.warm()));
@@ -97,8 +85,8 @@ describe("全局维护任务不挂 per-user 门面", () => {
     expect(h.logs.filter((l) => l.level === "WARN")).toHaveLength(1);
   });
 
-  // 与读路径相反:cron 需要知道这一轮白跑了(降级在这儿等于把一次静默故障变成两次)。
-  it("上游挂了 → 错误交给 cron,不降级", async () => {
+  // Unlike the read path, cron must know the run was wasted (degrading here would turn one silent failure into two).
+  it("upstream down: the error goes to cron, no degradation", async () => {
     const h = harness();
     h.upstream.fail = upstreamDown();
     const result = await h.run(
@@ -109,9 +97,8 @@ describe("全局维护任务不挂 per-user 门面", () => {
   });
 });
 
-// 本条是 #216 的核心回归。装配层是它唯一能被验到的地方 —— mint 与候选源各自的单测都看不见
-// 「装配时把哪个实现接了进去」,而洞恰恰在那一行:以前是 `candidates: this.tokens.candidates`。
-describe("写路径不为目录新鲜度出网(#216)", () => {
+// Core regression: the write path never fetches for catalogue freshness; the wiring is where it can break.
+describe("the write path does not egress for catalogue freshness", () => {
   const POL = {
     ref: "src/issued:polygon-ecosystem-token",
     symbol: "POL",
@@ -119,28 +106,28 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     price: { unitPrice: 1, marketCapRank: 76, asOf: 0 },
   };
 
-  it("warm 过期之后 mint 按 symbol 认币 —— 零请求", async () => {
+  it("after warm expires, mint by symbol makes zero requests", async () => {
     const h = harness();
     h.upstream.markets = [POL];
     await h.run(
       Effect.gen(function* () {
-        // 先让橱窗把 blob 建起来(用户打开过一次选币下拉)。
+        // First let the showcase build the blob (the user opened the picker once).
         yield* Effect.flatMap(TokenService, (t) => t.topTokens(10));
         const after = h.upstream.calls.length;
 
-        // 时钟推过价的 TTL:橱窗会认为该刷了,mint 不该。
+        // Clock past the price TTL: the showcase would refresh, mint must not.
         yield* TestClock.adjust(Duration.millis(24 * 60 * 60 * 1000));
         const ids = yield* Effect.flatMap(TokenService, (t) =>
           t.mint([{ ref: "binance/issued:POL", seed: { symbol: "POL" } }]),
         );
 
-        expect(ids.get("binance/issued:POL")).toBeDefined(); // 认出来了(用的是旧目录)
-        expect(h.upstream.calls).toHaveLength(after); // 而且一次网都没出
+        expect(ids.get("binance/issued:POL")).toBeDefined(); // recognised (via the old catalogue)
+        expect(h.upstream.calls).toHaveLength(after); // and no network call
       }),
     );
   });
 
-  it("对照:同样过期,橱窗**会**刷 —— 差别只在读者是谁", async () => {
+  it("control: same expiry, the showcase does refresh; the only difference is the reader", async () => {
     const h = harness();
     h.upstream.markets = [POL];
     await h.run(
@@ -156,9 +143,8 @@ describe("写路径不为目录新鲜度出网(#216)", () => {
     );
   });
 
-  it("冷缓存下 mint 仍取一次 —— 否则按 symbol 认的币集体认不出来", async () => {
-    // 顺带:`oracleLayer` 的 `R` 里没有 `CandidateSource`(类型上就成立,装配点不必知道它);
-    // harness 只给八个端口,mint 的 symbol 那一档照样走通 —— 这是它的运行时证据。
+  it("on a cold cache mint still fetches once, or symbol-matched tokens all go unrecognised", async () => {
+    // `oracleLayer`'s `R` has no `CandidateSource`; the harness supplies only eight ports and the symbol tier still works.
     const h = harness();
     h.upstream.markets = [POL];
     const ids = await h.run(

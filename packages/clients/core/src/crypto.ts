@@ -1,13 +1,8 @@
 import { Effect } from "effect";
 import { SigningFailure, summaryOf } from "./errors";
 
-// HMAC-SHA256 签名。**这是从 `@folio/connectors-basic` 复制过来的一份,不是搬过去的**:
-// 那个包是 connector 的契约基座(`BalanceProvider` / `Balance` / creds 加解密),client 层不许依赖它
-// (ADR 0036) —— 一个只会算摘要的函数不值得为它拉进整个契约包。老那份留在原地服务老 provider,
-// 等 B 批 provider 包搬空后若没人用了,再跟着删。
-//
-// 与老那份的区别只有出口形状:`Promise<string>` → `Effect<string, SigningFailure>`。签不出来是
-// **凭据问题不是传输故障**(见 errors.ts 里 SigningFailure 的注释)。
+// Duplicated from `@folio/connectors-basic` on purpose: clients must not depend on the connector
+// contract package.
 
 const HEX = "0123456789abcdef";
 
@@ -42,7 +37,7 @@ export function hmacSha256(
       );
       return encoding === "hex" ? bytesToHex(sig) : bytesToBase64(sig);
     },
-    // **不带 cause 里的 secret**:cause 是 WebCrypto 抛的错,不含密钥;`where` 也只说「签名」。
+    // The WebCrypto error never contains the key.
     catch: (cause) => new SigningFailure({ where: "hmac-sha256", cause: summaryOf(cause) }),
   });
 }

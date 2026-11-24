@@ -2,23 +2,22 @@ import { type SyncAction, SyncStatus } from "@/components/sync-status";
 import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { useSyncStatus } from "@/lib/queries/sync";
 
-// 页头右上角同步入口:绝对定位落到 PageHeader actions 原位(<main> 是定位上下文,top/right 对齐其内距)。
-// 同步摘要读自 react-query 缓存(_authed loader 已预取,不额外请求)。需要它的页面自行渲染 <HeaderSync/>
-// —— appShell 不再持有;账户页额外传 action 融入右侧 + 段。桌面 hover 面板 /
-// 移动 tap 面板由 SyncStatus 自理。
+// Sync entry at the top right, absolutely positioned where PageHeader actions would sit (<main> is
+// the positioning context). Reads the sync summary from the react-query cache; each page that
+// needs it renders its own <HeaderSync/>.
 export function HeaderSync({
   action,
   autoSyncWhenStale,
 }: {
   action?: SyncAction;
-  /** 数据过期时自动补一轮(FOL-18 子票 2)。**只有首页传** —— 账户页 / 洞察页维持现状。 */
+  /** Auto-sync a round when data is stale. Only the home page passes this. */
   autoSyncWhenStale?: boolean;
 }) {
-  // 按选中的 Portfolio 那一份(ADR 0033)—— 切组合这块跟着变,不再对着别处的账户报数。
+  // Follows the selected portfolio.
   const { selectedId } = usePortfolio();
   const syncStatus = useSyncStatus(selectedId);
   return (
-    // `data-slot`:e2e 量它在页头的位置(切 page 前后 top 不变),不猜类名。
+    // `data-slot`: e2e measures its position in the page header.
     <div data-slot="header-sync" className="absolute top-6 right-4 z-20 lg:right-8">
       <SyncStatus
         summary={syncStatus}

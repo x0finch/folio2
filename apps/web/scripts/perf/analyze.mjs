@@ -1,16 +1,10 @@
-// perf:cpu:analyze —— 把 perf:cpu:jobs 写下的 profile 拆成「逐调用 kind、逐函数」的 top-N。
+// perf:cpu:analyze: breaks the profiles perf:cpu:jobs wrote into per-call-kind, per-function top-N. The owners column stops at a package ("Effect 325 ms"); this accumulates self and inclusive time per function (name + source module + line), each averaged per call. Inclusive counts a function once per sample, so recursion isn't double-counted.
 //
 //   pnpm --filter @folio/web perf:cpu:analyze <run-dir> [--top 25] [--kind sync-account] [--json]
 //
-// owners 列只说到包(「Effect 325 ms」),看不出是 Effect 里的哪件事(Schema 解码?Layer 构造?
-// fiber 调度?)。这里按函数(名字 + 源模块 + 行号)累加两种时间,都按**每次调用**平均:
-// - self:采样落在这一帧本身;
-// - inclusive:采样的调用栈里有这一帧(一个样本对同一个函数只记一次,递归不重复算)。
-// 源模块用 owners.mjs 的 region 映射(`//#region <源路径>`)。行号只对产出 profile 的那次构建有效,
-// 所以 perf:cpu:jobs 把那次的 region 表存进输出目录(`regions.json`),这里优先用它。
+// Source modules come from owners.mjs's region map (`//#region <path>`). Line numbers are valid only for the build that produced the profile, so perf:cpu:jobs stores that build's region table in the output dir (`regions.json`), preferred here.
 //
-// 时间窗与样本封顶和 jobs.mjs 同一个规则:第 i 格 = [第 i 次调用开始, 第 i+1 次开始),单个样本最多
-// 记 `maxSampleUs`(`<scenario>-<tag>.slots.json` 里带着)。`:first` 那次单列(冷数据),默认跳过。
+// Windowing and sample cap match jobs.mjs: slot i = [start of call i, start of call i+1), one sample capped at `maxSampleUs` (carried in `<scenario>-<tag>.slots.json`). The `:first` call (cold data) is separate and skipped by default.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -23,9 +17,7 @@ const { values, positionals } = parseArgs({
     kind: { type: "string" },
     "with-first": { type: "boolean", default: false },
     json: { type: "boolean", default: false },
-    // 自顶向下的调用树(按 kind 聚合),只画 inclusive ≥ `--min-ms` 的节点。`--collapse` 的帧
-    // (默认 Effect 的 fiber 运行时 / 调度器)不画,子节点挂到最近一个画出来的祖先上 —— 否则树
-    // 里一半是 runLoop / evaluateEffect,看不出是谁的活。
+    // Top-down call tree by kind, drawing only nodes with inclusive >= `--min-ms`. `--collapse` frames (default: Effect's fiber runtime / scheduler) are skipped and their children hang off the nearest drawn ancestor, or half the tree would be runLoop / evaluateEffect.
     tree: { type: "boolean", default: false },
     "min-ms": { type: "string", default: "0.5" },
     collapse: {
@@ -41,7 +33,7 @@ if (!dir) {
   process.exit(2);
 }
 const TOP = Number(values.top);
-// profile 的行号只对产出它的那次构建有效:输出目录里有 region 表就用它,没有(老的输出)才读当前 `dist/`。
+// Profile line numbers are valid only for the build that made them: use the region table in the output dir if present, else (old output) read the current `dist/`.
 if (existsSync(join(dir, "regions.json")))
   loadRegions(JSON.parse(readFileSync(join(dir, "regions.json"), "utf8")));
 else console.error("no regions.json in the run dir — mapping frames against the current dist/");
@@ -99,7 +91,7 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith(".slots.json"))) {
     b.totalUs += dt;
     const k = key(id);
     b.self.set(k, (b.self.get(k) ?? 0) + dt);
-    // 调用树:从根往下,跳过被 collapse 的帧。
+    // Call tree: from the root down, skipping collapsed frames.
     const stack = [];
     for (let cur = id; cur !== undefined; cur = parent.get(cur)) {
       const f = nodes.get(cur).callFrame;

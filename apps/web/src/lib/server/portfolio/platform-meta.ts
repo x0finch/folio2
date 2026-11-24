@@ -3,7 +3,7 @@ import type { PlatformMeta } from "@folio/oracle-basic";
 import { Effect } from "effect";
 import { z } from "zod";
 
-// 链平台展示元数据(FOL-54):按 chain key 批量 resolve —— 键集由客户端从快照原料算好再传入。
+// Batch-resolves chain platform display metadata by chain key (the client computes the key set).
 
 export const PlatformMetaInput = z.object({
   chainIds: z.array(z.string()),

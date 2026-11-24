@@ -29,25 +29,25 @@ const snapshot = (accountId: string, takenAt: number): AccountSnapshot => ({
 });
 
 describe("deriveSyncStatus", () => {
-  it("缺凭据、数旧了都进「需要注意」", () => {
+  it("missing creds and stale data both need attention", () => {
     const accounts = [
-      account({ id: "fresh", label: "刚同步" }),
-      account({ id: "stale", label: "很久没同步" }),
-      account({ id: "creds", label: "缺凭据", needsCredentials: true }),
+      account({ id: "fresh", label: "Just synced" }),
+      account({ id: "stale", label: "Long unsynced" }),
+      account({ id: "creds", label: "Missing creds", needsCredentials: true }),
     ];
     const snapshots = [snapshot("fresh", NOW), snapshot("stale", NOW - 30 * DAY)];
     const out = deriveSyncStatus(accounts, snapshots, NOW);
 
     expect(out.total).toBe(3);
     expect(out.attention.map((a) => [a.label, a.kind])).toEqual([
-      ["缺凭据", "missing-credentials"],
-      ["很久没同步", "stale"],
+      ["Missing creds", "missing-credentials"],
+      ["Long unsynced", "stale"],
     ]);
     expect(out.lastSyncedAt).toBe(NOW);
   });
 
-  it("从没同步过的账户 → 上次同步时刻是空,不是 1970", () => {
-    const out = deriveSyncStatus([account({ id: "never", label: "没同步过" })], [], NOW);
+  it("never-synced account → last sync time is null, not 1970", () => {
+    const out = deriveSyncStatus([account({ id: "never", label: "Never synced" })], [], NOW);
 
     expect(out.lastSyncedAt).toBeNull();
     expect(out.attention.map((a) => a.kind)).toEqual(["never-synced"]);

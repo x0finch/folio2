@@ -14,9 +14,7 @@ import { Stat } from "./stat";
 import { TrendPanel } from "./trend-panel";
 
 const DAY_MS = 86_400_000;
-// hero 趋势最多展示最近 30 天;更长跨度 + 区间切换属于 Insights(不改共享的 getPortfolioHistory)。
 const HERO_WINDOW_DAYS = 30;
-// hero 净值 ≥ 此额才启用缩写(小于则本来就放得下、缩写没意义)。
 const HERO_COMPACT_MIN = 1_000_000;
 const GAIN_BADGE =
   "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 font-mono font-semibold text-xs tabular-nums";
@@ -32,8 +30,7 @@ function gainTone(amount: number) {
   return GAIN_TONE.flat;
 }
 
-// 窄屏(< sm=640):hero 默认用紧凑金额,给「缩写 + 涨跌幅同行」腾地方;桌面默认完整。
-// 只决定**默认**态,用户点击总额后由 compactOverride 接管。
+// Narrow screens (< sm=640) default to compact amounts; the user's click then takes over via compactOverride.
 function useIsNarrow() {
   const [narrow, setNarrow] = useState(false);
   useEffect(() => {
@@ -46,22 +43,20 @@ function useIsNarrow() {
   return narrow;
 }
 
-// 24h 盈亏药丸:贴在净值数字右上角。文案与代币行同形(`{±}$Δ P%`),底色走涨跌 token。
-// **盈亏 FOL-51 起随总览一起到,没有「还在取」的态** —— 只剩两态:算得出(数)/ 算不出(`—`)。
+// 24h PnL pill at the top right of the number; it arrives with the overview, so only two states: a value or `—`.
 function GainBadge({ gain, compact = false }: { gain: Gain | null; compact?: boolean }) {
   const usd = useDisplayValue();
   if (gain == null) return <span className={cn(GAIN_BADGE, GAIN_TONE.flat)}>{NO_VALUE}</span>;
   return (
     <span className={cn(GAIN_BADGE, gainTone(gain.amount))}>
-      {/* 遮 24h 盈亏金额,留百分比(ADR 0052)。 */}
+      {/* Masks the PnL amount, keeps the percentage. */}
       <Sensitive>{signedUsd((n) => usd(n, { compact }), gain.amount)}</Sensitive>
       {gain.pct != null && ` ${Math.abs(gain.pct).toFixed(2)}%`}
     </span>
   );
 }
 
-// 净值 hero(H3 #102):趋势图作背景 + 净值/24h/三指标浮于其上(无 Card)。
-// 趋势色随涨跌走 --pos/--neg;三指标 best/worst/稳定币占比派生自纯函数 deriveHeroMetrics(已单测)。
+// Net-worth hero: trend chart as background with number / 24h / three metrics floating over it.
 export function PortfolioHero({
   series,
   totalUsd,
@@ -73,62 +68,53 @@ export function PortfolioHero({
 }: {
   series: HistoryPoint[];
   totalUsd: number;
-  // 组合层 24h 盈亏(ADR 0050,两端相减),随总览原料一起到 —— **不在这里从曲线上量**。
-  // 曲线画的是净值(含充提),这个数是「现值 − 24 小时前值」,两者本来就不该是同一个;`null` = 算不出。
+  // Portfolio 24h PnL (two-ended subtraction) arrives with the overview; deliberately not measured
+  // off the curve, which plots net worth including deposits. `null` = not computable.
   gain24h: Gain | null;
   holdings: readonly HoldingLike[];
-  /** 净值曲线还在取 —— 数字照常渲染,曲线走 TrendPanel 的「还在取数」态。 */
+  /** Curve still loading: numbers render, the curve shows TrendPanel's loading state. */
   loading?: boolean;
-  /** 首次同步中(有账户、还没有任何快照)—— 大数字走骨架、标题换「同步中」,不把 $0 当答案画。 */
+  /** First sync (accounts but no snapshot): skeleton number and "syncing" title instead of $0. */
   syncing?: boolean;
-  // 附加到文案层(数字/指标)的 class —— 只影响文字覆盖层,不动趋势图。默认空,主页不传 → 零影响。
+  // Class for the text layer only; doesn't affect the chart.
   contentClassName?: string;
 }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
-  // 划动读数(#470 片7):划到哪个点、那一刻怎么写,都在这个 hook 里。
+  // Scrub readout: which point and how it's labelled live in this hook.
   const scrub = useChartScrub();
 
-  // 裁到最近 30 天窗口(以最新快照时刻为基准,与 SSR/客户端一致、不用客户端时钟),
-  // 再自适应降采样:粒度随实际数据量走(约 1 天 → 小时级、约 30 天 → 日级),日内多次手动
-  // 同步塌缩成"该桶最后一个点",避免刷新频率抖动图形。
+  // Clip to the last 30 days (relative to the latest snapshot, not the client clock) and
+  // downsample adaptively; same-day manual syncs collapse to the bucket's last point.
   const lastT = series.length > 0 ? series[series.length - 1].t : 0;
   const chartSeries = downsampleSeries(
     series.filter((p) => p.t >= lastT - HERO_WINDOW_DAYS * DAY_MS),
   );
   const hasHistory = chartSeries.length >= 2;
-  // 「还什么都没有」—— 只有这一种情况留那条装饰线(见下面 JSX 里的分支)。
-  //
-  // **判据是「有没有东西」,不是「有没有钱」。** 一开始写的是 `totalUsd > 0`,那样净值为**负**
-  // 会掉进装饰线那支:perp 亏穿时屏幕上是「净值 −$X」配一条平滑上扬的绿线,比 0 那种更糟。
-  // 而持有价值恰好为 0 的灰尘仓位也仍然是「有仓位」—— 那时该说明原因,不该画背景纹样。
+  // "Nothing yet" is the only case that keeps the decorative line. Keyed on holdings, not on
+  // `totalUsd > 0`: a negative net worth (perp blown through) would otherwise show a rising green line.
   const nothingYet = holdings.length === 0 && totalUsd === 0;
 
-  // 24h 盈亏(ADR 0050,两端相减):现值 − 24 小时前值,随总览一起到。best/worst 按盈亏金额挑,
-  // 所以要这份 metrics。充提计入当天盈亏(设计),曲线画的是净值(含充提),两者一致 —— 充值那天
-  // 曲线跳一格、这个数也跟着 +10 万,不再互相矛盾。
+  // best/worst pick by PnL amount, hence these metrics.
   const metrics = deriveHeroMetrics(holdings, totalUsd);
   const spanDays = hasHistory
     ? Math.round((chartSeries[chartSeries.length - 1].t - chartSeries[0].t) / DAY_MS)
     : 0;
 
-  // 大数字显示的是**划到的那个点,或者实时值** —— 同一个位置、同一套元素(#470 片7)。
+  // The big number shows the scrubbed point or the live value.
   const shownUsd = scrub.point ? scrub.point.total : totalUsd;
 
-  // 紧凑金额:窄屏默认开(给「缩写 + 涨跌幅同行」腾地)、桌面默认关;点击总额后由 override 接管。
-  // 只在净值 ≥ HERO_COMPACT_MIN 时才真正缩写 —— 小额放得下、缩写没意义。总额与 badge 共用它。
+  // Compact: default on for narrow, off for desktop; a click overrides. Only abbreviates at
+  // >= HERO_COMPACT_MIN. Shared by the total and the badge.
   const isNarrow = useIsNarrow();
   const [compactOverride, setCompactOverride] = useState<boolean | null>(null);
   const showCompact = (compactOverride ?? isNarrow) && shownUsd >= HERO_COMPACT_MIN;
 
   return (
-    // **overflow-hidden 只包趋势图,不包整块**:它本是为了裁掉绝对定位的 TrendPanel(见 trend-panel.tsx
-    // 「调用方套 relative + overflow-hidden」),但套在根上会连带把浮于其上的净值一起裁 —— 隐私开启时
-    // 大号数字的高斯模糊向左溢出根左沿,就被这层 overflow 削掉半边(FOL-75)。把裁剪挪到图自己的
-    // 包裹层,内容层不再受它约束,模糊能完整铺开。
+    // overflow-hidden wraps only the chart, not the root: on the root it would clip the floating
+    // net worth (the privacy blur overflows the left edge).
     <div className="relative min-h-60 pt-1">
-      {/* 四态(点数不够 / 还在取数 / 什么都还没有 / 真有数据)全在 TrendPanel 里判。
-          hero 的上留白更大(topMargin=92,把折线压到下半区),填充也比抽屉略重 → 覆盖这两个默认值。 */}
+      {/* TrendPanel decides all four states. The hero's larger top margin (92) and heavier fill override the defaults. */}
       <div className="absolute inset-0 overflow-hidden">
         <TrendPanel
           series={chartSeries}
@@ -140,20 +126,17 @@ export function PortfolioHero({
         />
       </div>
 
-      {/* 数字层:浮于图上,不吃指针(hover 透传给背景图)。 */}
+      {/* Number layer floats over the chart and ignores pointers (hover passes to the chart). */}
       <div className={cn("pointer-events-none relative z-10", contentClassName)}>
-        {/* 划到某点时,标题换成那个时刻(#470 片7)—— 大数字顶替成该点的值,两者一起才说得清
-            「这是哪一刻的数」。 */}
+        {/* While scrubbing the title shows that moment, since the big number is the scrubbed value. */}
         <p className="font-medium text-muted-foreground text-xs tabular-nums">
           {scrub.label ?? (syncing ? t("firstSyncing") : t("totalNetWorth"))}
         </p>
-        {/* select-text:总净值是最该能复制的那个数(hero 整块坐在可点区域里)。
-            inline-flex + items-start:24h 增量贴在金额盒子的右上角,不跟数字基线居中。 */}
+        {/* select-text: the total is the number most worth copying. inline-flex + items-start puts the 24h delta at the top right. */}
         <div className="mt-2 inline-flex flex-wrap items-start gap-3">
-          {/* select-text:总净值是最该能复制的那个数。滚动与「整数/小数怎么拆」走 AmountTicker
-              (两个抽屉同一份);hero 的字号在这里给 —— 它比抽屉大两档。 */}
-          {/* 点击总额切换缩写↔完整(pointer-events-auto 覆盖数字层的 none):金额 ≥ $1M 时缩写省地、
-              涨跌幅同行,再点回完整。数字区在图上半、非划动区,吃指针不影响趋势 scrub。 */}
+          {/* Rolling and integer/decimal split use AmountTicker (shared with both drawers). Clicking the
+              total toggles compact (pointer-events-auto overrides the layer's none); it sits in the
+              non-scrub upper half. */}
           <button
             type="button"
             onClick={() => setCompactOverride((v) => !(v ?? isNarrow))}
@@ -161,10 +144,10 @@ export function PortfolioHero({
             className="pointer-events-auto flex w-fit cursor-pointer select-text items-baseline text-left"
           >
             {syncing ? (
-              // 首次同步中:大数字位摆骨架,别把「还不知道」画成 $0(见 index.tsx 的 pending 判据)。
+              // First sync: skeleton instead of drawing "unknown" as $0 (see index.tsx's pending check).
               <Skeleton className="h-11 w-52 rounded-lg sm:h-14 sm:w-64" />
             ) : (
-              // 隐私开着时 AmountTicker 自己渲染静态模糊值(ADR 0052),点一下临时显示 —— 这里不必再包。
+              // With privacy on, AmountTicker renders a static blurred value itself; no wrapper needed.
               <AmountTicker
                 value={shownUsd}
                 scrubbing={scrub.point != null}
@@ -174,15 +157,13 @@ export function PortfolioHero({
               />
             )}
           </button>
-          {/* 划动时不显 24h 药丸:那是「今天涨跌」,摆在一个历史时刻的数值旁边是两件事对不上。 */}
+          {/* Hide the 24h pill while scrubbing: it's "today's change" beside a historical value. */}
           {scrub.point ? null : <GainBadge gain={gain24h} compact={showCompact} />}
         </div>
 
         <div className="mt-6 flex flex-wrap gap-8">
-          {/* 「今天赚 / 亏最多的那个仓」—— 按盈亏**金额**取,不按涨跌幅(ADR 0050)。以前只看涨跌幅、
-              不看持有多少,于是这两格永远被小仓位的暴涨币占据。金额走 usd() → 跟随展示币种。
-              盈亏随总览一起到,没有「还在取」的态 —— best/worst 直接算得出或 `—`。 */}
-          {/* 遮盈亏金额,留 symbol(公开的币名);占比是百分比,整格不遮。 */}
+          {/* Best / worst position by PnL amount (not percent). Amounts go through usd() to follow the
+              display currency. Masks the PnL amount, keeps the symbol; the percentage stays unmasked. */}
           <Stat
             label={t("bestToday")}
             value={

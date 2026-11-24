@@ -1,36 +1,28 @@
 import type { TokenRef } from "@folio/oracle-ref";
 
-// 参考层的领域类型(ADR 0021 / 0023)。沿用现有词表,不另造:
-//   · `asset` = 持仓侧的【输入】(从 Balance 抽出的待解析身份)
-//   · `token` = 参考层的一切(解析后的实体及其数据)
-//   · **不出现任何数据源的名字** —— 「谁管它叫什么」由 tokenRef 的 `namer` 承载,
-//     而那个 namer 是注入的 upstream 自报的(`TokenUpstream.id`),契约层不知道是哪家。
-//
-// 两条主线(ADR 0021):内部只认 `tokens.id`;`tokenRef` 只在两个边界出现
-// (连接器报余额、oracle 问上游)。「上游认没认出这个币」不是一种状态 —— 看它有没有
-// 那个 namer 的 ref 行,读出来就是 `TokenInfo.ref` 非空。
+// Domain types of the reference layer. `asset` = the input side of a holding (identity to resolve); `token` = everything after resolution.
+// No data source is named: who calls it what is the tokenRef's `namer`, reported by the injected upstream. Internally only
+// `tokens.id` counts; `tokenRef` appears only at the two boundaries (connector balances, oracle asking upstream). "Did upstream recognise
+// it" is not a state: it is whether the namer's ref row exists, i.e. `TokenInfo.ref` non-null.
 
 export type { TokenRef };
 
-// —— 两个 facet(分开存 = 不同 TTL,ADR 0023)——
+// Two facets (stored separately for different TTLs)
 
-// 元信息 facet,慢 TTL(logo / name 极少变,没必要随价刷)。
-// `ref` = 当前源对它的命名;`null` = 这个源还没认出它(不存额外状态)。
+// Metadata facet, slow TTL (logo / name rarely change). `ref` = the current source's name for it; `null` = not recognised yet.
 export interface TokenInfo {
   id: string;
   ref: TokenRef | null;
   symbol: string;
   name: string;
-  logo?: string; // 源给的图(canonical)
-  providerLogo?: string; // 连接器自带的图(备用槽;展示回退链第二档)
-  // 这三个字段该回源重取了(长 TTL,见 INFO_TTL_MS)。**读侧不因此降级** —— 与价的 stale 同一个
-  // 口径:过期不删、照样给,只是标出来让调用方后台刷。建行时置为「已过期」:行是拿连接器报的
-  // 元信息建的,上游那份还没覆盖过。
+  logo?: string; // the source's image (canonical)
+  providerLogo?: string; // the connector's own image (spare slot; second tier of the display fallback chain)
+  // These three fields are due for refetch (long TTL, see INFO_TTL_MS). Reads do not degrade for it: served as is and flagged,
+  // like price stale. Set to "expired" at row creation, since the row was built from connector metadata upstream has not overwritten.
   infoStale: boolean;
 }
 
-// 价 facet,快 TTL。`marketCapRank` 是市场数据,其权威 home 在此。
-// 一律以 USD 计价;多法币在展示层换算,不进本层。
+// Price facet, fast TTL. `marketCapRank` is market data. Always priced in USD; fiat conversion is in the display layer.
 export interface TokenPrice {
   unitPrice: number;
   change24h?: number;
@@ -38,41 +30,39 @@ export interface TokenPrice {
   asOf: number;
 }
 
-// 价 facet 读出形:**过期不删、带 stale 标**(SWR)—— 展示先给旧价,调用方后台刷新。
+// Price facet read form: expired is not deleted, carries a stale flag (SWR): show the old price and refresh in the background.
 export interface TokenRecordPrice extends TokenPrice {
   stale: boolean;
 }
 
-// 代币整行 = 两个 facet 合起来,服务层读两个 store 后合并(store 各自只管自己那半)。
+// A whole token row = the two facets merged by the service after reading the two stores.
 export interface TokenRecord extends TokenInfo {
   price?: TokenRecordPrice;
 }
 
-// —— 写入用的形状 ——
+// Write shapes
 
-// provider 侧 seed(同步时采集):建行时它就是全部;归一到已有 Token 时**只填空槽、不覆盖**
-// (那行可能已有源给的好数据)。
+// Provider-side seed (collected at sync): when creating a row it is everything; when merging into an existing Token it only fills empty slots.
 export interface ProviderTokenSeed {
-  symbol: string; // 已归一(大写)
+  symbol: string; // normalised (uppercase)
   name?: string;
   providerLogo?: string;
 }
 
-// 只填空槽的补丁:源后补的名字 / 图 / 排名。undefined 的字段一律不动。
+// Empty-slot patch: a name / image / rank a source supplies later; undefined fields are untouched.
 export interface TokenInfoPatch {
   name?: string;
   logo?: string;
   providerLogo?: string;
 }
 
-// 写回一条价(按 token_id,不按 ref)。
+// Write back one price (by token_id, not ref).
 export interface TokenPriceWrite extends TokenPrice {
   tokenId: string;
 }
 
-// 写回一行上游元信息(按 token_id)。**与 `TokenInfoPatch` 相反:这是覆盖,不是填空槽** ——
-// 上游是这三个字段的权威 home,连接器报的那份只是行还没被认出来时的临时值。
-// `providerLogo` 不在这里 —— 那是连接器自带的备用图,上游无权覆盖它。
+// Write back one row of upstream metadata (by token_id). Unlike `TokenInfoPatch` this overwrites: upstream is the authority for
+// these three fields and the connector's values are only provisional. `providerLogo` is not here: upstream may not overwrite it.
 export interface TokenInfoWrite {
   tokenId: string;
   symbol: string;
@@ -80,33 +70,30 @@ export interface TokenInfoWrite {
   logo?: string;
 }
 
-// —— 其余 ——
+// Other
 
-// 历史价观测点:atMs = 该 UTC 日桶起点。
+// Historical price observation: atMs = start of the UTC day bucket.
 export interface TokenPricePoint {
   atMs: number;
   unitPrice: number;
 }
 
-// 符号消歧的候选(瞬时,喂 `pickByConfidence`)。来自 warm,已带 `marketCapRank`;
-// symbol 是查它的 key,值里不带。
+// Symbol disambiguation candidate (transient, fed to `pickByConfidence`): from warm, already has `marketCapRank`; the symbol is the lookup key.
 export interface TokenCandidate {
   ref: TokenRef;
   marketCapRank?: number;
 }
 
-// 一条 ref 已经有主了。`linked` = 它指向的那个 Token **已经有当前源的 ref 行** ——
-// 也就是已经认出来是哪个币了。mint 靠它区分「什么都不用做」与「该补链 / 该合并」,
-// 免得每次同步都替所有已知的 ref 白查一遍全局映射(实现里是一次 join)。
+// A ref that already has an owner. `linked` = its Token already has a ref row for the current source, i.e. already recognised;
+// mint uses it to tell "nothing to do" from "link / merge", avoiding a global-map lookup per known ref each sync.
 export interface TokenRefHit {
   tokenId: string;
   linked: boolean;
 }
 
-// 全局映射表(`global_token_ref_index`,ADR 0022)一行:「这条**链上** ref,在**那个上游**那里叫这个」。
-// **两边都是整条 tokenRef**(#228):不再是「一条 ref + 半截叫法」——右边给整条,落表时才由 store 拆成
-// (upstream, upstream_local_name) 两列。给半截会迫使每个调用方知道命名者是谁、自己拼回去(#227 通则)。
+// One row of the global map (`global_token_ref_index`): an on-chain ref and what that upstream calls it. Both sides are whole tokenRefs;
+// the store splits the right side into (upstream, upstream_local_name) columns on write, so callers need not know the namer.
 export interface TokenRefIndexRow {
-  chainRef: TokenRef; // 链上寻址:evm:<chainId>/contract:<addr> / <slug>/contract:<addr>
-  upstreamRef: TokenRef; // 上游对它的整条命名:coingecko/issued:bitcoin
+  chainRef: TokenRef; // on-chain address: evm:<chainId>/contract:<addr> / <slug>/contract:<addr>
+  upstreamRef: TokenRef; // upstream's whole name for it: coingecko/issued:bitcoin
 }

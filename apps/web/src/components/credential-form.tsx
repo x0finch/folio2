@@ -8,10 +8,8 @@ import type { InputSpec } from "@/lib/server/creds";
 import { GenericFields } from "./account-fields";
 import { incompleteSpecs } from "./incomplete-specs";
 
-// 动态补录表单(P6.6 → A3 v2):字段复用加账户的 GenericFields(带 new-password 安全 + 统一样式),
-// 只渲染非 public 字段(incompleteSpecs);semi 字段若有 credHint 打码片段,展示"记录的 X:abc…xyz"供识别。
-// 用户输入的首尾与片段对不上 → 拦下、提醒,需主动确认(兼容 key 轮换)。比对逻辑 key 在 type==="semi",
-// 无字段名硬编码。提交 → provideCredentials(校验 + live + 加密入库),成功走 onDone(父层弹 toast + 后台 sync)。
+// Re-entry form for incomplete credentials. A semi field whose first/last characters don't match
+// the masked hint is blocked until the user confirms (key rotation is legitimate).
 export function CredentialForm({
   accountId,
   specs,
@@ -20,7 +18,7 @@ export function CredentialForm({
 }: {
   accountId: string;
   specs: InputSpec[];
-  hint?: Record<string, string>; // credsSafe(safeView):public 原样、semi 打码,均为 string
+  hint?: Record<string, string>; // credsSafe: public as-is, semi masked
   onDone: () => void;
 }) {
   const ta = useTranslations("Accounts");
@@ -28,14 +26,14 @@ export function CredentialForm({
   const fields = incompleteSpecs(specs);
   const [values, setValues] = useState<Record<string, string>>({});
   const [confirmMismatch, setConfirmMismatch] = useState(false);
-  // 提交态与失败信息都由 mutation 持有 —— 手搓的 busy/error 各存一份,连点两次就发两个请求,
-  // 而后回来的那次还会把先回来的错误覆盖掉。这里只有一个 pending,按钮直接接它。
+  // One mutation-owned pending state: hand-rolled busy/error would double-submit and let a late
+  // response overwrite an earlier error.
   const save = useMutation({
     mutationFn: () => replaceAccountCredentials({ data: { accountId, creds: values } }),
     onSuccess: onDone,
   });
 
-  // 与打码片段对不上的 semi 字段(首尾比对)。空 = 一致或无片段。
+  // Semi fields whose first/last characters don't match the hint; empty = consistent or no hint.
   function mismatchedSemiKeys(): string[] {
     return fields
       .filter((s) => s.type === "semi" && hint?.[s.key] != null)
@@ -43,7 +41,7 @@ export function CredentialForm({
       .map((s) => s.key);
   }
 
-  // 改动后重新评估,避免改对了仍要求确认。
+  // Re-evaluate after any edit so a corrected value doesn't still demand confirmation.
   function updateValues(fn: (v: Record<string, string>) => Record<string, string>) {
     setValues(fn);
     setConfirmMismatch(false);
@@ -51,8 +49,7 @@ export function CredentialForm({
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    // 不一致且未确认 → 先拦下、提醒,等用户主动确认。走这条路要顺手 reset:
-    // 否则上一次失败的红字会一直挂在「请确认」旁边,像是这次也失败了。
+    // Mismatch without confirmation: block and ask. Reset so a stale error doesn't sit next to the confirm prompt.
     if (mismatchedSemiKeys().length > 0 && !confirmMismatch) {
       save.reset();
       setConfirmMismatch(true);
@@ -61,9 +58,8 @@ export function CredentialForm({
     save.mutate();
   }
 
-  // 校验失败的原因要原样给用户看(哪个字段不对是上游给的),不能压成一句通用错误。
-  // `save.error` 类型上是 Error,运行时未必 —— server fn / 中间层有可能以别的东西 reject。
-  // 只取 `.message` 的话那种情况下红字整条不渲染:请求失败了,画面上却一个字都没有。
+  // Show the upstream's validation reason as-is. `save.error` may not be an Error at runtime
+  // (server fn / middleware can reject with anything), and `.message` alone would render nothing.
   const error = save.error == null ? null : save.error.message || String(save.error);
 
   return (

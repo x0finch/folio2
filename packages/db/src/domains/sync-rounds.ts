@@ -3,61 +3,46 @@ import { Clock, Effect, Option } from "effect";
 import type { DbClient } from "../client";
 import { userCache } from "../schema";
 
-// 一次同步轮的状态(ADR 0048)。**轮跑在服务端,所以状态也在服务端** —— 以前它记在浏览器的
-// 模块级 store 里,于是 cron 的轮对面板永远隐形、刷新即失忆、两个设备各说各的。
-//
-// **住 `user_cache`,不建新表。**一组合一键(`sync-round:<portfolioId>`),值是这一组合**最近一轮**
-// (进行中或已收官),新轮开轮即覆盖。加一张表要一份迁移、一套索引、一条清理策略,而这份数据
-// 恰好就是 KV 该装的东西:一个键、一个 JSON、一个到期时刻,过期即作废。
-//
-// **心跳就是那一列 `expires_at`,不在 JSON 里再存一份。**开轮写 `now + ttl`,每个账户完成顺手续期;
-// worker 死了,最后一次心跳过后它自然过期。判定一句话:**未收官且已过期 = 中断**(谁来判在 app,
-// 这一层只如实交出 `finishedAt` 与 `expiresAt`)。
-//
-// **写入全是带轮 id 条件的单语句。**D1 没有交互式事务,单语句原子是这里唯一依赖的原语:上一轮的
-// worker 还在跑而键上已是新一轮时,它那几笔写 `WHERE json_extract(v,'$.roundId') = 老轮` 匹配不上,
-// **落空成 no-op**,不会把新轮的明细改花。读一遍再写会同时丢掉原子性、还得自己编一套并发故事。
+// Sync round state, kept server-side so cron rounds are visible and survive reloads. One
+// `user_cache` key per portfolio holding the latest round.
+// The heartbeat is the `expires_at` column: unfinished and expired = interrupted (the app decides).
+// Every write is a single statement conditioned on the round id: D1 has no interactive transactions,
+// so a stale worker's writes to a newer round simply match nothing.
 
-/** 这一轮是谁发起的。cron 与手动写的是同一个形状 —— 所以 cron 的轮从此在面板上可见。 */
 export type SyncRoundTrigger = "manual" | "cron";
 
 /**
- * 一个账户在这一轮里的下场。**四档,不是「成功 / 失败」两分**(ADR 0048 裁定 7 + FOL-18 子票 4):
- * 缺凭据的账户既不是成功也不是失败,它是「你还没填 API key」——把它算进任何一边都在撒谎;
- * `skipped` 是自动轮里「这个账户刚同步过、还很新,这一轮不必再问上游」——它也不是成功(没重拉)、
- * 更不是失败,是一次刻意的不做。手动轮不产生 `skipped`(强制全量)。
- *
- * 状态只是 JSON 里的一个字符串值(见 `settle` 的 `json_set`),加一档不需要 SQL 迁移。
+ * `needs-keys` (no credentials yet) is neither success nor failure; `skipped` is an auto round not
+ * refetching a still-fresh account (manual rounds never skip). Statuses are JSON strings, so adding one
+ * needs no migration.
  */
 export type SyncRoundAccountStatus = "pending" | "synced" | "failed" | "needs-keys" | "skipped";
 
 export interface SyncRoundAccount {
-  /** 开轮那一刻的展示名。冻在轮里 —— 事后改名不该让上一轮的失败清单变成一串陌生名字。 */
+  /** Frozen at round start so a later rename doesn't garble the previous round's report. */
   label: string;
   status: SyncRoundAccountStatus;
-  /** 上游的原话,只有 `failed` 才有。 */
+  /** Upstream message; only on `failed`. */
   error?: string;
 }
 
-/** 一轮的全貌。`expiresAt` 来自那一行的 `expires_at` 列,不在 JSON 里(见文件头)。 */
+/** `expiresAt` comes from the row's `expires_at` column, not the JSON. */
 export interface SyncRoundRecord {
   roundId: string;
   portfolioId: string;
   trigger: SyncRoundTrigger;
   startedAt: number;
-  /** null = 还没收官(配合 `expiresAt` 才判得出「在跑」还是「中断」)。 */
+  /** null = not finished; combine with `expiresAt` to tell running from interrupted. */
   finishedAt: number | null;
-  /** 整轮没跑起来时那一句(取账户 / 取凭据挂了),逐账户的失败不走这里。 */
+  /** Round-level failure only; per-account failures live in `accounts`. */
   error?: string;
-  /** accountId → 它这一轮怎么样了。 */
   accounts: Record<string, SyncRoundAccount>;
   expiresAt: number;
 }
 
 /**
- * 开轮的下场。判别在 `opened` 上:抢到了必有轮;没抢到通常是「活轮还在」(把它原样带回来),
- * 唯一的 null 是「那一行在两句之间被删了」(级联删用户)—— 那时**没有任何轮可报**,
- * 调用方别拿它当一轮在跑。
+ * `round: null` only when the row was deleted between the two statements (user cascade): there is
+ * no round to report, so callers mustn't treat it as running.
  */
 export type OpenSyncRoundResult =
   | { opened: true; round: SyncRoundRecord }
@@ -68,7 +53,7 @@ export interface OpenSyncRoundInput {
   roundId: string;
   trigger: SyncRoundTrigger;
   accounts: readonly { id: string; label: string }[];
-  /** 心跳时长。**由 app 给** —— 「多久没心跳算死」是同步编排的知识,不是存储的。 */
+  /** Heartbeat length, chosen by the app: how long without a heartbeat counts as dead is sync policy. */
   ttlMs: number;
 }
 
@@ -97,21 +82,18 @@ export interface TouchSyncRoundInput {
 export interface FinishSyncRoundInput {
   portfolioId: string;
   roundId: string;
-  /** 整轮没跑起来时那一句。 */
   error?: string;
-  /** 收官后改长保留(下一轮开轮即覆盖,所以留久一点不占地方)。 */
+  /** Longer retention after finishing; the next round overwrites the key anyway. */
   retentionMs: number;
 }
 
-// 一组合一键。前缀是 `user_cache` 的第四种键(另外三种在 oracle 的 cache.ts)。
 const keyOf = (portfolioId: string) => `sync-round:${portfolioId}`;
 
-// 落库的那一半 —— `SyncRoundRecord` 去掉 `expiresAt`(它是列,不是 JSON 字段)。
 type StoredRound = Omit<SyncRoundRecord, "expiresAt">;
 
-// **永远拿得到一段合法 JSON。**`json_extract` 碰上畸形值会直接让整条语句报错,而这个键上一个坏值
-// 就够把那个组合的同步永久卡死(开不了轮、也读不出来)。裹一层 `iif` 之后,坏值等价于「这里没有轮」——
-// 下一次开轮照常覆盖它。别改成 `json_valid(v) AND …`:`AND` / `OR` 的求值顺序不是语言保证。
+// `json_extract` errors on malformed JSON, which would wedge this portfolio's sync forever; `iif`
+// turns a bad value into "no round" so the next open overwrites it. Don't rewrite as
+// `json_valid(v) AND ...`: SQLite doesn't guarantee AND/OR evaluation order.
 const asJson = sql`iif(json_valid(${userCache.v}), ${userCache.v}, '{}')`;
 
 const decode = (row: { v: string; expiresAt: number }): SyncRoundRecord | undefined => {
@@ -128,7 +110,7 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
   const mine = (portfolioId: string) =>
     and(eq(userCache.userId, userId), eq(userCache.k, keyOf(portfolioId)));
 
-  // 「这一行装的还是同一轮吗」—— 每个写入都带着它,漏网的竞态因此落空成 no-op。
+  // Every write is conditioned on this, so a racing stale writer becomes a no-op.
   const sameRound = (roundId: string) => sql`json_extract(${asJson}, '$.roundId') = ${roundId}`;
 
   const read = (portfolioId: string): Effect.Effect<Option.Option<SyncRoundRecord>> =>
@@ -145,11 +127,8 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
 
   return {
     /**
-     * 开一轮。**幂等**:键上已有一轮「未收官且未过期」的活轮 → 一个字都不写,返回那一轮
-     * (`opened: false`)。第二个设备点同步、cron 撞上手动,看到的都是同一轮。
-     *
-     * 抢的那一手是**一条**条件 upsert(`ON CONFLICT DO UPDATE … WHERE 已收官或已过期`)+ `RETURNING`:
-     * 抢到了才有行回来。抢不到再读一次现场 —— 那一读读到的必是赢家写下的那一轮。
+     * Idempotent: if a live round (unfinished, unexpired) exists, writes nothing and returns it.
+     * The claim is one conditional upsert + RETURNING; on a loss, re-reading yields the winner's round.
      */
     open: (input: OpenSyncRoundInput): Effect.Effect<OpenSyncRoundResult> =>
       Effect.gen(function* () {
@@ -174,11 +153,9 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
             .onConflictDoUpdate({
               target: [userCache.userId, userCache.k],
               set: { v: sql`excluded.v`, expiresAt: sql`excluded.expires_at` },
-              // 覆盖的条件 = 「那一行装的不是活轮」:收过官、心跳断了,或者**压根不是一轮**
-              // (坏 JSON / 没有 roundId 的值 —— `asJson` 把坏值折成 '{}',roundId 就是 null)。
-              // 第三个析取项是文件头那句「坏值等价于这里没有轮」的下半截:少了它,一个没到期的
-              // 坏值会把这个组合的开轮永久卡死。
-              // `<=` 而不是 `<` —— `expiresAt` 是「活到这一刻为止」,与 cache 的 stale 判据同款。
+              // Overwrite unless the row holds a live round: finished, expired, or not a round at all
+              // (bad JSON folds to '{}', so roundId is null; otherwise a bad value wedges opening).
+              // `<=` because `expiresAt` means "alive until this instant", same as the cache.
               setWhere: sql`json_extract(${asJson}, '$.finishedAt') is not null or ${userCache.expiresAt} <= ${now} or json_extract(${asJson}, '$.roundId') is null`,
             })
             .returning({ v: userCache.v, expiresAt: userCache.expiresAt }),
@@ -188,33 +165,26 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
 
         const existing = yield* read(input.portfolioId);
         return Option.match(existing, {
-          // 读不到只可能是那一行在这两句之间被删了(级联删用户)。**如实返回 null**,别把刚才
-          // 没写进去的那份 fresh 递出去 —— 它长得像一轮在跑,而键上根本没有,前端会去轮询一个
-          // 永远读不到的幽灵轮。
+          // Only a concurrent delete gets here. Return null rather than `fresh`, or the client
+          // would poll a round that doesn't exist.
           onNone: () => ({ round: null, opened: false as const }),
           onSome: (round) => ({ round, opened: false as const }),
         });
       }),
 
-    /** 读这个组合最近一轮。没有过 → `none`(坏值同待遇:下一次开轮会覆盖它)。 */
+    /** A corrupt value reads as none; the next open overwrites it. */
     get: read,
 
     /**
-     * 记一个账户的下场,并把心跳续到 `now + ttl`。
-     *
-     * **只有 `pending → 终态` 这一步**(`status = 'pending'` 那一句):认不出的 accountId 因此不往
-     * 明细里凭空加一条(开轮那一刻的名单就是这一轮的分母,事后长出一条会让 `x / N` 里的 N 自己变大),
-     * 已落过账的也不被第二个下场改写 —— 同一个账户的两条消息(at-least-once 重投、enlist 已 pending
-     * 的那个)可能**并发**越过 consumer 的「还 pending 吗」(那一读在一次几十秒的同步之前),先落的算数。
-     *
-     * **已收官的轮一个字都不改**(`finishedAt is null` 那一句,与 `touch` / `enlist` 同款):
-     * 收官那一刻写下的是 7 天保留期与最终报告,晚到的一次 settle 既不该改报告,也不该把保留期
-     * 改回心跳的 120 秒。
+     * Records an account's outcome and extends the heartbeat. Only `pending -> final`: unknown
+     * account ids don't grow the denominator, and of two concurrent messages for one account
+     * (at-least-once redelivery) the first wins. Finished rounds are untouched, so a late settle
+     * can't shrink the retention back to the heartbeat TTL.
      */
     settle: (input: SettleSyncRoundInput): Effect.Effect<void> =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
-        // 路径里的键交给 `json_quote` 拼 —— 转义规则归 SQLite,不由这里手写一份。
+        // Let SQLite quote the key rather than hand-rolling the escaping.
         const path = sql`'$.accounts.' || json_quote(${input.accountId})`;
         const next =
           input.error === undefined
@@ -236,15 +206,10 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
       }),
 
     /**
-     * 把一个账户**拉进一轮还活着的轮**(记成 `pending`),顺带续心跳(FOL-89)。
-     *
-     * 单账户同步(`syncAccount`)撞上同组合正在跑的一轮时用它:开轮幂等会把活轮原样还回来,而那一轮
-     * 的名单里可能没有这个账户(刚建的),或者它已经落过账了(刚同步过又点一次)。两种都记回 `pending`,
-     * 由调用方投一条 `sync-account` 去跑 —— 于是它的结果落在同一轮里,`finishIfSettled` 也要等它。
-     *
-     * **只对活轮生效**(未收官 ∧ 未过期,判据与开轮的覆盖条件互为反面):落空 → `none`,调用方该回去
-     * 重开一轮(那时必开得动)。已经 `pending` 的账户再拉一次是同值覆盖写 —— 顶多多投一条消息,
-     * consumer 的「还 pending 吗」检查会让第二条空跑。
+     * Adds an account to a live round as `pending` and extends the heartbeat. Used when a single-
+     * account sync hits a running round that lacks the account or already settled it, so its result
+     * lands in the same round. A non-live round -> none, and the caller opens a new one.
+     * Re-enlisting a pending account at worst enqueues a message the consumer skips.
      */
     enlist: (input: EnlistSyncRoundInput): Effect.Effect<Option.Option<SyncRoundRecord>> =>
       Effect.gen(function* () {
@@ -271,11 +236,8 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
       }),
 
     /**
-     * 只续心跳,什么都不改。跑轮的那条任务定时调它(keepalive):后排的轮在并发闸后面排队时
-     * 一个 settle 都没有,「活着」不能只靠 settle 顺带的续期。
-     *
-     * **已收官的轮不续**(`finishedAt is null` 那一句):收官与 keepalive 是两条并发的路,
-     * 晚到的一次 touch 不该把收官写下的 7 天保留期改回 120 秒。
+     * Heartbeat only: rounds queued behind the concurrency gate get no settles, so they need a
+     * keepalive. Finished rounds aren't extended, so a late touch can't undo the retention.
      */
     touch: (input: TouchSyncRoundInput): Effect.Effect<void> =>
       Effect.gen(function* () {
@@ -294,7 +256,6 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
         );
       }),
 
-    /** 收官:落 `finishedAt`(+ 整轮失败那一句),并把保留期改长。 */
     finish: (input: FinishSyncRoundInput): Effect.Effect<void> =>
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
@@ -311,14 +272,10 @@ export const makeSyncRoundStore = (client: DbClient, userId: string) => {
       }),
 
     /**
-     * **「最后一个落账的人收官」**(FOL-86:队列一条消息一个账户,没有一条任务从头跑到尾)。
-     *
-     * 只在「这一轮还没收官 ∧ 明细里一个 `pending` 都不剩」时落 `finishedAt` —— **一条**条件
-     * UPDATE,判据与写入在同一句里,所以并发的两个 consumer 各自 settle 完再各调一次,也只有
-     * 一个抢得到(`finishedAt is null` 那一句),而最后落账的那一个一定看得到零个 `pending`。
-     * 先读再判再写会把这两条保证都丢掉。
-     *
-     * 抢到了回收官后的那一轮(调用方要念小计),没抢到 / 还有没落账的 → `none`。
+     * Last one to settle finishes the round (one queue message per account, no single task runs it
+     * end to end). One conditional UPDATE: of two concurrent callers only one wins, and the last
+     * settler always sees zero pending. Read-then-write would lose both guarantees.
+     * Returns the finished round to the winner, none otherwise.
      */
     finishIfSettled: (input: FinishSyncRoundInput): Effect.Effect<Option.Option<SyncRoundRecord>> =>
       Effect.gen(function* () {
