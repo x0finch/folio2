@@ -1,9 +1,9 @@
-import { parseChainIds } from "@folio/zerion-client";
 import { describe, expect, it } from "vitest";
-import { parsePositions } from "../../../src/connectors/evm/zerion-parse";
-import chains from "./fixtures/zerion-chains.json";
-import expected from "./fixtures/zerion-expected-balances.json";
-import positions from "./fixtures/zerion-positions.json";
+import { parseChainIds } from "../../../src/balance/zerion/api";
+import { parsePositions } from "../../../src/balance/zerion/parse";
+import chains from "./fixtures/chains.json";
+import expected from "./fixtures/expected-balances.json";
+import positions from "./fixtures/positions.json";
 
 const chainIds = parseChainIds(chains as never);
 
@@ -24,5 +24,12 @@ describe("parsePositions (golden: fixtures in → fixture out)", () => {
   it("chain mapping missing: throws (failing means nothing is produced, never the slug fallback form)", () => {
     // A position's chain absent from the chainIds mapping cannot yield a canonical evm:<id>, so it throws UPSTREAM_ERROR (retryable).
     expect(() => parsePositions(positions, {})).toThrow(/zerion unavailable at \(chain list\)/);
+  });
+});
+
+describe("parseChainIds", () => {
+  it("hex external_id becomes a decimal chainId", () => {
+    expect(chainIds.ethereum).toBe(1);
+    expect(chainIds.base).toBe(8453); // 0x2105
   });
 });

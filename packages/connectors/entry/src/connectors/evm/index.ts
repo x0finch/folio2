@@ -1,9 +1,8 @@
 import { Defi, Spot } from "@folio/connectors-basic";
-import { rabbyBalance } from "@folio/upstreams";
+import { rabbyBalance, zerionBalance } from "@folio/upstreams";
 import { z } from "zod";
 import { defineConnector } from "../../connector";
 import { evmAccountCreds } from "./creds";
-import { zerionProvider } from "./zerion-provider";
 
 // Order is priority: rabby is the default (no API key, two requests cover all chains); zerion is
 // kept disabled as a fallback for runtime source selection.
@@ -16,6 +15,6 @@ export const evm = defineConnector({
   account: { creds: evmAccountCreds },
   balance: {
     schema: z.discriminatedUnion("kind", [Spot, Defi]),
-    providers: [rabbyBalance, zerionProvider],
+    providers: [rabbyBalance, zerionBalance],
   },
 });

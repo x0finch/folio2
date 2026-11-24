@@ -6,6 +6,7 @@ export { blockbookBalance } from "./balance/blockbook/upstream";
 export { coinstatsBalance } from "./balance/coinstats/upstream";
 export { hyperliquidBalance } from "./balance/hyperliquid/upstream";
 export { rabbyBalance } from "./balance/rabby/upstream";
+export { zerionBalance } from "./balance/zerion/upstream";
 export { hmacSha256 } from "./runtime/crypto";
 export { HttpFailure, type HttpFailureKind, SigningFailure, summaryOf } from "./runtime/errors";
 export {

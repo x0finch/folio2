@@ -1,9 +1,10 @@
 import type { Defi, Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { UpstreamUnavailableError } from "@folio/upstream-basic";
-import type { ZerionPositionsResponse } from "@folio/zerion-client";
+import type { ZerionPositionsResponse } from "./api";
+import { ID } from "./constants";
 
-export type Row = Spot | Defi;
+type Row = Spot | Defi;
 
 // Debt legs negate amount (price stays positive): revalue recomputes value as amount × price, so a
 // sign carried only on value would be lost.
@@ -31,7 +32,7 @@ export function parsePositions(
     if (chainId === undefined) {
       // Retryable: the chain list is cached for 24h, so a missing chain is usually just stale.
       throw new UpstreamUnavailableError({
-        upstream: "zerion",
+        upstream: ID,
         where: "(chain list)",
         cause: `no chainId for chain '${chain ?? "?"}'`,
       });
