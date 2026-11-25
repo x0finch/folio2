@@ -67,6 +67,18 @@ describe("fetchBalances", () => {
     expect(eth?.selfPrice).toBeUndefined();
   });
 
+  it("sends the fixed query, with the address filled in", async () => {
+    const creds = {
+      config: configOf({ pagination: undefined, query: { chain: "eth", owner: "{address}" } }),
+      apiKey: KEY,
+      address: ADDRESS,
+    };
+    const { calls } = await run(pages, customBalance.fetchBalances(ctx(creds)));
+    const params = calls[0].request.url.searchParams;
+    expect(params.get("chain")).toBe("eth");
+    expect(params.get("owner")).toBe(ADDRESS);
+  });
+
   describe("key placement", () => {
     const placed = async (auth: unknown) => {
       const creds = {

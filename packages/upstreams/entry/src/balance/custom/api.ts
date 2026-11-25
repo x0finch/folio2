@@ -33,6 +33,14 @@ const pathFor = (config: CustomConfig, address: string | undefined, page: number
     .replace(ADDRESS_PLACEHOLDER, encodeURIComponent(address ?? ""))
     .replace(PAGE_PLACEHOLDER, String(page));
 
+const fixedQuery = (config: CustomConfig, address: string | undefined): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(config.query ?? {}).map(([name, value]) => [
+      name,
+      value.replaceAll(ADDRESS_PLACEHOLDER, address ?? ""),
+    ]),
+  );
+
 const rowsOf = (body: unknown, config: CustomConfig, where: string) => {
   const rows = config.rows === undefined ? body : valueAt(body, config.rows);
   return Array.isArray(rows)
@@ -59,7 +67,10 @@ export const fetchRows = (
     let cursor: string | undefined;
     for (let read = 0; read < MAX_PAGES; read++) {
       const path = pathFor(config, address, page);
-      const query: Record<string, string | number | undefined> = { ...auth.query };
+      const query: Record<string, string | number | undefined> = {
+        ...fixedQuery(config, address),
+        ...auth.query,
+      };
       if (pagination?.type === "page" && pagination.param) query[pagination.param] = page;
       if (pagination?.type === "cursor") query[pagination.param] = cursor;
       const body = yield* call.request(path, Schema.Unknown, { ...auth, query });

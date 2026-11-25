@@ -6,6 +6,8 @@ import {
   MAX_DOT_PATH_LENGTH,
   MAX_NAME_LENGTH,
   MAX_PATH_LENGTH,
+  MAX_QUERY_PARAMS,
+  MAX_QUERY_VALUE_LENGTH,
   PAGE_PLACEHOLDER,
   PRIVATE_SUFFIXES,
 } from "./constants";
@@ -43,7 +45,7 @@ export const hostOfOrigin = (origin: string | undefined): string | undefined =>
 
 const Host = Schema.String.check(Schema.makeFilter((host: string) => hostProblem(host)));
 
-// Path characters only: `?` and `#` are out, so nothing but `auth` can add a query.
+// Path characters only: `?` and `#` are out; queries go in `query`, `auth` and `pagination`.
 const PATH_CHARS = /^\/[A-Za-z0-9\-._~!$&'()*+,;=:@%/{}]*$/;
 const PLACEHOLDER = /\{[^}]*\}/g;
 
@@ -80,6 +82,25 @@ const QueryName = Schema.String.check(
   Schema.makeFilter(
     (name: string) =>
       (name.length <= MAX_NAME_LENGTH && QUERY_NAME.test(name)) || "invalid query parameter name",
+  ),
+);
+
+// Plain text plus `{address}`; the value is URL-encoded when sent.
+const QUERY_VALUE = /^[A-Za-z0-9\-._~:,{}]*$/;
+const QueryValue = Schema.String.check(
+  Schema.makeFilter(
+    (value: string) =>
+      (value.length <= MAX_QUERY_VALUE_LENGTH &&
+        QUERY_VALUE.test(value) &&
+        (value.match(PLACEHOLDER) ?? []).every((p) => p === ADDRESS_PLACEHOLDER)) ||
+      `query values are plain text and ${ADDRESS_PLACEHOLDER} only`,
+  ),
+);
+const FixedQuery = Schema.Record(QueryName, QueryValue).check(
+  Schema.makeFilter(
+    (query: Readonly<Record<string, string>>) =>
+      Object.keys(query).length <= MAX_QUERY_PARAMS ||
+      `at most ${MAX_QUERY_PARAMS} query parameters`,
   ),
 );
 
@@ -125,6 +146,8 @@ const Fields = Schema.Struct({
 const BaseConfig = Schema.Struct({
   host: Host,
   path: PathTemplate,
+  // Fixed query parameters, e.g. `{ "chain": "eth" }`.
+  query: Schema.optional(FixedQuery),
   auth: Schema.optional(Auth),
   pagination: Schema.optional(Pagination),
   // Dot path to the row array; absent when the body is the array.
@@ -147,6 +170,13 @@ function crossProblems(config: typeof BaseConfig.Type): Schema.FilterIssue[] {
   }
   if (typeof auth === "object" && "query" in auth && auth.query === pagination?.param) {
     issues.push({ path: ["auth"], issue: "the key and the page share a query parameter" });
+  }
+  const fixed = Object.keys(config.query ?? {});
+  const authQuery = typeof auth === "object" && "query" in auth ? auth.query : undefined;
+  for (const name of [authQuery, pagination?.param]) {
+    if (name !== undefined && fixed.includes(name)) {
+      issues.push({ path: ["query", name], issue: "already set by auth or pagination" });
+    }
   }
   if (fields.contract !== undefined && fields.chain === undefined) {
     issues.push({ path: ["fields", "contract"], issue: "contract needs chain" });

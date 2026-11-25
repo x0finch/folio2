@@ -27,6 +27,26 @@ describe("decodeCustomConfig", () => {
     }
   });
 
+  it("accepts fixed query parameters, with {address} in a value", () => {
+    expect(decode({ ...valid, query: { chain: "eth", owner: "{address}" } }).ok).toBe(true);
+  });
+
+  it.each([
+    ["a value with an unknown placeholder", { query: { x: "{page}" } }],
+    ["a value with & or =", { query: { x: "a&b=c" } }],
+    ["a name the key already uses", { auth: { query: "apikey" }, query: { apikey: "x" } }],
+    [
+      "a name the pagination already uses",
+      { pagination: { type: "page", param: "p" }, query: { p: "1" } },
+    ],
+    [
+      "too many parameters",
+      { query: Object.fromEntries([...Array(11)].map((_, i) => [`q${i}`, "1"])) },
+    ],
+  ])("rejects a query with %s", (_, over) => {
+    expect(decode({ ...valid, ...over }).ok).toBe(false);
+  });
+
   it("accepts page pagination in the path or in a param", () => {
     expect(decode({ ...valid, path: "/v1/h/{page}", pagination: { type: "page" } }).ok).toBe(true);
     expect(decode({ ...valid, pagination: { type: "page", param: "p", start: 0 } }).ok).toBe(true);
