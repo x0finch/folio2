@@ -9,6 +9,7 @@ export const OWN_ORIGIN = "BETTER_AUTH_URL";
 export const MAX_PAGES = 5;
 export const MAX_BODY_BYTES = 1_000_000;
 
+export const MAX_HOST_LENGTH = 253;
 export const MAX_PATH_LENGTH = 512;
 export const MAX_DOT_PATH_LENGTH = 128;
 export const MAX_NAME_LENGTH = 64; // header and query parameter names

@@ -4,6 +4,7 @@ import {
   FORBIDDEN_HEADER_PREFIXES,
   FORBIDDEN_HEADERS,
   MAX_DOT_PATH_LENGTH,
+  MAX_HOST_LENGTH,
   MAX_NAME_LENGTH,
   MAX_PATH_LENGTH,
   MAX_QUERY_PARAMS,
@@ -16,7 +17,6 @@ const IPV4 = /^\d+(?:\.\d+){3}$/;
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 // An all-digit last label is what makes `127.1` or `0x7f.1` resolve as an address.
 const TLD = /^(?:[a-z]{2,63}|xn--[a-z0-9-]{1,59})$/;
-const MAX_HOST_LENGTH = 253;
 
 /** Why a host may not be called, or undefined. `ownHost` is the deployment's own hostname. */
 export function hostProblem(host: string, ownHost?: string): string | undefined {
@@ -53,6 +53,8 @@ function pathProblem(path: string): string | undefined {
   if (path.length > MAX_PATH_LENGTH) return "path is too long";
   if (!PATH_CHARS.test(path)) return "path must start with / and hold no query, fragment or spaces";
   if (path.startsWith("//")) return "path must not start with //";
+  // URL parsing turns `%2e` into a dot segment and some servers decode `%2f` into a separator.
+  if (/%2[ef]/i.test(path)) return "path must not encode dots or slashes";
   if (path.split("/").some((segment) => segment === "." || segment === "..")) {
     return "path must not contain . or .. segments";
   }

@@ -32,14 +32,16 @@ const refused = (cause: string) =>
 const checkTarget = (call: Call<never, typeof OWN_ORIGIN>, { config, address }: Account) => {
   const problem = hostProblem(config.host, hostOfOrigin(call.keys[OWN_ORIGIN]));
   if (problem) return Effect.fail(refused(`host: ${problem}`));
-  if (config.path.includes(ADDRESS_PLACEHOLDER) && !address?.trim()) {
-    return Effect.fail(refused(`path needs an address`));
-  }
+  const wantsAddress =
+    config.path.includes(ADDRESS_PLACEHOLDER) ||
+    Object.values(config.query ?? {}).some((value) => value.includes(ADDRESS_PLACEHOLDER));
+  if (wantsAddress && !address?.trim()) return Effect.fail(refused("config needs an address"));
   return Effect.void;
 };
 
+// Page pagination can't tell a full last page from one more to come without another request.
 const truncatedNote = (): Note => ({
-  title: "Not every page was read",
+  title: "Some pages may not have been read",
   icon: "warning",
   content: `Only the first ${MAX_PAGES} pages of this source are read.`,
 });

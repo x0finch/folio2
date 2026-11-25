@@ -30,8 +30,8 @@ const keyPlacement = (auth: CustomAuth, key: string | undefined): RequestOptions
 
 const pathFor = (config: CustomConfig, address: string | undefined, page: number): string =>
   config.path
-    .replace(ADDRESS_PLACEHOLDER, encodeURIComponent(address ?? ""))
-    .replace(PAGE_PLACEHOLDER, String(page));
+    .replaceAll(ADDRESS_PLACEHOLDER, encodeURIComponent(address ?? ""))
+    .replaceAll(PAGE_PLACEHOLDER, String(page));
 
 const fixedQuery = (config: CustomConfig, address: string | undefined): Record<string, string> =>
   Object.fromEntries(
@@ -65,6 +65,10 @@ export const fetchRows = (
     const rows: unknown[] = [];
     let page = pagination?.type === "page" ? (pagination.start ?? 1) : 0;
     let cursor: string | undefined;
+    // A source that ignores the page parameter, or whose cursors cycle, serves the same rows again;
+    // stop there rather than count every holding once per page.
+    const seenCursors = new Set<string>();
+    let previousPage: string | undefined;
     for (let read = 0; read < MAX_PAGES; read++) {
       const path = pathFor(config, address, page);
       const query: Record<string, string | number | undefined> = {
@@ -75,6 +79,9 @@ export const fetchRows = (
       if (pagination?.type === "cursor") query[pagination.param] = cursor;
       const body = yield* call.request(path, Schema.Unknown, { ...auth, query });
       const pageRows = yield* rowsOf(body, config, path);
+      const pageKey = JSON.stringify(pageRows);
+      if (pageRows.length > 0 && pageKey === previousPage) return { rows, truncated: false };
+      previousPage = pageKey;
       rows.push(...pageRows);
 
       if (pagination === undefined) return { rows, truncated: false };
@@ -83,7 +90,10 @@ export const fetchRows = (
         page++;
       } else {
         const next = cursorOf(body, pagination.next);
-        if (next === undefined || next === cursor) return { rows, truncated: false };
+        if (next === undefined || seenCursors.has(next) || next === cursor) {
+          return { rows, truncated: false };
+        }
+        if (cursor !== undefined) seenCursors.add(cursor);
         cursor = next;
       }
     }

@@ -67,6 +67,26 @@ describe("fetchBalances", () => {
     expect(eth?.selfPrice).toBeUndefined();
   });
 
+  it("fills every {address} in the path", async () => {
+    const creds = {
+      config: configOf({ pagination: undefined, path: "/v1/{address}/holdings/{address}" }),
+      apiKey: KEY,
+      address: ADDRESS,
+    };
+    const { calls } = await run(pages, customBalance.fetchBalances(ctx(creds)));
+    expect(calls[0].request.url.pathname).toBe(`/v1/${ADDRESS}/holdings/${ADDRESS}`);
+  });
+
+  it("an {address} in the query with no address stored is refused before any request", async () => {
+    const creds = {
+      config: configOf({ path: "/v1/holdings", query: { owner: "{address}" } }),
+      apiKey: KEY,
+    };
+    const { value, calls } = await failing(pages, customBalance.fetchBalances(ctx(creds)));
+    expect(value._tag).toBe("UpstreamRefusedError");
+    expect(calls).toHaveLength(0);
+  });
+
   it("sends the fixed query, with the address filled in", async () => {
     const creds = {
       config: configOf({ pagination: undefined, query: { chain: "eth", owner: "{address}" } }),
@@ -168,12 +188,55 @@ describe("fetchBalances", () => {
     });
 
     it(`stops at ${MAX_PAGES} pages and says so in a note`, async () => {
+      // Each page holds a different coin, so only the cap ends the walk.
       const endless = (_: HttpClientRequestLike, nth: number) =>
-        json({ ...page2, next: `c${nth + 10}` });
+        json({
+          ...page2,
+          data: {
+            holdings: page2.data.holdings.map((h) => ({
+              ...h,
+              asset: { ...h.asset, ticker: `${h.asset.ticker}${nth}` },
+            })),
+          },
+          next: `c${nth + 10}`,
+        });
       const { value, calls } = await run(endless, customBalance.fetchBalances(ctx()));
       expect(calls).toHaveLength(MAX_PAGES);
       expect(value.balances).toHaveLength(MAX_PAGES);
       expect(value.note?.[0]?.icon).toBe("warning");
+    });
+
+    it("a page that repeats the previous one ends the walk without counting it twice", async () => {
+      const config = configOf({ pagination: { type: "page", param: "p" } });
+      const { value, calls } = await run(
+        () => json(page1),
+        customBalance.fetchBalances(ctx({ ...ctx().account.creds, config })),
+      );
+      expect(calls).toHaveLength(2);
+      const once = await run(
+        () => json(page1),
+        customBalance.fetchBalances(
+          ctx({ ...ctx().account.creds, config: configOf({ pagination: undefined }) }),
+        ),
+      );
+      expect(value.balances).toEqual(once.value.balances);
+      expect(value.note).toBeUndefined();
+    });
+
+    it("cursors that cycle end the walk", async () => {
+      const cycle = (_: HttpClientRequestLike, nth: number) =>
+        json({
+          ...page2,
+          data: {
+            holdings: page2.data.holdings.map((h) => ({
+              ...h,
+              asset: { ...h.asset, ticker: `${h.asset.ticker}${nth}` },
+            })),
+          },
+          next: nth % 2 === 0 ? "a" : "b",
+        });
+      const { calls } = await run(cycle, customBalance.fetchBalances(ctx()));
+      expect(calls).toHaveLength(3); // start, a, b — then a again
     });
 
     it("a cursor that repeats ends the walk", async () => {

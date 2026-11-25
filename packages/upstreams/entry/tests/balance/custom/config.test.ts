@@ -78,6 +78,8 @@ describe("decodeCustomConfig", () => {
     ["a fragment in the path", { path: "/v1/holdings#x" }],
     ["a protocol-relative path", { path: "//evil.example/x" }],
     ["a dot-dot segment", { path: "/v1/../admin" }],
+    ["an encoded dot-dot segment", { path: "/v1/%2e%2E/admin" }],
+    ["an encoded slash", { path: "/v1/a%2Fb" }],
     ["an unknown placeholder", { path: "/v1/{apiKey}" }],
     ["an unclosed placeholder", { path: "/v1/{address" }],
     ["{page} without page pagination", { path: "/v1/{page}", pagination: undefined }],

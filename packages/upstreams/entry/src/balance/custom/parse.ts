@@ -12,10 +12,14 @@ const RAW_INTEGER = /^\d+$/;
 const NAMER = /^[A-Za-z0-9][A-Za-z0-9:_.-]*$/;
 const ADDRESS = /^[A-Za-z0-9:_.-]+$/;
 
+// `1e400` and a 400-digit raw balance both parse to Infinity, which the balance contract rejects
+// for the whole call; such a row is unreadable instead.
+const finite = (n: number): number | undefined => (Number.isFinite(n) ? n : undefined);
+
 const numberOf = (value: unknown): number | undefined => {
   if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
   if (typeof value !== "string" || !NUMERIC.test(value.trim())) return undefined;
-  return Number(value.trim());
+  return finite(Number(value.trim()));
 };
 
 const textOf = (value: unknown): string | undefined =>
@@ -35,7 +39,7 @@ function scaleRaw(raw: unknown, decimals: unknown): number | undefined {
   if (!Number.isInteger(places) || places < 0 || places > MAX_DECIMALS) return undefined;
   const padded = digits.padStart(places + 1, "0");
   const point = padded.length - places;
-  return Number(`${padded.slice(0, point)}.${padded.slice(point) || "0"}`);
+  return finite(Number(`${padded.slice(0, point)}.${padded.slice(point) || "0"}`));
 }
 
 const refPart = (value: unknown, shape: RegExp): string | undefined => {
@@ -43,17 +47,19 @@ const refPart = (value: unknown, shape: RegExp): string | undefined => {
   return text && text.length <= MAX_REF_PART_LENGTH && shape.test(text) ? text : undefined;
 };
 
-// Never `issued:`: nothing vouches for a user-defined source's names.
+// Never `issued:`: nothing vouches for a user-defined source's names. `native` only where the
+// config names a contract field and the row leaves it empty: a chain alone can't tell a chain's
+// coin from its tokens, and folding them into one `native` ref would merge different holdings.
 function refOf(row: unknown, config: CustomConfig, host: string, symbol: string): string {
   const { chain: chainPath, contract: contractPath } = config.fields;
   const chain = chainPath && refPart(valueAt(row, chainPath), NAMER);
-  if (chain) {
-    const rawContract = contractPath ? valueAt(row, contractPath) : undefined;
+  if (chain && contractPath) {
+    const rawContract = valueAt(row, contractPath);
     if (textOf(rawContract) === undefined) return tokenRef.native(chain);
     const contract = refPart(rawContract, ADDRESS);
     if (contract) return tokenRef.contract(chain, contract);
   }
-  return tokenRef.custom(ID, `${host}:${symbol}`);
+  return tokenRef.custom(ID, chain ? `${host}:${chain}:${symbol}` : `${host}:${symbol}`);
 }
 
 // The account is marked to market: a coin the market prices is revalued at sync and on display;
@@ -77,13 +83,15 @@ export function parseRows(
     readable++;
     // Spot holdings only: an empty or negative row is not something this account holds.
     if (amount <= 0) continue;
-    const price = fields.price === undefined ? undefined : numberOf(valueAt(row, fields.price));
+    const quoted = fields.price === undefined ? undefined : numberOf(valueAt(row, fields.price));
+    const price =
+      quoted !== undefined && quoted > 0 && Number.isFinite(amount * quoted) ? quoted : undefined;
     const name = fields.name === undefined ? undefined : textOf(valueAt(row, fields.name));
     balances.push({
       kind: "spot",
       symbol,
       amount,
-      ...(price !== undefined && price > 0 ? { price, value: amount * price } : { value: 0 }),
+      ...(price !== undefined ? { price, value: amount * price } : { value: 0 }),
       tokenRef: refOf(row, config, host, symbol),
       ...(name ? { name } : {}),
     });

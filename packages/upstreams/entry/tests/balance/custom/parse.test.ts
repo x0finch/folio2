@@ -140,7 +140,38 @@ describe("parseRows", () => {
     );
     expect(balances.map((b) => b.tokenRef)).toEqual([
       "custom/custom:API.VAULT.EXAMPLE:A",
-      "custom/custom:API.VAULT.EXAMPLE:B",
+      "custom/custom:API.VAULT.EXAMPLE:EVM:1:B",
+    ]);
+  });
+
+  it("a chain without a contract field never folds coins into one native ref", () => {
+    const config = configOf({ fields: { symbol: "s", amount: "a", chain: "c" } });
+    const { balances } = parseRows(
+      [
+        { s: "ETH", a: 10, c: "evm:1" },
+        { s: "USDC", a: 500, c: "evm:1" },
+      ],
+      config,
+    );
+    const refs = balances.map((b) => b.tokenRef);
+    expect(new Set(refs).size).toBe(2);
+    expect(refs.some((r) => r.endsWith("/native"))).toBe(false);
+  });
+
+  it("a number that overflows makes its row unreadable, not the call", () => {
+    const config = configOf({ fields: { symbol: "s", amount: "a", price: "p" } });
+    const { balances, readable } = parseRows(
+      [
+        { s: "HUGE", a: "1e400" },
+        { s: "X", a: "1e10", p: "1e300" },
+        { s: "OK", a: 1, p: 2 },
+      ],
+      config,
+    );
+    expect(readable).toBe(2);
+    expect(balances.map((b) => [b.symbol, b.value])).toEqual([
+      ["X", 0],
+      ["OK", 2],
     ]);
   });
 
