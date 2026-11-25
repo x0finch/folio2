@@ -41,6 +41,9 @@ const fixedQuery = (config: CustomConfig, address: string | undefined): Record<s
     ]),
   );
 
+const hasRows = (body: unknown, config: CustomConfig): boolean =>
+  Array.isArray(config.rows === undefined ? body : valueAt(body, config.rows));
+
 const rowsOf = (body: unknown, config: CustomConfig, where: string) => {
   const rows = config.rows === undefined ? body : valueAt(body, config.rows);
   return Array.isArray(rows)
@@ -77,7 +80,14 @@ export const fetchRows = (
       };
       if (pagination?.type === "page" && pagination.param) query[pagination.param] = page;
       if (pagination?.type === "cursor") query[pagination.param] = cursor;
-      const body = yield* call.request(path, Schema.Unknown, { ...auth, query });
+      // Past the first page, a 404 or a body without rows is how many sources say "no more".
+      const later = read > 0;
+      const body = yield* call.request(path, Schema.Unknown, {
+        ...auth,
+        query,
+        ...(later ? { notFoundAsNull: true as const } : {}),
+      });
+      if (later && (body === null || !hasRows(body, config))) return { rows, truncated: false };
       const pageRows = yield* rowsOf(body, config, path);
       const pageKey = JSON.stringify(pageRows);
       if (pageRows.length > 0 && pageKey === previousPage) return { rows, truncated: false };

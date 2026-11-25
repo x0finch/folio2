@@ -47,18 +47,14 @@ const refPart = (value: unknown, shape: RegExp): string | undefined => {
   return text && text.length <= MAX_REF_PART_LENGTH && shape.test(text) ? text : undefined;
 };
 
-// Never `issued:`: nothing vouches for a user-defined source's names. `native` only where the
-// config names a contract field and the row leaves it empty: a chain alone can't tell a chain's
-// coin from its tokens, and folding them into one `native` ref would merge different holdings.
+// Only a contract address identifies a coin: never `issued:` or `native`, since nothing vouches
+// for a user-defined source's symbols, and a `native` ref would hand any symbol the chain coin's
+// identity and price. Everything else stays private to this source, per chain and symbol.
 function refOf(row: unknown, config: CustomConfig, host: string, symbol: string): string {
   const { chain: chainPath, contract: contractPath } = config.fields;
   const chain = chainPath && refPart(valueAt(row, chainPath), NAMER);
-  if (chain && contractPath) {
-    const rawContract = valueAt(row, contractPath);
-    if (textOf(rawContract) === undefined) return tokenRef.native(chain);
-    const contract = refPart(rawContract, ADDRESS);
-    if (contract) return tokenRef.contract(chain, contract);
-  }
+  const contract = contractPath && refPart(valueAt(row, contractPath), ADDRESS);
+  if (chain && contract) return tokenRef.contract(chain, contract);
   return tokenRef.custom(ID, chain ? `${host}:${chain}:${symbol}` : `${host}:${symbol}`);
 }
 

@@ -29,13 +29,26 @@ const refused = (cause: string) =>
 
 // Checked on every call, not only when saved: a config stored before a rule existed, or one that
 // only now points at this deployment, must still never be fetched.
-const checkTarget = (call: Call<never, typeof OWN_ORIGIN>, { config, address }: Account) => {
+const checkTarget = (call: Call<never, typeof OWN_ORIGIN>, { config, address }: Account) =>
+  Effect.gen(function* () {
+    // Without it the own-domain rule can't run; the other host rules still do.
+    if (!call.keys[OWN_ORIGIN]) {
+      yield* Effect.logWarning(`custom source: ${OWN_ORIGIN} unset, own domain not checked`);
+    }
+    return yield* checkRules(call, { config, address });
+  });
+
+const checkRules = (call: Call<never, typeof OWN_ORIGIN>, { config, address }: Account) => {
   const problem = hostProblem(config.host, hostOfOrigin(call.keys[OWN_ORIGIN]));
   if (problem) return Effect.fail(refused(`host: ${problem}`));
   const wantsAddress =
     config.path.includes(ADDRESS_PLACEHOLDER) ||
     Object.values(config.query ?? {}).some((value) => value.includes(ADDRESS_PLACEHOLDER));
   if (wantsAddress && !address?.trim()) return Effect.fail(refused("config needs an address"));
+  // Encoding leaves dots alone, and the URL parser would resolve them as a segment of the path.
+  if (wantsAddress && /^\.+$/.test(address?.trim() ?? "")) {
+    return Effect.fail(refused("address can't be only dots"));
+  }
   return Effect.void;
 };
 

@@ -25,7 +25,7 @@ describe("parseRows", () => {
           amount: 1.5,
           price: 3000.5,
           value: 4500.75,
-          tokenRef: "evm:1/native",
+          tokenRef: "custom/custom:API.VAULT.EXAMPLE:EVM:1:ETH",
           name: "Ether",
         },
         {
@@ -50,7 +50,7 @@ describe("parseRows", () => {
           symbol: "SOL",
           amount: 2,
           value: 0,
-          tokenRef: "solana/native",
+          tokenRef: "custom/custom:API.VAULT.EXAMPLE:SOLANA:SOL",
           name: "Solana",
         },
       ],
@@ -142,6 +142,20 @@ describe("parseRows", () => {
       "custom/custom:API.VAULT.EXAMPLE:A",
       "custom/custom:API.VAULT.EXAMPLE:EVM:1:B",
     ]);
+  });
+
+  it("an empty contract never claims the chain's native coin", () => {
+    const config = configOf({ fields: { symbol: "s", amount: "a", chain: "c", contract: "k" } });
+    const { balances } = parseRows(
+      [
+        { s: "ORDI", a: 1, c: "bitcoin", k: "" },
+        { s: "BTC", a: 1, c: "bitcoin", k: "" },
+      ],
+      config,
+    );
+    const refs = balances.map((b) => b.tokenRef);
+    expect(new Set(refs).size).toBe(2);
+    expect(refs.some((r) => r.endsWith("/native"))).toBe(false);
   });
 
   it("a chain without a contract field never folds coins into one native ref", () => {

@@ -25,7 +25,7 @@ const customAccountCreds = [
     key: "config",
     type: "public",
     label: "Source config",
-    desc: "JSON: host, path, auth, pagination, rows, fields",
+    desc: "JSON: host, path, query, auth, pagination, rows, fields. Never put a key here; it goes in API Key.",
     validator: z.string().transform((raw, ctx) => {
       const decoded = decodeCustomConfig(raw);
       if (decoded.ok) return decoded.config;

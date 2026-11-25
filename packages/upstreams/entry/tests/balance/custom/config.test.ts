@@ -34,6 +34,8 @@ describe("decodeCustomConfig", () => {
   it.each([
     ["a value with an unknown placeholder", { query: { x: "{page}" } }],
     ["a value with & or =", { query: { x: "a&b=c" } }],
+    ["a key-like name", { query: { apikey: "abc123" } }],
+    ["a token-like name", { query: { access_token: "abc123" } }],
     ["a name the key already uses", { auth: { query: "apikey" }, query: { apikey: "x" } }],
     [
       "a name the pagination already uses",

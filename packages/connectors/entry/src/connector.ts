@@ -8,7 +8,6 @@ import type { z } from "zod";
 // mark-to-market: no trusted price, always valued at the market source price (e.g. manual).
 export type ConnectorValuation = "authoritative" | "mark-to-market";
 
-// Type-erased manifest for the heterogeneous registry; generics only exist at `defineConnector`.
 // Whether stored non-public creds still belong to the account after its public ones change from
 // `previous` to `next` (both plaintext). Absent: they always do.
 type KeepsSecrets = (
@@ -19,6 +18,7 @@ type KeepsSecrets = (
 // Non-public creds that become required by the account's public ones (custom: a keyed config).
 type NeededCreds = (publicCreds: Readonly<Record<string, string>>) => readonly string[];
 
+// Type-erased manifest for the heterogeneous registry; generics only exist at `defineConnector`.
 export interface ConnectorManifest {
   readonly id: string;
   readonly label: string;

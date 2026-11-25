@@ -98,11 +98,18 @@ const QueryValue = Schema.String.check(
       `query values are plain text and ${ADDRESS_PLACEHOLDER} only`,
   ),
 );
+// The config is stored in plain text and shown back to the user; a key belongs in `apiKey`.
+const SECRET_LIKE = /key|token|secret|auth|sig|pass/i;
 const FixedQuery = Schema.Record(QueryName, QueryValue).check(
   Schema.makeFilter(
     (query: Readonly<Record<string, string>>) =>
       Object.keys(query).length <= MAX_QUERY_PARAMS ||
       `at most ${MAX_QUERY_PARAMS} query parameters`,
+  ),
+  Schema.makeFilter(
+    (query: Readonly<Record<string, string>>) =>
+      !Object.keys(query).some((name) => SECRET_LIKE.test(name)) ||
+      "keys go in auth with the API Key field, not in query",
   ),
 );
 

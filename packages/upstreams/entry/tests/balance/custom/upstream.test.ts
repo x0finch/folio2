@@ -87,6 +87,17 @@ describe("fetchBalances", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("an address that is only dots is refused before any request", async () => {
+    const creds = {
+      config: configOf({ pagination: undefined }),
+      apiKey: KEY,
+      address: "..",
+    };
+    const { value, calls } = await failing(pages, customBalance.fetchBalances(ctx(creds)));
+    expect(value._tag).toBe("UpstreamRefusedError");
+    expect(calls).toHaveLength(0);
+  });
+
   it("sends the fixed query, with the address filled in", async () => {
     const creds = {
       config: configOf({ pagination: undefined, query: { chain: "eth", owner: "{address}" } }),
@@ -221,6 +232,22 @@ describe("fetchBalances", () => {
       );
       expect(value.balances).toEqual(once.value.balances);
       expect(value.note).toBeUndefined();
+    });
+
+    it("a 404 or a body without rows past the first page ends the walk", async () => {
+      const config = configOf({ pagination: { type: "page", param: "p" } });
+      for (const end of [
+        () => json({ error: "not found" }, { status: 404 }),
+        () => json({ error: "out of range" }),
+      ]) {
+        const reply = (_: HttpClientRequestLike, nth: number) => (nth === 0 ? json(page1) : end());
+        const { value, calls } = await run(
+          reply,
+          customBalance.fetchBalances(ctx({ ...ctx().account.creds, config })),
+        );
+        expect(calls).toHaveLength(2);
+        expect(value.balances.length).toBeGreaterThan(0);
+      }
     });
 
     it("cursors that cycle end the walk", async () => {
