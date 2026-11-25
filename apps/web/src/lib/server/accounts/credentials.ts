@@ -4,7 +4,13 @@ import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
-import { carryOverCreds, publicValues, readStoredCreds, sealCreds } from "@/lib/server/creds";
+import {
+  carryOverCreds,
+  openCreds,
+  publicValues,
+  readStoredCreds,
+  sealCreds,
+} from "@/lib/server/creds";
 import { serverFn } from "@/lib/server/server-fn";
 
 // Log safe fields only, never creds.
@@ -34,15 +40,21 @@ export const handleReplaceAccountCredentials = serverFn("replaceAccountCredentia
     publicValues(specs, stored),
     publicValues(specs, values),
   );
+  // The shape gate and the probe judge the creds the account will end up with, so fields not
+  // re-entered but kept are opened from storage for them; only `values` is sealed below.
   const kept = keep
-    ? specs.filter((s) => s.type !== "public" && stored[s.key] != null).map((s) => s.key)
+    ? specs.filter((s) => s.type !== "public" && stored[s.key] != null && given[s.key] == null)
     : [];
-  // Typed failure so the validation message reaches the form.
-  yield* connectors.validate(account.connectorId, values, {
-    liveness: true,
-    label: account.label,
-    kept,
+  const keptPlain = yield* Effect.tryPromise({
+    try: () => openCreds(kept, stored, env.SECRETS_KEY),
+    catch: () => new Error("stored credentials can't be read; enter them all again"),
   });
+  // Typed failure so the validation message reaches the form.
+  yield* connectors.validate(
+    account.connectorId,
+    { ...keptPlain, ...values },
+    { liveness: true, label: account.label },
+  );
   const sealed = yield* Effect.promise(() => sealCreds(specs, values, env.SECRETS_KEY));
   yield* accounts.setCredentials(
     account.id,

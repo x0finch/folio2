@@ -100,8 +100,7 @@ const makeRegistry = () => ({
   validate: (
     connectorId: string,
     values: Record<string, string>,
-    // `kept`: non-public fields already stored that survive this update.
-    opts?: { liveness?: boolean; label?: string; kept?: readonly string[] },
+    opts?: { liveness?: boolean; label?: string },
   ): Effect.Effect<void, Error> =>
     Effect.gen(function* () {
       const manifest = getConnector(connectorRegistry, connectorId);
@@ -114,9 +113,7 @@ const makeRegistry = () => ({
         try: () => validateCredentials(manifest.account.creds, values),
         catch: asError,
       });
-      const missing = (manifest.account.needs?.(values) ?? []).filter(
-        (key) => values[key] == null && !opts?.kept?.includes(key),
-      );
+      const missing = (manifest.account.needs?.(values) ?? []).filter((key) => values[key] == null);
       if (missing.length > 0) {
         const labels = missing.map(
           (key) => manifest.account.creds.find((f) => f.key === key)?.label ?? key,

@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import { custom } from "../../src/connectors/custom";
 import { getConnector, registry } from "../../src/registry";
 
-const config = (host = "api.vault.example") =>
-  JSON.stringify({ host, path: "/v1/holdings", fields: { symbol: "s", amount: "a" } });
+const config = (host = "api.vault.example", auth = "bearer") =>
+  JSON.stringify({ host, path: "/v1/holdings", auth, fields: { symbol: "s", amount: "a" } });
 
 const creds = custom.account.creds;
 const keepsSecrets = (previous: string, next: string) =>
@@ -35,10 +35,11 @@ describe("custom account kind", () => {
     await expect(validateCredentials(creds, {})).rejects.toThrow(/config/);
   });
 
-  it("keeps the key while the host stays, drops it when the host changes", () => {
+  it("keeps the key while the host stays and it sends one; drops it otherwise", () => {
     const moved = JSON.stringify({ ...JSON.parse(config()), path: "/v2/holdings" });
     expect(keepsSecrets(config(), moved)).toBe(true);
     expect(keepsSecrets(config(), config("api.other.example"))).toBe(false);
+    expect(keepsSecrets(config(), config(undefined, "none"))).toBe(false);
     expect(keepsSecrets("not json", config())).toBe(false);
   });
 });

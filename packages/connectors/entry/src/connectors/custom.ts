@@ -48,7 +48,7 @@ const customAccountCreds = [
 ] as const satisfies readonly CredField[];
 
 // A source the user describes; mark-to-market, so its own prices value only coins the market can't, and the key
-// is dropped once the config points at another host.
+// is dropped once the config points at another host or stops sending one.
 export const custom = defineConnector({
   id: "custom",
   label: "Custom source",
@@ -56,8 +56,9 @@ export const custom = defineConnector({
   account: {
     creds: customAccountCreds,
     keepsSecrets: (previous, next) => {
+      // A keyless config drops the key too, or nothing would ever clear it.
       const host = hostOf(previous.config);
-      return host !== undefined && host === hostOf(next.config);
+      return host !== undefined && host === hostOf(next.config) && needsKey(next.config);
     },
     // `apiKey` is optional per field; a keyed config makes it required.
     needs: (publicCreds) => (needsKey(publicCreds.config) ? ["apiKey"] : []),

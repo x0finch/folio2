@@ -55,6 +55,40 @@ describe("accounts/credentials", () => {
       expect(listed[0].needsCredentials).toBe(false);
     });
 
+    it("re-entering only the secret is judged with the kept key, which stays stored", async () => {
+      const { account } = await seedIncomplete(USER);
+      const real = await realRegistry();
+      const { registry, validated } = await fakeRegistry({
+        // The real shape gate, without the network probe.
+        validate: (connectorId, values) => real.validate(connectorId, values),
+      });
+      await callWithRegistry(
+        USER,
+        registry,
+        handleReplaceAccountCredentials({
+          accountId: account.id,
+          creds: { apiKey: "新的 key", secret: "旧的 secret" },
+        }),
+      );
+
+      await callWithRegistry(
+        USER,
+        registry,
+        handleReplaceAccountCredentials({
+          accountId: account.id,
+          creds: { secret: "新的 secret" },
+        }),
+      );
+
+      expect(validated.at(-1)).toEqual({ apiKey: "新的 key", secret: "新的 secret" });
+      const opened = await openCreds(
+        registry.specs.binance ?? [],
+        JSON.parse(await rawOf(USER, account.id)),
+        env.SECRETS_KEY as string,
+      );
+      expect(opened).toMatchObject({ apiKey: "新的 key", secret: "新的 secret" });
+    });
+
     it("replacing the key → new one stored, nothing of the old remains", async () => {
       const { account, registry } = await seedIncomplete(USER);
 
@@ -305,6 +339,21 @@ describe("accounts/credentials: custom source", () => {
     const raw = await rawOf(account.id);
     const opened = await openCreds(registry.specs.custom ?? [], raw, env.SECRETS_KEY as string);
     expect(opened.apiKey).toBe("新 key");
+  });
+
+  it("switching to a keyless config on the same host drops the key", async () => {
+    const { account, registry } = await seed();
+
+    await callWithRegistry(
+      USER,
+      registry,
+      handleReplaceAccountCredentials({
+        accountId: account.id,
+        creds: { config: configAt("api.vault.example", "/v1/holdings", "none") },
+      }),
+    );
+
+    expect((await rawOf(account.id)).apiKey).toBeUndefined();
   });
 
   it("re-entering only the key keeps the stored config", async () => {
