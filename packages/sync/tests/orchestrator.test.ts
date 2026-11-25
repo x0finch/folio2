@@ -1,13 +1,14 @@
-import {
-  type Balance,
-  ConnectorAuthError,
-  type ConnectorError,
-  ConnectorFailure,
-  ConnectorRateLimitError,
-  ConnectorUnavailableError,
-} from "@folio/connectors-basic";
+import type { Balance } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
-import { Duration, Effect, Fiber, type Layer, Option, TestClock, TestContext } from "effect";
+import {
+  UpstreamAuthError,
+  type UpstreamError,
+  UpstreamParseError,
+  UpstreamRateLimitError,
+  UpstreamUnavailableError,
+} from "@folio/upstream-basic";
+import { Duration, Effect, Fiber, type Layer, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { depError, type FetchOutcome, Sweep, type SyncLogger, type SyncServices } from "../src";
 import { type FakeOptions, fakeServices } from "./fakes";
@@ -152,7 +153,7 @@ describe("syncUser: missing credentials skip / failure isolation", () => {
     const { layer, writes } = makeServices([good, bad], {
       fetch: (acc) =>
         acc.id === "bad"
-          ? Effect.fail(new ConnectorFailure({ message: "boom" }))
+          ? Effect.fail(new UpstreamParseError({ upstream: "acme", where: "/boom" }))
           : Effect.succeed(ok([bal("BTC", 1)])),
     });
     const { results } = await runSync(layer, "u1");
@@ -209,7 +210,8 @@ describe("structured logs (level + safe fields)", () => {
         log,
         fetch: (acc) => {
           if (acc.id === "n") return Effect.succeed({ status: "needs-credentials" } as const);
-          if (acc.id === "f") return Effect.fail(new ConnectorAuthError({ message: "bad key" }));
+          if (acc.id === "f")
+            return Effect.fail(new UpstreamAuthError({ upstream: "acme", where: "/t" }));
           return Effect.succeed(ok([bal("BTC", 1)]));
         },
       },
@@ -222,7 +224,7 @@ describe("structured logs (level + safe fields)", () => {
     expect(byMsg("account sync failed")?.level).toBe("error");
     expect(byMsg("account sync failed")?.props).toMatchObject({
       accountId: "f",
-      reason: "ConnectorAuthError",
+      reason: "UpstreamAuthError",
     });
   });
 });
@@ -232,10 +234,10 @@ describe("structured logs (level + safe fields)", () => {
 // Pattern: fork, advance the fake clock, join; boundaries are asserted exactly.
 describe("syncUser (Effect core): backoff retry (fetch only)", () => {
   // Fetch stub that fails the first failTimes calls, then succeeds.
-  function flaky(makeErr: () => ConnectorError, failTimes: number) {
+  function flaky(makeErr: () => UpstreamError, failTimes: number) {
     let calls = 0;
     // Failures go through the error channel.
-    const fetchBalances = (): Effect.Effect<FetchOutcome, ConnectorError> => {
+    const fetchBalances = (): Effect.Effect<FetchOutcome, UpstreamError> => {
       calls++;
       return calls <= failTimes ? Effect.fail(makeErr()) : Effect.succeed(ok([]));
     };
@@ -245,19 +247,19 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
   // Runs an Effect on the fake clock: fork, advance generously, join. Cases needing exact timing fork themselves.
   const runWithClock = <A, E>(effect: Effect.Effect<A, E>, advanceMs = 100_000): Promise<A> =>
     Effect.gen(function* () {
-      const fiber = yield* Effect.fork(effect);
+      const fiber = yield* Effect.forkChild(effect);
       yield* TestClock.adjust(Duration.millis(advanceMs));
       return yield* Fiber.join(fiber);
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
 
   it("uses Retry-After instead of exponential backoff: no retry at 1233ms, retry after 1234ms", async () => {
     const { fetchBalances, calls } = flaky(
-      () => new ConnectorRateLimitError({ message: "rate limited", retryAfterMs: 1234 }),
+      () => new UpstreamRateLimitError({ upstream: "acme", where: "/t", retryAfterMs: 1234 }),
       1,
     );
     const { layer } = makeServices([account()], { fetch: fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
+      const fiber = yield* Effect.forkChild(syncWith(layer, "u1"));
       // The first exponential step is 200ms; without Retry-After we'd have retried by now.
       yield* TestClock.adjust(Duration.millis(1233));
       expect(calls()).toBe(1);
@@ -266,19 +268,19 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
       const { results } = yield* Fiber.join(fiber);
       expect(calls()).toBe(2);
       expect(results[0].ok).toBe(true);
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
   });
 
   it("backoff doubles per step: the second wait is 400ms, not another 200ms", async () => {
     // Jitter is additive (+0..baseMs), so each step is an interval; assert interval bounds, not points.
     //   call 2 in [200, 400]; call 3 in [600, 1000]. Call 3 not before 600 proves the doubling.
     const { fetchBalances, calls } = flaky(
-      () => new ConnectorUnavailableError({ message: "5xx" }), // no Retry-After: exponential
+      () => new UpstreamUnavailableError({ upstream: "acme", where: "/t" }), // no Retry-After: exponential
       2,
     );
     const { layer } = makeServices([account()], { fetch: fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
+      const fiber = yield* Effect.forkChild(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(199));
       expect(calls()).toBe(1); // first step is at least 200ms
       yield* TestClock.adjust(Duration.millis(201)); // t=400: call 2 has happened
@@ -288,42 +290,42 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
       yield* TestClock.adjust(Duration.millis(401)); // t=1000: call 3 has happened
       yield* Fiber.join(fiber);
       expect(calls()).toBe(3);
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
   });
 
   it("Retry-After above the cap is clamped and still retried, not abandoned", async () => {
     const { fetchBalances, calls } = flaky(
-      () => new ConnectorRateLimitError({ message: "slow down", retryAfterMs: 60_000 }),
+      () => new UpstreamRateLimitError({ upstream: "acme", where: "/t", retryAfterMs: 60_000 }),
       1,
     );
     const { layer } = makeServices([account()], { fetch: fetchBalances });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
+      const fiber = yield* Effect.forkChild(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(4999));
       expect(calls()).toBe(1);
       yield* TestClock.adjust(Duration.millis(1201)); // 5s cap + 200ms jitter ceiling
       const { results } = yield* Fiber.join(fiber);
       expect(calls()).toBe(2);
       expect(results[0].ok).toBe(true);
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
   });
 
   it("exhausted retries give ok:false (isolated) and no snapshot", async () => {
     const { fetchBalances, calls } = flaky(
-      () => new ConnectorUnavailableError({ message: "5xx" }),
+      () => new UpstreamUnavailableError({ upstream: "acme", where: "/t" }),
       99,
     );
     const { layer, writes } = makeServices([account()], { fetch: fetchBalances });
     const { results } = await runWithClock(syncWith(layer, "u1"));
     expect(results[0]).toMatchObject({ ok: false });
-    expect(results[0].error).toContain("5xx");
+    expect(results[0].error).toContain("unavailable");
     expect(calls()).toBe(3); // RETRY_MAX_ATTEMPTS
     expect(writes).toHaveLength(0);
   });
 
   it("a non-retryable error (AUTH_FAILED) is not retried", async () => {
     const { fetchBalances, calls } = flaky(
-      () => new ConnectorAuthError({ message: "bad key" }),
+      () => new UpstreamAuthError({ upstream: "acme", where: "/t" }),
       99,
     );
     const { layer } = makeServices([account()], { fetch: fetchBalances });
@@ -336,7 +338,7 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
   it("retry log: attempt increments from 1 and carries the account context fields", async () => {
     const { log, entries } = capturingLogger();
     const { fetchBalances } = flaky(
-      () => new ConnectorRateLimitError({ message: "5xx", retryAfterMs: 300 }),
+      () => new UpstreamRateLimitError({ upstream: "acme", where: "/t", retryAfterMs: 300 }),
       2,
     );
     const { layer } = makeServices([account({ id: "a7", connectorId: "okx" })], {
@@ -351,7 +353,7 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
       userId: "u1",
       accountId: "a7",
       connectorId: "okx",
-      reason: "ConnectorRateLimitError",
+      reason: "UpstreamRateLimitError",
       retryAfterMs: 300,
     });
   });
@@ -360,7 +362,8 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
     const exhausted = capturingLogger();
     const { layer: l1 } = makeServices([account()], {
       log: exhausted.log,
-      fetch: flaky(() => new ConnectorUnavailableError({ message: "5xx" }), 99).fetchBalances,
+      fetch: flaky(() => new UpstreamUnavailableError({ upstream: "acme", where: "/t" }), 99)
+        .fetchBalances,
     });
     await runWithClock(syncWith(l1, "u1"));
     expect(exhausted.entries.filter((e) => e.msg === "provider call retrying")).toHaveLength(2);
@@ -368,7 +371,8 @@ describe("syncUser (Effect core): backoff retry (fetch only)", () => {
     const fatal = capturingLogger();
     const { layer: l2 } = makeServices([account()], {
       log: fatal.log,
-      fetch: flaky(() => new ConnectorAuthError({ message: "bad key" }), 99).fetchBalances,
+      fetch: flaky(() => new UpstreamAuthError({ upstream: "acme", where: "/t" }), 99)
+        .fetchBalances,
     });
     await runWithClock(syncWith(l2, "u1"));
     expect(fatal.entries.filter((e) => e.msg === "provider call retrying")).toHaveLength(0);
@@ -408,15 +412,15 @@ describe("syncUser (Effect core): fetch timeout", () => {
       },
     });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
+      const fiber = yield* Effect.forkChild(syncWith(layer, "u1"));
       // 3 attempts x 20s timeout + two backoffs; advance generously.
       yield* TestClock.adjust(Duration.millis(100_000));
       const { results } = yield* Fiber.join(fiber);
       expect(results[0].ok).toBe(false);
-      expect(results[0].error).toContain("timed out");
+      expect(results[0].error).toContain("unavailable at (timeout)");
       expect(calls).toBe(3); // RETRY_MAX_ATTEMPTS
       expect(writes).toHaveLength(0);
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
   });
 
   it("each attempt is timed separately: no timeout at 19.9s, timeout and retry after 20s", async () => {
@@ -428,14 +432,14 @@ describe("syncUser (Effect core): fetch timeout", () => {
       },
     });
     await Effect.gen(function* () {
-      const fiber = yield* Effect.fork(syncWith(layer, "u1"));
+      const fiber = yield* Effect.forkChild(syncWith(layer, "u1"));
       yield* TestClock.adjust(Duration.millis(19_900));
       expect(calls).toBe(1); // FETCH_TIMEOUT_MS not reached
       // 20s timeout + 200 first backoff + 200 jitter ceiling = 20_400; advance to 20_500.
       yield* TestClock.adjust(Duration.millis(600));
       expect(calls).toBe(2);
-      yield* Effect.fork(Fiber.interrupt(fiber)); // wrap up without waiting for the other two attempts
-    }).pipe(Effect.provide(TestContext.TestContext), Effect.runPromise);
+      yield* Effect.forkChild(Fiber.interrupt(fiber)); // wrap up without waiting for the other two attempts
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
   });
 });
 

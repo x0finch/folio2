@@ -1,5 +1,6 @@
 import { DEFAULT_TOP_N, PRICE_TTL_MS, type UpstreamToken } from "@folio/oracle-basic";
-import { Duration, Effect, TestClock } from "effect";
+import { Duration, Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { CandidateSource } from "../src/tokens/candidates";
 import { harness, upstreamDown } from "./fakes";

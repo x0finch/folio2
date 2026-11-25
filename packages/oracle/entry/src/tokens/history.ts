@@ -1,7 +1,7 @@
 import type { CacheStore, DbRequest, TokenPriceStore, TokenStore } from "@folio/db";
 import type { TokenPricePoint } from "@folio/oracle-basic";
 import { dayBucketOf, MS_PER_DAY } from "@folio/oracle-basic";
-import type { TokenUpstream } from "@folio/oracle-basic/ports";
+import type { TokenUpstream } from "@folio/upstream-basic/ports";
 import { Clock, Effect, Option } from "effect";
 import { type DailyFillReport, fillDaily } from "../daily-fill";
 
@@ -40,7 +40,7 @@ export const makeHistory = (
     Effect.gen(function* () {
       const info = yield* store.getById(tokenId);
       // Upstream does not recognise it yet: no history (this upstream only knows names it issued).
-      const ref = Option.flatMap(info, (i) => Option.fromNullable(i.ref));
+      const ref = Option.flatMap(info, (i) => Option.fromNullishOr(i.ref));
       if (Option.isNone(ref) || fromMs > toMs) return [];
 
       const todayB = dayBucketOf(yield* Clock.currentTimeMillis);
@@ -67,13 +67,13 @@ export const makeHistory = (
     priceAt: (tokenId, atMs) =>
       Effect.map(
         Effect.suspend(() => priceSeries(tokenId, dayBucketOf(atMs) * MS_PER_DAY, atMs)),
-        (series) => Option.fromNullable(series.at(-1)?.unitPrice),
+        (series) => Option.fromNullishOr(series.at(-1)?.unitPrice),
       ),
 
     fillDaily: (tokenId, fromMs, maxCalls) =>
       Effect.gen(function* () {
         const info = yield* store.getById(tokenId);
-        const ref = Option.flatMap(info, (i) => Option.fromNullable(i.ref));
+        const ref = Option.flatMap(info, (i) => Option.fromNullishOr(i.ref));
         if (Option.isNone(ref)) return { calls: 0, done: true, failed: false };
         return yield* fillDaily(
           cache,

@@ -43,5 +43,5 @@ export const provideRemoteDbClient =
     Effect.provideServiceEffect(
       self,
       DbClient,
-      Effect.sync(() => DbClient.make(connectTo(proxyDrizzle(remote)))),
+      Effect.sync(() => DbClient.of(connectTo(proxyDrizzle(remote)))),
     );

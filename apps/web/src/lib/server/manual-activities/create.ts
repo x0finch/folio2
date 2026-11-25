@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { z } from "zod";
 import { addManualActivities } from "@/lib/server/manual/store";
 import { refillDailyPrices } from "@/lib/server/prices/daily";
+import { serverFn } from "@/lib/server/server-fn";
 import { OccurredAt } from "./occurred-at";
 
 export const ActivityKind = z.enum(["add", "reduce", "set"]);
@@ -36,7 +37,7 @@ export const handleCreateManualActivities = Effect.fn("createManualActivities")(
 });
 
 // Queues a targeted `daily-prices` refill so new tokens' history needn't wait for the next hour.
-export const handleCreateManualActivitiesAndRefill = Effect.fn("createManualActivities")(function* (
+export const handleCreateManualActivitiesAndRefill = serverFn("createManualActivities")(function* (
   data: Parameters<typeof handleCreateManualActivities>[0],
 ) {
   const result = yield* handleCreateManualActivities(data);

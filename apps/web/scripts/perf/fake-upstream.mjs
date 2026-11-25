@@ -36,7 +36,7 @@ const COUNTS = {
   hyperliquid: { positions: 40 },
 };
 
-// Real top-by-market-cap coins (ids aligned with `@folio/oracle-upstream-coingecko`'s OVERRIDES, which the symbol tier relies on). native means no contract on any chain (`platforms` empty).
+// Real top-by-market-cap coins (ids aligned with CoinGecko's OVERRIDES in `@folio/upstreams`, which the symbol tier relies on). native means no contract on any chain (`platforms` empty).
 const MAJORS = [
   ["bitcoin", "btc", "Bitcoin", 64000, true],
   ["ethereum", "eth", "Ethereum", 3200, true],

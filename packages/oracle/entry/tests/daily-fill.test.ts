@@ -35,10 +35,10 @@ describe("fillDaily range unions under concurrency", () => {
         const fastCalls: [number, number][] = [];
 
         // The slow one: budget for one window, stuck on fetch after reading the (empty) range.
-        const slow = yield* Effect.fork(
+        const slow = yield* Effect.forkChild(
           fillDaily(h.cache, "tk_x", emptySource(slowCalls, gate), FROM_MS, 1, "test.slow"),
         );
-        while (slowCalls.length === 0) yield* Effect.yieldNow();
+        while (slowCalls.length === 0) yield* Effect.yieldNow;
 
         // The fast one plans from the same empty range, fills all three windows, writes first.
         const fast = yield* fillDaily(
@@ -71,10 +71,10 @@ describe("fillDaily range unions under concurrency", () => {
       Effect.gen(function* () {
         const gate = yield* Deferred.make<void>();
         const bigCalls: [number, number][] = [];
-        const big = yield* Effect.fork(
+        const big = yield* Effect.forkChild(
           fillDaily(h.cache, "tk_y", emptySource(bigCalls, gate), FROM_MS, 10, "test.big"),
         );
-        while (bigCalls.length === 0) yield* Effect.yieldNow();
+        while (bigCalls.length === 0) yield* Effect.yieldNow;
         yield* fillDaily(h.cache, "tk_y", emptySource([]), FROM_MS, 1, "test.small");
         yield* Deferred.succeed(gate, undefined);
         yield* Fiber.join(big);

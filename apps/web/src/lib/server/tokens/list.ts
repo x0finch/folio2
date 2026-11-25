@@ -3,6 +3,7 @@ import { getLogger } from "@logtape/logtape";
 import { Effect } from "effect";
 import { z } from "zod";
 import { toOption } from "@/lib/core/token-model";
+import { serverFn } from "@/lib/server/server-fn";
 import { edgeCached, SEARCH_CACHE_TTL_S } from "./edge-cache";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
@@ -11,7 +12,7 @@ const tokenLog = getLogger(["folio", "web", "tokens"]);
 // terms are mostly long-tail tokens.
 export const ListTokensInput = z.object({ query: z.string() });
 
-export const handleListTokens = Effect.fn("listTokens")(function* (
+export const handleListTokens = serverFn("listTokens")(function* (
   data: z.infer<typeof ListTokensInput>,
 ) {
   const q = data.query.trim();

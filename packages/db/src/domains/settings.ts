@@ -14,7 +14,7 @@ export interface UserSettingsView {
   hideBalances: boolean;
 }
 
-export const makeSettingsStore = (client: DbClient, userId: string) => {
+export const makeSettingsStore = (client: DbClient["Service"], userId: string) => {
   return {
     /** Users without a row get the defaults; no row is created on read. */
     get: (): Effect.Effect<UserSettingsView> =>

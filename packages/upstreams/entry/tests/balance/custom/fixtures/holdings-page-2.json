@@ -1,0 +1,12 @@
+{
+  "_fixture": "Hand-written fake API (api.vault.example), the last page: no `next`.",
+  "data": {
+    "holdings": [
+      {
+        "asset": { "ticker": "SOL", "label": "Solana", "network": "solana" },
+        "balance": "2000000000",
+        "precision": 9
+      }
+    ]
+  }
+}

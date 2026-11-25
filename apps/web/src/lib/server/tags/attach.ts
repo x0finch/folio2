@@ -1,6 +1,6 @@
 import { Database } from "@folio/db";
-import { Effect } from "effect";
 import { z } from "zod";
+import { serverFn } from "@/lib/server/server-fn";
 
 // Shared with detach.
 export const AccountTagInput = z.object({
@@ -8,7 +8,7 @@ export const AccountTagInput = z.object({
   tagId: z.string().min(1),
 });
 
-export const handleAttachTag = Effect.fn("attachTag")(function* (
+export const handleAttachTag = serverFn("attachTag")(function* (
   data: z.infer<typeof AccountTagInput>,
 ) {
   const out = yield* (yield* Database).tags.attach(data.accountId, data.tagId);

@@ -1,6 +1,7 @@
 import type { UpstreamToken } from "@folio/oracle-basic";
 import { PRICE_TTL_MS, WARM_TTL_MS } from "@folio/oracle-basic";
-import { Duration, Effect, TestClock } from "effect";
+import { Duration, Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { candidatesBySymbol, warmCatalogue } from "../src/tokens/candidates";
 import {

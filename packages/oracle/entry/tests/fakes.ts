@@ -1,5 +1,3 @@
-import type { UpstreamError } from "@folio/client-core";
-import { UpstreamUnavailableError } from "@folio/client-core";
 import type {
   CacheEntry,
   CacheStore,
@@ -11,9 +9,7 @@ import type {
 } from "@folio/db";
 import { DatabaseForOracle, GlobalDatabase, provideCurrentUser, provideDbClient } from "@folio/db";
 import type {
-  FxUpstream,
   PlatformMeta,
-  PlatformUpstream,
   ProviderTokenSeed,
   TokenCandidate,
   TokenInfo,
@@ -26,12 +22,14 @@ import type {
   TokenRef,
   TokenRefHit,
   TokenRefIndexRow,
-  TokenUpstream,
   UpstreamToken,
 } from "@folio/oracle-basic";
-import * as Ports from "@folio/oracle-basic/ports";
+import { Namer } from "@folio/oracle-basic/ports";
 import { parseTokenRef } from "@folio/oracle-ref";
-import { Clock, Effect, HashMap, Layer, Logger, Option, TestClock, TestContext } from "effect";
+import { type UpstreamError, UpstreamUnavailableError } from "@folio/upstream-basic";
+import { FxUpstream, PlatformUpstream, TokenUpstream } from "@folio/upstream-basic/ports";
+import { Clock, Effect, Layer, Logger, Option, References } from "effect";
+import { TestClock } from "effect/testing";
 import type { OraclePorts, OracleServices } from "../src";
 import { GlobalRefIndexService, Oracle, oracleLayer } from "../src";
 import { FxService } from "../src/fx";
@@ -160,7 +158,7 @@ function fakeTokenStore(seed: TokenInfo[] = [], namer = "src"): FakeTokenStore {
     getAll: () =>
       Effect.sync(() => new Map([...rows].map(([id, row]) => [id, { ...row }] as const))),
 
-    getById: (id) => Effect.sync(() => Option.fromNullable(rows.get(id)).pipe(Option.map(clone))),
+    getById: (id) => Effect.sync(() => Option.fromNullishOr(rows.get(id)).pipe(Option.map(clone))),
 
     fillInfo: (tokenId, patch: TokenInfoPatch) =>
       Effect.sync(() => {
@@ -342,7 +340,7 @@ function fakeGlobalRefIndexStore(
         return { updated, inserted, deleted: 0 };
       }),
 
-    refreshedAt: (u) => Effect.sync(() => Option.fromNullable(refreshedAt.get(u))),
+    refreshedAt: (u) => Effect.sync(() => Option.fromNullishOr(refreshedAt.get(u))),
   };
   return store;
 }
@@ -369,7 +367,7 @@ function fakeCacheStore(): FakeCacheStore {
     get: (key) =>
       Effect.map(Clock.currentTimeMillis, (now) => {
         store.reads += 1;
-        return Option.fromNullable(read(key, now));
+        return Option.fromNullishOr(read(key, now));
       }),
 
     // One round trip: the real implementation is one `WHERE k IN (…)`, so one read is counted here too.
@@ -566,7 +564,7 @@ export interface HarnessOpts {
   // symbol to upstream id curated table (`Namer.overrides`).
   overrides?: Readonly<Record<string, string>>;
   // Replaces the real candidate source (mint's cases must count how often it is asked: reaching the symbol tier is itself asserted). Real one if omitted.
-  candidates?: CandidateSource;
+  candidates?: CandidateSource["Service"];
 }
 
 // The "this request" in the harness. Fake stores do not bucket by user, so it is just a name.
@@ -585,16 +583,15 @@ export function harness(opts: HarnessOpts = {}): Harness {
   const platformUpstream = fakePlatformUpstream(opts.chains, namer);
 
   const logs: LogEntry[] = [];
-  const logger = Logger.replace(
-    Logger.defaultLogger,
-    Logger.make(({ message, logLevel, annotations }) => {
+  const logger = Logger.layer([
+    Logger.make(({ message, logLevel, fiber }) => {
       logs.push({
-        level: logLevel.label,
+        level: logLevel.toUpperCase(),
         message: Array.isArray(message) ? message.map(String).join(" ") : String(message),
-        annotations: Object.fromEntries(Array.from(HashMap.entries(annotations))),
+        annotations: { ...fiber.getRef(References.CurrentLogAnnotations) },
       });
     }),
-  );
+  ]);
 
   const ports = Layer.mergeAll(
     // The local slices are db tickets, not ports (the contract is the db implementations). Fakes only cover fields the code under test
@@ -603,18 +600,18 @@ export function harness(opts: HarnessOpts = {}): Harness {
       tokens: store,
       tokenPrices: prices,
       cache,
-    } as unknown as DatabaseForOracle),
+    } as unknown as DatabaseForOracle["Service"]),
     Layer.succeed(GlobalDatabase, {
       refIndex: globalRefIndex,
       accounts: { listUserIds: () => Effect.succeed([]) },
-    } as unknown as GlobalDatabase),
-    Layer.succeed(Ports.TokenUpstream, upstream),
-    Layer.succeed(Ports.FxUpstream, fxUpstream),
-    Layer.succeed(Ports.PlatformUpstream, platformUpstream),
-    Layer.succeed(Ports.Namer, { id: namer, overrides: opts.overrides ?? {} }),
+    } as unknown as GlobalDatabase["Service"]),
+    Layer.succeed(TokenUpstream, upstream),
+    Layer.succeed(FxUpstream, fxUpstream),
+    Layer.succeed(PlatformUpstream, platformUpstream),
+    Layer.succeed(Namer, { id: namer, overrides: opts.overrides ?? {} }),
   );
   // `provideMerge` so ports are also exposed: cases get both services and fake ports (`readPlatforms(h.cache, …)` unit tests use ports directly).
-  // `CandidateSource.Default` is exposed too: `oracleLayer` consumes it, but it has its own tests ("does the write path egress") needing the service.
+  // `CandidateSource.layer` is exposed too: `oracleLayer` consumes it, but it has its own tests ("does the write path egress") needing the service.
   // Defaults to production's `oracleLayer` (so whole-assembly is covered by every case); only when a case replaces the candidate source
   // are the three services assembled by hand, since merging a same-Tag layer from outside is ambiguous about who wins.
   const services = opts.candidates
@@ -622,17 +619,17 @@ export function harness(opts: HarnessOpts = {}): Harness {
         // The aggregate `Oracle` must be present too: it holds these three services themselves, so `provideMerge` them rather than
         // building a second set after the candidate source is replaced.
         Layer.provideMerge(
-          Oracle.Default,
+          Oracle.layer,
           Layer.mergeAll(
-            Layer.provide(TokenService.Default, Layer.succeed(CandidateSource, opts.candidates)),
-            FxService.Default,
-            PlatformService.Default,
+            Layer.provide(TokenService.layer, Layer.succeed(CandidateSource, opts.candidates)),
+            FxService.layer,
+            PlatformService.layer,
           ),
         ),
-        GlobalRefIndexService.Default,
+        GlobalRefIndexService.layer,
         Layer.succeed(CandidateSource, opts.candidates),
       )
-    : Layer.mergeAll(oracleLayer, CandidateSource.Default, GlobalRefIndexService.Default);
+    : Layer.mergeAll(oracleLayer, CandidateSource.layer, GlobalRefIndexService.layer);
   const everything = Layer.provideMerge(services, ports);
 
   return {
@@ -647,14 +644,14 @@ export function harness(opts: HarnessOpts = {}): Harness {
     run: (effect) =>
       Effect.runPromise(
         // Start at the fixed base (deterministic day buckets); cases advance time with `yield* TestClock.adjust(…)`.
-        Effect.zipRight(TestClock.setTime(NOW0), effect).pipe(
+        Effect.andThen(TestClock.setTime(NOW0), effect).pipe(
           Effect.provide(everything),
           // The two parts of a request, same as production's assembly point. Fake stores read neither; supplied because the layer's
           // `R` truthfully says "needs a request" and omitting them fails to compile.
           provideCurrentUser(HARNESS_USER),
           provideDbClient(unreachableD1),
           Effect.provide(logger),
-          Effect.provide(TestContext.TestContext),
+          Effect.provide(TestClock.layer()),
         ),
       ),
   };

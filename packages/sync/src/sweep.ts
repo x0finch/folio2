@@ -1,4 +1,4 @@
-import { Chunk, Effect, Option, Stream } from "effect";
+import { Effect, Option, Stream } from "effect";
 import { syncAccount } from "./account";
 import { SYNC_CONCURRENCY } from "./constants";
 import type { SyncDepError } from "./errors";
@@ -32,7 +32,7 @@ export const syncUserStream = (
 export const syncUser = (userId: string): Effect.Effect<SyncResult, SyncDepError, SyncServices> =>
   syncUserStream(userId).pipe(
     Stream.runCollect,
-    Effect.map((chunk) => ({ results: Chunk.toArray(chunk) })),
+    Effect.map((results) => ({ results })),
   );
 
 // Syncs a single account (one queue message each) without the Stream machinery, which costs real CPU in a 10ms budget. `none` if the account isn't listed.

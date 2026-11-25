@@ -1,13 +1,15 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
-import { isComplete, readStoredCreds, safeView } from "@/lib/server/creds";
+import { missingCreds, publicValues, readStoredCreds, safeView } from "@/lib/server/creds";
 import { type PortfolioScope, scopedMembership } from "@/lib/server/portfolio/scope";
+import { serverFn } from "@/lib/server/server-fn";
 
 // Raw creds (incl. secret ciphertext) never leave the server, only the safeView projection.
-export const handleListAccounts = Effect.fn("listAccounts")(function* (data: PortfolioScope = {}) {
+export const handleListAccounts = serverFn("listAccounts")(function* (data: PortfolioScope = {}) {
   const { accounts: store } = yield* Database;
-  const specsByType = (yield* ConnectorRegistry).specs;
+  const connectors = yield* ConnectorRegistry;
+  const specsByType = connectors.specs;
   const [scope, rawList] = yield* Effect.all(
     [scopedMembership(data.portfolioId), store.listRawCreds()],
     { concurrency: 2 },
@@ -21,10 +23,16 @@ export const handleListAccounts = Effect.fn("listAccounts")(function* (data: Por
     if (parsed === null) unreadable.push(a.id);
     const stored = parsed ?? {};
     const specs = specsByType[a.connectorId] ?? [];
+    const missing = missingCreds(
+      specs,
+      stored,
+      connectors.neededCreds(a.connectorId, publicValues(specs, stored)),
+    );
     return {
       ...a,
       portfolioId: scope.portfolioIdOf(a.id),
-      needsCredentials: !isComplete(specs, stored),
+      needsCredentials: missing.length > 0,
+      missingCreds: missing,
       credsSafe: safeView(specs, stored),
     };
   });

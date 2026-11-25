@@ -136,7 +136,7 @@ export interface SnapshotRawRows {
   balances: BalanceRawRow[];
 }
 
-export const makeSnapshotStore = (client: DbClient, userId: string) => {
+export const makeSnapshotStore = (client: DbClient["Service"], userId: string) => {
   /**
    * Raw variant of `latestWithBalances` via `db.values` (D1 `raw()`), skipping drizzle's row mapping.
    * The second query inlines the first as a subquery instead of `IN (?, ...)`, which avoids D1's ~100

@@ -1,6 +1,7 @@
-import type { Balance, ConnectorError } from "@folio/connectors-basic";
+import type { Balance } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import { Account, type AccountSyncResult, BalanceSource } from "@folio/sync";
+import type { UpstreamError } from "@folio/upstream-basic";
 import { Effect, Layer } from "effect";
 import { runForUser } from "@/lib/server/runtime";
 import { makeSyncServicesLayer } from "@/lib/server/sync/deps";
@@ -13,7 +14,7 @@ export interface SyncJob {
   account: AccountSafe;
   rawCreds?: string | null;
   balances?: Balance[];
-  fail?: ConnectorError;
+  fail?: UpstreamError;
 }
 
 const sourceFor = (job: SyncJob) =>

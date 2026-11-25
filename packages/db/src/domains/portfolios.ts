@@ -44,7 +44,11 @@ const NAME_TAKEN = (name: string) =>
 // The default's name can't be rejected (the user didn't type it), so on collision append ` (2)`,
 // ` (3)`, ... rather than dying on first app open.
 const DEFAULT_NAME_TRIES = 20;
-const freeDefaultName = (client: DbClient, userId: string, base: string): Effect.Effect<string> =>
+const freeDefaultName = (
+  client: DbClient["Service"],
+  userId: string,
+  base: string,
+): Effect.Effect<string> =>
   Effect.gen(function* () {
     for (let n = 1; n <= DEFAULT_NAME_TRIES; n++) {
       const candidate = n === 1 ? base : `${base} (${n})`;
@@ -59,7 +63,10 @@ export interface PortfolioMembership {
   portfolioId: string;
 }
 
-const selectDefault = (client: DbClient, userId: string): Effect.Effect<Portfolio | undefined> =>
+const selectDefault = (
+  client: DbClient["Service"],
+  userId: string,
+): Effect.Effect<Portfolio | undefined> =>
   client.query((db) =>
     db
       .select()
@@ -71,7 +78,10 @@ const selectDefault = (client: DbClient, userId: string): Effect.Effect<Portfoli
 
 // Package-level so account creation can use it without depending on the portfolio store.
 // ON CONFLICT DO NOTHING + re-read: under a race one insert loses and both get the same row.
-export const ensureDefault = (client: DbClient, userId: string): Effect.Effect<Portfolio> =>
+export const ensureDefault = (
+  client: DbClient["Service"],
+  userId: string,
+): Effect.Effect<Portfolio> =>
   Effect.gen(function* () {
     const found = yield* selectDefault(client, userId);
     if (found) return found;
@@ -99,7 +109,7 @@ export const ensureDefault = (client: DbClient, userId: string): Effect.Effect<P
     return after;
   });
 
-export const makePortfolioStore = (client: DbClient, userId: string) => {
+export const makePortfolioStore = (client: DbClient["Service"], userId: string) => {
   return {
     ensureDefault: (): Effect.Effect<Portfolio> => ensureDefault(client, userId),
 

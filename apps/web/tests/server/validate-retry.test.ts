@@ -10,10 +10,12 @@ import { ConnectorRegistry } from "@/lib/server/connectors/registry";
 const ADDRESS = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045";
 
 // Assembles the registry and runs the probe.
-const validateAccountCreds = (...args: Parameters<ConnectorRegistry["validate"]>): Promise<void> =>
+const validateAccountCreds = (
+  ...args: Parameters<ConnectorRegistry["Service"]["validate"]>
+): Promise<void> =>
   Effect.runPromise(
     Effect.flatMap(ConnectorRegistry, (r) => r.validate(...args)).pipe(
-      Effect.provide(ConnectorRegistry.Default),
+      Effect.provide(ConnectorRegistry.layer),
     ),
   );
 

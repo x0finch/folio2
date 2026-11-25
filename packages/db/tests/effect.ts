@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
-import { Effect, TestClock, TestContext } from "effect";
+import { Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { type DbClient, provideDbClient } from "../src/client";
 import { provideCurrentUser } from "../src/current-user";
 import { Database, DatabaseForOracle, type DbRequest, GlobalDatabase } from "../src/database";
@@ -12,9 +13,9 @@ export const NOW = 1000;
 // Runs an effect that needs only `DbClient`; not exported: cases get services via `forDomain` / `forGlobal` / `forOracle`.
 const runDb = <A>(effect: Effect.Effect<A, never, DbClient>, nowMs = NOW): Promise<A> =>
   Effect.runPromise(
-    Effect.zipRight(TestClock.setTime(nowMs), effect).pipe(
+    Effect.andThen(TestClock.setTime(nowMs), effect).pipe(
       provideDbClient(env),
-      Effect.provide(TestContext.TestContext),
+      Effect.provide(TestClock.layer()),
     ),
   );
 
@@ -25,38 +26,38 @@ type Promisified<S> = {
     : S[K];
 };
 
-// Handle for one domain: `forDomain((db) => db.tabPins)` then `tabPins(USER_A).create(...)`. One `Database.Default` serves all users; userId is read at op time from `CurrentUser`.
+// Handle for one domain: `forDomain((db) => db.tabPins)` then `tabPins(USER_A).create(...)`. One `Database.layer` serves all users; userId is read at op time from `CurrentUser`.
 //
 // Cases get services only through the aggregate `Database`, not per-domain Tags.
 //
 // Tests stay Promise-shaped: they check persistence (real D1, key conflicts, cross-user isolation), not timing.
 export const forDomain =
-  <S extends object>(pick: (db: Database) => S) =>
+  <S extends object>(pick: (db: Database["Service"]) => S) =>
   (userId: string, nowMs = NOW): Promisified<S> =>
     promisifiedFrom<S, Database, DbRequest>(
       Effect.map(Database, pick),
-      (effect) => effect.pipe(Effect.provide(Database.Default), provideCurrentUser(userId)),
+      (effect) => effect.pipe(Effect.provide(Database.layer), provideCurrentUser(userId)),
       nowMs,
     );
 
 // Handle for `GlobalDatabase`: no userId parameter, and it can't reach `CurrentUser`, which is exactly how it differs from the per-user half.
 export const forGlobal =
-  <S extends object>(pick: (db: GlobalDatabase) => S) =>
+  <S extends object>(pick: (db: GlobalDatabase["Service"]) => S) =>
   (nowMs = NOW): Promisified<S> =>
     promisifiedFrom<S, GlobalDatabase, DbClient>(
       Effect.map(GlobalDatabase, pick),
-      (effect) => Effect.provide(effect, GlobalDatabase.Default),
+      (effect) => Effect.provide(effect, GlobalDatabase.layer),
       nowMs,
     );
 
 // Handle for the oracle ticket; `namer` is a constructor parameter (db has no vendor), and most cases use the default.
 export const forOracle =
-  <S extends object>(pick: (db: DatabaseForOracle) => S) =>
+  <S extends object>(pick: (db: DatabaseForOracle["Service"]) => S) =>
   (userId: string, namer: string, nowMs = NOW): Promisified<S> =>
     promisifiedFrom<S, DatabaseForOracle, DbRequest>(
       Effect.map(DatabaseForOracle, pick),
       (effect) =>
-        effect.pipe(Effect.provide(DatabaseForOracle.Default(namer)), provideCurrentUser(userId)),
+        effect.pipe(Effect.provide(DatabaseForOracle.layer(namer)), provideCurrentUser(userId)),
       nowMs,
     );
 

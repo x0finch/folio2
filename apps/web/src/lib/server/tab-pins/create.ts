@@ -9,6 +9,7 @@ import {
   pinsInView,
   type TabPinScope,
 } from "@/lib/core/accounts-in-view";
+import { serverFn } from "@/lib/server/server-fn";
 
 // Shared with update-target; consistency with `TabPinScope` is checked where the handler is wired.
 export const PinTargetInput = z.object({
@@ -56,7 +57,7 @@ export const assertPinCap = (candidate: PinTargetRef, excludePinId?: string) =>
     }
   });
 
-export const handleCreateTabPin = Effect.fn("createTabPin")(function* (
+export const handleCreateTabPin = serverFn("createTabPin")(function* (
   data: NonNullable<TabPinScope>,
 ) {
   const db = yield* Database;

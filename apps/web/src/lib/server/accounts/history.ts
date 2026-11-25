@@ -6,6 +6,7 @@ import type { HistoryRange } from "@/lib/core/history-range";
 import { historyResolution } from "@/lib/core/history-range";
 import { MANUAL_CONNECTOR_ID } from "@/lib/core/manual";
 import { loadManualAccountLiveTotal, loadManualAccountSeries } from "@/lib/server/manual/store";
+import { serverFn } from "@/lib/server/server-fn";
 
 function downsampleManualRows(
   rows: readonly { takenAt: number; totalUsd: number }[],
@@ -61,7 +62,7 @@ export const AccountHistoryInput = z.object({
   range: z.enum(["7d", "30d", "1y", "all"]).optional(),
 });
 
-export const handleGetAccountHistory = Effect.fn("getAccountHistory")(function* (
+export const handleGetAccountHistory = serverFn("getAccountHistory")(function* (
   data: z.infer<typeof AccountHistoryInput>,
 ) {
   return yield* loadAccountHistory(data);

@@ -1,8 +1,8 @@
 import { FIAT_NAMER } from "@folio/oracle-basic";
 import { getLogger } from "@logtape/logtape";
-import { Effect } from "effect";
 import { z } from "zod";
 import { NAMER } from "@/lib/server/oracle";
+import { serverFn } from "@/lib/server/server-fn";
 import { priceTickets } from "./pricing";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
@@ -11,7 +11,7 @@ const tokenLog = getLogger(["folio", "web", "tokens"]);
 // (it came from the network); both the current upstream's and the `fiat` namer are allowed (same set as mintHolding).
 export const TokenPriceInput = z.object({ ticket: z.string().min(1) });
 
-export const handleGetTokenPrice = Effect.fn("getTokenPrice")(function* (
+export const handleGetTokenPrice = serverFn("getTokenPrice")(function* (
   data: z.infer<typeof TokenPriceInput>,
 ) {
   // Same routing as batch pricing (priceTickets); one ticket, first result, null if unpriced. No warm: relies on the cache

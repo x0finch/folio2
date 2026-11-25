@@ -269,12 +269,12 @@ function recordingD1(db: D1Database, log: Recorded[]): D1Database {
 }
 
 async function recorded<A>(
-  pick: (s: Database["snapshots"]) => Effect.Effect<A, unknown, DbRequest>,
+  pick: (s: Database["Service"]["snapshots"]) => Effect.Effect<A, unknown, DbRequest>,
 ): Promise<{ result: A; statements: Recorded[] }> {
   const statements: Recorded[] = [];
   const result = await Effect.runPromise(
     Effect.flatMap(Database, (db) => pick(db.snapshots)).pipe(
-      Effect.provide(Database.Default),
+      Effect.provide(Database.layer),
       provideCurrentUser(USER),
       provideDbClient({ DB: recordingD1(env.DB, statements) }),
       Effect.orDie,

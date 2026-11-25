@@ -1,8 +1,11 @@
-import type { Balance, BalanceProvider, ConnectorManifest } from "@folio/connectors-basic";
+import type { Balance } from "@folio/connectors-basic";
+import type { BalanceUpstream } from "@folio/upstream-basic";
+import type { ConnectorManifest } from "./connector";
 import { binance } from "./connectors/binance";
 import { bitcoin } from "./connectors/bitcoin";
 import { bybit } from "./connectors/bybit";
 import { cosmos } from "./connectors/cosmos";
+import { custom } from "./connectors/custom";
 import { evm } from "./connectors/evm";
 import { hyperliquid } from "./connectors/hyperliquid";
 import { manual } from "./connectors/manual";
@@ -29,7 +32,7 @@ export function getConnector(
 }
 
 // First provider not explicitly disabled, else providers[0]; undefined if there are none.
-export function selectProvider(manifest: ConnectorManifest): BalanceProvider<Balance> | undefined {
+export function selectProvider(manifest: ConnectorManifest): BalanceUpstream<Balance> | undefined {
   return (
     manifest.balance.providers.find((p) => p.defaultEnabled !== false) ??
     manifest.balance.providers[0]
@@ -47,6 +50,7 @@ export const connectors = [
   bybit,
   hyperliquid,
   manual,
+  custom,
 ] as const satisfies readonly ConnectorManifest[];
 export const registry: ConnectorRegistry = buildRegistry(connectors);
 

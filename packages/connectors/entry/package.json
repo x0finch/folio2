@@ -12,18 +12,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/binance-client": "workspace:*",
     "@folio/bitcoin-derive": "workspace:*",
-    "@folio/blockbook-client": "workspace:*",
-    "@folio/bybit-client": "workspace:*",
-    "@folio/client-core": "workspace:*",
-    "@folio/coinstats-client": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
-    "@folio/hyperliquid-client": "workspace:*",
-    "@folio/okx-client": "workspace:*",
-    "@folio/oracle-ref": "workspace:*",
-    "@folio/rabby-client": "workspace:*",
-    "@folio/zerion-client": "workspace:*",
+    "@folio/upstream-basic": "workspace:*",
+    "@folio/upstreams": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

@@ -65,7 +65,7 @@ describe("isolate-level service graph", () => {
           const out: string[] = [];
           for (let i = 0; i < 5; i += 1) {
             // Yield each round to force interleaving.
-            yield* Effect.yieldNow();
+            yield* Effect.yieldNow;
             const rows = yield* database.accounts.list();
             out.push(...rows.map((r) => r.userId));
           }

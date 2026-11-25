@@ -1,8 +1,8 @@
 import { FIAT_NAMER } from "@folio/oracle-basic";
 import { getLogger } from "@logtape/logtape";
-import { Effect } from "effect";
 import { z } from "zod";
 import { NAMER } from "@/lib/server/oracle";
+import { serverFn } from "@/lib/server/server-fn";
 import { priceTickets } from "./pricing";
 
 const tokenLog = getLogger(["folio", "web", "tokens"]);
@@ -14,7 +14,7 @@ export const RefreshTokenPricesInput = z.object({
   tickets: z.array(z.string().min(1)).max(200),
 });
 
-export const handleRefreshTokenPrices = Effect.fn("refreshTokenPrices")(function* (
+export const handleRefreshTokenPrices = serverFn("refreshTokenPrices")(function* (
   data: z.infer<typeof RefreshTokenPricesInput>,
 ) {
   // Both the current upstream's and the `fiat` namer are allowed (NAMER only would drop fiat holdings and leave the

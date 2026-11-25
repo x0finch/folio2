@@ -1,4 +1,5 @@
-import { Duration, Effect, Option, TestClock } from "effect";
+import { Duration, Effect, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { GlobalRefIndexService, Oracle } from "../src";
 import { FxService } from "../src/fx";
@@ -90,9 +91,9 @@ describe("global maintenance job is not on the per-user facade", () => {
     const h = harness();
     h.upstream.fail = upstreamDown();
     const result = await h.run(
-      Effect.either(Effect.flatMap(GlobalRefIndexService, (s) => s.warm())),
+      Effect.result(Effect.flatMap(GlobalRefIndexService, (s) => s.warm())),
     );
-    expect(result._tag).toBe("Left");
+    expect(result._tag).toBe("Failure");
     expect(h.globalRefIndex.writes).toBe(0);
   });
 });

@@ -1,5 +1,6 @@
 import { FX_TTL_MS, MS_PER_DAY, SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
-import { Duration, Effect, Option, TestClock } from "effect";
+import { Duration, Effect, Option } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { btcUsdDaily, deriveFiatDaily, FxService, fxKey, readFx, writeFx } from "../src/fx";
 import { harness, now0, upstreamDown } from "./fakes";
@@ -10,7 +11,7 @@ import { harness, now0, upstreamDown } from "./fakes";
 // to the global `token_daily_prices` (user_cache holds only the attempted range).
 
 const setup = (rates: Record<string, number> = {}) => harness({ rates });
-const withFx = <A, E, R>(f: (fx: FxService) => Effect.Effect<A, E, R>) =>
+const withFx = <A, E, R>(f: (fx: FxService["Service"]) => Effect.Effect<A, E, R>) =>
   Effect.flatMap(FxService, f);
 
 describe("resolve: read", () => {

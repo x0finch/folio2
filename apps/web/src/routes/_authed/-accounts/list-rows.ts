@@ -23,6 +23,7 @@ export interface AccountRow {
   gain24h?: Gain | null;
   note?: Note[];
   needsCredentials: boolean;
+  missingCreds: readonly string[];
   credsSafe: Record<string, string>;
   portfolioId: string;
   tags: AccountTagView[];
@@ -69,6 +70,7 @@ export function buildAccountRows(sources: {
       gain24h: a.needsCredentials ? undefined : ov?.gain24h,
       note: ov?.note,
       needsCredentials: a.needsCredentials,
+      missingCreds: a.missingCreds,
       credsSafe: a.credsSafe,
       portfolioId: a.portfolioId,
       tags: tagsOfAccount.get(a.id) ?? [],

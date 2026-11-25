@@ -35,7 +35,9 @@ const fakeCache = () => {
 // Fill only `cache`: the code under test touches nothing else, and filling all would hide what it uses.
 const run = <A>(cache: CacheStore, effect: Effect.Effect<A, never, Database | DbRequest>) =>
   Effect.runPromise(
-    stubRequest(Effect.provide(effect, Layer.succeed(Database, { cache } as unknown as Database))),
+    stubRequest(
+      Effect.provide(effect, Layer.succeed(Database, { cache } as unknown as Database["Service"])),
+    ),
   );
 
 describe("DeFi protocol logo URLs", () => {

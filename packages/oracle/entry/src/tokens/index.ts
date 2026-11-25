@@ -1,6 +1,7 @@
 import { DatabaseForOracle, GlobalDatabase } from "@folio/db";
-import { Namer, TokenUpstream } from "@folio/oracle-basic/ports";
-import { Effect } from "effect";
+import { Namer } from "@folio/oracle-basic/ports";
+import { TokenUpstream } from "@folio/upstream-basic/ports";
+import { Context, Effect, Layer } from "effect";
 import { CandidateSource } from "./candidates";
 import { makeCatalogue, type TokenCatalogue } from "./catalogue";
 import { makeHistory, type TokenHistory } from "./history";
@@ -32,11 +33,11 @@ export type { MintInput, RefreshStaleReport };
 // The global ref-index maintenance lives in `../global-ref-index`, not here: `TokenService` is per-user and
 // that job has no userId, so folding it in would force a fake one.
 
-// `CandidateSource` stays on `TokenService.Default`'s `R` and is consumed by `../oracle` at assembly; replacing it needs only another layer.
+// `CandidateSource` stays on `TokenService.layer`'s `R` and is consumed by `../oracle` at assembly; replacing it needs only another layer.
 // Time comes from `Clock` (tests use `TestClock`).
 // Services are taken from Tags only here: the slice factories take resolved ports, so their `R` has no services; store ops carry only `DbRequest`.
-export class TokenService extends Effect.Service<TokenService>()("oracle/TokenService", {
-  effect: Effect.gen(function* () {
+export class TokenService extends Context.Service<TokenService>()("oracle/TokenService", {
+  make: Effect.gen(function* () {
     // Token rows / price rows / cache come from db's reference-layer-only ticket; they are not ports.
     const { tokens: store, tokenPrices: prices, cache } = yield* DatabaseForOracle;
     const upstream = yield* TokenUpstream;
@@ -56,4 +57,6 @@ export class TokenService extends Effect.Service<TokenService>()("oracle/TokenSe
       ...makeCatalogue(cache, upstream),
     } satisfies TokenServiceShape;
   }),
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}

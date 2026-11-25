@@ -1,6 +1,7 @@
 import { type DbEnv, type DbRequest, provideCurrentUser, provideDbClient } from "@folio/db";
 import { Oracle } from "@folio/oracle";
-import { Effect, Layer, Option, TestClock, TestContext } from "effect";
+import { Effect, Layer, Option } from "effect";
+import { TestClock } from "effect/testing";
 
 // Shared test harness for app-side server logic: provides a fake aggregate `Oracle` layer.
 // Default methods are empty (empty Map / `none` / 0) so a case only stubs what it cares about.
@@ -8,7 +9,7 @@ import { Effect, Layer, Option, TestClock, TestContext } from "effect";
 // method signatures are still checked against the real service.
 type StubOf<S> = Omit<S, "_tag">;
 
-const emptyTokens: StubOf<Oracle["tokens"]> = {
+const emptyTokens: StubOf<Oracle["Service"]["tokens"]> = {
   mint: () => Effect.succeed(new Map()),
   enrich: () => Effect.succeed(new Map()),
   enrichAll: () => Effect.succeed(new Map()),
@@ -25,33 +26,33 @@ const emptyTokens: StubOf<Oracle["tokens"]> = {
   refreshCatalogue: () => Effect.succeed(0),
 };
 
-const emptyFx: StubOf<Oracle["fx"]> = {
+const emptyFx: StubOf<Oracle["Service"]["fx"]> = {
   resolve: () => Effect.succeed(Option.none()),
   warm: () => Effect.void,
   rateSeries: () => Effect.succeed([]),
   fillDaily: () => Effect.succeed({ calls: 0, done: true, failed: false }),
 };
 
-const emptyPlatforms: StubOf<Oracle["platforms"]> = {
+const emptyPlatforms: StubOf<Oracle["Service"]["platforms"]> = {
   resolve: (keys) => Effect.succeed(new Map([...keys].map((key) => [key, { key, name: key }]))),
   warm: () => Effect.void,
 };
 
 export interface OracleStub {
-  tokens?: Partial<Oracle["tokens"]>;
-  fx?: Partial<Oracle["fx"]>;
-  platforms?: Partial<Oracle["platforms"]>;
+  tokens?: Partial<Oracle["Service"]["tokens"]>;
+  fx?: Partial<Oracle["Service"]["fx"]>;
+  platforms?: Partial<Oracle["Service"]["platforms"]>;
 }
 
 // The only `as`: fills in the three `_tag`s omitted by `StubOf`; signatures are already checked.
 const oracleStubLayer = (stub: OracleStub = {}) =>
   Layer.succeed(
     Oracle,
-    new Oracle({
+    Oracle.of({
       tokens: { ...emptyTokens, ...stub.tokens },
       fx: { ...emptyFx, ...stub.fx },
       platforms: { ...emptyPlatforms, ...stub.platforms },
-    } as Oracle),
+    } as Oracle["Service"]),
   );
 
 /**
@@ -74,9 +75,9 @@ export const runWithOracleAt = <A, E>(
   effect: Effect.Effect<A, E, Oracle | DbRequest>,
 ): Promise<A> =>
   Effect.runPromise(
-    Effect.zipRight(TestClock.setTime(nowMs), effect).pipe(
+    Effect.andThen(TestClock.setTime(nowMs), effect).pipe(
       Effect.provide(oracleStubLayer(stub)),
       stubRequest,
-      Effect.provide(TestContext.TestContext),
+      Effect.provide(TestClock.layer()),
     ),
   );

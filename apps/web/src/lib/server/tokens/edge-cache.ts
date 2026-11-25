@@ -21,7 +21,7 @@ const TOKEN_CACHE_NAME = "folio-token-search";
 /**
  * Wraps the effect itself, not an async shell around it: `load` is an Effect, so read cache -> compute on miss ->
  * write back share one fiber with the upstream request (a Promise boundary would keep fetching after cancellation).
- * Cache failures are logged via `Effect.catchAll` and treated as a miss; `tryPromise` (not `promise`) so they aren't defects.
+ * Cache failures are logged via `Effect.catch` and treated as a miss; `tryPromise` (not `promise`) so they aren't defects.
  */
 export const edgeCached = <E, R>(
   path: string,
@@ -37,9 +37,9 @@ export const edgeCached = <E, R>(
       const res = await cache.match(key);
       return res ? ((await res.json()) as TokenOption[]) : null;
     }).pipe(
-      Effect.catchAll((err) =>
+      Effect.catch((err) =>
         Effect.sync(() => {
-          tokenLog.warn("edge cache: read failed", { op, error: reason(err.error) });
+          tokenLog.warn("edge cache: read failed", { op, error: reason(err.cause) });
           return null;
         }),
       ),
@@ -63,9 +63,9 @@ export const edgeCached = <E, R>(
       );
       tokenLog.debug("edge cache: stored", { op });
     }).pipe(
-      Effect.catchAll((err) =>
+      Effect.catch((err) =>
         Effect.sync(() =>
-          tokenLog.warn("edge cache: write failed", { op, error: reason(err.error) }),
+          tokenLog.warn("edge cache: write failed", { op, error: reason(err.cause) }),
         ),
       ),
     );

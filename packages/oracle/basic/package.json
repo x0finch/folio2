@@ -13,7 +13,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@folio/client-core": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "effect": "catalog:"
   },

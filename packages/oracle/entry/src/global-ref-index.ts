@@ -1,7 +1,7 @@
-import type { UpstreamError } from "@folio/client-core";
 import { type DbClient, GlobalDatabase, type RefIndexDiffCounts } from "@folio/db";
-import { TokenUpstream } from "@folio/oracle-basic/ports";
-import { Clock, Effect, type Option } from "effect";
+import type { UpstreamError } from "@folio/upstream-basic";
+import { TokenUpstream } from "@folio/upstream-basic/ports";
+import { Clock, Context, Effect, Layer, type Option } from "effect";
 
 // Maintenance facade for the global ref-index table. Not part of `oracleLayer`: it has no user, so the caller provides
 // just this layer and the two ports.
@@ -10,10 +10,10 @@ import { Clock, Effect, type Option } from "effect";
 // Errors are surfaced, not degraded: there is no local stale value, and the caller must know the run was wasted.
 
 // Service shape is derived from the `effect` return value; `.Default` is its layer.
-export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>()(
+export class GlobalRefIndexService extends Context.Service<GlobalRefIndexService>()(
   "oracle/GlobalRefIndexService",
   {
-    effect: Effect.gen(function* () {
+    make: Effect.gen(function* () {
       // Ops live in `GlobalDatabase` (the ticket with no owner).
       const { refIndex } = yield* GlobalDatabase;
       const upstream = yield* TokenUpstream;
@@ -60,4 +60,6 @@ export class GlobalRefIndexService extends Effect.Service<GlobalRefIndexService>
       };
     }),
   },
-) {}
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}

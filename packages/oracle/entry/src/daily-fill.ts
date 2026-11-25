@@ -1,7 +1,7 @@
-import type { UpstreamError } from "@folio/client-core";
 import type { CacheStore, DbRequest } from "@folio/db";
 import { DAILY_FILL_DAYS_PER_CALL, dayBucketOf } from "@folio/oracle-basic";
-import { Clock, Effect, Either, Option, Schema } from "effect";
+import type { UpstreamError } from "@folio/upstream-basic";
+import { Clock, Effect, Option, Result, Schema } from "effect";
 import { logDegraded } from "./tokens/swr";
 
 // Backfills historical daily prices; shared by token `fillDaily` and fiat `fx.fillDaily`. One queue message gets one egress budget (`maxCalls`).
@@ -137,14 +137,14 @@ export const fillDaily = (
       if (have.size < buckets.length) {
         if (calls + source.callsPerWindow > maxCalls) break;
         calls += source.callsPerWindow;
-        const got = yield* Effect.either(source.fetch(w.fromB, w.toB));
-        if (Either.isLeft(got)) {
-          yield* logDegraded(at, got.left);
+        const got = yield* Effect.result(source.fetch(w.fromB, w.toB));
+        if (Result.isFailure(got)) {
+          yield* logDegraded(at, got.failure);
           failed = true;
           break;
         }
         const rows: { dayBucket: number; unitPrice: number }[] = [];
-        for (const [dayBucket, unitPrice] of got.right) {
+        for (const [dayBucket, unitPrice] of got.success) {
           if (dayBucket >= w.fromB && dayBucket <= w.toB && !have.has(dayBucket)) {
             rows.push({ dayBucket, unitPrice });
           }

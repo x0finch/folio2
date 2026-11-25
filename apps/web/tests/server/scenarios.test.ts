@@ -480,3 +480,57 @@ describe("scenario: an on-chain wallet syncs one USDC", () => {
     expect(usdc[0].sources).toHaveLength(2); // two sources, each visible
   });
 });
+
+// -- scenario: a user-defined source --
+describe("scenario: a custom source reports a coin with its own price", () => {
+  // What the custom upstream emits for a coin with no chain: keyed by host + symbol, valued at the
+  // source's own price, which the market can't override for a coin it doesn't know.
+  const reported = {
+    symbol: "PTS",
+    amount: 42,
+    price: 7,
+    value: 42 * 7,
+    kind: "spot" as const,
+    tokenRef: "custom/custom:API.VAULT.EXAMPLE:PTS",
+  };
+
+  async function syncCustom(): Promise<string> {
+    const account = await dbFor(USER).accounts.create({
+      connectorId: "custom",
+      label: "vault",
+      creds: null,
+    });
+    const res = await syncOne(USER, {
+      account: (await dbFor(USER).accounts.list()).find((a) => a.id === account.id) as never,
+      balances: [reported as never],
+    });
+    if (!res.ok || !res.snapshotId) throw new Error(`sync failed: ${res.error ?? "no snapshot"}`);
+    return res.snapshotId;
+  }
+
+  it("1 stored: one token row with only the custom ref, and nothing asked upstream", async () => {
+    await syncCustom();
+    const rows = await tokenRows();
+    expect(rows).toHaveLength(1);
+    expect(await refRows(rows[0].id)).toEqual([
+      { namer: "custom", localName: "custom:API.VAULT.EXAMPLE:PTS" },
+    ]);
+    expect(outbound).toEqual([]);
+  });
+
+  it("2 data: no market price, so the source's value is stored, never as a selfPrice", async () => {
+    const snapshotId = await syncCustom();
+    const { results } = await env.DB.prepare(
+      "SELECT amount, usd_value AS usdValue, self_price AS selfPrice FROM snapshot_balances WHERE snapshot_id = ?",
+    )
+      .bind(snapshotId)
+      .all<{ amount: number; usdValue: number; selfPrice: number | null }>();
+    expect(results).toEqual([{ amount: 42, usdValue: 42 * 7, selfPrice: null }]);
+  });
+
+  it("3 display: the unpriced coin shows at the source's price", async () => {
+    await syncCustom();
+    const view = await overview();
+    expect(holdingOf(view, "PTS")?.totalValue).toBe(42 * 7);
+  });
+});

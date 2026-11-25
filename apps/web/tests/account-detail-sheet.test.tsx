@@ -97,6 +97,7 @@ const row = (over: Partial<AccountRow> = {}): AccountRow => ({
   gain24h: { amount: 12.34, pct: 1.5 },
   needsCredentials: false,
   credsSafe: {},
+  missingCreds: [],
   portfolioId: "p1",
   tags: [],
   ...over,

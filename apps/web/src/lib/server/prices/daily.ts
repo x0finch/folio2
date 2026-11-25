@@ -72,7 +72,7 @@ export const refillDailyPrices = (accountId: string): Effect.Effect<void, never,
     const ids = yield* manualAccountTokenIds(accountId);
     yield* enqueueForUser((userId) => jobsFor(userId, ids));
   }).pipe(
-    Effect.catchAllCause((cause) =>
+    Effect.catchCause((cause) =>
       Effect.sync(() =>
         log.warn("daily prices refill not queued", { accountId, error: Cause.pretty(cause) }),
       ),

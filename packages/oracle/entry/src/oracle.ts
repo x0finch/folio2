@@ -1,6 +1,7 @@
 import type { DatabaseForOracle, GlobalDatabase } from "@folio/db";
-import type { FxUpstream, Namer, PlatformUpstream, TokenUpstream } from "@folio/oracle-basic/ports";
-import { Effect, Layer } from "effect";
+import type { Namer } from "@folio/oracle-basic/ports";
+import type { FxUpstream, PlatformUpstream, TokenUpstream } from "@folio/upstream-basic/ports";
+import { Context, Effect, Layer } from "effect";
 import { FxService } from "./fx";
 import { PlatformService } from "./platforms";
 import { TokenService } from "./tokens";
@@ -14,15 +15,17 @@ import { CandidateSource } from "./tokens/candidates";
  * The one per-user ticket: `(yield* Oracle).fx.resolve("EUR")`, mirroring `@folio/db`'s aggregate `Database`.
  * The domain services are unchanged; `tokens.mint` is `TokenService.mint` itself.
  */
-export class Oracle extends Effect.Service<Oracle>()("oracle/Oracle", {
-  effect: Effect.gen(function* () {
+export class Oracle extends Context.Service<Oracle>()("oracle/Oracle", {
+  make: Effect.gen(function* () {
     return {
       tokens: yield* TokenService,
       fx: yield* FxService,
       platforms: yield* PlatformService,
     };
   }),
-}) {}
+}) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 // Also contains the aggregate: `yield* Oracle` works once `oracleLayer` is provided; domain services stay individually gettable.
 export type OracleServices = Oracle | TokenService | FxService | PlatformService;
@@ -35,13 +38,13 @@ export type OraclePorts =
 
 // `CandidateSource` is consumed here: package-internal Tag that must not appear in the assembly point's `R`.
 const domains = Layer.mergeAll(
-  Layer.provide(TokenService.Default, CandidateSource.Default),
-  FxService.Default,
-  PlatformService.Default,
+  Layer.provide(TokenService.layer, CandidateSource.layer),
+  FxService.layer,
+  PlatformService.layer,
 );
 
 // `provideMerge` keeps the three domain services exposed alongside the aggregate, and both paths must yield the same instance.
 export const oracleLayer: Layer.Layer<OracleServices, never, OraclePorts> = Layer.provideMerge(
-  Oracle.Default,
+  Oracle.layer,
   domains,
 );

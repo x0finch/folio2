@@ -10,7 +10,7 @@ import { openSqliteFile, resolveLocalDb } from "../scripts/ref-index/sqlite-file
 
 const MIGRATIONS = join(import.meta.dirname, "../../../packages/db/drizzle");
 const CG_BASE = "http://coingecko.test/api/v3";
-const CG = { apiKey: "test-key", pro: true, baseUrl: CG_BASE };
+const CG = { COINGECKO_PRO_API_KEY: "test-key", COINGECKO_API_BASE: CG_BASE };
 const MAX_STATEMENTS_PER_BATCH = 50;
 
 interface Coin {

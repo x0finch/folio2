@@ -54,7 +54,7 @@ export interface AccountTagLink {
   tagId: string;
 }
 
-export const makeTagStore = (client: DbClient, userId: string) => {
+export const makeTagStore = (client: DbClient["Service"], userId: string) => {
   return {
     /** Name is trimmed and unique case-insensitively within the portfolio. */
     create: (input: CreateTagInput): Effect.Effect<Tag, NotFound | InvalidInput> =>

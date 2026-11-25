@@ -19,7 +19,7 @@ const SNAPSHOT_PAGE = 50;
 
 const encoder = new TextEncoder();
 
-// The four export sections as one Effect Stream: `concat` orders them, `paginateEffect` pages, failures propagate
+// The four export sections as one Effect Stream: `concat` orders them, `paginate` pages, failures propagate
 // through the stream. Services are resolved before the stream is built, so its `R` is `never`; the request's `DbRequest`
 // is captured then and provided when the stream finishes, because the body is pulled after the handler returns.
 export const exportStream = (): Effect.Effect<
@@ -51,7 +51,7 @@ export const exportStream = (): Effect.Effect<
     );
 
     // Snapshots: paged, balances fetched per page and streamed out, so memory stays constant. `none` means no next page.
-    const snapshotLines = Stream.paginateEffect(0, (offset: number) =>
+    const snapshotLines = Stream.paginate(0, (offset: number) =>
       Effect.gen(function* () {
         const page = yield* snapshots.listPage(SNAPSHOT_PAGE, offset);
         const pageBalances =
@@ -67,7 +67,7 @@ export const exportStream = (): Effect.Effect<
           page.length < SNAPSHOT_PAGE ? Option.none<number>() : Option.some(offset + SNAPSHOT_PAGE);
         return [page.map((s) => snapshotRecord(s, bySnapshot.get(s.id) ?? [])), next] as const;
       }),
-    ).pipe(Stream.flattenIterables);
+    );
 
     // Manual ledger last: accountId / tokenId reference the accounts / tokens written above.
     const activities = Stream.fromIterableEffect(manual.listAllActivity()).pipe(
@@ -82,7 +82,7 @@ export const exportStream = (): Effect.Effect<
       Stream.map((record: unknown) => encoder.encode(ndjsonLine(record))),
       Stream.provideContext(request),
     );
-    return Stream.toReadableStream(bytes);
+    return bytes.pipe(Stream.toReadableStream());
   });
 
 // Business effect of GET /api/export; the route only authenticates and runs `runForUser`.

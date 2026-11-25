@@ -2,13 +2,14 @@ import { Oracle } from "@folio/oracle";
 import { Clock, Effect, Option } from "effect";
 import { z } from "zod";
 import { pickLocale } from "@/lib/i18n/detect";
+import { serverFn } from "@/lib/server/server-fn";
 import { buildFiatOptions } from "./fiat-options";
 
 // The picker's fiat group: tickets are built server-side (the client never builds tokenRefs / tickets), names are
 // localized by the caller's locale. Static, no network, no per-user data: no edge cache, no rows.
 export const ListFiatOptionsInput = z.object({ locale: z.string() });
 
-export const handleListFiatOptions = Effect.fn("listFiatOptions")(function* (
+export const handleListFiatOptions = serverFn("listFiatOptions")(function* (
   data: z.infer<typeof ListFiatOptionsInput>,
 ) {
   // Unrecognized locale falls back to the default language.

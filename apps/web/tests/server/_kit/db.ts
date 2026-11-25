@@ -16,10 +16,13 @@ const runOnce = <A>(
   effect: Effect.Effect<A, never, Database | DbRequest>,
 ): Promise<A> =>
   Effect.runPromise(
-    effect.pipe(Effect.provide(Database.Default), provideCurrentUser(userId), provideDbClient(env)),
+    effect.pipe(Effect.provide(Database.layer), provideCurrentUser(userId), provideDbClient(env)),
   );
 
-const promisify = <S extends object>(userId: string, pick: (db: Database) => S): Promisified<S> =>
+const promisify = <S extends object>(
+  userId: string,
+  pick: (db: Database["Service"]) => S,
+): Promisified<S> =>
   new Proxy({} as Promisified<S>, {
     get:
       (_t, key) =>

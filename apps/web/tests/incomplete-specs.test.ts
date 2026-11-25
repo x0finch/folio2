@@ -9,8 +9,17 @@ const SPECS: InputSpec[] = [
 ];
 
 describe("incompleteSpecs", () => {
-  it("keeps only non-public specs (semi + secret)", () => {
+  it("keeps non-public specs (semi + secret) when the public ones are known", () => {
     expect(incompleteSpecs(SPECS).map((s) => s.key)).toEqual(["apiKey", "apiSecret"]);
+  });
+
+  it("also asks for the public fields the account still needs", () => {
+    const specs: InputSpec[] = [
+      { key: "config", type: "public", label: "Config" },
+      { key: "address", type: "public", label: "Address", optional: true },
+      { key: "apiKey", type: "secret", label: "Key", optional: true },
+    ];
+    expect(incompleteSpecs(specs, ["address"]).map((s) => s.key)).toEqual(["address", "apiKey"]);
   });
 
   it("preserves original order", () => {
@@ -22,7 +31,7 @@ describe("incompleteSpecs", () => {
     expect(incompleteSpecs(specs).map((s) => s.key)).toEqual(["secret", "semi"]);
   });
 
-  it("returns empty when every spec is public (on-chain never needs credentials)", () => {
+  it("returns empty when every spec is public and none is missing (on-chain)", () => {
     const specs: InputSpec[] = [{ key: "addressOrXpub", type: "public", label: "Bitcoin address" }];
     expect(incompleteSpecs(specs)).toEqual([]);
   });

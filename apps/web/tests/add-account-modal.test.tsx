@@ -253,6 +253,7 @@ describe("add credentials", () => {
     accountId: "acc_9",
     connectorId: "binance" as const,
     credsSafe: { apiKey: "ab…yz" },
+    missingCreds: ["secret"],
   };
 
   it("opens straight into the creds view: titled with the connector, form gets the account + masked hints", async () => {

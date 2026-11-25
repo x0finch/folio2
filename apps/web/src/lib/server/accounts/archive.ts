@@ -1,8 +1,8 @@
 import { Database } from "@folio/db";
 import { getLogger } from "@logtape/logtape";
-import { Effect } from "effect";
 import { z } from "zod";
 import { sealManualAccount } from "@/lib/server/manual/store";
+import { serverFn } from "@/lib/server/server-fn";
 
 const log = getLogger(["folio", "web", "accounts"]);
 
@@ -14,7 +14,7 @@ export const ArchiveAccountInput = z.object({
   archived: z.boolean(),
 });
 
-export const handleArchiveAccount = Effect.fn("archiveAccount")(function* (
+export const handleArchiveAccount = serverFn("archiveAccount")(function* (
   data: z.infer<typeof ArchiveAccountInput>,
 ) {
   const accounts = (yield* Database).accounts;

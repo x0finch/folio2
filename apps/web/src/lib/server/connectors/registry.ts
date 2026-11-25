@@ -1,5 +1,4 @@
 import { env } from "cloudflare:workers";
-import { FolioHttpClient } from "@folio/client-core";
 import {
   type ConnectorId,
   registry as connectorRegistry,
@@ -7,10 +6,11 @@ import {
   selectProvider,
   validateCredentials,
 } from "@folio/connectors";
-import { type ConnectorError, isRetryable, retryAfterOf } from "@folio/connectors-basic";
-import { Context, Duration, Effect, Schedule } from "effect";
+import { isRetryable, retryAfterOf, type UpstreamError } from "@folio/upstream-basic";
+import { FolioHttpClient } from "@folio/upstreams";
+import { Context, Duration, Effect, Layer, Schedule } from "effect";
 import { platformLogoUrl } from "@/lib/core/logo";
-import type { InputSpec } from "@/lib/server/creds";
+import { type InputSpec, toInputSpec } from "@/lib/server/creds";
 
 // Liveness-probe retry: much tighter than sync's (background, nobody waiting) because the user is watching the
 // form. One retry only dodges transient blips; waits are capped at 1.5 s.
@@ -22,26 +22,27 @@ const VALIDATE_RETRY_BASE_MS = 200;
 const validateRetryPolicy = Schedule.exponential(Duration.millis(VALIDATE_RETRY_BASE_MS)).pipe(
   // ① Retry only retryable errors, and give up if the upstream's suggested wait exceeds our cap: clamping would likely
   //    hit 429 again, and surfacing the error beats a hung form (opposite of sync's clamp, deliberately).
-  //    Must precede `passthrough`, which pins the input type to ConnectorError.
-  Schedule.whileInput((e: ConnectorError) => {
-    if (!isRetryable(e)) return false;
-    const suggested = retryAfterOf(e);
+  Schedule.while(({ input }: Schedule.Metadata<Duration.Duration, UpstreamError>) => {
+    if (!isRetryable(input)) return false;
+    const suggested = retryAfterOf(input);
     return suggested === undefined || suggested <= VALIDATE_RETRY_MAX_WAIT_MS;
   }),
-  // Output becomes the error itself, so the next step can read Retry-After.
-  Schedule.passthrough,
   // ② Use the upstream's stated delay, else the exponential value; both clamped to the cap.
-  Schedule.modifyDelay((err, computed) => {
-    const suggested = retryAfterOf(err);
-    return Duration.min(
-      Duration.millis(VALIDATE_RETRY_MAX_WAIT_MS),
-      suggested !== undefined ? Duration.millis(suggested) : computed,
+  Schedule.modifyDelay(({ input, duration }) => {
+    const suggested = retryAfterOf(input);
+    return Effect.succeed(
+      Duration.min(
+        Duration.millis(VALIDATE_RETRY_MAX_WAIT_MS),
+        suggested !== undefined ? Duration.millis(suggested) : duration,
+      ),
     );
   }),
   // ③ Jitter is required: callers on one key all wake at the same Retry-After and would collide again.
   //    Additive (+0..baseMs) because Effect's multiplicative `jittered` can undercut the base.
-  Schedule.addDelay(() => Duration.millis(Math.random() * VALIDATE_RETRY_BASE_MS)),
-  Schedule.intersect(Schedule.recurs(VALIDATE_RETRY_ATTEMPTS - 1)),
+  Schedule.addDelay(() =>
+    Effect.sync(() => Duration.millis(Math.random() * VALIDATE_RETRY_BASE_MS)),
+  ),
+  (backoff) => Schedule.max([backoff, Schedule.recurs(VALIDATE_RETRY_ATTEMPTS - 1)]),
 );
 
 // App-side connector dispatch hub (server-only: imports cloudflare:workers, so only referenced inside handler bodies;
@@ -69,12 +70,7 @@ const buildCatalog = (): Record<string, ConnectorCatalogEntry> => {
 const buildSpecs = (): Partial<Record<ConnectorId, InputSpec[]>> => {
   const specs: Partial<Record<ConnectorId, InputSpec[]>> = {};
   for (const [cid, manifest] of connectorRegistry) {
-    specs[cid as ConnectorId] = manifest.account.creds.map((f) => ({
-      key: f.key,
-      type: f.type,
-      label: f.label,
-      desc: f.desc,
-    }));
+    specs[cid as ConnectorId] = manifest.account.creds.map(toInputSpec);
   }
   return specs;
 };
@@ -86,6 +82,18 @@ const asError = (e: unknown): Error => (e instanceof Error ? e : new Error(Strin
 const makeRegistry = () => ({
   catalog: buildCatalog(),
   specs: buildSpecs(),
+
+  // Whether stored secrets survive a change of the account's public creds (custom: same host).
+  keepsSecrets: (
+    connectorId: string,
+    previous: Record<string, string>,
+    next: Record<string, string>,
+  ): boolean =>
+    getConnector(connectorRegistry, connectorId)?.account.keepsSecrets?.(previous, next) ?? true,
+
+  // Optional creds this account requires given its public ones.
+  neededCreds: (connectorId: string, publicCreds: Record<string, string>): readonly string[] =>
+    getConnector(connectorRegistry, connectorId)?.account.needs?.(publicCreds) ?? [],
 
   // Credential validation on create / completion: shape gate per `account.creds`, then (with opts.liveness)
   // `provider.validateAccount`. Failures are typed; the form shows the message verbatim.
@@ -105,6 +113,13 @@ const makeRegistry = () => ({
         try: () => validateCredentials(manifest.account.creds, values),
         catch: asError,
       });
+      const missing = (manifest.account.needs?.(values) ?? []).filter((key) => values[key] == null);
+      if (missing.length > 0) {
+        const labels = missing.map(
+          (key) => manifest.account.creds.find((f) => f.key === key)?.label ?? key,
+        );
+        return yield* Effect.fail(new Error(`${labels.join(", ")}: required by this config`));
+      }
       if (!opts?.liveness) return;
 
       // A connector without providers (manual) has no liveness check; the shape gate already passed.
@@ -129,13 +144,17 @@ const makeRegistry = () => ({
       // Only unreachable-upstream errors retry: `validateAccount` returns `false` for rejected credentials and uses the
       // error channel for transport failures, so a wrong key reports "could not verify" without re-hitting upstream.
       // Pinned by tests/server/validate-retry.test.ts. Uses the same `isRetryable` as `@folio/sync`.
-      const alive = yield* provider
-        .validateAccount(ctx)
-        .pipe(
-          Effect.retry(validateRetryPolicy),
-          Effect.provide(FolioHttpClient),
-          Effect.mapError(asError),
-        );
+      const alive = yield* provider.validateAccount(ctx).pipe(
+        Effect.retry(validateRetryPolicy),
+        Effect.provide(FolioHttpClient),
+        // A config the upstream refuses (custom source) is the user's to fix: its reason is our
+        // own text, never upstream content, so it can reach the form.
+        Effect.mapError((e) =>
+          e._tag === "UpstreamRefusedError" && e.where === "(config)" && e.cause
+            ? new Error(e.cause)
+            : asError(e),
+        ),
+      );
       if (!alive) {
         return yield* Effect.fail(
           new Error("could not verify these credentials — please check them and try again"),
@@ -144,11 +163,13 @@ const makeRegistry = () => ({
     }),
 });
 
-export class ConnectorRegistry extends Effect.Service<ConnectorRegistry>()(
+export class ConnectorRegistry extends Context.Service<ConnectorRegistry>()(
   "web/ConnectorRegistry",
-  { sync: makeRegistry },
-) {}
+  { make: Effect.sync(makeRegistry) },
+) {
+  static readonly layer = Layer.effect(this, this.make);
+}
 
 /** The same ticket as a Context built without Layer, for `runtime.ts`'s hand-assembled runtime. */
 export const connectorRegistryContext = (): Context.Context<ConnectorRegistry> =>
-  Context.make(ConnectorRegistry, ConnectorRegistry.make(makeRegistry()));
+  Context.make(ConnectorRegistry, ConnectorRegistry.of(makeRegistry()));

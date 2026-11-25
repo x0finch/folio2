@@ -1,5 +1,5 @@
 import { configure, type LogRecord } from "@logtape/logtape";
-import { Effect, Runtime } from "effect";
+import { Context, Effect } from "effect";
 import { beforeAll, describe, expect, it } from "vitest";
 import { logCategory, logTapeLogger, withLogTapeLogger } from "@/lib/server/effect-log";
 
@@ -15,17 +15,11 @@ beforeAll(async () => {
   });
 });
 
-// Both installs — the layer and the FiberRefs-patching withLogTapeLogger — must pass the same assertions.
+// Both installs — the layer and the context-patching withLogTapeLogger — must pass the same assertions.
 const routes = {
   layer: <A>(effect: Effect.Effect<A>) => Effect.runPromise(Effect.provide(effect, logTapeLogger)),
-  fiberRefs: <A>(effect: Effect.Effect<A>) =>
-    Runtime.runPromise(
-      Runtime.make({
-        context: Runtime.defaultRuntime.context,
-        fiberRefs: withLogTapeLogger(Runtime.defaultRuntime.fiberRefs),
-        runtimeFlags: Runtime.defaultRuntime.runtimeFlags,
-      }),
-    )(effect),
+  context: <A>(effect: Effect.Effect<A>) =>
+    Effect.runPromiseWith(withLogTapeLogger(Context.empty()))(effect),
 };
 
 describe.each(Object.entries(routes))("Effect log → LogTape (%s)", (_route, run) => {
@@ -62,7 +56,7 @@ describe.each(Object.entries(routes))("Effect log → LogTape (%s)", (_route, ru
     expect(captured.map((r) => r.level)).toEqual(["error", "warning", "info", "debug"]);
   });
 
-  // A nested Logger.replace doesn't replace the outer logger, it adds one: every line written twice.
+  // One forwarder routes by category; a second logger per area would write every line twice.
   it("logCategory picks the category; untagged lines go to oracle", async () => {
     captured.length = 0;
     await run(

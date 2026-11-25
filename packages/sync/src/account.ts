@@ -1,8 +1,7 @@
 import type { Balance } from "@folio/connectors-basic";
-import { ConnectorFailure } from "@folio/connectors-basic";
 import type { AccountSafe } from "@folio/db";
 import { Effect } from "effect";
-import { messageOf, type SyncDepError } from "./errors";
+import { depError, type SyncDepError } from "./errors";
 import { platformOf } from "./platform";
 import { fetchBalancesWithRetry } from "./retry";
 import { SnapshotStore, type SyncServices, TokenOracle } from "./services";
@@ -17,7 +16,7 @@ const bestEffort = <A>(
   message: string,
 ): Effect.Effect<A, never, SyncServices> =>
   effect.pipe(
-    Effect.catchAll((e) =>
+    Effect.catch((e) =>
       Effect.logWarning(message).pipe(Effect.annotateLogs("error", e.message), Effect.as(fallback)),
     ),
   );
@@ -82,8 +81,7 @@ export const syncAccount = (
   Effect.gen(function* () {
     const stored = yield* Effect.try({
       try: (): Record<string, string> => (rawCreds ? JSON.parse(rawCreds) : {}),
-      // Bad JSON can't be fixed by retrying: classify as non-retryable.
-      catch: (e) => new ConnectorFailure({ message: messageOf(e), cause: e }),
+      catch: (e) => depError("readCreds", e),
     });
     const outcome = yield* fetchBalancesWithRetry(account, stored);
     // Missing credentials: skipped, neither a failure nor an error-channel value.
@@ -98,7 +96,7 @@ export const syncAccount = (
     }
     return yield* finish(account, outcome);
   }).pipe(
-    Effect.catchAll((err) =>
+    Effect.catch((err) =>
       Effect.logError("account sync failed").pipe(
         Effect.annotateLogs({
           reason: err._tag,

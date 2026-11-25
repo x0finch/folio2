@@ -62,7 +62,7 @@ export function diffRefIndexPage(
   return { updates, deletes };
 }
 
-export const makeGlobalRefIndexStore = (client: DbClient) => {
+export const makeGlobalRefIndexStore = (client: DbClient["Service"]) => {
   // Multi-row upsert, chunked two levels (rows per statement, statements per batch).
   const writeRefRows = (
     toWrite: readonly RefIndexRow[],
@@ -234,7 +234,7 @@ export const makeGlobalRefIndexStore = (client: DbClient) => {
             .from(globalTokenRefIndex)
             .where(eq(globalTokenRefIndex.upstream, upstream)),
         ),
-        (rows) => Option.fromNullable(rows[0]?.latest),
+        (rows) => Option.fromNullishOr(rows[0]?.latest),
       ),
   };
 };

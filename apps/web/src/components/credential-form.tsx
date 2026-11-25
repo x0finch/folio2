@@ -14,16 +14,18 @@ export function CredentialForm({
   accountId,
   specs,
   hint,
+  missing,
   onDone,
 }: {
   accountId: string;
   specs: InputSpec[];
   hint?: Record<string, string>; // credsSafe: public as-is, semi masked
+  missing?: readonly string[]; // required fields the account lacks
   onDone: () => void;
 }) {
   const ta = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const fields = incompleteSpecs(specs);
+  const fields = incompleteSpecs(specs, missing);
   const [values, setValues] = useState<Record<string, string>>({});
   const [confirmMismatch, setConfirmMismatch] = useState(false);
   // One mutation-owned pending state: hand-rolled busy/error would double-submit and let a late

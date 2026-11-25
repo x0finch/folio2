@@ -8,7 +8,7 @@ import {
   provideCurrentUser,
   provideDbClient,
 } from "@folio/db";
-import { UPSTREAM_ID } from "@folio/oracle-upstream-coingecko";
+import { COINGECKO_ID } from "@folio/upstreams";
 import { Effect, Layer } from "effect";
 
 // Fixture helpers for workers-pool tests that insert rows into D1 and read them back.
@@ -22,7 +22,7 @@ const runWith = <I, A>(
   Effect.runPromise(
     effect.pipe(
       Effect.provide(layer),
-      Effect.provide(Database.Default),
+      Effect.provide(Database.layer),
       provideCurrentUser(userId),
       provideDbClient(env),
     ),
@@ -59,7 +59,7 @@ const promisifiedFrom = <S extends object, R>(
 
 /** Per-user store helpers via the aggregate `Database`: `dbFor(USER).accounts.list()`. */
 export const dbFor = (userId: string) => {
-  const of = <S extends object>(pick: (db: Database) => S) =>
+  const of = <S extends object>(pick: (db: Database["Service"]) => S) =>
     promisifiedFrom(Effect.map(Database, pick), (effect) => runWith(Layer.empty, userId, effect));
   return {
     accounts: of((db) => db.accounts),
@@ -76,9 +76,9 @@ export const dbFor = (userId: string) => {
 
 /** Fixture helpers for the oracle service (not on `Database`): `oracleDbFor(USER).tokens.create(...)`. */
 export const oracleDbFor = (userId: string) => {
-  const of = <S extends object>(pick: (db: DatabaseForOracle) => S) =>
+  const of = <S extends object>(pick: (db: DatabaseForOracle["Service"]) => S) =>
     promisifiedFrom(Effect.map(DatabaseForOracle, pick), (effect) =>
-      runWith(DatabaseForOracle.Default(UPSTREAM_ID), userId, effect),
+      runWith(DatabaseForOracle.layer(COINGECKO_ID), userId, effect),
     );
   return {
     tokens: of((db) => db.tokens),
@@ -88,7 +88,7 @@ export const oracleDbFor = (userId: string) => {
 
 // Runs an effect needing only `GlobalDatabase`: its ops have no owner, so there is no `CurrentUser` to provide.
 const runGlobal = <A>(effect: Effect.Effect<A, never, GlobalDatabase | DbClient>): Promise<A> =>
-  Effect.runPromise(effect.pipe(Effect.provide(GlobalDatabase.Default), provideDbClient(env)));
+  Effect.runPromise(effect.pipe(Effect.provide(GlobalDatabase.layer), provideDbClient(env)));
 
 /** Fixture helpers for the global (user-less) tables: `globalDb.refIndex.putAll(...)`. */
 export const globalDb = {

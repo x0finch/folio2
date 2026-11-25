@@ -31,7 +31,7 @@ function fakeFx(rates: Record<string, number> = {}) {
       Effect.sync(() => {
         asked.push(currency);
         const c = currency.trim().toUpperCase();
-        return Option.fromNullable(c === "USD" ? 1 : rates[c]);
+        return Option.fromNullishOr(c === "USD" ? 1 : rates[c]);
       }),
   };
   return { fx, asked };
@@ -120,6 +120,20 @@ describe("revalue: mark-to-market kinds (no authoritative own price, always sour
     );
     expect(out[0].value).toBe(99);
     expect(asked).toEqual([]);
+  });
+
+  it("custom source: a coin the market knows takes the market price over the source's", async () => {
+    const { tokens } = fakeTokens(PRICES);
+    const out = await runWithOracle(
+      { tokens, fx: NO_FX },
+      revalue(
+        true,
+        [spot({ symbol: "BTC", amount: 2, price: 1, value: 2, tokenRef: "bitcoin/native" })],
+        IDS,
+      ),
+    );
+    expect(out[0]).toMatchObject({ price: 65000, value: 130000 });
+    expect(out[0].selfPrice).toBeUndefined();
   });
 
   it("no tokenRef at all (imported legacy row): keeps the value, no price lookup", async () => {

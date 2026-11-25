@@ -1,0 +1,57 @@
+// Also the ref namer of rows with no chain, one per account kind like `manual`.
+export const ID = "custom";
+
+// The deployment's public origin; requests to it (or its subdomains) would loop back into the app.
+export const OWN_ORIGIN = "BETTER_AUTH_URL";
+
+// User-defined sources are unvetted: a few pages and a bounded body keep one account from eating a
+// sync job's time and memory.
+export const MAX_PAGES = 5;
+export const MAX_BODY_BYTES = 1_000_000;
+
+export const MAX_HOST_LENGTH = 253;
+export const MAX_PATH_LENGTH = 512;
+export const MAX_DOT_PATH_LENGTH = 128;
+export const MAX_NAME_LENGTH = 64; // header and query parameter names
+export const MAX_QUERY_PARAMS = 10; // fixed query parameters per config
+export const MAX_QUERY_VALUE_LENGTH = 256;
+export const MAX_DECIMALS = 36;
+export const MAX_SYMBOL_LENGTH = 32;
+export const MAX_TOKEN_NAME_LENGTH = 128;
+export const MAX_REF_PART_LENGTH = 128; // chain and contract values
+
+// Names that only resolve inside a private network.
+export const PRIVATE_SUFFIXES = ["localhost", "local", "internal", "arpa"] as const;
+
+// Public wildcard DNS that answers with any IP written into the name (`127.0.0.1.nip.io`). Other
+// names resolving to private addresses are left to Workers' egress, which can't reach them.
+export const IP_ECHO_DOMAINS = ["nip.io", "sslip.io", "xip.io", "localtest.me", "lvh.me"] as const;
+
+// Where a Worker deployment answers besides its own domain; a source there could be this app.
+export const PLATFORM_ALIAS_DOMAINS = ["workers.dev", "pages.dev"] as const;
+
+// Headers the key may not ride in: they steer routing, sessions or proxies, not authentication.
+export const FORBIDDEN_HEADERS = new Set([
+  "host",
+  "cookie",
+  "connection",
+  "content-length",
+  "content-type",
+  "transfer-encoding",
+  "upgrade",
+  "te",
+  "trailer",
+  "keep-alive",
+  "expect",
+  "origin",
+  "referer",
+  "forwarded",
+  "via",
+  "x-real-ip",
+  "accept",
+  "user-agent",
+]);
+export const FORBIDDEN_HEADER_PREFIXES = ["proxy-", "sec-", "cf-", "x-forwarded-"] as const;
+
+export const ADDRESS_PLACEHOLDER = "{address}";
+export const PAGE_PLACEHOLDER = "{page}";

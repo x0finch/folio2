@@ -397,6 +397,9 @@ const en = {
     Passphrase: "Passphrase",
     "EVM Address": "EVM Address",
     "Wallet Address": "Wallet Address",
+    "Source config": "Source config",
+    "JSON: host, path, query, auth, pagination, rows, fields — never a key here, it goes in API Key":
+      "JSON: host, path, query, auth, pagination, rows, fields — never a key here, it goes in API Key",
     "0x + 40 hex": "0x + 40 hex",
     "Bitcoin address or xpub": "Bitcoin address or xpub",
     "address (1…/3…/bc1…) or xpub/ypub/zpub": "address (1…/3…/bc1…) or xpub/ypub/zpub",
@@ -811,6 +814,9 @@ const zh: Messages = {
     Passphrase: "Passphrase",
     "EVM Address": "EVM 地址",
     "Wallet Address": "钱包地址",
+    "Source config": "数据源配置",
+    "JSON: host, path, query, auth, pagination, rows, fields — never a key here, it goes in API Key":
+      "JSON：host、path、query、auth、pagination、rows、fields（不要在这里放 key，key 填在 API Key）",
     "0x + 40 hex": "0x + 40 位十六进制",
     "Bitcoin address or xpub": "比特币地址或扩展公钥",
     "address (1…/3…/bc1…) or xpub/ypub/zpub": "地址(1…/3…/bc1…)或 xpub/ypub/zpub",

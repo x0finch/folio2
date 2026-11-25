@@ -1,6 +1,6 @@
 import { FIAT_NAMER, MS_PER_DAY, tokenTicket } from "@folio/oracle-basic";
 import { tokenRef } from "@folio/oracle-ref";
-import { Effect, Either } from "effect";
+import { Effect, Result } from "effect";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleCreateAccountAndRefill } from "@/lib/server/accounts/create";
 import { handleGetAccountHistory } from "@/lib/server/accounts/history";
@@ -152,7 +152,7 @@ describe("jobs/daily-prices", () => {
       expect(state).toEqual({ acked: true, retried: false });
       perMessage.push(outbound.calls.length);
       for (const m of sent) {
-        expect(Either.isRight(decodeJob(m.job))).toBe(true);
+        expect(Result.isSuccess(decodeJob(m.job))).toBe(true);
         queue.push(m.job);
       }
       expect(perMessage.length).toBeLessThan(20); // the relay chain must converge
