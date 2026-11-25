@@ -129,4 +129,49 @@ describe("defineUpstream", () => {
       "https://api.split.test/x",
     ]);
   });
+
+  it("limit tiers: the first whose `when` holds gates `request`", async () => {
+    const tiered = defineUpstream({
+      id: "tiered",
+      label: "Tiered",
+      base: "https://api.tiered.test",
+      optionalKeys: ["TIERED_KEY", "TIERED_PRO_KEY"],
+      limits: {
+        default: [
+          { limit: 1, window: Duration.seconds(1), scope: "key", when: "TIERED_PRO_KEY" },
+          { limit: 1, window: Duration.seconds(5), scope: "key", when: "keyed" },
+          { limit: 1, window: Duration.seconds(30), scope: "egress", when: "keyless" },
+        ],
+      },
+    });
+    // Whether the second of two requests has gone out after `ms`.
+    const secondSentAfter = (env: Record<string, string>, ms: number) => {
+      const stub = httpStub(() => json({}));
+      return runClient(
+        stub,
+        Effect.gen(function* () {
+          const call = yield* tiered.connect(env);
+          yield* Effect.forkChild(Effect.all([1, 2].map(() => call.request("/x", ANY))));
+          yield* TestClock.adjust(Duration.millis(ms));
+          return stub.calls.length === 2;
+        }),
+      );
+    };
+    expect(await secondSentAfter({ TIERED_PRO_KEY: "p", TIERED_KEY: "d" }, 1_000)).toBe(true);
+    expect(await secondSentAfter({ TIERED_KEY: "d" }, 1_000)).toBe(false);
+    expect(await secondSentAfter({ TIERED_KEY: "d" }, 5_000)).toBe(true);
+    expect(await secondSentAfter({}, 5_000)).toBe(false);
+    expect(await secondSentAfter({}, 30_000)).toBe(true);
+  });
+
+  it("hosts sharing the base override declare it once", () => {
+    const shared = defineUpstream({
+      id: "shared",
+      label: "Shared",
+      base: "https://a.shared.test",
+      baseOverride: "SHARED_BASE",
+      hosts: { b: { base: "https://b.shared.test", baseOverride: "SHARED_BASE" } },
+    });
+    expect(shared.envNames).toEqual(["SHARED_BASE"]);
+  });
 });

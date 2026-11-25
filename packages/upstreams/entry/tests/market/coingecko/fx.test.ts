@@ -1,9 +1,9 @@
 import { FxUpstream } from "@folio/upstream-basic/ports";
-import { runClient } from "@folio/upstreams/testing";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { fetchRatesEffect } from "../src/fx";
-import { coinGeckoUpstreamLayers } from "../src/upstreams";
+import { fetchRatesEffect } from "../../../src/market/coingecko/fx";
+import { coinGeckoUpstreamLayers } from "../../../src/market/coingecko/layers";
+import { runClient } from "../../../src/runtime/testing";
 import { failing, run, stubbing } from "./harness";
 
 // Upstream is quoted against BTC: usdPerUnit(X) = usd.value / X.value.
@@ -61,7 +61,7 @@ describe("btcRef", () => {
   it("btcRef = coingecko/issued:bitcoin, same key as the token side's BTC history (reusable)", async () => {
     const ref = await runClient(
       stubbing(() => ({})).http,
-      Effect.map(FxUpstream, (u) => u.btcRef).pipe(Effect.provide(coinGeckoUpstreamLayers().fx)),
+      Effect.map(FxUpstream, (u) => u.btcRef).pipe(Effect.provide(coinGeckoUpstreamLayers({}).fx)),
       "none",
     );
     expect(ref).toBe("coingecko/issued:bitcoin");

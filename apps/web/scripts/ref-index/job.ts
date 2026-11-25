@@ -1,6 +1,6 @@
 import { GlobalDatabase, provideRemoteDbClient, type RemoteSql } from "@folio/db";
 import { GlobalRefIndexService } from "@folio/oracle";
-import { type CoinGeckoConfig, coinGeckoUpstreamLayers } from "@folio/oracle-upstream-coingecko";
+import { coinGeckoUpstreamLayers } from "@folio/upstreams";
 import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { toError } from "@/lib/server/errors";
 
@@ -20,7 +20,7 @@ export interface RefreshReport {
 /** Runs one round. Failure rejects an `Error`: upstream typed failures become readable text via the app's `toError` (same as the Worker); transport rejects (D1 down) are defects, surfaced as-is. */
 export async function refreshRefIndex(
   sql: RemoteSql,
-  coingecko: CoinGeckoConfig,
+  env: Readonly<Record<string, string | undefined>>,
 ): Promise<RefreshReport> {
   const program = Effect.gen(function* () {
     const svc = yield* GlobalRefIndexService;
@@ -29,7 +29,7 @@ export async function refreshRefIndex(
     return { lastRefreshedAt: Option.getOrNull(before), ...result };
   });
   const services = GlobalRefIndexService.layer.pipe(
-    Layer.provide(Layer.merge(GlobalDatabase.layer, coinGeckoUpstreamLayers(coingecko).token)),
+    Layer.provide(Layer.merge(GlobalDatabase.layer, coinGeckoUpstreamLayers(env).token)),
   );
   const exit = await Effect.runPromiseExit(
     program.pipe(provideRemoteDbClient(sql), Effect.mapError(toError), Effect.provide(services)),

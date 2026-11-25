@@ -11,12 +11,13 @@ import { make as makeRateLimit, type RateLimit } from "./ratelimit";
 //   deployment — the whole deployment regardless of key or IP (e.g. a signature the upstream meters).
 type LimitScope = "key" | "egress" | "deployment";
 
-interface Limit {
+interface Limit<O extends string = string> {
   readonly limit: number; // grants per window; also the burst
   readonly window: Duration.Input;
   readonly scope: LimitScope;
-  // Applies only with / without the optional key (an upstream with a keyless tier).
-  readonly when?: "keyed" | "keyless";
+  // Applies only with / without any optional key (an upstream with a keyless tier), or with the
+  // named one (a paid tier behind its own key).
+  readonly when?: "keyed" | "keyless" | O;
 }
 
 export interface UpstreamSpec<K extends string = string, O extends string = never> {
@@ -35,8 +36,9 @@ export interface UpstreamSpec<K extends string = string, O extends string = neve
   readonly userAgent?: string;
   // Headers on every request, from the resolved keys.
   readonly headers?: (keys: Keys<K, O>) => Record<string, string>;
-  // `default` gates every request; others only requests sent through `call.via(name)`.
-  readonly limits?: Readonly<Record<string, Limit>>;
+  // `default` gates every request; others only requests sent through `call.via(name)`. A list is
+  // tiers: the first whose `when` holds applies.
+  readonly limits?: Readonly<Record<string, Limit<O> | readonly Limit<O>[]>>;
   readonly rateLimitedStatuses?: readonly number[];
 }
 
@@ -104,7 +106,8 @@ export function defineUpstream<const K extends string = never, const O extends s
   const overrides = [spec.baseOverride, ...hosts.map(([, host]) => host.baseOverride)].filter(
     (name) => name !== undefined,
   );
-  const envNames = [...required, ...optional, ...overrides];
+  // Hosts may share one override (a proxy in front of every domain).
+  const envNames = [...new Set([...required, ...optional, ...overrides])];
 
   const resolveKeys = (
     env: Readonly<Record<string, unknown>>,
@@ -130,11 +133,12 @@ export function defineUpstream<const K extends string = never, const O extends s
     return Effect.succeed(keys as Keys<K, O>);
   };
 
-  const gateFor = (name: string, keyed: boolean): Effect.Effect<RateLimit | undefined> => {
-    const limit = spec.limits?.[name];
+  const gateFor = (name: string, keys: Keys<K, O>): Effect.Effect<RateLimit | undefined> => {
+    const keyed = optional.some((key) => key in keys) || required.length > 0;
+    const applies = ({ when }: Limit<O>) =>
+      when === undefined || (when === "keyed" ? keyed : when === "keyless" ? !keyed : when in keys);
+    const limit = [spec.limits?.[name] ?? []].flat().find(applies);
     if (!limit) return Effect.succeed(undefined);
-    if (limit.when === "keyed" && !keyed) return Effect.succeed(undefined);
-    if (limit.when === "keyless" && keyed) return Effect.succeed(undefined);
     // Bucket names never hold a key's value: they end up in logs and cache URLs.
     return makeRateLimit({
       key: `${spec.id}:${name}:${limit.scope}`,
@@ -146,7 +150,6 @@ export function defineUpstream<const K extends string = never, const O extends s
   const connect = (env: Readonly<Record<string, unknown>>) =>
     Effect.gen(function* () {
       const keys = yield* resolveKeys(env);
-      const keyed = optional.some((name) => name in keys) || required.length > 0;
       const override = spec.baseOverride && stringOf(env, spec.baseOverride);
       const bases = override ? [override] : [spec.base, ...(spec.mirrors ?? [])];
       const fixed = {
@@ -163,7 +166,7 @@ export function defineUpstream<const K extends string = never, const O extends s
         });
       const limits = new Map<string, RateLimit | undefined>();
       for (const name of Object.keys(spec.limits ?? {})) {
-        limits.set(name, yield* gateFor(name, keyed));
+        limits.set(name, yield* gateFor(name, keys));
       }
       const gates = new Map<string, Requester>();
       for (const [name, limit] of limits) gates.set(name, requesterFor(limit));

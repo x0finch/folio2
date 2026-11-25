@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ID as UPSTREAM_ID } from "../../../src/market/coingecko/constants";
 import {
   cgkRef,
   coinIdOf,
@@ -6,8 +7,7 @@ import {
   parsePriceSeries,
   parseSearch,
   parseSimplePrice,
-  UPSTREAM_ID,
-} from "../src";
+} from "../../../src/market/coingecko/parse";
 import simplePrice from "./fixtures/simple-price.json";
 
 describe("ref and coin id both ways", () => {

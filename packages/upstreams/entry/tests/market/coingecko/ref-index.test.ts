@@ -1,7 +1,8 @@
-import type { AssetPlatform, CoinListItem } from "@folio/coingecko-client";
 import { tokenRef } from "@folio/oracle-ref";
 import { describe, expect, it } from "vitest";
-import { toRefIndexRows, UPSTREAM_ID } from "../src";
+import type { AssetPlatform, CoinListItem } from "../../../src/market/coingecko/api";
+import { ID as UPSTREAM_ID } from "../../../src/market/coingecko/constants";
+import { toRefIndexRows } from "../../../src/market/coingecko/ref-index";
 import assetPlatforms from "./fixtures/asset-platforms.json" with { type: "json" };
 import coinsList from "./fixtures/coins-list.json" with { type: "json" };
 

@@ -1,9 +1,10 @@
-import { CoinGeckoClient, type CoinGeckoConfig } from "@folio/coingecko-client";
 import type { UpstreamError } from "@folio/upstream-basic";
-import type { Outbound } from "@folio/upstreams";
-import { type HttpStub, httpStub, jsonResponse, runClient } from "@folio/upstreams/testing";
 import { Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
+import { connection, type Needs } from "../../../src/market/coingecko/upstream";
+import { type HttpStub, httpStub, jsonResponse, runClient } from "../../../src/runtime/testing";
+
+type Env = Readonly<Record<string, string>>;
 
 // Shared wiring for the adapter tests. Stubs the `HttpClient` service (not `globalThis.fetch`) so the real path
 // is exercised and the endpoint and params the adapter asked for are pinned.
@@ -45,28 +46,26 @@ export const routed = (routes: Record<string, unknown>): Stub =>
 
 // Rate-limit tier is `none`: these tests are not about rate limiting and one case often fires a dozen requests;
 // the `memory` tier would wait after burst quota and `TestClock` never advances on its own.
-const provide = <A, E>(
-  effect: Effect.Effect<A, E, CoinGeckoClient | Outbound>,
-  config: CoinGeckoConfig,
-) => Effect.provide(effect, CoinGeckoClient.layer(config));
+const provide = <A, E>(effect: Effect.Effect<A, E, Needs>, env: Env) =>
+  Effect.provide(effect, connection(env));
 
 export const run = <A, E>(
   stub: Stub,
-  effect: Effect.Effect<A, E, CoinGeckoClient | Outbound>,
-  config: CoinGeckoConfig = {},
-): Promise<A> => runClient(stub.http, provide(effect, config), "none");
+  effect: Effect.Effect<A, E, Needs>,
+  env: Env = {},
+): Promise<A> => runClient(stub.http, provide(effect, env), "none");
 
 // Retry cases sleep between attempts and `TestClock` does not advance by itself: run in a fiber and repeatedly
 // yield + advance one second until done. Asserts attempt counts, never wall-clock.
 export const runDriven = <A, E>(
   stub: Stub,
-  effect: Effect.Effect<A, E, CoinGeckoClient | Outbound>,
-  config: CoinGeckoConfig = {},
+  effect: Effect.Effect<A, E, Needs>,
+  env: Env = {},
 ): Promise<A> =>
   runClient(
     stub.http,
     Effect.gen(function* () {
-      const fiber = yield* Effect.forkChild(provide(effect, config));
+      const fiber = yield* Effect.forkChild(provide(effect, env));
       for (let i = 0; i < 20; i++) {
         yield* Effect.yieldNow;
         yield* TestClock.adjust(Duration.seconds(1));
@@ -79,6 +78,6 @@ export const runDriven = <A, E>(
 // Failure path yields the error value itself, not a `FiberFailure`.
 export const failing = (
   stub: Stub,
-  effect: Effect.Effect<unknown, UpstreamError, CoinGeckoClient | Outbound>,
-  config: CoinGeckoConfig = {},
-): Promise<UpstreamError> => run(stub, Effect.flip(effect), config);
+  effect: Effect.Effect<unknown, UpstreamError, Needs>,
+  env: Env = {},
+): Promise<UpstreamError> => run(stub, Effect.flip(effect), env);

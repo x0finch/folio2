@@ -9,13 +9,13 @@
 //
 // Env:
 //   CLOUDFLARE_API_TOKEN   required for remote (Account > D1 > Edit; the deploy token has it). Only in request headers, never printed.
-//   COINGECKO_API_KEY      optional; enables pro/demo quota
+//   COINGECKO_API_KEY      optional; demo quota
+//   COINGECKO_PRO_API_KEY  optional; pro base and quota
 //   COINGECKO_API_BASE     optional; upstream base override (perf tests point it at a local fake)
 //
 // Exit codes: 0 success; 1 failure (upstream / D1 / arguments).
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { coinGeckoConfigOf } from "@/lib/server/coingecko-config";
 import { createD1HttpSql } from "./d1-http";
 import { refreshRefIndex, tallied } from "./job";
 import { openSqliteFile, resolveLocalDb } from "./sqlite-file";
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   const started = Date.now();
   log(`${opts.dryRun ? "dry run against" : "refreshing"} ${target.label}`);
   try {
-    const report = await refreshRefIndex(sql, coinGeckoConfigOf(process.env));
+    const report = await refreshRefIndex(sql, process.env);
     const lines = {
       lastRefreshedAt:
         report.lastRefreshedAt === null ? "never" : new Date(report.lastRefreshedAt).toISOString(),

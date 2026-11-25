@@ -116,9 +116,6 @@ importers:
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../packages/oracle/ref
-      '@folio/oracle-upstream-coingecko':
-        specifier: workspace:*
-        version: link:../../packages/oracle/upstreams/coingecko
       '@folio/sync':
         specifier: workspace:*
         version: link:../../packages/sync
@@ -293,25 +290,6 @@ importers:
         specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(@vitest/coverage-istanbul@4.1.9)(jsdom@28.1.0(@noble/hashes@1.8.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
-  packages/clients/coingecko:
-    dependencies:
-      '@folio/upstream-basic':
-        specifier: workspace:*
-        version: link:../../upstreams/basic
-      '@folio/upstreams':
-        specifier: workspace:*
-        version: link:../../upstreams/entry
-      effect:
-        specifier: 'catalog:'
-        version: 4.1.5
-    devDependencies:
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 4.1.9(@types/node@22.20.0)(@vitest/coverage-istanbul@4.1.9)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
   packages/connectors/basic:
     dependencies:
       '@standard-schema/spec':
@@ -452,34 +430,6 @@ importers:
         specifier: 'catalog:'
         version: 4.1.9(@types/node@22.20.0)(@vitest/coverage-istanbul@4.1.9)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
-  packages/oracle/upstreams/coingecko:
-    dependencies:
-      '@folio/coingecko-client':
-        specifier: workspace:*
-        version: link:../../../clients/coingecko
-      '@folio/oracle-basic':
-        specifier: workspace:*
-        version: link:../../basic
-      '@folio/oracle-ref':
-        specifier: workspace:*
-        version: link:../../ref
-      '@folio/upstream-basic':
-        specifier: workspace:*
-        version: link:../../../upstreams/basic
-      '@folio/upstreams':
-        specifier: workspace:*
-        version: link:../../../upstreams/entry
-      effect:
-        specifier: 'catalog:'
-        version: 4.1.5
-    devDependencies:
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-      vitest:
-        specifier: 'catalog:'
-        version: 4.1.9(@types/node@22.20.0)(@vitest/coverage-istanbul@4.1.9)(jsdom@28.1.0(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@22.20.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
-
   packages/sync:
     dependencies:
       '@folio/connectors-basic':
@@ -584,6 +534,9 @@ importers:
       '@folio/connectors-basic':
         specifier: workspace:*
         version: link:../../connectors/basic
+      '@folio/oracle-basic':
+        specifier: workspace:*
+        version: link:../../oracle/basic
       '@folio/oracle-ref':
         specifier: workspace:*
         version: link:../../oracle/ref

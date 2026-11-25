@@ -8,7 +8,7 @@ import {
   provideCurrentUser,
   provideDbClient,
 } from "@folio/db";
-import { UPSTREAM_ID } from "@folio/oracle-upstream-coingecko";
+import { COINGECKO_ID } from "@folio/upstreams";
 import { Effect, Layer } from "effect";
 
 // Fixture helpers for workers-pool tests that insert rows into D1 and read them back.
@@ -78,7 +78,7 @@ export const dbFor = (userId: string) => {
 export const oracleDbFor = (userId: string) => {
   const of = <S extends object>(pick: (db: DatabaseForOracle["Service"]) => S) =>
     promisifiedFrom(Effect.map(DatabaseForOracle, pick), (effect) =>
-      runWith(DatabaseForOracle.layer(UPSTREAM_ID), userId, effect),
+      runWith(DatabaseForOracle.layer(COINGECKO_ID), userId, effect),
     );
   return {
     tokens: of((db) => db.tokens),

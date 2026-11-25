@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { MARKETS_PER_PAGE, RETRY_MAX_WAIT_MS } from "../src/constants";
-import { makeUpstreamEffects } from "../src/upstream";
+import { MARKETS_PER_PAGE, RETRY_MAX_WAIT_MS } from "../../../src/market/coingecko/constants";
+import { makeTokenEffects } from "../../../src/market/coingecko/token";
 import { run, runDriven, type Stub, stubbing } from "./harness";
 
 // Retry policy lives in this package (the Effect client has none), so it is pinned here.
@@ -24,20 +24,20 @@ const rateLimited = (retryAfterSec: number, failures: number): Stub =>
 describe("which errors trigger another attempt", () => {
   it("5xx means upstream unreachable: one retry succeeds", async () => {
     const stub = failingFirst(1, 503);
-    await runDriven(stub, makeUpstreamEffects().fetchMarkets({ topN: 1 }));
+    await runDriven(stub, makeTokenEffects().fetchMarkets({ topN: 1 }));
     expect(stub.calls).toHaveLength(2);
   });
 
   it("retries are capped: persistent 5xx gives up after two attempts", async () => {
     const stub = failingFirst(99, 503);
-    const err = await runDriven(stub, Effect.flip(makeUpstreamEffects().fetchMarkets({ topN: 1 })));
+    const err = await runDriven(stub, Effect.flip(makeTokenEffects().fetchMarkets({ topN: 1 })));
     expect(err._tag).toBe("UpstreamUnavailableError");
     expect(stub.calls).toHaveLength(2);
   });
 
   it("401 is a credentials problem: gives up after one attempt", async () => {
     const stub = failingFirst(99, 401);
-    const err = await run(stub, Effect.flip(makeUpstreamEffects().fetchMarkets({ topN: 1 })));
+    const err = await run(stub, Effect.flip(makeTokenEffects().fetchMarkets({ topN: 1 })));
     expect(err._tag).toBe("UpstreamAuthError");
     expect(stub.calls).toHaveLength(1);
   });
@@ -46,7 +46,7 @@ describe("which errors trigger another attempt", () => {
 describe("Retry-After: honour upstream, within a tolerable cap", () => {
   it("a wait within the cap: waits, then retries once", async () => {
     const stub = rateLimited(1, 1); // 1 second, within the 2s cap
-    await runDriven(stub, makeUpstreamEffects().fetchMarkets({ topN: 1 }));
+    await runDriven(stub, makeTokenEffects().fetchMarkets({ topN: 1 }));
     expect(stub.calls).toHaveLength(2);
   });
 
@@ -54,7 +54,7 @@ describe("Retry-After: honour upstream, within a tolerable cap", () => {
   // sit on a user's write path, so fail fast and let SWR serve stale.
   it("a wait over the cap: gives up immediately instead of clamping and waiting", async () => {
     const stub = rateLimited(RETRY_MAX_WAIT_MS / 1000 + 58, 99); // 60 seconds, far over the cap
-    const err = await runDriven(stub, Effect.flip(makeUpstreamEffects().fetchMarkets({ topN: 1 })));
+    const err = await runDriven(stub, Effect.flip(makeTokenEffects().fetchMarkets({ topN: 1 })));
     expect(err._tag).toBe("UpstreamRateLimitError");
     expect(stub.calls).toHaveLength(1);
   });
@@ -78,7 +78,7 @@ describe("retry granularity is one request, not one method", () => {
       return page >= 3 ? [] : rows(page);
     });
 
-    await runDriven(stub, makeUpstreamEffects().fetchMarkets({ topN: MARKETS_PER_PAGE * 3 }));
+    await runDriven(stub, makeTokenEffects().fetchMarkets({ topN: MARKETS_PER_PAGE * 3 }));
 
     const pages = stub.calls.map((c) => c.query.get("page"));
     expect(pages.filter((p) => p === "1")).toHaveLength(1); // page 1 not repeated
@@ -95,7 +95,7 @@ describe("two concurrent requests retry independently", () => {
       return ++platformTries === 1 ? new Error("503") : platforms;
     });
 
-    await runDriven(stub, makeUpstreamEffects().fetchRefIndex());
+    await runDriven(stub, makeTokenEffects().fetchRefIndex());
 
     expect(stub.calls.filter((c) => c.path.includes("/asset_platforms"))).toHaveLength(2);
     expect(stub.calls.filter((c) => c.path.includes("/coins/list"))).toHaveLength(1);

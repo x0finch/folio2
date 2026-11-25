@@ -42,7 +42,6 @@
     "@folio/oracle": "workspace:*",
     "@folio/oracle-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
-    "@folio/oracle-upstream-coingecko": "workspace:*",
     "@folio/sync": "workspace:*",
     "@folio/ui": "workspace:*",
     "@folio/upstream-basic": "workspace:*",

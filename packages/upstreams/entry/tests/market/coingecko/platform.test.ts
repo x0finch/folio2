@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fetchChainsEffect } from "../src/platform";
+import { fetchChainsEffect } from "../../../src/market/coingecko/platform";
 import { run, stubbing } from "./harness";
 
 const ASSET_PLATFORMS = [

@@ -12,7 +12,7 @@ Production needs these Worker secrets (the plaintext `LOG_LEVEL=info` is already
 - `BETTER_AUTH_SECRET` — `openssl rand -hex 32`.
 - `BETTER_AUTH_URL` — the deployed origin (set in step 6).
 - `COINSTATS_API_KEY` — Solana / Sui / Cosmos (free at openapi.coinstats.app). EVM (Rabby) and Bitcoin (public Blockbook) need no key.
-- Optional: `COINGECKO_API_KEY` (lifts the keyless rate limit), `ZERION_API_KEY` (alternative EVM source).
+- Optional: `COINGECKO_API_KEY` (demo key; lifts the keyless rate limit) or `COINGECKO_PRO_API_KEY` (paid plan), `ZERION_API_KEY` (alternative EVM source).
 
 Exchange API keys are not deployment config: users enter them per account in the UI and they are encrypted into D1.
 

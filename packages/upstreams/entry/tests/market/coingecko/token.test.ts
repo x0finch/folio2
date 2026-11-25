@@ -1,12 +1,15 @@
-import type { AssetPlatform, MarketCoin } from "@folio/coingecko-client";
 import { TokenUpstream } from "@folio/upstream-basic/ports";
-import { runClient } from "@folio/upstreams/testing";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
-// The page cap is not exported; take it from the constants module to test the page boundary.
-import { IDS_PER_REQUEST, MARKETS_PER_PAGE, UPSTREAM_ID } from "../src/constants";
-import { makeUpstreamEffects } from "../src/upstream";
-import { coinGeckoUpstreamLayers } from "../src/upstreams";
+import type { AssetPlatform, MarketCoin } from "../../../src/market/coingecko/api";
+import {
+  IDS_PER_REQUEST,
+  MARKETS_PER_PAGE,
+  ID as UPSTREAM_ID,
+} from "../../../src/market/coingecko/constants";
+import { coinGeckoUpstreamLayers } from "../../../src/market/coingecko/layers";
+import { makeTokenEffects } from "../../../src/market/coingecko/token";
+import { runClient } from "../../../src/runtime/testing";
 import assetPlatforms from "./fixtures/asset-platforms.json" with { type: "json" };
 import { type Call, routed, run, type Stub, stubbing } from "./harness";
 
@@ -16,7 +19,7 @@ import { type Call, routed, run, type Stub, stubbing } from "./harness";
 const PLATFORMS = assetPlatforms as AssetPlatform[];
 
 // Fresh implementation per case.
-const impl = () => makeUpstreamEffects();
+const impl = () => makeTokenEffects();
 
 const marketRow = (id: string, rank: number): MarketCoin =>
   ({
@@ -48,7 +51,7 @@ describe("port layer", () => {
     const rows = await runClient(
       stub.http,
       Effect.flatMap(TokenUpstream, (u) => u.fetchMarkets({ topN: 1 })).pipe(
-        Effect.provide(coinGeckoUpstreamLayers().token),
+        Effect.provide(coinGeckoUpstreamLayers({}).token),
       ),
       "none",
     ).finally(() => vi.restoreAllMocks());

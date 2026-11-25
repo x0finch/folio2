@@ -1,20 +1,19 @@
-import type { MarketCoin, SearchResult, SimplePriceMap } from "@folio/coingecko-client";
 import type { TokenPrice, TokenPricePoint, TokenRef, UpstreamToken } from "@folio/oracle-basic";
 import { parseTokenRef, tokenRef } from "@folio/oracle-ref";
-import { LAST_UPDATED_AT, SEARCH_LIMIT, UPSTREAM_ID, VS_USD } from "./constants";
+import type { MarketCoin, SearchResult, SimplePriceMap } from "./api";
+import { ID, LAST_UPDATED_AT, SEARCH_LIMIT, VS_USD } from "./constants";
 
 // Pure parsing of CoinGecko responses into contract shapes; zero IO.
 // Produced tokenRefs always name this adapter; coin ids are lowercase kebab.
 
-export const cgkRef = (coinId: string): TokenRef =>
-  tokenRef.issued(UPSTREAM_ID, coinId.toLowerCase());
+export const cgkRef = (coinId: string): TokenRef => tokenRef.issued(ID, coinId.toLowerCase());
 
 // coin id from a ref named by this upstream; anything else is undefined.
 // Parse by grammar, not prefix: `coingecko/contract:0x…` shares the namer but its local name is an address,
 // and a hand-built ticket can carry it. Only the `issued:` shape is a CoinGecko id.
 export function coinIdOf(ref: TokenRef): string | undefined {
   const parsed = parseTokenRef(ref);
-  return parsed.kind === "issued" && parsed.namer === UPSTREAM_ID ? parsed.id : undefined;
+  return parsed.kind === "issued" && parsed.namer === ID ? parsed.id : undefined;
 }
 
 // One markets row to UpstreamToken (price in USD); rows without id are skipped.

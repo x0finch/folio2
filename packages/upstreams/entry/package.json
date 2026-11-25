@@ -15,6 +15,7 @@
   "dependencies": {
     "@folio/bitcoin-derive": "workspace:*",
     "@folio/connectors-basic": "workspace:*",
+    "@folio/oracle-basic": "workspace:*",
     "@folio/oracle-ref": "workspace:*",
     "@folio/upstream-basic": "workspace:*",
     "effect": "catalog:"
