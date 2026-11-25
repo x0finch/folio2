@@ -6,7 +6,7 @@ export { binanceBalance } from "./balance/binance/upstream";
 export { blockbookBalance } from "./balance/blockbook/upstream";
 export { bybitBalance } from "./balance/bybit/upstream";
 export { coinstatsBalance } from "./balance/coinstats/upstream";
-export { decodeCustomConfig } from "./balance/custom/config";
+export { configNeeds, decodeCustomConfig } from "./balance/custom/config";
 export { customBalance } from "./balance/custom/upstream";
 export { hyperliquidBalance } from "./balance/hyperliquid/upstream";
 export { okxBalance } from "./balance/okx/upstream";

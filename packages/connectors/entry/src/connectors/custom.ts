@@ -1,5 +1,5 @@
 import { type CredField, Spot } from "@folio/connectors-basic";
-import { customBalance, decodeCustomConfig } from "@folio/upstreams";
+import { configNeeds, customBalance, decodeCustomConfig } from "@folio/upstreams";
 import { z } from "zod";
 import { defineConnector } from "../connector";
 
@@ -10,9 +10,9 @@ const PLUG_SVG = `
 
 const CUSTOM_LOGO = `data:image/svg+xml,${encodeURIComponent(PLUG_SVG.replace(/\s+/g, " ").trim())}`;
 
-const needsKey = (raw: string | undefined): boolean => {
+const needsOf = (raw: string | undefined) => {
   const decoded = decodeCustomConfig(raw);
-  return decoded.ok && decoded.config.auth !== undefined && decoded.config.auth !== "none";
+  return decoded.ok ? configNeeds(decoded.config) : { key: false, address: false };
 };
 
 const hostOf = (raw: string | undefined): string | undefined => {
@@ -38,7 +38,13 @@ const customAccountCreds = [
     key: "address",
     type: "public",
     label: "Wallet Address",
-    validator: z.string().trim().min(1).optional(),
+    // Only dots would be read as a path segment once filled into the URL.
+    validator: z
+      .string()
+      .trim()
+      .min(1)
+      .refine((v) => !/^\.+$/.test(v), "not only dots")
+      .optional(),
   },
   {
     key: "apiKey",
@@ -64,10 +70,13 @@ export const custom = defineConnector({
     keepsSecrets: (previous, next) => {
       // A keyless config drops the key too, or nothing would ever clear it.
       const host = hostOf(previous.config);
-      return host !== undefined && host === hostOf(next.config) && needsKey(next.config);
+      return host !== undefined && host === hostOf(next.config) && needsOf(next.config).key;
     },
-    // `apiKey` is optional per field; a keyed config makes it required.
-    needs: (publicCreds) => (needsKey(publicCreds.config) ? ["apiKey"] : []),
+    // `apiKey` and `address` are optional per field; the config can make either required.
+    needs: (publicCreds) => {
+      const { key, address } = needsOf(publicCreds.config);
+      return [...(key ? ["apiKey"] : []), ...(address ? ["address"] : [])];
+    },
   },
   balance: { schema: Spot, providers: [customBalance] },
   valuation: "mark-to-market",

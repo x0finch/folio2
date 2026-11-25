@@ -3,6 +3,7 @@ import {
   ADDRESS_PLACEHOLDER,
   FORBIDDEN_HEADER_PREFIXES,
   FORBIDDEN_HEADERS,
+  IP_ECHO_DOMAINS,
   MAX_DOT_PATH_LENGTH,
   MAX_HOST_LENGTH,
   MAX_NAME_LENGTH,
@@ -32,6 +33,9 @@ export function hostProblem(host: string, ownHost?: string): string | undefined 
   if (!TLD.test(labels[labels.length - 1] ?? "")) return "host must end in a top-level domain";
   if (PRIVATE_SUFFIXES.some((suffix) => host.endsWith(`.${suffix}`))) {
     return "private network names are not allowed";
+  }
+  if (IP_ECHO_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
+    return "hosts that echo an IP address are not allowed";
   }
   if (ownHost && (host === ownHost || host.endsWith(`.${ownHost}`))) {
     return "this deployment's own domain is not allowed";
@@ -217,6 +221,14 @@ function crossProblems(config: typeof BaseConfig.Type): Schema.FilterIssue[] {
 export const CustomConfig = BaseConfig.check(Schema.makeFilter(crossProblems));
 export type CustomConfig = typeof CustomConfig.Type;
 export type CustomAuth = NonNullable<CustomConfig["auth"]>;
+
+/** The account creds a config can't run without, beyond the config itself. */
+export const configNeeds = (config: CustomConfig): { key: boolean; address: boolean } => ({
+  key: (config.auth ?? "none") !== "none",
+  address:
+    config.path.includes(ADDRESS_PLACEHOLDER) ||
+    Object.values(config.query ?? {}).some((value) => value.includes(ADDRESS_PLACEHOLDER)),
+});
 
 // Typos in a hand-written config fail instead of being dropped.
 const STRICT = { onExcessProperty: "error" } as const;

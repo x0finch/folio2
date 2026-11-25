@@ -137,9 +137,9 @@ const oversized = (where: string, max: number) =>
   new HttpFailure({ kind: "refused", where, cause: `body over ${max} bytes` });
 
 // Ending a started body stream aborts the request, freeing the connection now rather than at GC.
-// One chunk is pulled so the stream actually starts.
+// One chunk is pulled so the stream starts; detached, so a stalled body never delays the verdict.
 const release = (res: HttpClientResponse.HttpClientResponse): Effect.Effect<void> =>
-  Stream.runDrain(Stream.take(res.stream, 1)).pipe(Effect.ignore);
+  Effect.asVoid(Effect.forkDetach(Stream.runDrain(Stream.take(res.stream, 1)).pipe(Effect.ignore)));
 
 const readCappedJson = (
   res: HttpClientResponse.HttpClientResponse,

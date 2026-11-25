@@ -42,7 +42,7 @@ TanStack Start + Vite on Cloudflare Workers; D1 + Drizzle; better-auth; Effect 4
 ### apps/web boundaries
 - Client code value-imports only contract packages (`@folio/connectors-basic`, `@folio/oracle-basic`). Effect Tags go in subpaths (`/ports`) so `effect` stays out of the client bundle.
 - `cloudflare:workers` / node built-ins in client-imported modules only inside `createServerFn` handlers.
-- `lib/core` pure client-callable; `lib/hooks`, `lib/i18n`, `lib/queries` client-only; `lib/server/<resource>/index.ts` is the server-fn surface (`createServerFn().middleware([requireAuth]).validator(Input).handler(runEffect(handleX))`, `handleX = serverFn("handleX")(…)` so the timing log has its name); the rest of `lib/server` is server-only. No files at the top of `lib/`.
+- `lib/core` pure client-callable; `lib/hooks`, `lib/i18n`, `lib/queries` client-only; `lib/server/<resource>/index.ts` is the server-fn surface (`createServerFn().middleware([requireAuth]).validator(Input).handler(runEffect(handleX))`, `handleX = serverFn("x")(…)` (the label the timing log and span tree show)); the rest of `lib/server` is server-only. No files at the top of `lib/`.
 - Handlers return Effects; `runtime.ts` runs them and supplies the user.
 - Node-tested pure logic never shares a file with a handler.
 - Keep a page's pieces together; shared dirs only for genuinely generic parts.

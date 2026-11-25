@@ -63,7 +63,9 @@ function refOf(row: unknown, config: CustomConfig, host: string, symbol: string)
   const chain = chainPath && refPart(valueAt(row, chainPath), NAMER);
   const contract = contractPath && refPart(valueAt(row, contractPath), ADDRESS);
   if (chain && contract) return tokenRef.contract(chain, contract);
-  return tokenRef.custom(ID, chain ? `${host}:${chain}:${symbol}` : `${host}:${symbol}`);
+  // Encoded parts: `:` may occur in a chain (`evm:1`) or a symbol, and must not let two rows meet.
+  const parts = chain ? [host, chain, symbol] : [host, symbol];
+  return tokenRef.custom(ID, parts.map(encodeURIComponent).join(":"));
 }
 
 // The account is marked to market: a coin the market prices is revalued at sync and on display;

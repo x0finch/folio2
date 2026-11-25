@@ -144,13 +144,17 @@ const makeRegistry = () => ({
       // Only unreachable-upstream errors retry: `validateAccount` returns `false` for rejected credentials and uses the
       // error channel for transport failures, so a wrong key reports "could not verify" without re-hitting upstream.
       // Pinned by tests/server/validate-retry.test.ts. Uses the same `isRetryable` as `@folio/sync`.
-      const alive = yield* provider
-        .validateAccount(ctx)
-        .pipe(
-          Effect.retry(validateRetryPolicy),
-          Effect.provide(FolioHttpClient),
-          Effect.mapError(asError),
-        );
+      const alive = yield* provider.validateAccount(ctx).pipe(
+        Effect.retry(validateRetryPolicy),
+        Effect.provide(FolioHttpClient),
+        // A config the upstream refuses (custom source) is the user's to fix: its reason is our
+        // own text, never upstream content, so it can reach the form.
+        Effect.mapError((e) =>
+          e._tag === "UpstreamRefusedError" && e.where === "(config)" && e.cause
+            ? new Error(e.cause)
+            : asError(e),
+        ),
+      );
       if (!alive) {
         return yield* Effect.fail(
           new Error("could not verify these credentials — please check them and try again"),

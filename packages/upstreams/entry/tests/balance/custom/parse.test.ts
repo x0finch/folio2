@@ -25,7 +25,7 @@ describe("parseRows", () => {
           amount: 1.5,
           price: 3000.5,
           value: 4500.75,
-          tokenRef: "custom/custom:API.VAULT.EXAMPLE:EVM:1:ETH",
+          tokenRef: "custom/custom:API.VAULT.EXAMPLE:EVM%3A1:ETH",
           name: "Ether",
         },
         {
@@ -147,7 +147,7 @@ describe("parseRows", () => {
     );
     expect(balances.map((b) => b.tokenRef)).toEqual([
       "custom/custom:API.VAULT.EXAMPLE:A",
-      "custom/custom:API.VAULT.EXAMPLE:EVM:1:B",
+      "custom/custom:API.VAULT.EXAMPLE:EVM%3A1:B",
     ]);
   });
 
@@ -194,6 +194,18 @@ describe("parseRows", () => {
       ["X", 0],
       ["OK", 2],
     ]);
+  });
+
+  it("a `:` in a chain or symbol can't make two rows meet", () => {
+    const config = configOf({ fields: { symbol: "s", amount: "a", chain: "c" } });
+    const { balances } = parseRows(
+      [
+        { s: "USDC", a: 1, c: "eth" },
+        { s: "eth:USDC", a: 1 },
+      ],
+      config,
+    );
+    expect(new Set(balances.map((b) => b.tokenRef)).size).toBe(2);
   });
 
   it("drops an oversized name, keeps the row", () => {

@@ -116,7 +116,10 @@ describe("custom source", () => {
       const { validate } = await realRegistry();
       const probe = (host: string) =>
         Effect.runPromiseExit(validate("custom", { config: config(host) }, { liveness: true }));
-      expect((await probe("folio.example.com"))._tag).toBe("Failure");
+      const own = await probe("folio.example.com");
+      expect(own._tag).toBe("Failure");
+      // The form gets the reason, not just "custom refused at (config)".
+      expect(String(own)).toContain("own domain");
       expect((await probe("api.vault.example"))._tag).toBe("Success");
       expect(outbound.calls).toEqual([]);
     } finally {

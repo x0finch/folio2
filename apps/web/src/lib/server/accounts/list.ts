@@ -1,7 +1,7 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
-import { isComplete, publicValues, readStoredCreds, safeView } from "@/lib/server/creds";
+import { missingCreds, publicValues, readStoredCreds, safeView } from "@/lib/server/creds";
 import { type PortfolioScope, scopedMembership } from "@/lib/server/portfolio/scope";
 import { serverFn } from "@/lib/server/server-fn";
 
@@ -23,14 +23,16 @@ export const handleListAccounts = serverFn("listAccounts")(function* (data: Port
     if (parsed === null) unreadable.push(a.id);
     const stored = parsed ?? {};
     const specs = specsByType[a.connectorId] ?? [];
+    const missing = missingCreds(
+      specs,
+      stored,
+      connectors.neededCreds(a.connectorId, publicValues(specs, stored)),
+    );
     return {
       ...a,
       portfolioId: scope.portfolioIdOf(a.id),
-      needsCredentials: !isComplete(
-        specs,
-        stored,
-        connectors.neededCreds(a.connectorId, publicValues(specs, stored)),
-      ),
+      needsCredentials: missing.length > 0,
+      missingCreds: missing,
       credsSafe: safeView(specs, stored),
     };
   });

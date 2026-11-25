@@ -23,6 +23,10 @@ export const MAX_REF_PART_LENGTH = 128; // chain and contract values
 // Names that only resolve inside a private network.
 export const PRIVATE_SUFFIXES = ["localhost", "local", "internal", "arpa"] as const;
 
+// Public wildcard DNS that answers with any IP written into the name (`127.0.0.1.nip.io`). Other
+// names resolving to private addresses are left to Workers' egress, which can't reach them.
+export const IP_ECHO_DOMAINS = ["nip.io", "sslip.io", "xip.io", "localtest.me", "lvh.me"] as const;
+
 // Headers the key may not ride in: they steer routing, sessions or proxies, not authentication.
 export const FORBIDDEN_HEADERS = new Set([
   "host",

@@ -49,7 +49,12 @@ export function Accounts() {
   const [addOpen, setAddOpen] = useState(false);
   const [completeTarget, setCompleteTarget] = useState<CompleteTarget | null>(null);
   const startComplete = (a: AccountRow) =>
-    setCompleteTarget({ accountId: a.id, connectorId: a.connectorId, credsSafe: a.credsSafe });
+    setCompleteTarget({
+      accountId: a.id,
+      connectorId: a.connectorId,
+      credsSafe: a.credsSafe,
+      missingCreds: a.missingCreds,
+    });
 
   return (
     <>

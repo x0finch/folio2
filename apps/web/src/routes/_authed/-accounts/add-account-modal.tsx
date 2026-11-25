@@ -18,6 +18,7 @@ export interface CompleteTarget {
   accountId: string;
   connectorId: ConnectorId;
   credsSafe: Record<string, string>; // safeView projection: semi fields masked
+  missingCreds: readonly string[];
 }
 
 // One MorphingModal for both steps (grid ↔ form); `viewId = step` drives the morph.
@@ -165,6 +166,7 @@ export function AddAccountModal({
               accountId={completeFor.accountId}
               specs={specsQuery.data?.[completeFor.connectorId] ?? []}
               hint={completeFor.credsSafe}
+              missing={completeFor.missingCreds}
               onDone={handleCompleteDone}
             />
           </ViewShell>

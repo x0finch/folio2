@@ -1,9 +1,9 @@
 import type { InputSpec } from "@/lib/server/creds";
-// Fields the re-entry form asks for: the non-public ones (semi + secret), plus any required public
-// field missing from `known` (the account's safe view), e.g. after a partial import. Order preserved.
+// Fields the re-entry form asks for: the non-public ones (semi + secret), plus any public field the
+// account still needs (`missing`), e.g. after a partial import. Order preserved.
 export function incompleteSpecs(
   specs: readonly InputSpec[],
-  known: Readonly<Record<string, unknown>> = {},
+  missing: readonly string[] = [],
 ): InputSpec[] {
-  return specs.filter((s) => s.type !== "public" || (!s.optional && known[s.key] == null));
+  return specs.filter((s) => s.type !== "public" || missing.includes(s.key));
 }

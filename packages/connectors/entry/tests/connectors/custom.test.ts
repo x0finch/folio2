@@ -38,6 +38,31 @@ describe("custom account kind", () => {
     ).resolves.toMatchObject({ apiKey: "sk-live_A1.b2~" });
   });
 
+  it("needs the key for a keyed config and the address for an {address} config", () => {
+    const needs = (c: object) =>
+      custom.account.needs?.({
+        config: JSON.stringify({
+          path: "/v1/h",
+          fields: { symbol: "s", amount: "a" },
+          ...c,
+          host: "api.x.example",
+        }),
+      });
+    expect(needs({})).toEqual([]);
+    expect(needs({ auth: "bearer" })).toEqual(["apiKey"]);
+    expect(needs({ path: "/v1/{address}" })).toEqual(["address"]);
+    expect(needs({ query: { owner: "{address}" }, auth: { header: "X-Key" } })).toEqual([
+      "apiKey",
+      "address",
+    ]);
+  });
+
+  it("refuses an address made only of dots", async () => {
+    await expect(validateCredentials(creds, { config: config(), address: ".." })).rejects.toThrow(
+      /address/,
+    );
+  });
+
   it("rejects a bad config with the reason", async () => {
     await expect(validateCredentials(creds, { config: config("127.0.0.1") })).rejects.toThrow(
       /config: IP literals/,

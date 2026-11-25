@@ -4,8 +4,8 @@ import { Effect, Schema } from "effect";
 import { balanceUpstream } from "../../runtime/balance";
 import { type Call, defineUpstream } from "../../runtime/define";
 import { fetchRows, type Incomplete } from "./api";
-import { CustomConfig, hostOfOrigin, hostProblem } from "./config";
-import { ADDRESS_PLACEHOLDER, ID, MAX_BODY_BYTES, MAX_PAGES, OWN_ORIGIN } from "./constants";
+import { CustomConfig, configNeeds, hostOfOrigin, hostProblem } from "./config";
+import { ID, MAX_BODY_BYTES, MAX_PAGES, OWN_ORIGIN } from "./constants";
 import { parseRows } from "./parse";
 
 const custom = defineUpstream({
@@ -42,9 +42,7 @@ const checkTarget = (call: Call<never, typeof OWN_ORIGIN>, { config, address }: 
 const checkRules = (call: Call<never, typeof OWN_ORIGIN>, { config, address }: Account) => {
   const problem = hostProblem(config.host, hostOfOrigin(call.keys[OWN_ORIGIN]));
   if (problem) return Effect.fail(refused(`host: ${problem}`));
-  const wantsAddress =
-    config.path.includes(ADDRESS_PLACEHOLDER) ||
-    Object.values(config.query ?? {}).some((value) => value.includes(ADDRESS_PLACEHOLDER));
+  const wantsAddress = configNeeds(config).address;
   if (wantsAddress && !address?.trim()) return Effect.fail(refused("config needs an address"));
   // Encoding leaves dots alone, and the URL parser would resolve them as a segment of the path.
   if (wantsAddress && /^\.+$/.test(address?.trim() ?? "")) {

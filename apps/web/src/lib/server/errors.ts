@@ -30,7 +30,8 @@ const PRETTY_CAUSE = Symbol.for("folio/pretty-cause");
 export const withPrettyCause = (error: unknown, pretty: string): unknown => {
   if (typeof error === "object" && error !== null) {
     // Redefinable: the same error object can be rejected by the runtime more than once.
-    if (Object.isExtensible(error) || Object.hasOwn(error, PRETTY_CAUSE)) {
+    const existing = Object.getOwnPropertyDescriptor(error, PRETTY_CAUSE);
+    if (existing ? existing.configurable : Object.isExtensible(error)) {
       Object.defineProperty(error, PRETTY_CAUSE, {
         value: pretty,
         configurable: true,

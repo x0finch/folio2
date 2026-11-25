@@ -90,17 +90,22 @@ export function safeView(
   return out;
 }
 
-// `needed`: optional fields the connector requires given the public creds (`account.needs`).
-export function isComplete(
+// Required fields the account lacks. `needed`: optional fields the connector requires given the
+// public creds (`account.needs`).
+export function missingCreds(
   specs: readonly InputSpec[],
   stored: Record<string, string>,
   needed: readonly string[] = [],
-): boolean {
-  return (
-    specs.filter((s) => !s.optional).every((s) => stored[s.key] != null) &&
-    needed.every((key) => stored[key] != null)
-  );
+): string[] {
+  const required = [...specs.filter((s) => !s.optional).map((s) => s.key), ...needed];
+  return [...new Set(required)].filter((key) => stored[key] == null);
 }
+
+export const isComplete = (
+  specs: readonly InputSpec[],
+  stored: Record<string, string>,
+  needed: readonly string[] = [],
+): boolean => missingCreds(specs, stored, needed).length === 0;
 
 export function publicValues(
   specs: readonly InputSpec[],
