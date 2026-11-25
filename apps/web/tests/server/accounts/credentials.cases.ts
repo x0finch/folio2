@@ -181,3 +181,106 @@ describe("accounts/credentials", () => {
     });
   });
 });
+
+describe("accounts/credentials: custom source", () => {
+  const USER = "h-acc-creds-custom";
+  const configAt = (host: string, path = "/v1/holdings") =>
+    JSON.stringify({ host, path, auth: "bearer", fields: { symbol: "s", amount: "a" } });
+
+  const rawOf = async (accountId: string) =>
+    JSON.parse((await db(USER).accounts.getRawCreds(accountId)) ?? "{}") as Record<string, string>;
+
+  // Through the real registry: its `keepsSecrets` is what decides.
+  const seed = async () => {
+    const { registry } = await fakeRegistry();
+    const account = await db(USER).accounts.create({
+      connectorId: "custom",
+      label: "金库",
+      creds: "{}",
+    });
+    await callWithRegistry(
+      USER,
+      registry,
+      handleReplaceAccountCredentials({
+        accountId: account.id,
+        creds: { config: configAt("api.vault.example"), apiKey: "旧 key" },
+      }),
+    );
+    return { account, registry };
+  };
+
+  beforeEach(async () => {
+    blockOutbound();
+    await freshUser(USER);
+  });
+
+  it("changing the host clears the stored key", async () => {
+    const { account, registry } = await seed();
+    expect((await rawOf(account.id)).apiKey).toBeDefined();
+
+    await callWithRegistry(
+      USER,
+      registry,
+      handleReplaceAccountCredentials({
+        accountId: account.id,
+        creds: { config: configAt("api.other.example") },
+      }),
+    );
+
+    const raw = await rawOf(account.id);
+    expect(raw.apiKey).toBeUndefined();
+    expect(JSON.parse(raw.config).host).toBe("api.other.example");
+  });
+
+  it("changing only the path keeps the key, still sealed", async () => {
+    const { account, registry } = await seed();
+    const sealedBefore = (await rawOf(account.id)).apiKey;
+
+    await callWithRegistry(
+      USER,
+      registry,
+      handleReplaceAccountCredentials({
+        accountId: account.id,
+        creds: { config: configAt("api.vault.example", "/v2/holdings") },
+      }),
+    );
+
+    const raw = await rawOf(account.id);
+    expect(raw.apiKey).toBe(sealedBefore);
+    const opened = await openCreds(registry.specs.custom ?? [], raw, env.SECRETS_KEY as string);
+    expect(opened.apiKey).toBe("旧 key");
+  });
+
+  it("a new host with a new key stores the new key", async () => {
+    const { account, registry } = await seed();
+
+    await callWithRegistry(
+      USER,
+      registry,
+      handleReplaceAccountCredentials({
+        accountId: account.id,
+        creds: { config: configAt("api.other.example"), apiKey: "新 key" },
+      }),
+    );
+
+    const raw = await rawOf(account.id);
+    const opened = await openCreds(registry.specs.custom ?? [], raw, env.SECRETS_KEY as string);
+    expect(opened.apiKey).toBe("新 key");
+  });
+
+  it("re-entering only the key keeps the stored config", async () => {
+    const { account, registry } = await seed();
+
+    await callWithRegistry(
+      USER,
+      registry,
+      handleReplaceAccountCredentials({ accountId: account.id, creds: { apiKey: "新 key" } }),
+    );
+
+    const raw = await rawOf(account.id);
+    expect(JSON.parse(raw.config).host).toBe("api.vault.example");
+    const listed = await callWithRegistry(USER, registry, handleListAccounts());
+    expect(listed[0].credsSafe).not.toHaveProperty("apiKey");
+    expect(listed[0].needsCredentials).toBe(false);
+  });
+});

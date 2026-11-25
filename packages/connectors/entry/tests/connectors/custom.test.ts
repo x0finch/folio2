@@ -1,0 +1,44 @@
+import { validateCredentials } from "@folio/connectors-basic";
+import { customBalance } from "@folio/upstreams";
+import { describe, expect, it } from "vitest";
+import { custom } from "../../src/connectors/custom";
+import { getConnector, registry } from "../../src/registry";
+
+const config = (host = "api.vault.example") =>
+  JSON.stringify({ host, path: "/v1/holdings", fields: { symbol: "s", amount: "a" } });
+
+const creds = custom.account.creds;
+const keepsSecrets = (previous: string, next: string) =>
+  custom.account.keepsSecrets?.({ config: previous }, { config: next });
+
+describe("custom account kind", () => {
+  it("is registered, marked to market and served by the custom upstream", () => {
+    const manifest = getConnector(registry, "custom");
+    expect(manifest?.valuation).toBe("mark-to-market");
+    expect(manifest?.balance.providers).toEqual([customBalance]);
+    // Inline, so the logo proxy never fetches anything for it.
+    expect(manifest?.logo.startsWith("data:image/svg+xml,")).toBe(true);
+  });
+
+  it("decodes the config on save; address and key are optional", async () => {
+    const out = await validateCredentials(creds, { config: config() });
+    expect(out.config).toMatchObject({ host: "api.vault.example" });
+    expect(out.apiKey).toBeUndefined();
+    expect(out.address).toBeUndefined();
+  });
+
+  it("rejects a bad config with the reason", async () => {
+    await expect(validateCredentials(creds, { config: config("127.0.0.1") })).rejects.toThrow(
+      /config: IP literals/,
+    );
+    await expect(validateCredentials(creds, { config: "{" })).rejects.toThrow(/config/);
+    await expect(validateCredentials(creds, {})).rejects.toThrow(/config/);
+  });
+
+  it("keeps the key while the host stays, drops it when the host changes", () => {
+    const moved = JSON.stringify({ ...JSON.parse(config()), path: "/v2/holdings" });
+    expect(keepsSecrets(config(), moved)).toBe(true);
+    expect(keepsSecrets(config(), config("api.other.example"))).toBe(false);
+    expect(keepsSecrets("not json", config())).toBe(false);
+  });
+});

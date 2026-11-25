@@ -1,4 +1,6 @@
+import { env } from "cloudflare:test";
 import { type ConnectorId, registry as connectorRegistry } from "@folio/connectors";
+import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { realRegistry } from "../_kit/fakes";
 import { blockOutbound } from "../_kit/outbound";
@@ -80,5 +82,54 @@ describe("credential field specs (what getConnectorCredentialSpecs returns)", ()
         expect(Object.keys(f)).not.toContain("validator");
       }
     }
+  });
+});
+
+describe("custom source", () => {
+  const config = (host: string) =>
+    JSON.stringify({ host, path: "/v1/holdings", fields: { symbol: "s", amount: "a" } });
+
+  it("only the config is required; address and key are optional", async () => {
+    blockOutbound();
+    const { specs } = await realRegistry();
+    const byKey = Object.fromEntries((specs.custom ?? []).map((f) => [f.key, f]));
+    expect(byKey.config?.optional).toBeUndefined();
+    expect(byKey.address?.optional).toBe(true);
+    expect(byKey.apiKey).toMatchObject({ type: "secret", optional: true });
+  });
+
+  it("the add-account probe checks the config without any request", async () => {
+    const outbound = blockOutbound();
+    const { validate } = await realRegistry();
+    await Effect.runPromise(
+      validate("custom", { config: config("api.vault.example"), apiKey: "k" }, { liveness: true }),
+    );
+    expect(outbound.calls).toEqual([]);
+  });
+
+  it("the probe refuses the deployment's own domain", async () => {
+    const outbound = blockOutbound();
+    const e = env as unknown as Record<string, string | undefined>;
+    const before = e.BETTER_AUTH_URL;
+    e.BETTER_AUTH_URL = "https://folio.example.com";
+    try {
+      const { validate } = await realRegistry();
+      const probe = (host: string) =>
+        Effect.runPromiseExit(validate("custom", { config: config(host) }, { liveness: true }));
+      expect((await probe("folio.example.com"))._tag).toBe("Failure");
+      expect((await probe("api.vault.example"))._tag).toBe("Success");
+      expect(outbound.calls).toEqual([]);
+    } finally {
+      e.BETTER_AUTH_URL = before;
+    }
+  });
+
+  it("a private host fails the shape check with the reason", async () => {
+    blockOutbound();
+    const { validate } = await realRegistry();
+    const error = await Effect.runPromise(
+      Effect.flip(validate("custom", { config: config("db.internal") }, { liveness: true })),
+    );
+    expect(error.message).toContain("private network names");
   });
 });

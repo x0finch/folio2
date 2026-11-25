@@ -5,6 +5,7 @@ import { binance } from "./connectors/binance";
 import { bitcoin } from "./connectors/bitcoin";
 import { bybit } from "./connectors/bybit";
 import { cosmos } from "./connectors/cosmos";
+import { custom } from "./connectors/custom";
 import { evm } from "./connectors/evm";
 import { hyperliquid } from "./connectors/hyperliquid";
 import { manual } from "./connectors/manual";
@@ -49,6 +50,7 @@ export const connectors = [
   bybit,
   hyperliquid,
   manual,
+  custom,
 ] as const satisfies readonly ConnectorManifest[];
 export const registry: ConnectorRegistry = buildRegistry(connectors);
 

@@ -9,11 +9,18 @@ import type { z } from "zod";
 export type ConnectorValuation = "authoritative" | "mark-to-market";
 
 // Type-erased manifest for the heterogeneous registry; generics only exist at `defineConnector`.
+// Whether stored non-public creds still belong to the account after its public ones change from
+// `previous` to `next` (both plaintext). Absent: they always do.
+type KeepsSecrets = (
+  previous: Readonly<Record<string, string>>,
+  next: Readonly<Record<string, string>>,
+) => boolean;
+
 export interface ConnectorManifest {
   readonly id: string;
   readonly label: string;
   readonly logo: string;
-  readonly account: { readonly creds: readonly CredField[] };
+  readonly account: { readonly creds: readonly CredField[]; readonly keepsSecrets?: KeepsSecrets };
   readonly balance: {
     readonly schema: z.ZodType<Balance>;
     readonly providers: readonly BalanceUpstream<Balance>[];
@@ -31,7 +38,7 @@ export function defineConnector<
   id: Id;
   label: string;
   logo: string;
-  account: { creds: AC };
+  account: { creds: AC; keepsSecrets?: KeepsSecrets };
   balance: { schema: S; providers: BalanceUpstream<z.infer<S>, AC>[] };
   valuation?: ConnectorValuation;
 }): ConnectorManifest & { readonly id: Id } {

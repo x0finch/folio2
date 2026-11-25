@@ -10,7 +10,7 @@ import { isRetryable, retryAfterOf, type UpstreamError } from "@folio/upstream-b
 import { FolioHttpClient } from "@folio/upstreams";
 import { Context, Duration, Effect, Layer, Schedule } from "effect";
 import { platformLogoUrl } from "@/lib/core/logo";
-import type { InputSpec } from "@/lib/server/creds";
+import { type InputSpec, toInputSpec } from "@/lib/server/creds";
 
 // Liveness-probe retry: much tighter than sync's (background, nobody waiting) because the user is watching the
 // form. One retry only dodges transient blips; waits are capped at 1.5 s.
@@ -70,12 +70,7 @@ const buildCatalog = (): Record<string, ConnectorCatalogEntry> => {
 const buildSpecs = (): Partial<Record<ConnectorId, InputSpec[]>> => {
   const specs: Partial<Record<ConnectorId, InputSpec[]>> = {};
   for (const [cid, manifest] of connectorRegistry) {
-    specs[cid as ConnectorId] = manifest.account.creds.map((f) => ({
-      key: f.key,
-      type: f.type,
-      label: f.label,
-      desc: f.desc,
-    }));
+    specs[cid as ConnectorId] = manifest.account.creds.map(toInputSpec);
   }
   return specs;
 };
@@ -87,6 +82,14 @@ const asError = (e: unknown): Error => (e instanceof Error ? e : new Error(Strin
 const makeRegistry = () => ({
   catalog: buildCatalog(),
   specs: buildSpecs(),
+
+  // Whether stored secrets survive a change of the account's public creds (custom: same host).
+  keepsSecrets: (
+    connectorId: string,
+    previous: Record<string, string>,
+    next: Record<string, string>,
+  ): boolean =>
+    getConnector(connectorRegistry, connectorId)?.account.keepsSecrets?.(previous, next) ?? true,
 
   // Credential validation on create / completion: shape gate per `account.creds`, then (with opts.liveness)
   // `provider.validateAccount`. Failures are typed; the form shows the message verbatim.

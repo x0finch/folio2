@@ -1,13 +1,17 @@
 import { generateSecret } from "@folio/connectors-basic";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import {
+  carryOverCreds,
   categorizeFields,
   type InputSpec,
   isComplete,
   openCreds,
+  publicValues,
   SEMI_PREFIX,
   safeView,
   sealCreds,
+  toInputSpec,
 } from "@/lib/server/creds";
 
 const key = generateSecret();
@@ -64,6 +68,66 @@ describe("isComplete (needs-credentials)", () => {
   it("false when a semi_ placeholder or a secret field is missing (imported)", () => {
     expect(isComplete(okx, { [`${SEMI_PREFIX}apiKey`]: "ABCD…5678" })).toBe(false); // placeholder, no real value
     expect(isComplete(okx, { apiKey: "K", secret: "S" })).toBe(false); // passphrase missing
+  });
+});
+
+describe("optional fields", () => {
+  const custom: InputSpec[] = [
+    { key: "config", type: "public", label: "Source config" },
+    { key: "apiKey", type: "secret", label: "API Key", optional: true },
+  ];
+
+  it("optionality is read off the validator", () => {
+    const field = (validator: z.ZodType) => ({
+      key: "k",
+      type: "secret" as const,
+      label: "K",
+      validator,
+    });
+    expect(toInputSpec(field(z.string().optional())).optional).toBe(true);
+    expect(toInputSpec(field(z.string())).optional).toBeUndefined();
+  });
+
+  it("an optional secret doesn't hold back completeness", () => {
+    expect(isComplete(custom, { config: "{}" })).toBe(true);
+  });
+});
+
+describe("carryOverCreds (a creds update)", () => {
+  const stored = {
+    address: "0xold",
+    apiKey: "KEEPME",
+    secret: "ciphertext",
+    [`${SEMI_PREFIX}apiKey`]: "AB…YZ",
+  };
+  const specs: InputSpec[] = [{ key: "address", type: "public", label: "A" }, ...okx];
+
+  it("keeps stored non-public fields that weren't given, while allowed", () => {
+    const next = carryOverCreds(specs, stored, { address: "0xnew", passphrase: "new" }, true);
+    expect(next).toEqual({
+      address: "0xnew",
+      passphrase: "new",
+      apiKey: "KEEPME",
+      secret: "ciphertext",
+      [`${SEMI_PREFIX}apiKey`]: "AB…YZ",
+    });
+  });
+
+  it("a given field replaces the stored one and its placeholder", () => {
+    const next = carryOverCreds(specs, stored, { apiKey: "NEW" }, true);
+    expect(next.apiKey).toBe("NEW");
+    expect(next[`${SEMI_PREFIX}apiKey`]).toBeUndefined();
+  });
+
+  it("drops every stored non-public field when not allowed", () => {
+    expect(carryOverCreds(specs, stored, { address: "0xnew" }, false)).toEqual({
+      address: "0xnew",
+    });
+  });
+
+  it("never carries public fields: the caller passes those in", () => {
+    expect(carryOverCreds(specs, stored, {}, true).address).toBeUndefined();
+    expect(publicValues(specs, stored)).toEqual({ address: "0xold" });
   });
 });
 

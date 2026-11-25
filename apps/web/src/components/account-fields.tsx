@@ -205,7 +205,7 @@ export function GenericFields({
             <Input
               id={`${idPrefix}-${s.key}`}
               type={s.type === "secret" ? "password" : "text"}
-              required={s.type !== "public" || s.key === "address"}
+              required={!s.optional && (s.type !== "public" || s.key === "address")}
               // `new-password`: Chrome ignores autoComplete="off" on password inputs and would autofill
               // the site login; this also breaks the username/password pairing so API keys aren't filled.
               autoComplete={s.type === "secret" ? "new-password" : "off"}

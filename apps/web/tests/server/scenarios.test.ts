@@ -480,3 +480,59 @@ describe("scenario: an on-chain wallet syncs one USDC", () => {
     expect(usdc[0].sources).toHaveLength(2); // two sources, each visible
   });
 });
+
+// -- scenario: a user-defined source --
+describe("scenario: a custom source reports a coin with its own price", () => {
+  // What the custom upstream emits for a coin with no chain: keyed by host + symbol, valued at 0,
+  // its own price only in `selfPrice`.
+  const reported = {
+    symbol: "PTS",
+    amount: 42,
+    value: 0,
+    selfPrice: 7,
+    kind: "spot" as const,
+    tokenRef: "custom/custom:API.VAULT.EXAMPLE:PTS",
+  };
+
+  async function syncCustom(): Promise<string> {
+    const account = await dbFor(USER).accounts.create({
+      connectorId: "custom",
+      label: "vault",
+      creds: null,
+    });
+    const res = await syncOne(USER, {
+      account: (await dbFor(USER).accounts.list()).find((a) => a.id === account.id) as never,
+      balances: [reported as never],
+    });
+    if (!res.ok || !res.snapshotId) throw new Error(`sync failed: ${res.error ?? "no snapshot"}`);
+    return res.snapshotId;
+  }
+
+  it("1 stored: one token row with only the custom ref, and nothing asked upstream", async () => {
+    await syncCustom();
+    const rows = await tokenRows();
+    expect(rows).toHaveLength(1);
+    expect(await refRows(rows[0].id)).toEqual([
+      { namer: "custom", localName: "custom:API.VAULT.EXAMPLE:PTS" },
+    ]);
+    expect(outbound).toEqual([]);
+  });
+
+  it("2 data: marked to market, so the source's price is neither the value nor a stored selfPrice", async () => {
+    const snapshotId = await syncCustom();
+    const { results } = await env.DB.prepare(
+      "SELECT amount, usd_value AS usdValue, self_price AS selfPrice FROM snapshot_balances WHERE snapshot_id = ?",
+    )
+      .bind(snapshotId)
+      .all<{ amount: number; usdValue: number; selfPrice: number | null }>();
+    expect(results).toEqual([{ amount: 42, usdValue: 0, selfPrice: null }]);
+  });
+
+  it("3 display: the source's price never values it, so the unpriced coin adds nothing", async () => {
+    await syncCustom();
+    const view = await overview();
+    // Holdings worth exactly 0 are left out of the list.
+    expect(holdingOf(view, "PTS")).toBeUndefined();
+    expect(view.holdings.reduce((sum, h) => sum + h.totalValue, 0)).toBe(0);
+  });
+});

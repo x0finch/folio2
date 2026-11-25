@@ -32,6 +32,7 @@ export const fakeRegistry = async (
   const registry = {
     catalog: options.catalog ?? real.catalog,
     specs: options.specs ?? real.specs,
+    keepsSecrets: real.keepsSecrets,
     validate: (
       connectorId: string,
       values: Record<string, string>,

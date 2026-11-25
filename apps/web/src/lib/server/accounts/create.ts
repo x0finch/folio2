@@ -15,7 +15,7 @@ import { serverFn } from "@/lib/server/server-fn";
 const log = getLogger(["folio", "web", "accounts"]);
 
 // Seals per field type: only `secret` fields are encrypted. SECRETS_KEY stays in the app layer.
-export const raw2sealed = async (
+const raw2sealed = async (
   specs: ConnectorRegistry["Service"]["specs"],
   connectorId: ConnectorId,
   values: Record<string, string>,
