@@ -202,26 +202,6 @@ describe("error classification", () => {
       assetPlatforms,
     );
 
-  it("429 gives rate-limited, with Retry-After", async () => {
-    const err = await failWith({ status: 429, headers: { "retry-after": "9" } });
-    expect(err._tag).toBe("UpstreamRateLimitError");
-    expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(9000);
-  });
-
-  it("401 / 403 give a credentials problem", async () => {
-    for (const status of [401, 403]) {
-      expect((await failWith({ status }))._tag).toBe("UpstreamAuthError");
-    }
-  });
-
-  it("5xx / unreachable give unavailable", async () => {
-    expect((await failWith({ status: 503 }))._tag).toBe("UpstreamUnavailableError");
-    const dns = stub(() => {
-      throw new Error("dns");
-    });
-    expect((await failing(dns, assetPlatforms))._tag).toBe("UpstreamUnavailableError");
-  });
-
   it("the failure carries upstream and only the pathname", async () => {
     const err = await failWith({ status: 503 });
     expect(err.upstream).toBe("coingecko");

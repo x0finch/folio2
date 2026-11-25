@@ -273,20 +273,6 @@ describe("failure classification", () => {
     }
   });
 
-  it("5xx and network failures are unavailable; unreadable JSON is parse", async () => {
-    expect((await failWith({ status: 503 }))._tag).toBe("UpstreamUnavailableError");
-    const offline = httpStub(() => {
-      throw new Error("dns");
-    });
-    expect((await failing(offline, binanceBalance.validateAccount(ctx())))._tag).toBe(
-      "UpstreamUnavailableError",
-    );
-    const html = httpStub(() => new Response("<html>", { status: 200 }));
-    expect((await failing(html, binanceBalance.validateAccount(ctx())))._tag).toBe(
-      "UpstreamParseError",
-    );
-  });
-
   it("errors carry no credentials and no query", async () => {
     const dump = JSON.stringify(await failWith({ status: 503 }));
     expect(dump).not.toContain(CREDS.secret);

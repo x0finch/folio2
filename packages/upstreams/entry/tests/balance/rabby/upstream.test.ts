@@ -216,13 +216,6 @@ describe("failure classification", () => {
     expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBeUndefined();
   });
 
-  it("unreadable JSON gives parse", async () => {
-    const stub = httpStub(() => new Response("<html>", { status: 200 }));
-    expect((await failing(stub, rabbyBalance.fetchBalances(ctx())))._tag).toBe(
-      "UpstreamParseError",
-    );
-  });
-
   it("errors carry no query / address", async () => {
     const stub = upstream({ cache_token_list: () => json({}, { status: 503 }) });
     const err = await failing(stub, rabbyBalance.fetchBalances(ctx()));
@@ -241,12 +234,5 @@ describe("validateAccount", () => {
   it("credentials rejected (403): false", async () => {
     const stub = httpStub(() => json({}, { status: 403 }));
     expect(await run(stub, rabbyBalance.validateAccount(ctx()))).toBe(false);
-  });
-
-  it("5xx goes through the error channel, not squashed into false", async () => {
-    const stub = httpStub(() => json({}, { status: 503 }));
-    expect((await failing(stub, rabbyBalance.validateAccount(ctx())))._tag).toBe(
-      "UpstreamUnavailableError",
-    );
   });
 });

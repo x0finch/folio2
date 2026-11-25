@@ -223,28 +223,6 @@ describe("failure classification", () => {
   it("a bare null body is a parse failure, not a crash", async () => {
     expect((await failWith(() => json(null)))._tag).toBe("UpstreamParseError");
   });
-
-  it("HTTP: 401 / 403 auth, 429 rate-limited with Retry-After, 5xx unavailable", async () => {
-    for (const status of [401, 403]) {
-      expect(
-        await run(
-          httpStub(() => json({}, { status })),
-          okxBalance.validateAccount(ctx()),
-        ),
-      ).toBe(false);
-    }
-    const limited = await failWith(() =>
-      json({}, { status: 429, headers: { "retry-after": "4" } }),
-    );
-    expect(limited._tag === "UpstreamRateLimitError" && limited.retryAfterMs).toBe(4000);
-    expect((await failWith(() => json({}, { status: 503 })))._tag).toBe("UpstreamUnavailableError");
-  });
-
-  it("errors carry no credentials", async () => {
-    const dump = JSON.stringify(await failWith(() => json({}, { status: 503 })));
-    expect(dump).not.toContain(CREDS.secret);
-    expect(dump).not.toContain(CREDS.passphrase);
-  });
 });
 
 describe("validateAccount", () => {

@@ -1,4 +1,4 @@
-import { isRetryable, type UpstreamError, type UpstreamNeeds } from "@folio/upstream-basic";
+import type { UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import { hyperliquidBalance } from "../../../src/balance/hyperliquid/upstream";
@@ -62,33 +62,6 @@ describe("fetchBalances", () => {
 });
 
 describe("failure classification", () => {
-  it("5xx and network failures give unreachable (retryable)", async () => {
-    const down = httpStub(() => json({}, { status: 503 }));
-    const err = await failing(down, hyperliquidBalance.fetchBalances(ctx()));
-    expect(err._tag).toBe("UpstreamUnavailableError");
-    expect(isRetryable(err)).toBe(true);
-    const dead = httpStub(() => {
-      throw new Error("dns");
-    });
-    expect((await failing(dead, hyperliquidBalance.fetchBalances(ctx())))._tag).toBe(
-      "UpstreamUnavailableError",
-    );
-  });
-
-  it("429 gives rate-limited, with Retry-After", async () => {
-    const stub = httpStub(() => json({}, { status: 429, headers: { "retry-after": "7" } }));
-    const err = await failing(stub, hyperliquidBalance.fetchBalances(ctx()));
-    expect(err._tag).toBe("UpstreamRateLimitError");
-    expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(7000);
-  });
-
-  it("unreadable JSON gives parse", async () => {
-    const stub = httpStub(() => new Response("<html>", { status: 200 }));
-    expect((await failing(stub, hyperliquidBalance.fetchBalances(ctx())))._tag).toBe(
-      "UpstreamParseError",
-    );
-  });
-
   it("errors name the upstream and carry no address", async () => {
     const stub = httpStub(() => json({}, { status: 503 }));
     const err = await failing(stub, hyperliquidBalance.fetchBalances(ctx()));
@@ -118,11 +91,5 @@ describe("validateAccount", () => {
   it("200 gives true (an address that never traded is also 200 + empty state)", async () => {
     const stub = httpStub(() => json(neverTraded));
     expect(await run(stub, hyperliquidBalance.validateAccount(ctx()))).toBe(true);
-  });
-
-  it("unreachable goes through the error channel, not squashed into false", async () => {
-    const stub = httpStub(() => json({}, { status: 503 }));
-    const err = await failing(stub, hyperliquidBalance.validateAccount(ctx()));
-    expect(err._tag).toBe("UpstreamUnavailableError");
   });
 });

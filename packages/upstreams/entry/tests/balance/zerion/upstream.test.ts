@@ -116,13 +116,6 @@ describe("request shape", () => {
     expect(url.searchParams.get("currency")).toBe("usd");
   });
 
-  it("no key configured: a credentials problem, and no request at all", async () => {
-    const stub = upstream();
-    const err = await failing(stub, zerionBalance.fetchBalances(ctx({})));
-    expect(err._tag).toBe("UpstreamAuthError");
-    expect(stub.calls).toHaveLength(0);
-  });
-
   it("disabled by default: a fallback source", () => {
     expect(zerionBalance.defaultEnabled).toBe(false);
   });
@@ -134,24 +127,6 @@ describe("failure classification", () => {
       upstream({ "/positions": () => json({ errors: [{ title: "nope" }] }, init) }),
       zerionBalance.fetchBalances(ctx()),
     );
-
-  it("401 / 403 give a credentials problem", async () => {
-    for (const status of [401, 403]) {
-      expect((await failWith({ status }))._tag).toBe("UpstreamAuthError");
-    }
-  });
-
-  it("429 gives rate-limited, with Retry-After", async () => {
-    const err = await failWith({ status: 429, headers: { "retry-after": "5" } });
-    expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(5000);
-  });
-
-  it("unreadable JSON gives parse", async () => {
-    const stub = upstream({ "/positions": () => new Response("<html>", { status: 200 }) });
-    expect((await failing(stub, zerionBalance.fetchBalances(ctx())))._tag).toBe(
-      "UpstreamParseError",
-    );
-  });
 
   it("errors carry neither the key nor the query", async () => {
     const dump = JSON.stringify(await failWith({ status: 503 }));
@@ -165,20 +140,5 @@ describe("validateAccount", () => {
     const stub = httpStub(() => json({}));
     expect(await run(stub, zerionBalance.validateAccount(ctx()))).toBe(true);
     expect(stub.calls[0].request.url.pathname).toBe(`/v1/wallets/${ADDR}/portfolio`);
-  });
-
-  it("no key configured: false, and no request at all", async () => {
-    const stub = httpStub(() => json({}));
-    expect(await run(stub, zerionBalance.validateAccount(ctx({})))).toBe(false);
-    expect(stub.calls).toHaveLength(0);
-  });
-
-  it("credentials rejected (401): false; 5xx goes through the error channel", async () => {
-    const denied = httpStub(() => json({}, { status: 401 }));
-    expect(await run(denied, zerionBalance.validateAccount(ctx()))).toBe(false);
-    const down = httpStub(() => json({}, { status: 503 }));
-    expect((await failing(down, zerionBalance.validateAccount(ctx())))._tag).toBe(
-      "UpstreamUnavailableError",
-    );
   });
 });

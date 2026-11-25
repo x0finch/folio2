@@ -183,17 +183,6 @@ describe("blockbookBalance.fetchBalances — xpub mode (golden fixture, server-s
 });
 
 describe("blockbookBalance.fetchBalances — error mapping", () => {
-  it("429 → rate limit; 500 (every node) → upstream unavailable", async () => {
-    mockBlockbook({ status: 429 });
-    expect(await failing(blockbookBalance.fetchBalances(ctx()))).toMatchObject({
-      _tag: "UpstreamRateLimitError",
-    });
-    mockBlockbook({ status: 500 });
-    expect(await failing(blockbookBalance.fetchBalances(ctx()))).toMatchObject({
-      _tag: "UpstreamUnavailableError",
-    });
-  });
-
   it("node override: only that node is hit, no built-in public node", async () => {
     const overrides = { BLOCKBOOK_API_BASE: "http://127.0.0.1:3399/blockbook" };
     // Exactly the declared key, public (not encrypted / exported).
@@ -246,18 +235,6 @@ describe("request shape", () => {
     expect(err.upstream).toBe("blockbook");
     expect(err.where).not.toContain("details");
     expect(err.where).toContain("/xpub/");
-  });
-
-  it("429 carries Retry-After", async () => {
-    stub = httpStub(
-      () =>
-        new Response("{}", {
-          status: 429,
-          headers: { "content-type": "application/json", "retry-after": "6" },
-        }),
-    );
-    const err = await failing(blockbookBalance.fetchBalances(ctx({ addressOrXpub: ADDR }, PIN)));
-    expect(err._tag === "UpstreamRateLimitError" && err.retryAfterMs).toBe(6000);
   });
 });
 

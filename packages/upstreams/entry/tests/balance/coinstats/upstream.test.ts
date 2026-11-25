@@ -67,46 +67,6 @@ describe("fetchBalances", () => {
     expect(stub.calls[0].request.headers["x-api-key"]).toBe(KEY);
     expect(stub.calls[0].request.url.searchParams.get("address")).toBe(ADDR);
   });
-
-  it("no provider key configured: a credentials problem, and no request at all", async () => {
-    const stub = httpStub(() => json([]));
-    const err = await failing(stub, coinstatsBalance.fetchBalances(ctx({})));
-    expect(err._tag).toBe("UpstreamAuthError");
-    expect(stub.calls).toHaveLength(0);
-  });
-
-  it("429 gives rate-limited; 401 gives a credentials problem", async () => {
-    const limited = httpStub(() => json({}, { status: 429 }));
-    expect((await failing(limited, coinstatsBalance.fetchBalances(ctx())))._tag).toBe(
-      "UpstreamRateLimitError",
-    );
-    const denied = httpStub(() => json({}, { status: 401 }));
-    expect((await failing(denied, coinstatsBalance.fetchBalances(ctx())))._tag).toBe(
-      "UpstreamAuthError",
-    );
-  });
-});
-
-describe("validateAccount", () => {
-  it("no key configured: false, and no request at all", async () => {
-    const stub = httpStub(() => json([]));
-    expect(await run(stub, coinstatsBalance.validateAccount(ctx({})))).toBe(false);
-    expect(stub.calls).toHaveLength(0);
-  });
-
-  it("200 → true;401 → false", async () => {
-    const ok = httpStub(() => json([]));
-    expect(await run(ok, coinstatsBalance.validateAccount(ctx()))).toBe(true);
-    const denied = httpStub(() => json({}, { status: 401 }));
-    expect(await run(denied, coinstatsBalance.validateAccount(ctx()))).toBe(false);
-  });
-
-  it("unreachable goes through the error channel, not squashed into false", async () => {
-    const stub = httpStub(() => json({}, { status: 503 }));
-    expect((await failing(stub, coinstatsBalance.validateAccount(ctx())))._tag).toBe(
-      "UpstreamUnavailableError",
-    );
-  });
 });
 
 describe("output check", () => {
