@@ -1,4 +1,4 @@
-import { Duration, Effect, Fiber, Schema } from "effect";
+import { Duration, Effect, Exit, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { describe, expect, it } from "vitest";
 import { defineUpstream } from "../../src/runtime/define";
@@ -173,5 +173,48 @@ describe("defineUpstream", () => {
       hosts: { b: { base: "https://b.shared.test", baseOverride: "SHARED_BASE" } },
     });
     expect(shared.envNames).toEqual(["SHARED_BASE"]);
+  });
+
+  it("an account base replaces base, override and mirrors", async () => {
+    const stub = httpStub(() => json({}));
+    await runClient(
+      stub,
+      Effect.gen(function* () {
+        const call = yield* acme.connect(
+          { ...env, ACME_BASE: "http://127.0.0.1:9" },
+          "https://own.example",
+        );
+        yield* call.request("/v1/x", ANY);
+        expect(call.base).toBe("https://own.example");
+      }),
+    );
+    expect(stub.calls.map((c) => c.request.url.href)).toEqual(["https://own.example/v1/x"]);
+  });
+
+  it("without any base, connecting is a defect", async () => {
+    const baseless = defineUpstream({ id: "baseless", label: "Baseless" });
+    const exit = await Effect.runPromiseExit(baseless.connect({}));
+    expect(exit._tag).toBe("Failure");
+    expect(Exit.hasDies(exit)).toBe(true);
+  });
+
+  it("redirect refusal and the body cap reach every requester", async () => {
+    const guarded = defineUpstream({
+      id: "guarded",
+      label: "Guarded",
+      base: "https://guarded.test",
+      refuseRedirects: true,
+      maxBodyBytes: 8,
+    });
+    const redirected = await runClient(
+      httpStub(() => new Response(null, { status: 302 })),
+      Effect.flip(Effect.flatMap(guarded.connect({}), (call) => call.request("/x", ANY))),
+    );
+    expect(redirected._tag).toBe("UpstreamRefusedError");
+    const oversized = await runClient(
+      httpStub(() => json({ padding: "more than eight bytes" })),
+      Effect.flip(Effect.flatMap(guarded.connect({}), (call) => call.request("/x", ANY))),
+    );
+    expect(oversized._tag).toBe("UpstreamRefusedError");
   });
 });

@@ -23,7 +23,8 @@ interface Limit<O extends string = string> {
 export interface UpstreamSpec<K extends string = string, O extends string = never> {
   readonly id: string; // lowercase slug; also the `upstream` field of every error it raises
   readonly label: string;
-  readonly base: string;
+  // Absent when every account brings its own host (the capability's `base`).
+  readonly base?: string;
   // Interchangeable nodes serving the same API; how to move between them is the upstream's call.
   readonly mirrors?: readonly string[];
   // Deployment env var that replaces `base` and every mirror (a proxy for a geo-blocked egress, a local fake).
@@ -40,6 +41,8 @@ export interface UpstreamSpec<K extends string = string, O extends string = neve
   // tiers: the first whose `when` holds applies.
   readonly limits?: Readonly<Record<string, Limit<O> | readonly Limit<O>[]>>;
   readonly rateLimitedStatuses?: readonly number[];
+  readonly refuseRedirects?: boolean;
+  readonly maxBodyBytes?: number;
 }
 
 interface Host {
@@ -72,6 +75,8 @@ export interface BalanceTarget<A> {
 export interface BalanceCapability<K extends string, O extends string, A, B extends Balance> {
   // Decodes the account's stored creds; a mismatch means the account kind and upstream disagree.
   readonly account: Schema.Codec<A, unknown>;
+  // The account's own base URL, for an upstream whose host is user-configured.
+  readonly base?: (creds: A) => string;
   readonly fetch: (
     call: Call<K, O>,
     target: BalanceTarget<A>,
@@ -85,8 +90,10 @@ export interface BalanceCapability<K extends string, O extends string, A, B exte
 
 export interface Upstream<K extends string = string, O extends string = never>
   extends UpstreamSpec<K, O> {
+  // `accountBase` replaces `base`, any override and every mirror: the account names its own host.
   readonly connect: (
     env: Readonly<Record<string, unknown>>,
+    accountBase?: string,
   ) => Effect.Effect<Call<K, O>, UpstreamAuthError>;
   // Env names the app must inject: keys and base overrides, never anything else.
   readonly envNames: readonly string[];
@@ -147,11 +154,18 @@ export function defineUpstream<const K extends string = never, const O extends s
     });
   };
 
-  const connect = (env: Readonly<Record<string, unknown>>) =>
+  const basesFor = (env: Readonly<Record<string, unknown>>, accountBase?: string): string[] => {
+    if (accountBase) return [accountBase];
+    const override = spec.baseOverride && stringOf(env, spec.baseOverride);
+    if (override) return [override];
+    return spec.base ? [spec.base, ...(spec.mirrors ?? [])] : [];
+  };
+
+  const connect = (env: Readonly<Record<string, unknown>>, accountBase?: string) =>
     Effect.gen(function* () {
       const keys = yield* resolveKeys(env);
-      const override = spec.baseOverride && stringOf(env, spec.baseOverride);
-      const bases = override ? [override] : [spec.base, ...(spec.mirrors ?? [])];
+      const bases = basesFor(env, accountBase);
+      if (bases.length === 0) return yield* Effect.die(new Error(`${spec.id}: no base to call`));
       const fixed = {
         ...(spec.userAgent ? { "user-agent": spec.userAgent } : {}),
         ...spec.headers?.(keys),
@@ -163,6 +177,8 @@ export function defineUpstream<const K extends string = never, const O extends s
           headers: () => Effect.succeed(fixed),
           limit,
           rateLimitedStatuses: spec.rateLimitedStatuses,
+          refuseRedirects: spec.refuseRedirects,
+          maxBodyBytes: spec.maxBodyBytes,
         });
       const limits = new Map<string, RateLimit | undefined>();
       for (const name of Object.keys(spec.limits ?? {})) {

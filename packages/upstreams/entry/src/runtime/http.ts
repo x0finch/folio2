@@ -1,6 +1,12 @@
 import type { UpstreamError } from "@folio/upstream-basic";
-import { Clock, Effect, Schema, type SchemaIssue } from "effect";
-import { HttpClient, type HttpClientError, HttpClientRequest } from "effect/http";
+import { Clock, Effect, Schema, type SchemaIssue, Stream } from "effect";
+import {
+  FetchHttpClient,
+  HttpClient,
+  type HttpClientError,
+  HttpClientRequest,
+  type HttpClientResponse,
+} from "effect/http";
 import { HttpFailure, type HttpFailureKind, type SigningFailure } from "./errors";
 import { disableBuiltInTracing } from "./http-client";
 import type { RateLimit } from "./ratelimit";
@@ -54,6 +60,10 @@ export interface HttpConfig {
   ) => Effect.Effect<HeadersInit, SigningFailure>;
   readonly limit?: RateLimit; // omitted = unlimited
   readonly rateLimitedStatuses?: readonly number[]; // default [429]
+  // A 3xx is `refused` instead of followed, so the request can only reach the host it names.
+  readonly refuseRedirects?: boolean;
+  // A body over this many bytes is `refused`; it is counted while read, never buffered whole first.
+  readonly maxBodyBytes?: number;
 }
 
 const mergeHeaders = (
@@ -119,6 +129,51 @@ const leavesOf = (
   }
 };
 
+const isRedirect = (status: number): boolean =>
+  // `redirect: "manual"` yields 0 (an opaque redirect) in browsers and the 3xx itself on workerd.
+  status === 0 || (status >= 300 && status < 400);
+
+const oversized = (where: string, max: number) =>
+  new HttpFailure({ kind: "refused", where, cause: `body over ${max} bytes` });
+
+const readCappedJson = (
+  res: HttpClientResponse.HttpClientResponse,
+  where: string,
+  max: number,
+): Effect.Effect<unknown, HttpFailure> =>
+  Effect.gen(function* () {
+    const declared = Number(res.headers["content-length"]);
+    if (Number.isFinite(declared) && declared > max) return yield* oversized(where, max);
+    const { parts, size } = yield* Stream.runFoldEffect(
+      res.stream,
+      () => ({ parts: [] as Uint8Array[], size: 0 }),
+      (acc, chunk) => {
+        acc.size += chunk.length;
+        if (acc.size > max) return Effect.fail(oversized(where, max));
+        acc.parts.push(chunk);
+        return Effect.succeed(acc);
+      },
+    ).pipe(
+      Effect.mapError((error) =>
+        error instanceof HttpFailure
+          ? error
+          : new HttpFailure({ kind: "parse", where, cause: summarize(error) }),
+      ),
+    );
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.length;
+    }
+    const text = new TextDecoder().decode(bytes);
+    return yield* Effect.try({
+      try: (): unknown => (text === "" ? null : JSON.parse(text)),
+      // No parser message: it quotes a slice of the body.
+      catch: () => new HttpFailure({ kind: "parse", where, cause: "body is not JSON" }),
+    });
+  });
+
 // Sends a request and returns schema-validated JSON (null on 404 with `notFoundAsNull`).
 // The schema declares only the fields we read; extra upstream keys pass through, so an added
 // field never breaks a batch. A shape mismatch is `UpstreamParseError` (not retryable).
@@ -161,8 +216,19 @@ export function makeRequester(config: HttpConfig): Requester {
           : HttpClientRequest.bodyText(options.body, "application/json"),
       );
 
-      const res = yield* client.execute(request).pipe(Effect.mapError(transportFailure(where)));
+      const sent = client.execute(request).pipe(Effect.mapError(transportFailure(where)));
+      const res = yield* config.refuseRedirects
+        ? Effect.provideService(sent, FetchHttpClient.RequestInit, { redirect: "manual" })
+        : sent;
 
+      if (config.refuseRedirects && isRedirect(res.status)) {
+        return yield* new HttpFailure({
+          kind: "refused",
+          where,
+          status: res.status,
+          cause: "redirect",
+        });
+      }
       if (res.status < 200 || res.status >= 300) {
         if (rateLimited.has(res.status)) {
           const now = yield* Clock.currentTimeMillis;
@@ -184,12 +250,15 @@ export function makeRequester(config: HttpConfig): Requester {
         });
       }
 
-      const body = yield* res.json.pipe(
-        // Summary only: this `ResponseError` also carries the full request.
-        Effect.mapError(
-          (error) => new HttpFailure({ kind: "parse", where, cause: summarize(error) }),
-        ),
-      );
+      const body =
+        config.maxBodyBytes === undefined
+          ? yield* res.json.pipe(
+              // Summary only: this `ResponseError` also carries the full request.
+              Effect.mapError(
+                (error) => new HttpFailure({ kind: "parse", where, cause: summarize(error) }),
+              ),
+            )
+          : yield* readCappedJson(res, where, config.maxBodyBytes);
       return yield* Schema.decodeUnknownEffect(schema)(body).pipe(
         Effect.mapError(
           (error) => new HttpFailure({ kind: "parse", where, cause: whyInvalid(error) }),

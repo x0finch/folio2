@@ -67,7 +67,6 @@ export function balanceUpstream<K extends string, O extends string, A, B extends
 
   const prepare = (ctx: Parameters<BalanceUpstream<B>["fetchBalances"]>[0]) =>
     Effect.gen(function* () {
-      const call = yield* upstream.connect(ctx.creds);
       const creds = yield* decodeAccount(ctx.account.creds).pipe(
         Effect.mapError(
           () =>
@@ -78,6 +77,7 @@ export function balanceUpstream<K extends string, O extends string, A, B extends
             }),
         ),
       );
+      const call = yield* upstream.connect(ctx.creds, capability.base?.(creds));
       const target: BalanceTarget<A> = {
         accountId: ctx.account.id,
         connectorId: ctx.account.connectorId,

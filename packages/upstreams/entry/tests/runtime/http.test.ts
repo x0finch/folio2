@@ -1,8 +1,9 @@
 import { Effect, Exit, Fiber, Layer, Schema, Tracer } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/http";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SigningFailure } from "../../src/runtime/errors";
 import { makeRequester } from "../../src/runtime/http";
+import { FolioHttpClient } from "../../src/runtime/http-client";
 import { httpStub, jsonResponse as json, runClient } from "../../src/runtime/testing";
 
 // Transport tests use a permissive schema; validation has its own block below.
@@ -386,5 +387,95 @@ describe("interruption aborts the underlying request", () => {
 
     expect(out).toEqual({ ok: 1 });
     expect(signal?.aborted).toBe(false);
+  });
+});
+
+describe("refuseRedirects", () => {
+  it.each([301, 302, 307, 308])("%i → refused, not followed and not retried", async (status) => {
+    const err = await failing(
+      () => new Response(null, { status, headers: { location: "https://elsewhere.example/" } }),
+      req({ refuseRedirects: true })("/v1/t", ANY),
+    );
+    expect(err._tag).toBe("UpstreamRefusedError");
+    expect(err.cause).toBe("redirect");
+  });
+
+  it("an opaque redirect (status 0) is refused too", async () => {
+    const opaque = HttpClient.make((request) =>
+      Effect.succeed(
+        HttpClientResponse.fromWeb(request, { ...json({}), status: 0, headers: new Headers() }),
+      ),
+    );
+    const err = await req({ refuseRedirects: true })("/v1/t", ANY).pipe(
+      Effect.flip,
+      Effect.provideService(HttpClient.HttpClient, opaque),
+      Effect.runPromise,
+    );
+    expect(err._tag).toBe("UpstreamRefusedError");
+  });
+
+  it("asks fetch not to follow redirects", async () => {
+    const spy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(() => Promise.resolve(json({ ok: 1 })));
+    try {
+      await req({ refuseRedirects: true })("/v1/t", ANY).pipe(
+        Effect.provide(FolioHttpClient),
+        Effect.runPromise,
+      );
+      await req()("/v1/t", ANY).pipe(Effect.provide(FolioHttpClient), Effect.runPromise);
+      expect(spy.mock.calls[0]?.[1]?.redirect).toBe("manual");
+      expect(spy.mock.calls[1]?.[1]?.redirect).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("without the flag a 3xx stays an upstream failure", async () => {
+    const err = await failing(() => new Response(null, { status: 302 }), req()("/v1/t", ANY));
+    expect(err._tag).toBe("UpstreamUnavailableError");
+  });
+});
+
+describe("maxBodyBytes", () => {
+  const MAX = 64;
+  const capped = () => req({ maxBodyBytes: MAX })("/v1/t", ANY);
+  // A streamed body has no Content-Length, so only the running count can stop it.
+  const streamed = (text: string) => {
+    const bytes = new TextEncoder().encode(text);
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let i = 0; i < bytes.length; i += 16) controller.enqueue(bytes.slice(i, i + 16));
+        controller.close();
+      },
+    });
+    return new Response(body, { status: 200 });
+  };
+
+  it("a body within the cap parses", async () => {
+    expect(await run(() => streamed('{"ok":1}'), capped)).toEqual({ ok: 1 });
+  });
+
+  it("a declared Content-Length over the cap → refused", async () => {
+    const big = () =>
+      new Response("{}", { status: 200, headers: { "content-length": String(MAX + 1) } });
+    const err = await failing(big, capped());
+    expect(err._tag).toBe("UpstreamRefusedError");
+    expect(err.cause).toBe(`body over ${MAX} bytes`);
+  });
+
+  it("a streamed body that grows past the cap → refused", async () => {
+    const err = await failing(() => streamed(`{"pad":"${"x".repeat(MAX)}"}`), capped());
+    expect(err._tag).toBe("UpstreamRefusedError");
+  });
+
+  it("a non-JSON body → parse, without quoting the body", async () => {
+    const err = await failing(() => streamed("<html>secret-ish</html>"), capped());
+    expect(err._tag).toBe("UpstreamParseError");
+    expect(JSON.stringify(err)).not.toContain("secret-ish");
+  });
+
+  it("an empty body decodes as null", async () => {
+    expect(await run(() => new Response("", { status: 200 }), capped)).toBeNull();
   });
 });
