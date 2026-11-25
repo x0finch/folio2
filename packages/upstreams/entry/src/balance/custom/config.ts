@@ -11,6 +11,7 @@ import {
   MAX_QUERY_PARAMS,
   MAX_QUERY_VALUE_LENGTH,
   PAGE_PLACEHOLDER,
+  PLATFORM_ALIAS_DOMAINS,
   PRIVATE_SUFFIXES,
 } from "./constants";
 
@@ -36,6 +37,9 @@ export function hostProblem(host: string, ownHost?: string): string | undefined 
   }
   if (IP_ECHO_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
     return "hosts that echo an IP address are not allowed";
+  }
+  if (PLATFORM_ALIAS_DOMAINS.some((domain) => host.endsWith(`.${domain}`))) {
+    return "Workers and Pages hosts are not allowed";
   }
   if (ownHost && (host === ownHost || host.endsWith(`.${ownHost}`))) {
     return "this deployment's own domain is not allowed";

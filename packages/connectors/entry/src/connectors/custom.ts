@@ -15,6 +15,11 @@ const needsOf = (raw: string | undefined) => {
   return decoded.ok ? configNeeds(decoded.config) : { key: false, address: false };
 };
 
+const authOf = (raw: string | undefined) => {
+  const decoded = decodeCustomConfig(raw);
+  return decoded.ok ? (decoded.config.auth ?? "none") : undefined;
+};
+
 const hostOf = (raw: string | undefined): string | undefined => {
   const decoded = decodeCustomConfig(raw);
   return decoded.ok ? decoded.config.host : undefined;
@@ -70,7 +75,14 @@ export const custom = defineConnector({
     keepsSecrets: (previous, next) => {
       // A keyless config drops the key too, or nothing would ever clear it.
       const host = hostOf(previous.config);
-      return host !== undefined && host === hostOf(next.config) && needsOf(next.config).key;
+      // The key stays only where the user put it: same host, same placement (a header key moved
+      // into the query would start showing up in URLs).
+      return (
+        host !== undefined &&
+        host === hostOf(next.config) &&
+        needsOf(next.config).key &&
+        JSON.stringify(authOf(previous.config)) === JSON.stringify(authOf(next.config))
+      );
     },
     // `apiKey` and `address` are optional per field; the config can make either required.
     needs: (publicCreds) => {

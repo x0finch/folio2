@@ -28,13 +28,19 @@ type Account = typeof Account.Type;
 const refused = (cause: string) =>
   new UpstreamRefusedError({ upstream: ID, where: "(config)", cause });
 
+// Once per isolate: the setting is deployment-wide, so one line says it all.
+let originWarned = false;
+
 // Checked on every call, not only when saved: a config stored before a rule existed, or one that
 // only now points at this deployment, must still never be fetched.
 const checkTarget = (call: Call<never, typeof OWN_ORIGIN>, { config, address }: Account) =>
   Effect.gen(function* () {
-    // Without it the own-domain rule can't run; the other host rules still do.
-    if (!call.keys[OWN_ORIGIN]) {
-      yield* Effect.logWarning(`custom source: ${OWN_ORIGIN} unset, own domain not checked`);
+    // Without a usable origin the own-domain rule can't run; the other host rules still do.
+    if (!hostOfOrigin(call.keys[OWN_ORIGIN]) && !originWarned) {
+      originWarned = true;
+      yield* Effect.logWarning(
+        `custom source: ${OWN_ORIGIN} unset or not a URL, own domain not checked`,
+      );
     }
     return yield* checkRules(call, { config, address });
   });
@@ -55,10 +61,11 @@ const checkRules = (call: Call<never, typeof OWN_ORIGIN>, { config, address }: A
 const incompleteNote = (why: Incomplete): Note => ({
   title: "Some pages may not have been read",
   icon: "warning",
-  content:
-    why === "page-cap"
-      ? `Only the first ${MAX_PAGES} pages of this source are read.`
-      : "The source sent a page it had already sent, so reading stopped there.",
+  content: {
+    "page-cap": `Only the first ${MAX_PAGES} pages of this source are read.`,
+    repeated: "The source sent a page it had already sent, so reading stopped there.",
+    unreadable: "A later page had no rows to read, so reading stopped there.",
+  }[why],
 });
 
 export const customBalance = balanceUpstream(custom, {

@@ -76,6 +76,7 @@ describe("custom account kind", () => {
     expect(keepsSecrets(config(), moved)).toBe(true);
     expect(keepsSecrets(config(), config("api.other.example"))).toBe(false);
     expect(keepsSecrets(config(), config(undefined, "none"))).toBe(false);
+    expect(keepsSecrets(config(), config(undefined, { query: "k" } as never))).toBe(false);
     expect(keepsSecrets("not json", config())).toBe(false);
   });
 });

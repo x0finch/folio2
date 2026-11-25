@@ -53,12 +53,13 @@ const rowsOf = (body: unknown, config: CustomConfig, where: string) => {
 
 const cursorOf = (body: unknown, path: string): string | undefined => {
   const next = valueAt(body, path);
-  if (typeof next === "number" && Number.isFinite(next)) return String(next);
+  // Many APIs mark the last page with `next: 0`.
+  if (typeof next === "number" && Number.isFinite(next) && next !== 0) return String(next);
   return typeof next === "string" && next !== "" ? next : undefined;
 };
 
 // Why the walk stopped short of a clear last page: the page cap, or a page seen before.
-export type Incomplete = "page-cap" | "repeated";
+export type Incomplete = "page-cap" | "repeated" | "unreadable";
 
 /** Every row across the pages read, and why the read may be incomplete. */
 export const fetchRows = (
@@ -91,11 +92,14 @@ export const fetchRows = (
         query,
         ...(later ? { notFoundAsNull: true as const } : {}),
       });
-      if (later && (body === null || !hasRows(body, config))) return { rows };
+      if (later && body === null) return { rows };
+      // A later page without rows may be a transient error body: keep what was read, but say so.
+      if (later && !hasRows(body, config)) return { rows, incomplete: "unreadable" };
       const pageRows = yield* rowsOf(body, config, path);
       const pageKey = JSON.stringify(pageRows);
       if (pageRows.length > 0 && seenPages.has(pageKey)) {
-        return read > 1 ? { rows, incomplete: "repeated" } : { rows };
+        // Even right after the first page: an ignored parameter and a wrong `start` look the same.
+        return { rows, incomplete: "repeated" };
       }
       seenPages.add(pageKey);
       rows.push(...pageRows);

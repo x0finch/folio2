@@ -247,7 +247,8 @@ describe("fetchBalances", () => {
         ),
       );
       expect(value.balances).toEqual(once.value.balances);
-      expect(value.note).toBeUndefined();
+      // An ignored parameter and a wrong `start` look the same, so it says so.
+      expect(value.note?.[0]?.content).toContain("already sent");
     });
 
     it("a 404 or a body without rows past the first page ends the walk", async () => {
@@ -264,6 +265,27 @@ describe("fetchBalances", () => {
         expect(calls).toHaveLength(2);
         expect(value.balances.length).toBeGreaterThan(0);
       }
+    });
+
+    it("a later page without rows keeps what was read and says so; a 404 ends quietly", async () => {
+      const config = configOf({ pagination: { type: "page", param: "p" } });
+      const fetchWith = (end: () => Response) =>
+        run(
+          (_: HttpClientRequestLike, nth: number) => (nth === 0 ? json(page1) : end()),
+          customBalance.fetchBalances(ctx({ ...ctx().account.creds, config })),
+        );
+      const broken = await fetchWith(() => json({ error: "try later" }));
+      expect(broken.value.note?.[0]?.content).toContain("no rows");
+      const ended = await fetchWith(() => json({ error: "not found" }, { status: 404 }));
+      expect(ended.value.note).toBeUndefined();
+    });
+
+    it("a numeric cursor of 0 is the last page", async () => {
+      const { calls } = await run(
+        () => json({ ...page1, next: 0 }),
+        customBalance.fetchBalances(ctx()),
+      );
+      expect(calls).toHaveLength(1);
     });
 
     it("pages that cycle are counted once and the read is marked uncertain", async () => {

@@ -27,6 +27,9 @@ export const PRIVATE_SUFFIXES = ["localhost", "local", "internal", "arpa"] as co
 // names resolving to private addresses are left to Workers' egress, which can't reach them.
 export const IP_ECHO_DOMAINS = ["nip.io", "sslip.io", "xip.io", "localtest.me", "lvh.me"] as const;
 
+// Where a Worker deployment answers besides its own domain; a source there could be this app.
+export const PLATFORM_ALIAS_DOMAINS = ["workers.dev", "pages.dev"] as const;
+
 // Headers the key may not ride in: they steer routing, sessions or proxies, not authentication.
 export const FORBIDDEN_HEADERS = new Set([
   "host",

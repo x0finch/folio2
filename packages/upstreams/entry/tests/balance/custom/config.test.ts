@@ -84,6 +84,7 @@ describe("decodeCustomConfig", () => {
     ["a single label", { host: "intranet" }],
     ["a numeric last label", { host: "0x7f.1" }],
     ["an IP-echo name", { host: "127.0.0.1.nip.io" }],
+    ["a workers.dev alias", { host: "folio.acct.workers.dev" }],
     ["a relative path", { path: "v1/holdings" }],
     ["a query in the path", { path: "/v1/holdings?key=abc" }],
     ["a fragment in the path", { path: "/v1/holdings#x" }],
