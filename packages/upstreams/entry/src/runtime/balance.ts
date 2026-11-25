@@ -14,7 +14,10 @@ const ANY_STRING = Schema.toStandardSchemaV1(Schema.String);
 // The env names the app injects, as the port's `creds`. Values are never validated here: a missing
 // key surfaces as `auth` from `connect`.
 const envCreds = (upstream: Upstream<string, string>): readonly CredField[] => {
-  const keys = new Set<string>([...(upstream.keys ?? []), ...(upstream.optionalKeys ?? [])]);
+  const plain = new Set<string>(upstream.publicKeys ?? []);
+  const keys = new Set<string>(
+    [...(upstream.keys ?? []), ...(upstream.optionalKeys ?? [])].filter((key) => !plain.has(key)),
+  );
   // Anything else is a base override: public, so never encrypted or exported.
   return upstream.envNames.map(
     (key): CredField => ({

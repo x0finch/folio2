@@ -7,7 +7,7 @@ import {
   HttpClientRequest,
   type HttpClientResponse,
 } from "effect/http";
-import { HttpFailure, type HttpFailureKind, type SigningFailure } from "./errors";
+import { HttpFailure, type HttpFailureKind, SigningFailure } from "./errors";
 import { disableBuiltInTracing } from "./http-client";
 import type { RateLimit } from "./ratelimit";
 import { classifyFailure } from "./upstream-error";
@@ -143,7 +143,12 @@ const readCappedJson = (
 ): Effect.Effect<unknown, HttpFailure> =>
   Effect.gen(function* () {
     const declared = Number(res.headers["content-length"]);
-    if (Number.isFinite(declared) && declared > max) return yield* oversized(where, max);
+    if (Number.isFinite(declared) && declared > max) {
+      // Running the stream, even for nothing, aborts the request and frees the connection now
+      // rather than at GC.
+      yield* Stream.runDrain(Stream.take(res.stream, 0)).pipe(Effect.ignore);
+      return yield* oversized(where, max);
+    }
     const { parts, size } = yield* Stream.runFoldEffect(
       res.stream,
       () => ({ parts: [] as Uint8Array[], size: 0 }),
@@ -207,7 +212,15 @@ export function makeRequester(config: HttpConfig): Requester {
       const client = yield* HttpClient.HttpClient;
       const shared = config.headers ? yield* config.headers(path, options) : undefined;
       const own = options?.headers ? yield* options.headers : undefined;
-      const headers = shared || own ? mergeHeaders(shared, own) : undefined;
+      // A value `Headers` won't take (a pasted key with a newline or a non-Latin-1 character)
+      // would throw; it is the credential that's wrong.
+      const headers =
+        shared || own
+          ? yield* Effect.try({
+              try: () => mergeHeaders(shared, own),
+              catch: () => new SigningFailure({ where, cause: "header value not sendable" }),
+            })
+          : undefined;
 
       const request = HttpClientRequest.make(method)(url).pipe(
         headers ? HttpClientRequest.setHeaders(headers) : (r) => r,

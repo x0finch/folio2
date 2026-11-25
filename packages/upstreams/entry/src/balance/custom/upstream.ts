@@ -12,6 +12,7 @@ const custom = defineUpstream({
   id: ID,
   label: "Custom source",
   optionalKeys: [OWN_ORIGIN],
+  publicKeys: [OWN_ORIGIN],
   headers: () => ({ accept: "application/json" }),
   refuseRedirects: true,
   maxBodyBytes: MAX_BODY_BYTES,

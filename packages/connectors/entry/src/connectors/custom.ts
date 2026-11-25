@@ -43,7 +43,12 @@ const customAccountCreds = [
     key: "apiKey",
     type: "secret",
     label: "API Key",
-    validator: z.string().trim().min(1).optional(),
+    // Visible ASCII only: anything else can't travel in a header.
+    validator: z
+      .string()
+      .trim()
+      .regex(/^[\x21-\x7e]+$/, "only visible ASCII characters, no spaces")
+      .optional(),
   },
 ] as const satisfies readonly CredField[];
 

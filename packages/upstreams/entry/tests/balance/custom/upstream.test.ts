@@ -87,6 +87,22 @@ describe("fetchBalances", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("a key that can't travel in a header fails as auth, not as a crash", async () => {
+    const creds = {
+      config: configOf({ pagination: undefined }),
+      apiKey: "abc\ndef",
+      address: ADDRESS,
+    };
+    const { value, calls } = await failing(pages, customBalance.fetchBalances(ctx(creds)));
+    expect(value._tag).toBe("UpstreamAuthError");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("the deployment origin is a public setting, not a secret", () => {
+    const origin = customBalance.creds.find((f) => f.key === "BETTER_AUTH_URL");
+    expect(origin?.type).toBe("public");
+  });
+
   it("an address that is only dots is refused before any request", async () => {
     const creds = {
       config: configOf({ pagination: undefined }),
@@ -248,6 +264,19 @@ describe("fetchBalances", () => {
         expect(calls).toHaveLength(2);
         expect(value.balances.length).toBeGreaterThan(0);
       }
+    });
+
+    it("pages that cycle are counted once and the read is marked uncertain", async () => {
+      const config = configOf({ pagination: { type: "page", param: "p" } });
+      // A, B, A, B, …: a source wrapping the page number.
+      const reply = (_: HttpClientRequestLike, nth: number) => json(nth % 2 === 0 ? page1 : page2);
+      const { value, calls } = await run(
+        reply,
+        customBalance.fetchBalances(ctx({ ...ctx().account.creds, config })),
+      );
+      expect(calls).toHaveLength(3);
+      expect(value.balances.map((b) => b.symbol)).toEqual(["ETH", "USDC", "PTS", "SOL"]);
+      expect(value.note?.[0]?.icon).toBe("warning");
     });
 
     it("cursors that cycle end the walk", async () => {

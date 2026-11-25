@@ -34,6 +34,8 @@ export interface UpstreamSpec<K extends string = string, O extends string = neve
   // Deployment env var names. A missing required key fails with `auth` before any request.
   readonly keys?: readonly K[];
   readonly optionalKeys?: readonly O[];
+  // Optional keys that are settings, not secrets (e.g. the deployment's own origin).
+  readonly publicKeys?: readonly O[];
   readonly userAgent?: string;
   // Headers on every request, from the resolved keys.
   readonly headers?: (keys: Keys<K, O>) => Record<string, string>;

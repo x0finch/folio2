@@ -68,10 +68,11 @@ export const fetchRows = (
     const rows: unknown[] = [];
     let page = pagination?.type === "page" ? (pagination.start ?? 1) : 0;
     let cursor: string | undefined;
-    // A source that ignores the page parameter, or whose cursors cycle, serves the same rows again;
-    // stop there rather than count every holding once per page.
+    // A source that ignores the page parameter, or whose pages or cursors cycle, serves rows it
+    // already sent; stop there rather than count holdings twice. Only a second page equal to the
+    // first is a clean end (the parameter was ignored); a later repeat leaves the read uncertain.
     const seenCursors = new Set<string>();
-    let previousPage: string | undefined;
+    const seenPages = new Set<string>();
     for (let read = 0; read < MAX_PAGES; read++) {
       const path = pathFor(config, address, page);
       const query: Record<string, string | number | undefined> = {
@@ -90,8 +91,8 @@ export const fetchRows = (
       if (later && (body === null || !hasRows(body, config))) return { rows, truncated: false };
       const pageRows = yield* rowsOf(body, config, path);
       const pageKey = JSON.stringify(pageRows);
-      if (pageRows.length > 0 && pageKey === previousPage) return { rows, truncated: false };
-      previousPage = pageKey;
+      if (pageRows.length > 0 && seenPages.has(pageKey)) return { rows, truncated: read > 1 };
+      seenPages.add(pageKey);
       rows.push(...pageRows);
 
       if (pagination === undefined) return { rows, truncated: false };

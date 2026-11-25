@@ -27,6 +27,17 @@ describe("custom account kind", () => {
     expect(out.address).toBeUndefined();
   });
 
+  it("refuses a key that can't travel in a header", async () => {
+    for (const apiKey of ["abc def", "clé", "a\u200bb"]) {
+      await expect(validateCredentials(creds, { config: config(), apiKey })).rejects.toThrow(
+        /apiKey/,
+      );
+    }
+    await expect(
+      validateCredentials(creds, { config: config(), apiKey: "sk-live_A1.b2~" }),
+    ).resolves.toMatchObject({ apiKey: "sk-live_A1.b2~" });
+  });
+
   it("rejects a bad config with the reason", async () => {
     await expect(validateCredentials(creds, { config: config("127.0.0.1") })).rejects.toThrow(
       /config: IP literals/,

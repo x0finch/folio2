@@ -29,6 +29,10 @@ describe("decodeCustomConfig", () => {
 
   it("accepts fixed query parameters, with {address} in a value", () => {
     expect(decode({ ...valid, query: { chain: "eth", owner: "{address}" } }).ok).toBe(true);
+    // Names that merely contain "token" or "auth" are not keys.
+    expect(decode({ ...valid, query: { tokens: "true", author: "x", tokenId: "1" } }).ok).toBe(
+      true,
+    );
   });
 
   it.each([

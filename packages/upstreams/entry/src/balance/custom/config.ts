@@ -99,7 +99,8 @@ const QueryValue = Schema.String.check(
   ),
 );
 // The config is stored in plain text and shown back to the user; a key belongs in `apiKey`.
-const SECRET_LIKE = /key|token|secret|auth|sig|pass/i;
+const SECRET_LIKE =
+  /^(?:api[-_]?key|key|token|access[-_]?token|auth|authorization|secret|client[-_]?secret|signature|sig|password|passphrase)$/i;
 const FixedQuery = Schema.Record(QueryName, QueryValue).check(
   Schema.makeFilter(
     (query: Readonly<Record<string, string>>) =>

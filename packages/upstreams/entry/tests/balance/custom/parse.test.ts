@@ -88,11 +88,18 @@ describe("parseRows", () => {
     expect(small?.amount).toBe(0.005);
   });
 
-  it("with decimals, a fractional or negative raw amount is unreadable", () => {
+  it("with decimals, a fractional raw amount is unreadable", () => {
     const config = configOf({ fields: { symbol: "s", amount: "a", decimals: "d" } });
     expect(parseRows([{ s: "X", a: "1.5", d: 2 }], config).readable).toBe(0);
-    expect(parseRows([{ s: "X", a: "-5", d: 2 }], config).readable).toBe(0);
     expect(parseRows([{ s: "X", a: "5", d: 99 }], config).readable).toBe(0);
+  });
+
+  it("with decimals, a negative raw amount (a debt) is readable but not held", () => {
+    const config = configOf({ fields: { symbol: "s", amount: "a", decimals: "d" } });
+    expect(parseRows([{ s: "USDC", a: "-1000000", d: 6 }], config)).toEqual({
+      balances: [],
+      readable: 1,
+    });
   });
 
   it("without decimals, takes numbers and numeric strings as they are", () => {

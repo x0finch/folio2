@@ -7,7 +7,7 @@ import { ID, MAX_DECIMALS, MAX_REF_PART_LENGTH, MAX_SYMBOL_LENGTH } from "./cons
 export type Row = Spot;
 
 const NUMERIC = /^-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?$/;
-const RAW_INTEGER = /^\d+$/;
+const RAW_INTEGER = /^-?\d+$/;
 // A `/` would split the ref into three segments; whitespace never appears in a namer or address.
 const NAMER = /^[A-Za-z0-9][A-Za-z0-9:_.-]*$/;
 const ADDRESS = /^[A-Za-z0-9:_.-]+$/;
@@ -29,7 +29,7 @@ const textOf = (value: unknown): string | undefined =>
 // before scaling.
 function scaleRaw(raw: unknown, decimals: unknown): number | undefined {
   const digits =
-    typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0
+    typeof raw === "number" && Number.isSafeInteger(raw)
       ? String(raw)
       : typeof raw === "string" && RAW_INTEGER.test(raw.trim())
         ? raw.trim()
@@ -37,9 +37,11 @@ function scaleRaw(raw: unknown, decimals: unknown): number | undefined {
   const places = numberOf(decimals);
   if (digits === undefined || places === undefined) return undefined;
   if (!Number.isInteger(places) || places < 0 || places > MAX_DECIMALS) return undefined;
-  const padded = digits.padStart(places + 1, "0");
+  // Negative rows (debts) stay readable; the caller skips them as not held.
+  const sign = digits.startsWith("-") ? "-" : "";
+  const padded = digits.slice(sign.length).padStart(places + 1, "0");
   const point = padded.length - places;
-  return finite(Number(`${padded.slice(0, point)}.${padded.slice(point) || "0"}`));
+  return finite(Number(`${sign}${padded.slice(0, point)}.${padded.slice(point) || "0"}`));
 }
 
 const refPart = (value: unknown, shape: RegExp): string | undefined => {
