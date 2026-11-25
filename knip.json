@@ -13,7 +13,7 @@
       "ignoreDependencies": ["cloudflare", "wrangler"]
     },
     "packages/upstreams/entry": {
-      "entry": ["src/balance/rabby/vendor/regenerate.mjs"]
+      "entry": ["vendor/rabby/regenerate.mjs"]
     }
   }
 }

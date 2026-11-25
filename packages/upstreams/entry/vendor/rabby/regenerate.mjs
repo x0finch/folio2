@@ -3,7 +3,7 @@
 // Why patch at all: Workers forbid runtime wasm compilation (`Wasm code generation disallowed by embedder`, sync and async), while the upstream
 // bundle does `new WebAssembly.Module(inline base64 bytes)` at module evaluation whenever there is no window, which is a Worker's shape.
 // The only way: extract the wasm to a .wasm file compiled at build time and hand the compiled Module back.
-// Usage (from packages/upstreams/entry): node src/balance/rabby/vendor/regenerate.mjs [version]
+// Usage (from packages/upstreams/entry): node vendor/rabby/regenerate.mjs [version]
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";

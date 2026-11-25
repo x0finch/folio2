@@ -12,7 +12,7 @@
       "!**/routeTree.gen.ts",
       "!**/worker-configuration.d.ts",
       "!packages/db/drizzle",
-      "!packages/upstreams/entry/src/balance/rabby/vendor",
+      "!packages/upstreams/entry/vendor",
       "!packages/ui/src/components",
       "!packages/ui/src/lib/tick-sound.ts",
       "!packages/ui/src/styles",
