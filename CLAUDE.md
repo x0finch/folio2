@@ -13,13 +13,14 @@ TanStack Start + Vite on Cloudflare Workers; D1 + Drizzle; better-auth; Effect 4
 ## Architecture rules
 - Contract-first: every upstream implements a port from `@folio/upstream-basic` (`BalanceUpstream`, `PriceUpstream`, …) and fails only with its six `UpstreamError` tiers.
 - Test-first: adapters get tests against recorded fixtures (`tests/fixtures/`); parsers get golden tests. Tests live in each package's `tests/`.
-- Packages split by "who we talk to / how we translate": one request-layer package per upstream (`packages/clients/<x>`, `@folio/<x>-client`, `createXxxClient(config)`); all adapters in `@folio/connectors` under `src/connectors/<id>/`. Never per-provider packages.
+- Every upstream lives in `@folio/upstreams`, one folder each (`src/balance/<id>/`, `src/market/<id>/`: `constants.ts`, `api.ts`, `parse.ts`, `upstream.ts`), declared with `defineUpstream` (keys, base override, limits) and run by `src/runtime/`. Never per-upstream packages; `@folio/connectors` holds account kinds only (creds + which upstreams serve them).
+- Upstreams read deployment keys only through `defineUpstream` `keys`: a missing key is `auth` before any request. Retries stay in `@folio/sync`.
 - `@folio/db` exports only user-scoped ops via one `Database` service (`(yield* Database).accounts.list()`); reference data via one `Oracle`. Methods take no user param — ops read `CurrentUser` when they run; only `apps/web/src/lib/server/runtime.ts` provides it. Any table with an owner is user-scoped; only `global_token_ref_index` and `token_daily_prices` aren't.
 - Merge holdings only by `tokens.id`, never by symbol.
 - `tokenRef` (`<namer>/<localName>`) only at connector/oracle boundaries, built and parsed via `@folio/oracle-ref`. `platform` comes from the provider, never from the ref.
 - `kind` (`spot` / `defi` / `perp_equity` / `perp_position`) only drives shared logic; display-only details go in a `Note`.
 - Store and aggregate in USD; display currency is presentation only.
-- CoinGecko is known only to `@folio/oracle-upstream-coingecko`; `@folio/oracle` depends on no client/upstream.
+- CoinGecko is known only to `@folio/upstreams` (`src/market/coingecko/`); `@folio/oracle` depends on no upstream implementation, only on the ports in `@folio/upstream-basic`.
 - Manual accounts write no snapshots (computed from the ledger). Multi-wallet CEX sync is best-effort (failed wallet → account Note).
 - Scope on the server (`portfolioId`), never filter on the client.
 - Requests carry no compute (10 ms CPU): authed pages `ssr: false`; precompute at sync into `user_cache`; recompute after mutations in `waitUntil`.
