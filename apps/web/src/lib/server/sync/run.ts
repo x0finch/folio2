@@ -4,7 +4,7 @@ import { Clock, Effect } from "effect";
 import { z } from "zod";
 import { isManual } from "@/lib/core/manual";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
-import { isComplete, readStoredCreds } from "@/lib/server/creds";
+import { isComplete, publicValues, readStoredCreds } from "@/lib/server/creds";
 import { serverFn } from "@/lib/server/server-fn";
 import { startAccountRound } from "./round";
 import { isSyncableAccount, type SyncRoundView, syncRoundView } from "./status";
@@ -39,9 +39,11 @@ export const handleSyncAccount = serverFn("syncAccount")(function* (
   // Archived accounts never join a round.
   if (!isSyncableAccount(account)) return done({ accountId: account.id, ok: false, skipped: true });
   // Missing creds: answer now rather than spend a queued call to reach the same verdict.
-  const specs = (yield* ConnectorRegistry).specs[account.connectorId] ?? [];
+  const connectors = yield* ConnectorRegistry;
+  const specs = connectors.specs[account.connectorId] ?? [];
   const stored = readStoredCreds(yield* accounts.getRawCreds(account.id)) ?? {};
-  if (!isComplete(specs, stored)) {
+  const needed = connectors.neededCreds(account.connectorId, publicValues(specs, stored));
+  if (!isComplete(specs, stored, needed)) {
     return done({
       accountId: account.id,
       ok: false,

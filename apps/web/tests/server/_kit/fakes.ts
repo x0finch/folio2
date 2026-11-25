@@ -14,7 +14,7 @@ export interface FakeRegistryOptions {
   readonly validate?: (
     connectorId: string,
     values: Record<string, string>,
-    opts?: { liveness?: boolean; label?: string },
+    opts?: { liveness?: boolean; label?: string; kept?: readonly string[] },
   ) => Effect.Effect<void, Error>;
   readonly specs?: Partial<Record<string, InputSpec[]>>;
   readonly catalog?: Record<string, { label: string; logo: string }>;
@@ -33,10 +33,11 @@ export const fakeRegistry = async (
     catalog: options.catalog ?? real.catalog,
     specs: options.specs ?? real.specs,
     keepsSecrets: real.keepsSecrets,
+    neededCreds: real.neededCreds,
     validate: (
       connectorId: string,
       values: Record<string, string>,
-      opts?: { liveness?: boolean; label?: string },
+      opts?: { liveness?: boolean; label?: string; kept?: readonly string[] },
     ) => {
       validated.push({ ...values });
       return options.validate

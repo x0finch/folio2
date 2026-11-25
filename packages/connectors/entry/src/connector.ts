@@ -16,11 +16,18 @@ type KeepsSecrets = (
   next: Readonly<Record<string, string>>,
 ) => boolean;
 
+// Non-public creds that become required by the account's public ones (custom: a keyed config).
+type NeededCreds = (publicCreds: Readonly<Record<string, string>>) => readonly string[];
+
 export interface ConnectorManifest {
   readonly id: string;
   readonly label: string;
   readonly logo: string;
-  readonly account: { readonly creds: readonly CredField[]; readonly keepsSecrets?: KeepsSecrets };
+  readonly account: {
+    readonly creds: readonly CredField[];
+    readonly keepsSecrets?: KeepsSecrets;
+    readonly needs?: NeededCreds;
+  };
   readonly balance: {
     readonly schema: z.ZodType<Balance>;
     readonly providers: readonly BalanceUpstream<Balance>[];
@@ -38,7 +45,7 @@ export function defineConnector<
   id: Id;
   label: string;
   logo: string;
-  account: { creds: AC; keepsSecrets?: KeepsSecrets };
+  account: { creds: AC; keepsSecrets?: KeepsSecrets; needs?: NeededCreds };
   balance: { schema: S; providers: BalanceUpstream<z.infer<S>, AC>[] };
   valuation?: ConnectorValuation;
 }): ConnectorManifest & { readonly id: Id } {

@@ -69,6 +69,16 @@ describe("isComplete (needs-credentials)", () => {
     expect(isComplete(okx, { [`${SEMI_PREFIX}apiKey`]: "ABCD…5678" })).toBe(false); // placeholder, no real value
     expect(isComplete(okx, { apiKey: "K", secret: "S" })).toBe(false); // passphrase missing
   });
+
+  it("an optional field the connector needs counts as required", () => {
+    const specs: InputSpec[] = [
+      { key: "config", type: "public", label: "Config" },
+      { key: "apiKey", type: "secret", label: "Key", optional: true },
+    ];
+    expect(isComplete(specs, { config: "{}" })).toBe(true);
+    expect(isComplete(specs, { config: "{}" }, ["apiKey"])).toBe(false);
+    expect(isComplete(specs, { config: "{}", apiKey: "sealed" }, ["apiKey"])).toBe(true);
+  });
 });
 
 describe("optional fields", () => {

@@ -23,7 +23,7 @@ import {
 import type { UpstreamError, UpstreamNeeds } from "@folio/upstream-basic";
 import { FolioHttpClient } from "@folio/upstreams";
 import { Context, Effect, Layer } from "effect";
-import { isComplete, openCreds, toInputSpec } from "@/lib/server/creds";
+import { isComplete, openCreds, publicValues, toInputSpec } from "@/lib/server/creds";
 import { revalue } from "./revalue";
 import { isSyncableAccount } from "./status";
 
@@ -40,7 +40,9 @@ const fetchViaConnector = (
 ): Effect.Effect<FetchOutcome, UpstreamError | SyncDepError, UpstreamNeeds> =>
   Effect.gen(function* () {
     const specs = manifest.account.creds.map(toInputSpec);
-    if (!isComplete(specs, stored)) return { status: "needs-credentials" } satisfies FetchOutcome;
+    const needed = manifest.account.needs?.(publicValues(specs, stored)) ?? [];
+    if (!isComplete(specs, stored, needed))
+      return { status: "needs-credentials" } satisfies FetchOutcome;
     const plain = yield* Effect.tryPromise({
       try: () => openCreds(specs, stored, env.SECRETS_KEY),
       catch: (e) => depError("readCreds", e),

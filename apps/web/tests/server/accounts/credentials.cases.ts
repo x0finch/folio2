@@ -7,7 +7,7 @@ import {
 import { handleListAccounts } from "@/lib/server/accounts/list";
 import { openCreds } from "@/lib/server/creds";
 import { db } from "../_kit/db";
-import { fakeRegistry, validateFails } from "../_kit/fakes";
+import { fakeRegistry, realRegistry, validateFails } from "../_kit/fakes";
 import { blockOutbound } from "../_kit/outbound";
 import { callWithRegistry, callWithRegistryExit } from "../_kit/run";
 import { freshUser, otherUser } from "../_kit/user";
@@ -184,8 +184,8 @@ describe("accounts/credentials", () => {
 
 describe("accounts/credentials: custom source", () => {
   const USER = "h-acc-creds-custom";
-  const configAt = (host: string, path = "/v1/holdings") =>
-    JSON.stringify({ host, path, auth: "bearer", fields: { symbol: "s", amount: "a" } });
+  const configAt = (host: string, path = "/v1/holdings", auth = "bearer") =>
+    JSON.stringify({ host, path, auth, fields: { symbol: "s", amount: "a" } });
 
   const rawOf = async (accountId: string) =>
     JSON.parse((await db(USER).accounts.getRawCreds(accountId)) ?? "{}") as Record<string, string>;
@@ -223,13 +223,52 @@ describe("accounts/credentials: custom source", () => {
       registry,
       handleReplaceAccountCredentials({
         accountId: account.id,
-        creds: { config: configAt("api.other.example") },
+        creds: { config: configAt("api.other.example", "/v1/holdings", "none") },
       }),
     );
 
     const raw = await rawOf(account.id);
     expect(raw.apiKey).toBeUndefined();
     expect(JSON.parse(raw.config).host).toBe("api.other.example");
+  });
+
+  it("a keyed config on a new host without a new key is refused, nothing written", async () => {
+    const { account } = await seed();
+    const before = await rawOf(account.id);
+    // The real check (the custom probe sends no request), so the refusal is the app's own.
+    const { registry } = await fakeRegistry({ validate: (await realRegistry()).validate });
+
+    const exit = await callWithRegistryExit(
+      USER,
+      registry,
+      handleReplaceAccountCredentials({
+        accountId: account.id,
+        creds: { config: configAt("api.other.example") },
+      }),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("API Key: required by this config");
+    expect(await rawOf(account.id)).toEqual(before);
+  });
+
+  it("a keyed config with no stored key lists as needing credentials", async () => {
+    const { registry } = await fakeRegistry();
+    const account = await db(USER).accounts.create({
+      connectorId: "custom",
+      label: "imported",
+      creds: JSON.stringify({ config: configAt("api.vault.example") }),
+    });
+    const keyless = await db(USER).accounts.create({
+      connectorId: "custom",
+      label: "keyless",
+      creds: JSON.stringify({ config: configAt("api.vault.example", "/v1/holdings", "none") }),
+    });
+
+    const listed = await callWithRegistry(USER, registry, handleListAccounts());
+    const needs = Object.fromEntries(listed.map((a) => [a.id, a.needsCredentials]));
+    expect(needs[account.id]).toBe(true);
+    expect(needs[keyless.id]).toBe(false);
   });
 
   it("changing only the path keeps the key, still sealed", async () => {

@@ -1,14 +1,15 @@
 import { Database } from "@folio/db";
 import { Effect } from "effect";
 import { ConnectorRegistry } from "@/lib/server/connectors/registry";
-import { isComplete, readStoredCreds, safeView } from "@/lib/server/creds";
+import { isComplete, publicValues, readStoredCreds, safeView } from "@/lib/server/creds";
 import { type PortfolioScope, scopedMembership } from "@/lib/server/portfolio/scope";
 import { serverFn } from "@/lib/server/server-fn";
 
 // Raw creds (incl. secret ciphertext) never leave the server, only the safeView projection.
 export const handleListAccounts = serverFn("listAccounts")(function* (data: PortfolioScope = {}) {
   const { accounts: store } = yield* Database;
-  const specsByType = (yield* ConnectorRegistry).specs;
+  const connectors = yield* ConnectorRegistry;
+  const specsByType = connectors.specs;
   const [scope, rawList] = yield* Effect.all(
     [scopedMembership(data.portfolioId), store.listRawCreds()],
     { concurrency: 2 },
@@ -25,7 +26,11 @@ export const handleListAccounts = serverFn("listAccounts")(function* (data: Port
     return {
       ...a,
       portfolioId: scope.portfolioIdOf(a.id),
-      needsCredentials: !isComplete(specs, stored),
+      needsCredentials: !isComplete(
+        specs,
+        stored,
+        connectors.neededCreds(a.connectorId, publicValues(specs, stored)),
+      ),
       credsSafe: safeView(specs, stored),
     };
   });

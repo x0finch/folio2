@@ -91,12 +91,17 @@ const makeRegistry = () => ({
   ): boolean =>
     getConnector(connectorRegistry, connectorId)?.account.keepsSecrets?.(previous, next) ?? true,
 
+  // Optional creds this account requires given its public ones.
+  neededCreds: (connectorId: string, publicCreds: Record<string, string>): readonly string[] =>
+    getConnector(connectorRegistry, connectorId)?.account.needs?.(publicCreds) ?? [],
+
   // Credential validation on create / completion: shape gate per `account.creds`, then (with opts.liveness)
   // `provider.validateAccount`. Failures are typed; the form shows the message verbatim.
   validate: (
     connectorId: string,
     values: Record<string, string>,
-    opts?: { liveness?: boolean; label?: string },
+    // `kept`: non-public fields already stored that survive this update.
+    opts?: { liveness?: boolean; label?: string; kept?: readonly string[] },
   ): Effect.Effect<void, Error> =>
     Effect.gen(function* () {
       const manifest = getConnector(connectorRegistry, connectorId);
@@ -109,6 +114,15 @@ const makeRegistry = () => ({
         try: () => validateCredentials(manifest.account.creds, values),
         catch: asError,
       });
+      const missing = (manifest.account.needs?.(values) ?? []).filter(
+        (key) => values[key] == null && !opts?.kept?.includes(key),
+      );
+      if (missing.length > 0) {
+        const labels = missing.map(
+          (key) => manifest.account.creds.find((f) => f.key === key)?.label ?? key,
+        );
+        return yield* Effect.fail(new Error(`${labels.join(", ")}: required by this config`));
+      }
       if (!opts?.liveness) return;
 
       // A connector without providers (manual) has no liveness check; the shape gate already passed.

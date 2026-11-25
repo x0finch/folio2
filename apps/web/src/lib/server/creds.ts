@@ -90,10 +90,16 @@ export function safeView(
   return out;
 }
 
-export function isComplete(specs: readonly InputSpec[], stored: Record<string, string>): boolean {
-  return specs
-    .filter((s) => s.type !== "public" && !s.optional)
-    .every((s) => stored[s.key] != null);
+// `needed`: optional fields the connector requires given the public creds (`account.needs`).
+export function isComplete(
+  specs: readonly InputSpec[],
+  stored: Record<string, string>,
+  needed: readonly string[] = [],
+): boolean {
+  return (
+    specs.filter((s) => s.type !== "public" && !s.optional).every((s) => stored[s.key] != null) &&
+    needed.every((key) => stored[key] != null)
+  );
 }
 
 export function publicValues(

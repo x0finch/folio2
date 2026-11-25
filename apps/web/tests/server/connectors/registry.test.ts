@@ -124,6 +124,20 @@ describe("custom source", () => {
     }
   });
 
+  it("a keyed config needs the key on add; an unkeyed one doesn't", async () => {
+    blockOutbound();
+    const { validate } = await realRegistry();
+    const keyed = JSON.stringify({
+      host: "api.vault.example",
+      path: "/v1/holdings",
+      auth: "bearer",
+      fields: { symbol: "s", amount: "a" },
+    });
+    const error = await Effect.runPromise(Effect.flip(validate("custom", { config: keyed })));
+    expect(error.message).toBe("API Key: required by this config");
+    await Effect.runPromise(validate("custom", { config: config("api.vault.example") }));
+  });
+
   it("a private host fails the shape check with the reason", async () => {
     blockOutbound();
     const { validate } = await realRegistry();

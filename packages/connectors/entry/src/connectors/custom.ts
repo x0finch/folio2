@@ -10,6 +10,11 @@ const PLUG_SVG = `
 
 const CUSTOM_LOGO = `data:image/svg+xml,${encodeURIComponent(PLUG_SVG.replace(/\s+/g, " ").trim())}`;
 
+const needsKey = (raw: string | undefined): boolean => {
+  const decoded = decodeCustomConfig(raw);
+  return decoded.ok && decoded.config.auth !== undefined && decoded.config.auth !== "none";
+};
+
 const hostOf = (raw: string | undefined): string | undefined => {
   const decoded = decodeCustomConfig(raw);
   return decoded.ok ? decoded.config.host : undefined;
@@ -54,6 +59,8 @@ export const custom = defineConnector({
       const host = hostOf(previous.config);
       return host !== undefined && host === hostOf(next.config);
     },
+    // `apiKey` is optional per field; a keyed config makes it required.
+    needs: (publicCreds) => (needsKey(publicCreds.config) ? ["apiKey"] : []),
   },
   balance: { schema: Spot, providers: [customBalance] },
   valuation: "mark-to-market",

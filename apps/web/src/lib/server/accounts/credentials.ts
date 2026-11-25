@@ -29,16 +29,20 @@ export const handleReplaceAccountCredentials = serverFn("replaceAccountCredentia
   const stored = readStoredCreds(yield* accounts.getRawCreds(account.id)) ?? {};
   const given = Object.fromEntries(Object.entries(data.creds).filter(([, v]) => v !== ""));
   const values = { ...publicValues(specs, stored), ...given };
-  // Typed failure so the validation message reaches the form.
-  yield* connectors.validate(account.connectorId, values, {
-    liveness: true,
-    label: account.label,
-  });
   const keep = connectors.keepsSecrets(
     account.connectorId,
     publicValues(specs, stored),
     publicValues(specs, values),
   );
+  const kept = keep
+    ? specs.filter((s) => s.type !== "public" && stored[s.key] != null).map((s) => s.key)
+    : [];
+  // Typed failure so the validation message reaches the form.
+  yield* connectors.validate(account.connectorId, values, {
+    liveness: true,
+    label: account.label,
+    kept,
+  });
   const sealed = yield* Effect.promise(() => sealCreds(specs, values, env.SECRETS_KEY));
   yield* accounts.setCredentials(
     account.id,
