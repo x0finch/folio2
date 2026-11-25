@@ -70,6 +70,10 @@ describe("isComplete (needs-credentials)", () => {
     expect(isComplete(okx, { apiKey: "K", secret: "S" })).toBe(false); // passphrase missing
   });
 
+  it("false when a required public field is missing (an import without it)", () => {
+    expect(isComplete(onchain, {})).toBe(false);
+  });
+
   it("an optional field the connector needs counts as required", () => {
     const specs: InputSpec[] = [
       { key: "config", type: "public", label: "Config" },

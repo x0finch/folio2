@@ -230,7 +230,7 @@ describe("fetchBalances", () => {
       const { value, calls } = await run(endless, customBalance.fetchBalances(ctx()));
       expect(calls).toHaveLength(MAX_PAGES);
       expect(value.balances).toHaveLength(MAX_PAGES);
-      expect(value.note?.[0]?.icon).toBe("warning");
+      expect(value.note?.[0]?.content).toContain(`first ${MAX_PAGES} pages`);
     });
 
     it("a page that repeats the previous one ends the walk without counting it twice", async () => {
@@ -276,7 +276,7 @@ describe("fetchBalances", () => {
       );
       expect(calls).toHaveLength(3);
       expect(value.balances.map((b) => b.symbol)).toEqual(["ETH", "USDC", "PTS", "SOL"]);
-      expect(value.note?.[0]?.icon).toBe("warning");
+      expect(value.note?.[0]?.content).toContain("already sent");
     });
 
     it("cursors that cycle end the walk", async () => {

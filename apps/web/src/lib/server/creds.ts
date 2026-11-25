@@ -97,7 +97,7 @@ export function isComplete(
   needed: readonly string[] = [],
 ): boolean {
   return (
-    specs.filter((s) => s.type !== "public" && !s.optional).every((s) => stored[s.key] != null) &&
+    specs.filter((s) => !s.optional).every((s) => stored[s.key] != null) &&
     needed.every((key) => stored[key] != null)
   );
 }

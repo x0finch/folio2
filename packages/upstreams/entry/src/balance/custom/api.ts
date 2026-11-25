@@ -57,11 +57,14 @@ const cursorOf = (body: unknown, path: string): string | undefined => {
   return typeof next === "string" && next !== "" ? next : undefined;
 };
 
-/** Every row across the pages read; `truncated` when the page cap cut off pages still to come. */
+// Why the walk stopped short of a clear last page: the page cap, or a page seen before.
+export type Incomplete = "page-cap" | "repeated";
+
+/** Every row across the pages read, and why the read may be incomplete. */
 export const fetchRows = (
   call: Call<never, typeof OWN_ORIGIN>,
   { config, apiKey, address }: Target,
-): Effect.Effect<{ rows: unknown[]; truncated: boolean }, UpstreamError, UpstreamNeeds> =>
+): Effect.Effect<{ rows: unknown[]; incomplete?: Incomplete }, UpstreamError, UpstreamNeeds> =>
   Effect.gen(function* () {
     const { pagination } = config;
     const auth = keyPlacement(config.auth ?? "none", apiKey);
@@ -88,25 +91,27 @@ export const fetchRows = (
         query,
         ...(later ? { notFoundAsNull: true as const } : {}),
       });
-      if (later && (body === null || !hasRows(body, config))) return { rows, truncated: false };
+      if (later && (body === null || !hasRows(body, config))) return { rows };
       const pageRows = yield* rowsOf(body, config, path);
       const pageKey = JSON.stringify(pageRows);
-      if (pageRows.length > 0 && seenPages.has(pageKey)) return { rows, truncated: read > 1 };
+      if (pageRows.length > 0 && seenPages.has(pageKey)) {
+        return read > 1 ? { rows, incomplete: "repeated" } : { rows };
+      }
       seenPages.add(pageKey);
       rows.push(...pageRows);
 
-      if (pagination === undefined) return { rows, truncated: false };
+      if (pagination === undefined) return { rows };
       if (pagination.type === "page") {
-        if (pageRows.length === 0) return { rows, truncated: false };
+        if (pageRows.length === 0) return { rows };
         page++;
       } else {
         const next = cursorOf(body, pagination.next);
         if (next === undefined || seenCursors.has(next) || next === cursor) {
-          return { rows, truncated: false };
+          return { rows };
         }
         if (cursor !== undefined) seenCursors.add(cursor);
         cursor = next;
       }
     }
-    return { rows, truncated: true };
+    return { rows, incomplete: "page-cap" };
   });

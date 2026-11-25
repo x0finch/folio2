@@ -23,7 +23,7 @@ export function CredentialForm({
 }) {
   const ta = useTranslations("Accounts");
   const tc = useTranslations("Common");
-  const fields = incompleteSpecs(specs);
+  const fields = incompleteSpecs(specs, hint);
   const [values, setValues] = useState<Record<string, string>>({});
   const [confirmMismatch, setConfirmMismatch] = useState(false);
   // One mutation-owned pending state: hand-rolled busy/error would double-submit and let a late

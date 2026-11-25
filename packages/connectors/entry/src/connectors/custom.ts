@@ -25,7 +25,8 @@ const customAccountCreds = [
     key: "config",
     type: "public",
     label: "Source config",
-    desc: "JSON: host, path, query, auth, pagination, rows, fields. Never put a key here; it goes in API Key.",
+    // No `.`: use-intl reads one as a nested message key.
+    desc: "JSON: host, path, query, auth, pagination, rows, fields — never a key here, it goes in API Key",
     validator: z.string().transform((raw, ctx) => {
       const decoded = decodeCustomConfig(raw);
       if (decoded.ok) return decoded.config;

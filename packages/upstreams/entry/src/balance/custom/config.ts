@@ -99,8 +99,28 @@ const QueryValue = Schema.String.check(
   ),
 );
 // The config is stored in plain text and shown back to the user; a key belongs in `apiKey`.
-const SECRET_LIKE =
-  /^(?:api[-_]?key|key|token|access[-_]?token|auth|authorization|secret|client[-_]?secret|signature|sig|password|passphrase)$/i;
+// Judged by words (`auth_token`, `apiKey`, `x-api-key`): a key-ish word anywhere, or `token` /
+// `auth` last, so `tokens`, `tokenId` and `author` stay allowed.
+const ALWAYS_SECRET = new Set([
+  "key",
+  "apikey",
+  "secret",
+  "password",
+  "passphrase",
+  "signature",
+  "sig",
+]);
+const SECRET_LAST = new Set(["token", "auth", "authorization"]);
+const wordsOf = (name: string): string[] =>
+  name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+const secretLike = (name: string): boolean => {
+  const words = wordsOf(name);
+  return words.some((word) => ALWAYS_SECRET.has(word)) || SECRET_LAST.has(words.at(-1) ?? "");
+};
 const FixedQuery = Schema.Record(QueryName, QueryValue).check(
   Schema.makeFilter(
     (query: Readonly<Record<string, string>>) =>
@@ -109,7 +129,7 @@ const FixedQuery = Schema.Record(QueryName, QueryValue).check(
   ),
   Schema.makeFilter(
     (query: Readonly<Record<string, string>>) =>
-      !Object.keys(query).some((name) => SECRET_LIKE.test(name)) ||
+      !Object.keys(query).some(secretLike) ||
       "keys go in auth with the API Key field, not in query",
   ),
 );

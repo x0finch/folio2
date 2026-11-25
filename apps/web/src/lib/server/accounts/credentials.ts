@@ -9,6 +9,7 @@ import {
   openCreds,
   publicValues,
   readStoredCreds,
+  SEMI_PREFIX,
   sealCreds,
 } from "@/lib/server/creds";
 import { serverFn } from "@/lib/server/server-fn";
@@ -17,7 +18,8 @@ import { serverFn } from "@/lib/server/server-fn";
 const log = getLogger(["folio", "web", "accounts"]);
 
 // Re-enter or change creds. Given fields replace stored ones after a liveness check; a public field
-// not given keeps its value, a secret one too unless the connector says the change voids it.
+// not given keeps its value, a secret one too unless the connector says the change voids it; a
+// blank optional field is cleared.
 export const ReplaceCredentialsInput = z.object({
   accountId: z.string().min(1),
   creds: z.record(z.string(), z.string().trim()),
@@ -32,7 +34,16 @@ export const handleReplaceAccountCredentials = serverFn("replaceAccountCredentia
   // "Not yours" and "missing" share one error.
   if (!account) return yield* Effect.fail(new NotFound({ entity: "account", id: data.accountId }));
   const specs = connectors.specs[account.connectorId] ?? [];
-  const stored = readStoredCreds(yield* accounts.getRawCreds(account.id)) ?? {};
+  const raw = readStoredCreds(yield* accounts.getRawCreds(account.id)) ?? {};
+  // A blank optional field clears it; a blank required one means "unchanged".
+  const cleared = new Set(
+    specs.filter((spec) => spec.optional && data.creds[spec.key] === "").map((spec) => spec.key),
+  );
+  const stored = Object.fromEntries(
+    Object.entries(raw).filter(
+      ([key]) => !cleared.has(key.startsWith(SEMI_PREFIX) ? key.slice(SEMI_PREFIX.length) : key),
+    ),
+  );
   const given = Object.fromEntries(Object.entries(data.creds).filter(([, v]) => v !== ""));
   const values = { ...publicValues(specs, stored), ...given };
   const keep = connectors.keepsSecrets(

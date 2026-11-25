@@ -341,6 +341,33 @@ describe("accounts/credentials: custom source", () => {
     expect(opened.apiKey).toBe("新 key");
   });
 
+  it("a blank optional field clears it; a blank required one changes nothing", async () => {
+    const { account, registry } = await seed();
+    await callWithRegistry(
+      USER,
+      registry,
+      handleReplaceAccountCredentials({
+        accountId: account.id,
+        creds: { address: "0xabc" },
+      }),
+    );
+    expect((await rawOf(account.id)).address).toBe("0xabc");
+
+    await callWithRegistry(
+      USER,
+      registry,
+      handleReplaceAccountCredentials({
+        accountId: account.id,
+        creds: { address: "", config: "" },
+      }),
+    );
+
+    const raw = await rawOf(account.id);
+    expect(raw.address).toBeUndefined();
+    expect(JSON.parse(raw.config).host).toBe("api.vault.example");
+    expect(raw.apiKey).toBeDefined();
+  });
+
   it("switching to a keyless config on the same host drops the key", async () => {
     const { account, registry } = await seed();
 

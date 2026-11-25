@@ -40,6 +40,10 @@ describe("decodeCustomConfig", () => {
     ["a value with & or =", { query: { x: "a&b=c" } }],
     ["a key-like name", { query: { apikey: "abc123" } }],
     ["a token-like name", { query: { access_token: "abc123" } }],
+    ["an auth token", { query: { auth_token: "abc123" } }],
+    ["an access key", { query: { access_key: "abc123" } }],
+    ["a camelCase token", { query: { apiToken: "abc123" } }],
+    ["a dashed key", { query: { "x-api-key": "abc123" } }],
     ["a name the key already uses", { auth: { query: "apikey" }, query: { apikey: "x" } }],
     [
       "a name the pagination already uses",
