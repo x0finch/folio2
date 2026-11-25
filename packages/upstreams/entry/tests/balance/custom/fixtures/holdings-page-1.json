@@ -1,0 +1,36 @@
+{
+  "_fixture": "Hand-written fake API (api.vault.example), shaped like a typical holdings endpoint; not a recording.",
+  "data": {
+    "holdings": [
+      {
+        "asset": { "ticker": "ETH", "label": "Ether", "network": "evm:1" },
+        "balance": "1500000000000000000",
+        "precision": 18,
+        "usd": "3000.5"
+      },
+      {
+        "asset": {
+          "ticker": "USDC",
+          "label": "USD Coin",
+          "network": "evm:1",
+          "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"
+        },
+        "balance": "250000000",
+        "precision": 6,
+        "usd": 1
+      },
+      {
+        "asset": { "ticker": "PTS", "label": "Vault points" },
+        "balance": "42",
+        "precision": 0
+      },
+      {
+        "asset": { "ticker": "DUST", "network": "evm:1" },
+        "balance": "0",
+        "precision": 18,
+        "usd": "0"
+      }
+    ]
+  },
+  "next": "c2"
+}

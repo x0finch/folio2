@@ -102,6 +102,9 @@ export interface BalanceSubject {
   readonly accountSecrets?: readonly string[];
   // Answers every endpoint `fetchBalances` and `validateAccount` hit, from recorded fixtures.
   readonly reply: Reply;
+  // `validateAccount` checks the account without a request (a user-defined source runs only in
+  // sync jobs), so it answers `true` whatever the upstream would say.
+  readonly offlineVerify?: boolean;
   // Services the upstream needs besides `HttpClient` (rabby's signer).
   readonly provide?: <A, E>(
     effect: Effect.Effect<A, E, UpstreamNeeds>,
@@ -179,20 +182,29 @@ export function balanceContract(name: string, subject: BalanceSubject): void {
       });
     }
 
-    it("validateAccount: true on success, false on 401", async () => {
+    it.runIf(subject.offlineVerify)("validateAccount: true without sending a request", async () => {
+      const stub = httpStub(replies.status(401));
+      expect(await run(stub, verify())).toBe(true);
+      expect(stub.calls).toHaveLength(0);
+    });
+
+    it.skipIf(subject.offlineVerify)("validateAccount: true on success, false on 401", async () => {
       expect(await run(httpStub(subject.reply), verify())).toBe(true);
       expect(await run(httpStub(replies.status(401)), verify())).toBe(false);
     });
 
-    it("validateAccount: anything but auth stays in the error channel", async () => {
-      const cases: [Reply, UpstreamError["_tag"]][] = [
-        [replies.status(503), "UpstreamUnavailableError"],
-        [replies.rateLimited, "UpstreamRateLimitError"],
-        [replies.offline, "UpstreamUnavailableError"],
-        [replies.garbage, "UpstreamParseError"],
-      ];
-      for (const [reply, tag] of cases) expect((await failure(reply, verify()))._tag).toBe(tag);
-    });
+    it.skipIf(subject.offlineVerify)(
+      "validateAccount: anything but auth stays in the error channel",
+      async () => {
+        const cases: [Reply, UpstreamError["_tag"]][] = [
+          [replies.status(503), "UpstreamUnavailableError"],
+          [replies.rateLimited, "UpstreamRateLimitError"],
+          [replies.offline, "UpstreamUnavailableError"],
+          [replies.garbage, "UpstreamParseError"],
+        ];
+        for (const [reply, tag] of cases) expect((await failure(reply, verify()))._tag).toBe(tag);
+      },
+    );
 
     // Keyless upstreams hold nothing to leak.
     it.runIf(secrets.length > 0)("no secret reaches a span, a log line or an error", async () => {

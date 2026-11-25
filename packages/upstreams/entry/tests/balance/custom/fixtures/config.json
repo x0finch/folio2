@@ -1,0 +1,16 @@
+{
+  "host": "api.vault.example",
+  "path": "/v1/wallets/{address}/holdings",
+  "auth": "bearer",
+  "pagination": { "type": "cursor", "param": "cursor", "next": "next" },
+  "rows": "data.holdings",
+  "fields": {
+    "symbol": "asset.ticker",
+    "amount": "balance",
+    "decimals": "precision",
+    "chain": "asset.network",
+    "contract": "asset.address",
+    "name": "asset.label",
+    "price": "usd"
+  }
+}

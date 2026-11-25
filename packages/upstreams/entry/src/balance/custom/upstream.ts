@@ -1,0 +1,70 @@
+import type { Note } from "@folio/connectors-basic";
+import { UpstreamAuthError, UpstreamParseError, UpstreamRefusedError } from "@folio/upstream-basic";
+import { Effect, Schema } from "effect";
+import { balanceUpstream } from "../../runtime/balance";
+import { type Call, defineUpstream } from "../../runtime/define";
+import { fetchRows } from "./api";
+import { CustomConfig, hostOfOrigin, hostProblem } from "./config";
+import { ADDRESS_PLACEHOLDER, ID, MAX_BODY_BYTES, MAX_PAGES, OWN_ORIGIN } from "./constants";
+import { parseRows } from "./parse";
+
+const custom = defineUpstream({
+  id: ID,
+  label: "Custom source",
+  optionalKeys: [OWN_ORIGIN],
+  headers: () => ({ accept: "application/json" }),
+  refuseRedirects: true,
+  maxBodyBytes: MAX_BODY_BYTES,
+});
+
+const Account = Schema.Struct({
+  config: CustomConfig,
+  apiKey: Schema.optional(Schema.String),
+  address: Schema.optional(Schema.String),
+});
+type Account = typeof Account.Type;
+
+const refused = (cause: string) =>
+  new UpstreamRefusedError({ upstream: ID, where: "(config)", cause });
+
+// Checked on every call, not only when saved: a config stored before a rule existed, or one that
+// only now points at this deployment, must still never be fetched.
+const checkTarget = (call: Call<never, typeof OWN_ORIGIN>, { config, address }: Account) => {
+  const problem = hostProblem(config.host, hostOfOrigin(call.keys[OWN_ORIGIN]));
+  if (problem) return Effect.fail(refused(`host: ${problem}`));
+  if (config.path.includes(ADDRESS_PLACEHOLDER) && !address?.trim()) {
+    return Effect.fail(refused(`path needs an address`));
+  }
+  return Effect.void;
+};
+
+const truncatedNote = (): Note => ({
+  title: "Not every page was read",
+  icon: "warning",
+  content: `Only the first ${MAX_PAGES} pages of this source are read.`,
+});
+
+export const customBalance = balanceUpstream(custom, {
+  account: Account,
+  base: ({ config }) => `https://${config.host}`,
+  fetch: (call, { creds }) =>
+    Effect.gen(function* () {
+      yield* checkTarget(call, creds);
+      if ((creds.config.auth ?? "none") !== "none" && !creds.apiKey) {
+        return yield* new UpstreamAuthError({ upstream: ID, where: "(account)", cause: "no key" });
+      }
+      const { rows, truncated } = yield* fetchRows(call, creds);
+      const { balances, readable } = parseRows(rows, creds.config);
+      // Rows came back but the fields named none of them: the config, not the holdings, is wrong.
+      if (rows.length > 0 && readable === 0) {
+        return yield* new UpstreamParseError({
+          upstream: ID,
+          where: "(config)",
+          cause: "no row has the configured symbol and amount",
+        });
+      }
+      return { balances, ...(truncated ? { note: [truncatedNote()] } : {}) };
+    }),
+  // Sources run only inside sync jobs: adding the account checks the config, never the network.
+  verify: (call, { creds }) => checkTarget(call, creds),
+});

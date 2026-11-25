@@ -3,6 +3,8 @@ import { binanceBalance } from "../../src/balance/binance/upstream";
 import { blockbookBalance } from "../../src/balance/blockbook/upstream";
 import { bybitBalance } from "../../src/balance/bybit/upstream";
 import { coinstatsBalance } from "../../src/balance/coinstats/upstream";
+import { decodeCustomConfig } from "../../src/balance/custom/config";
+import { customBalance } from "../../src/balance/custom/upstream";
 import { hyperliquidBalance } from "../../src/balance/hyperliquid/upstream";
 import { okxBalance } from "../../src/balance/okx/upstream";
 import { RabbySigner } from "../../src/balance/rabby/signer";
@@ -22,6 +24,8 @@ import bybitEarnOnchain from "../balance/bybit/fixtures/earn-onchain.json";
 import bybitFunding from "../balance/bybit/fixtures/funding.json";
 import bybitWallet from "../balance/bybit/fixtures/wallet-balance.json";
 import coinstatsSolana from "../balance/coinstats/fixtures/solana.json";
+import customConfig from "../balance/custom/fixtures/config.json";
+import customPage from "../balance/custom/fixtures/holdings-page-2.json";
 import hyperliquidState from "../balance/hyperliquid/fixtures/clearinghouse-state.json";
 import okxBalanceFixture from "../balance/okx/fixtures/balance.json";
 import okxFunding from "../balance/okx/fixtures/funding.json";
@@ -149,4 +153,20 @@ balanceContract("binance", {
     ],
     binanceTicker,
   ),
+});
+
+const decodedCustom = decodeCustomConfig(JSON.stringify(customConfig));
+if (!decodedCustom.ok) throw new Error(decodedCustom.message);
+const CUSTOM_KEY = "s3cr3t-custom-key";
+
+balanceContract("custom", {
+  port: customBalance,
+  account: {
+    connectorId: "custom",
+    creds: { config: decodedCustom.config, apiKey: CUSTOM_KEY, address: EVM },
+  },
+  env: { BETTER_AUTH_URL: "https://folio.example.com" },
+  accountSecrets: [CUSTOM_KEY],
+  offlineVerify: true,
+  reply: () => json(customPage),
 });
