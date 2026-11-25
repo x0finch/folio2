@@ -47,7 +47,7 @@ const customAccountCreds = [
   },
 ] as const satisfies readonly CredField[];
 
-// A source the user describes; mark-to-market so nothing it reports prices a holding, and the key
+// A source the user describes; mark-to-market, so its own prices value only coins the market can't, and the key
 // is dropped once the config points at another host.
 export const custom = defineConnector({
   id: "custom",

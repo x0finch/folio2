@@ -483,13 +483,13 @@ describe("scenario: an on-chain wallet syncs one USDC", () => {
 
 // -- scenario: a user-defined source --
 describe("scenario: a custom source reports a coin with its own price", () => {
-  // What the custom upstream emits for a coin with no chain: keyed by host + symbol, valued at 0,
-  // its own price only in `selfPrice`.
+  // What the custom upstream emits for a coin with no chain: keyed by host + symbol, valued at the
+  // source's own price, which the market can't override for a coin it doesn't know.
   const reported = {
     symbol: "PTS",
     amount: 42,
-    value: 0,
-    selfPrice: 7,
+    price: 7,
+    value: 42 * 7,
     kind: "spot" as const,
     tokenRef: "custom/custom:API.VAULT.EXAMPLE:PTS",
   };
@@ -518,21 +518,19 @@ describe("scenario: a custom source reports a coin with its own price", () => {
     expect(outbound).toEqual([]);
   });
 
-  it("2 data: marked to market, so the source's price is neither the value nor a stored selfPrice", async () => {
+  it("2 data: no market price, so the source's value is stored, never as a selfPrice", async () => {
     const snapshotId = await syncCustom();
     const { results } = await env.DB.prepare(
       "SELECT amount, usd_value AS usdValue, self_price AS selfPrice FROM snapshot_balances WHERE snapshot_id = ?",
     )
       .bind(snapshotId)
       .all<{ amount: number; usdValue: number; selfPrice: number | null }>();
-    expect(results).toEqual([{ amount: 42, usdValue: 0, selfPrice: null }]);
+    expect(results).toEqual([{ amount: 42, usdValue: 42 * 7, selfPrice: null }]);
   });
 
-  it("3 display: the source's price never values it, so the unpriced coin adds nothing", async () => {
+  it("3 display: the unpriced coin shows at the source's price", async () => {
     await syncCustom();
     const view = await overview();
-    // Holdings worth exactly 0 are left out of the list.
-    expect(holdingOf(view, "PTS")).toBeUndefined();
-    expect(view.holdings.reduce((sum, h) => sum + h.totalValue, 0)).toBe(0);
+    expect(holdingOf(view, "PTS")?.totalValue).toBe(42 * 7);
   });
 });

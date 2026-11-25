@@ -56,10 +56,8 @@ function refOf(row: unknown, config: CustomConfig, host: string, symbol: string)
   return tokenRef.custom(ID, `${host}:${symbol}`);
 }
 
-/**
- * Rows that carry a symbol and an amount. Valued at 0: the account is marked to market, and the
- * source's own price only ever lands in `selfPrice`.
- */
+// The account is marked to market: a coin the market prices is revalued at sync and on display;
+// the source's own price only values a coin the market doesn't know.
 export function parseRows(
   rows: readonly unknown[],
   config: CustomConfig,
@@ -85,8 +83,7 @@ export function parseRows(
       kind: "spot",
       symbol,
       amount,
-      value: 0,
-      ...(price !== undefined && price > 0 ? { selfPrice: price } : {}),
+      ...(price !== undefined && price > 0 ? { price, value: amount * price } : { value: 0 }),
       tokenRef: refOf(row, config, host, symbol),
       ...(name ? { name } : {}),
     });

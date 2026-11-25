@@ -23,8 +23,8 @@ describe("parseRows", () => {
           kind: "spot",
           symbol: "ETH",
           amount: 1.5,
-          value: 0,
-          selfPrice: 3000.5,
+          price: 3000.5,
+          value: 4500.75,
           tokenRef: "evm:1/native",
           name: "Ether",
         },
@@ -32,8 +32,8 @@ describe("parseRows", () => {
           kind: "spot",
           symbol: "USDC",
           amount: 250,
-          value: 0,
-          selfPrice: 1,
+          price: 1,
+          value: 250,
           tokenRef: "evm:1/contract:0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
           name: "USD Coin",
         },
@@ -57,11 +57,11 @@ describe("parseRows", () => {
     });
   });
 
-  it("never prices a row itself: the source's price only reaches selfPrice", () => {
-    const { balances } = parseRows(page1.data.holdings, configOf());
+  it("values a row at the source's price when it gives one, else at 0; never a selfPrice", () => {
+    const { balances } = parseRows([...page1.data.holdings, ...page2.data.holdings], configOf());
     for (const row of balances) {
-      expect(row.value).toBe(0);
-      expect(row.price).toBeUndefined();
+      expect(row.selfPrice).toBeUndefined();
+      expect(row.value).toBe(row.price === undefined ? 0 : row.amount * row.price);
     }
   });
 

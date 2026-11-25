@@ -60,11 +60,11 @@ describe("fetchBalances", () => {
     expect(calls.every((c) => c.request.method === "GET")).toBe(true);
   });
 
-  it("the source's own price only reaches selfPrice", async () => {
+  it("the source's own price values the row, never as a selfPrice", async () => {
     const { value } = await run(pages, customBalance.fetchBalances(ctx()));
     const eth = value.balances.find((b) => b.symbol === "ETH");
-    expect(eth).toMatchObject({ selfPrice: 3000.5, value: 0 });
-    expect(eth?.price).toBeUndefined();
+    expect(eth).toMatchObject({ price: 3000.5, value: 4500.75 });
+    expect(eth?.selfPrice).toBeUndefined();
   });
 
   describe("key placement", () => {
