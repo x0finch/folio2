@@ -17,6 +17,7 @@ export const MAX_QUERY_PARAMS = 10; // fixed query parameters per config
 export const MAX_QUERY_VALUE_LENGTH = 256;
 export const MAX_DECIMALS = 36;
 export const MAX_SYMBOL_LENGTH = 32;
+export const MAX_TOKEN_NAME_LENGTH = 128;
 export const MAX_REF_PART_LENGTH = 128; // chain and contract values
 
 // Names that only resolve inside a private network.

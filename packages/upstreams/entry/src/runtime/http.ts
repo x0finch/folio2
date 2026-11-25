@@ -238,6 +238,7 @@ export function makeRequester(config: HttpConfig): Requester {
         : sent;
 
       if (config.refuseRedirects && isRedirect(res.status)) {
+        yield* release(res);
         return yield* new HttpFailure({
           kind: "refused",
           where,
@@ -246,6 +247,8 @@ export function makeRequester(config: HttpConfig): Requester {
         });
       }
       if (res.status < 200 || res.status >= 300) {
+        // Nothing reads an error body; close it now rather than hold the connection until GC.
+        yield* release(res);
         if (rateLimited.has(res.status)) {
           const now = yield* Clock.currentTimeMillis;
           return yield* new HttpFailure({

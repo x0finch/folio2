@@ -29,7 +29,14 @@ const PRETTY_CAUSE = Symbol.for("folio/pretty-cause");
 /** Attaches the full `Cause.pretty` to an error thrown out of the runtime; plain values pass through. */
 export const withPrettyCause = (error: unknown, pretty: string): unknown => {
   if (typeof error === "object" && error !== null) {
-    Object.defineProperty(error, PRETTY_CAUSE, { value: pretty });
+    // Redefinable: the same error object can be rejected by the runtime more than once.
+    if (Object.isExtensible(error) || Object.hasOwn(error, PRETTY_CAUSE)) {
+      Object.defineProperty(error, PRETTY_CAUSE, {
+        value: pretty,
+        configurable: true,
+        writable: true,
+      });
+    }
   }
   return error;
 };

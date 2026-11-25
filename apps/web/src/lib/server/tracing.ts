@@ -88,7 +88,7 @@ const tracerOf = (c: Collector): Tracer.Tracer =>
 
 /** `emit` is injectable only so unit tests can capture the tree. */
 export const spanTracerTo = (emit: (tree: string) => void): Layer.Layer<never> =>
-  Layer.unwrap(Effect.sync(() => Layer.succeed(Tracer.Tracer, tracerOf(makeCollector(emit)))));
+  Layer.sync(Tracer.Tracer, () => tracerOf(makeCollector(emit)));
 
 const spanTracer: Layer.Layer<never> = spanTracerTo((tree) =>
   log.debug("span tree\n{tree}", { tree }),

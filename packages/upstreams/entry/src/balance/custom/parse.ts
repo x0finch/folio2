@@ -2,7 +2,13 @@ import type { Spot } from "@folio/connectors-basic";
 import { tokenRef } from "@folio/oracle-ref";
 import { valueAt } from "./api";
 import type { CustomConfig } from "./config";
-import { ID, MAX_DECIMALS, MAX_REF_PART_LENGTH, MAX_SYMBOL_LENGTH } from "./constants";
+import {
+  ID,
+  MAX_DECIMALS,
+  MAX_REF_PART_LENGTH,
+  MAX_SYMBOL_LENGTH,
+  MAX_TOKEN_NAME_LENGTH,
+} from "./constants";
 
 export type Row = Spot;
 
@@ -84,7 +90,9 @@ export function parseRows(
     const quoted = fields.price === undefined ? undefined : numberOf(valueAt(row, fields.price));
     const price =
       quoted !== undefined && quoted > 0 && Number.isFinite(amount * quoted) ? quoted : undefined;
-    const name = fields.name === undefined ? undefined : textOf(valueAt(row, fields.name));
+    const rawName = fields.name === undefined ? undefined : textOf(valueAt(row, fields.name));
+    // Names land in the token table and every token listing; an oversized one is dropped.
+    const name = rawName && rawName.length <= MAX_TOKEN_NAME_LENGTH ? rawName : undefined;
     balances.push({
       kind: "spot",
       symbol,

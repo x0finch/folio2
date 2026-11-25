@@ -65,17 +65,15 @@ export const coingecko = defineUpstream({
   },
 });
 
-export class CoinGeckoConnection extends Context.Service<CoinGeckoConnection, CoinGeckoCall>()(
-  "upstreams/CoinGeckoConnection",
+export class CoinGeckoClient extends Context.Service<CoinGeckoClient, CoinGeckoCall>()(
+  "upstreams/CoinGeckoClient",
 ) {}
 
-export type Needs = CoinGeckoConnection | Outbound;
+export type Needs = CoinGeckoClient | Outbound;
 
 // Every key is optional, so connecting cannot fail.
-export const connection = (
-  env: Readonly<Record<string, unknown>>,
-): Layer.Layer<CoinGeckoConnection> =>
-  Layer.effect(CoinGeckoConnection, Effect.orDie(coingecko.connect(env)));
+export const connection = (env: Readonly<Record<string, unknown>>): Layer.Layer<CoinGeckoClient> =>
+  Layer.effect(CoinGeckoClient, Effect.orDie(coingecko.connect(env)));
 
 // Ports are `R = never`, so this package provides the connection and `HttpClient` itself.
 export const transport = (env: Readonly<Record<string, unknown>>): Layer.Layer<Needs> =>
@@ -123,4 +121,4 @@ export const req = <A>(
 
 export const withCall = <A>(
   use: (call: CoinGeckoCall) => Effect.Effect<A, UpstreamError, Outbound>,
-): Effect.Effect<A, UpstreamError, Needs> => Effect.flatMap(CoinGeckoConnection, use);
+): Effect.Effect<A, UpstreamError, Needs> => Effect.flatMap(CoinGeckoClient, use);

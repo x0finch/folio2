@@ -106,9 +106,8 @@ export const fetchRows = (
         page++;
       } else {
         const next = cursorOf(body, pagination.next);
-        if (next === undefined || seenCursors.has(next) || next === cursor) {
-          return { rows };
-        }
+        if (next === undefined) return { rows };
+        if (seenCursors.has(next) || next === cursor) return { rows, incomplete: "repeated" };
         if (cursor !== undefined) seenCursors.add(cursor);
         cursor = next;
       }

@@ -196,6 +196,13 @@ describe("parseRows", () => {
     ]);
   });
 
+  it("drops an oversized name, keeps the row", () => {
+    const config = configOf({ fields: { symbol: "s", amount: "a", name: "n" } });
+    const { balances } = parseRows([{ s: "A", a: 1, n: "x".repeat(129) }], config);
+    expect(balances).toHaveLength(1);
+    expect(balances[0]?.name).toBeUndefined();
+  });
+
   it("reads own properties only", () => {
     const config = configOf({ fields: { symbol: "s", amount: "constructor.length" } });
     expect(parseRows([{ s: "A" }], config).readable).toBe(0);

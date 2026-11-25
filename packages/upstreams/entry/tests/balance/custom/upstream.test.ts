@@ -296,9 +296,21 @@ describe("fetchBalances", () => {
     });
 
     it("a cursor that repeats ends the walk", async () => {
-      const stuck = () => json({ ...page2, next: "same" });
-      const { calls } = await run(stuck, customBalance.fetchBalances(ctx()));
+      // Different rows each time, so only the cursor gives the loop away.
+      const stuck = (_: HttpClientRequestLike, nth: number) =>
+        json({
+          ...page2,
+          data: {
+            holdings: page2.data.holdings.map((h) => ({
+              ...h,
+              asset: { ...h.asset, ticker: `${h.asset.ticker}${nth}` },
+            })),
+          },
+          next: "same",
+        });
+      const { value, calls } = await run(stuck, customBalance.fetchBalances(ctx()));
       expect(calls).toHaveLength(2);
+      expect(value.note?.[0]?.content).toContain("already sent");
     });
   });
 
