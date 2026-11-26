@@ -173,7 +173,8 @@ describe("token detail drawer", () => {
     expect(screen.getAllByText("—")).toHaveLength(2);
   });
 
-  const chartDrawn = (c: HTMLElement) => c.querySelector("[data-slot=sparkline]:not([aria-hidden])");
+  const chartDrawn = (c: HTMLElement) =>
+    c.querySelector("[data-slot=sparkline]:not([aria-hidden])");
 
   it('history comes back empty: shows the "no data yet" line, draws no chart', async () => {
     const { baseElement } = mount([btc]);
