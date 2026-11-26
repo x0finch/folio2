@@ -130,7 +130,7 @@ describe("AllocationPie: legend", () => {
     expect(legendRows(container)).toEqual(["BTC100%€100.00"]);
   });
 
-  it("privacy on: each slice amount masked, share kept", () => {
+  it("privacy on: the centre total and each slice amount masked, share kept", () => {
     wrap(
       <AllocationPie
         slices={[
@@ -141,7 +141,7 @@ describe("AllocationPie: legend", () => {
       { hide: true },
     );
     const masked = screen.getAllByRole("button", { name: /balance hidden/i });
-    expect(masked.map((m) => m.textContent)).toEqual(["$75.00", "$25.00"]);
+    expect(masked.map((m) => m.textContent)).toEqual(["$100.00", "$75.00", "$25.00"]);
     expect(screen.getByText("75%")).toBeTruthy();
   });
 });
