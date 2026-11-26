@@ -110,12 +110,12 @@
   --input: lab(3.04863% 0 0 / 0.10);
   /* Official 12% black is ~1.3:1; ring is the only focus indicator and WCAG needs 3:1. */
   --ring: oklch(0.708 0 0);
-  /* Data series are neutral steps, darkest first (DESIGN.md: hue is for functional colours only). */
-  --chart-1: #181818;
-  --chart-2: #4a4a4a;
-  --chart-3: #7c7c7c;
-  --chart-4: #adadad;
-  --chart-5: #d6d6d6;
+  /* Data series use the palette of beUI's chart demos, the same in both themes. */
+  --chart-1: #2563eb;
+  --chart-2: #38bdf8;
+  --chart-3: #0d9488;
+  --chart-4: #fbbf24;
+  --chart-5: #a1a1aa;
   /* Semantic colors: positive/negative/warning with soft backgrounds, secondary surface/border, shadows. */
   --pos: oklch(0.5 0.09 152);
   --pos-bg: oklch(0.95 0.03 152);
@@ -165,11 +165,11 @@
   --input: #ffffff1a;
   /* Same as light: focus indicator needs 3:1. */
   --ring: oklch(0.556 0 0);
-  --chart-1: #f2f2f2;
-  --chart-2: #c0c0c0;
-  --chart-3: #909090;
-  --chart-4: #636363;
-  --chart-5: #3d3d3d;
+  --chart-1: #2563eb;
+  --chart-2: #38bdf8;
+  --chart-3: #0d9488;
+  --chart-4: #fbbf24;
+  --chart-5: #a1a1aa;
   --pos: oklch(0.76 0.09 158);
   --pos-bg: oklch(0.29 0.06 158);
   --neg: oklch(0.72 0.12 25);

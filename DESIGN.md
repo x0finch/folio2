@@ -13,6 +13,7 @@ Rules for every screen in `apps/web`. Desktop and back-office pages follow all f
 - Functional colours are the only hues: gain / loss, warning, destructive. Low saturation, on text and small marks only, never as a filled area.
 - Dark mode mirrors light with the same contrast steps.
 - No gradients, saturated or neon colours, or heavy card shadows.
+- Charts are the exception: series use beUI's default palette (`--chart-1` … `--chart-5`) and its area fill.
 - Contrast by weight and lightness: titles bolder and darker, body lighter and thinner.
 - Whitespace is 1.5× a conventional page, inside and around components. Leave it empty rather than fill it.
 

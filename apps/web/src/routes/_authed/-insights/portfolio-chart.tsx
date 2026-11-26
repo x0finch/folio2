@@ -33,6 +33,7 @@ export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
   return (
     <LineChart
       label={t("portfolioValue")}
+      variant="area"
       categories={series.map((p) => labelOf(p.t))}
       series={[
         {
