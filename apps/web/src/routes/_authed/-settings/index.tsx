@@ -13,7 +13,10 @@ const authedApi = getRouteApi("/_authed");
 export function Settings() {
   const { user } = authedApi.useRouteContext();
   return (
-    <StaggerReveal className="flex flex-col gap-16">
+    <StaggerReveal
+      className="flex flex-col divide-y divide-border"
+      itemClassName="py-12 first:pt-0 last:pb-0"
+    >
       <UserCard user={user} />
       <AppearanceCard />
       {/* Before passkeys: passkeys are now added only via the auto-lock toggle. */}

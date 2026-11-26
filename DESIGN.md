@@ -4,6 +4,7 @@ Rules for every screen in `apps/web`. Desktop and back-office pages follow all f
 
 ## 1. Layout and information
 - No box inside a box: no nested cards, no extra divider lines.
+- One hairline (`border-border`) may separate the top-level sections of a long page; nothing finer than that.
 - No slogans, subtitles, secondary labels or explanatory copy.
 - Hierarchy comes from alignment and spacing, never from text that explains the interface.
 
