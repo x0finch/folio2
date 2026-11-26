@@ -1,7 +1,7 @@
 import { Button } from "@folio/ui";
+import { Fingerprint, LogOut } from "@folio/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Fingerprint, LogOut } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { signIn, signOut } from "@/lib/core/auth-client";
@@ -102,7 +102,7 @@ function LockOverlay({ onUnlock }: { onUnlock: () => void }) {
         {!ready && <p className="-mt-2 text-muted-foreground text-sm">{t("noDeviceCredential")}</p>}
 
         <Button type="button" className="w-full" disabled={busy} onClick={onPasskey}>
-          <Fingerprint className="size-4" />
+          <Fingerprint />
           {busy ? "…" : t("unlockWithPasskey")}
         </Button>
         {error ? <p className="text-destructive text-sm">{t("failed")}</p> : null}
@@ -114,7 +114,7 @@ function LockOverlay({ onUnlock }: { onUnlock: () => void }) {
           disabled={busy}
           onClick={onSignOut}
         >
-          <LogOut className="size-4" />
+          <LogOut />
           {tc("signOut")}
         </Button>
       </div>

@@ -1,15 +1,7 @@
 "use client";
 // beui.dev/components/motion/animated-badge — @/ 别名已改写为 @folio/ui/*。
 
-import {
-  AlertTriangle,
-  Check,
-  Circle,
-  Info,
-  LoaderCircle,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { AlertTriangle, Check, Circle, Info, LoaderCircle, X, type Icon as LucideIcon } from "../../icons";
 import {
   AnimatePresence,
   motion,

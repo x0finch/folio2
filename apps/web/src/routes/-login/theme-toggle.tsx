@@ -1,4 +1,4 @@
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Monitor, Moon, Sun } from "@folio/ui/icons";
 import { type Theme, useMountedTheme } from "@/lib/hooks/use-theme";
 
 const THEME_ORDER: Theme[] = ["light", "dark", "system"];

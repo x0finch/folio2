@@ -1,7 +1,13 @@
 import { TOP_TOKENS_LIMIT } from "@folio/oracle-basic";
 import { cn, Input, LogoAvatar } from "@folio/ui";
+import {
+  ChevronDown as ChevronDownIcon,
+  CircleAlert as CircleAlertIcon,
+  Loader2 as Loader2Icon,
+  SearchX as SearchXIcon,
+  X as XIcon,
+} from "@folio/ui/icons";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
@@ -316,14 +322,14 @@ export function TokenCombobox({
           )}
           {value ? (
             <XIcon
-              className="size-4 shrink-0 text-muted-foreground hover:text-foreground"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
               onClick={(e) => {
                 e.stopPropagation();
                 onChange(null);
               }}
             />
           ) : (
-            <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
+            <ChevronDownIcon className="shrink-0 text-muted-foreground" />
           )}
         </button>
       )}
@@ -343,7 +349,7 @@ export function TokenCombobox({
             >
               {isError ? (
                 <div className="flex flex-col items-center gap-2 px-3 py-6 text-center text-destructive text-sm">
-                  <CircleAlertIcon className="size-5" />
+                  <CircleAlertIcon />
                   {t("searchFailed")}
                 </div>
               ) : flatItems.length > 0 ? (
@@ -381,11 +387,11 @@ export function TokenCombobox({
                 ))
               ) : isLoading ? (
                 <div className="flex items-center justify-center px-3 py-6 text-muted-foreground">
-                  <Loader2Icon className="size-5 animate-spin" aria-label={t("searching")} />
+                  <Loader2Icon className="animate-spin" aria-label={t("searching")} />
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-2 px-3 py-6 text-center text-muted-foreground text-sm">
-                  <SearchXIcon className="size-5" />
+                  <SearchXIcon />
                   {t("noResults")}
                   {search && (
                     <button

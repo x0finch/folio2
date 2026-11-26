@@ -6,7 +6,7 @@ import {
   PopoverTrigger,
   SharedLayoutBg,
 } from "@folio/ui";
-import { Check, Settings2 } from "lucide-react";
+import { Check, Settings2 } from "@folio/ui/icons";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
@@ -60,10 +60,7 @@ export function PortfolioSelector() {
                 <button key={p.id} type="button" className={rowClass} onClick={() => select(p.id)}>
                   <span className="flex min-w-0 items-center gap-2">
                     <Check
-                      className={cn(
-                        "size-4 shrink-0",
-                        p.id === selectedId ? "opacity-100" : "opacity-0",
-                      )}
+                      className={cn(" shrink-0", p.id === selectedId ? "opacity-100" : "opacity-0")}
                     />
                     <span className="min-w-0 flex-1 truncate">{p.name}</span>
                   </span>
@@ -81,7 +78,7 @@ export function PortfolioSelector() {
                 onClick={() => setManageOpen(true)}
               >
                 <span className="flex min-w-0 items-center gap-2">
-                  <Settings2 className="size-4 shrink-0" />
+                  <Settings2 className="shrink-0" />
                   <span className="min-w-0 flex-1 truncate">{t("manage")}</span>
                 </span>
               </button>

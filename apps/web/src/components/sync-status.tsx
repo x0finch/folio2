@@ -1,8 +1,8 @@
 import type { ConnectorId } from "@folio/connectors";
 import { cn, Popover, PopoverContent, PopoverTrigger, useHoverCapable } from "@folio/ui";
+import { RefreshCw } from "@folio/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { RefreshCw } from "lucide-react";
 import { forwardRef, type ReactNode, useState } from "react";
 import { useTranslations } from "use-intl";
 import { connectorLabelFallback } from "@/lib/core/logo";
@@ -56,7 +56,7 @@ const StatusSegment = forwardRef<HTMLButtonElement, StatusSegmentProps>(function
       <span className={cn("size-2 shrink-0 rounded-full", dotClass)} />
       <span className="text-muted-foreground">{label}</span>
       {showRefresh && (
-        <RefreshCw className={cn("size-3.5 text-muted-foreground", busy && "animate-spin")} />
+        <RefreshCw className={cn(" text-muted-foreground", busy && "animate-spin")} />
       )}
     </button>
   );

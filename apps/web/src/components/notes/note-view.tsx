@@ -5,14 +5,14 @@ import {
   CircleCheck,
   CircleHelp,
   Info,
-  type LucideIcon,
+  type Icon as LucideIcon,
   TriangleAlert,
-} from "lucide-react";
+} from "@folio/ui/icons";
 
 // Renders one Note (status icon + title + content). content: string is plain text, NoteRow[] a row
 // list (a row with href links out). Numbers go through the injected formatNumber; row keys are indexes (read-only list).
 
-// Neutral status names -> lucide icons (lucide renamed AlertTriangle/AlertCircle to TriangleAlert/CircleAlert).
+// Neutral status names -> icons (lucide, where these names come from, renamed AlertTriangle/AlertCircle to TriangleAlert/CircleAlert).
 const NOTE_ICON_MAP: Record<string, LucideIcon> = {
   info: Info,
   success: CircleCheck,

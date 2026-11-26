@@ -1,7 +1,7 @@
 "use client";
 // beui.dev/components/blocks/swipeable-list — @/ 别名已改写为 @folio/ui/*。
 
-import { Ellipsis } from "lucide-react";
+import { Ellipsis } from "../../icons";
 import {
   animate,
   motion,

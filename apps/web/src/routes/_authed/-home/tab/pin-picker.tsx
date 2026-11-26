@@ -1,6 +1,6 @@
 import { cn, SharedLayoutBg } from "@folio/ui";
+import { Check } from "@folio/ui/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Check } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { connectorLabelFallback } from "@/lib/core/logo";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
@@ -76,9 +76,7 @@ function PickerSection({
                 name={o.label}
                 className="min-w-0 flex-1"
               />
-              <Check
-                className={cn("size-4 shrink-0", activeId === o.id ? "opacity-100" : "opacity-0")}
-              />
+              <Check className={cn(" shrink-0", activeId === o.id ? "opacity-100" : "opacity-0")} />
             </span>
           </button>
         ))}

@@ -1,6 +1,6 @@
 import { cn, Dock, DockItem, SharedLayoutBg, Skeleton } from "@folio/ui";
+import { BarChart3, Home, Settings, Wallet } from "@folio/ui/icons";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { BarChart3, Home, Settings, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
 import type { SyncStatusSummary } from "@/lib/core/sync-status";

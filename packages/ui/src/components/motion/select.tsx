@@ -1,7 +1,7 @@
 "use client";
 // beui.dev/components/motion/select — @/ 别名已改写为 @folio/ui/*。
 
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown } from "../../icons";
 import {
   animate,
   type MotionValue,

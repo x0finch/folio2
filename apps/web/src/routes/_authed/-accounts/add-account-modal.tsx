@@ -1,7 +1,7 @@
 import type { ConnectorId } from "@folio/connectors";
 import { MorphingModal, toast, useMediaQuery } from "@folio/ui";
+import { ArrowLeft, X } from "@folio/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, X } from "lucide-react";
 import { cloneElement, type ReactElement, type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { AccountForm } from "@/components/account-fields";
@@ -48,12 +48,12 @@ function ModalHeader({
             aria-label={t("backToConnectors")}
             className="-ml-1"
           >
-            <ArrowLeft className="size-4" />
+            <ArrowLeft />
           </IconButton>
         )}
         <h2 className="flex-1 font-semibold text-lg">{title}</h2>
         <IconButton size="sm" onClick={onClose} aria-label={tc("close")}>
-          <X className="size-4" />
+          <X />
         </IconButton>
       </div>
       <p className="text-muted-foreground text-sm">{subtitle}</p>

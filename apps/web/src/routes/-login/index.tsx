@@ -1,7 +1,7 @@
 import { Button, cn, Input, Label, MorphingModal, Tabs, TabsList, TabsTrigger } from "@folio/ui";
+import { Fingerprint } from "@folio/ui/icons";
 import { WebAuthnAbortService } from "@simplewebauthn/browser";
 import { useNavigate } from "@tanstack/react-router";
-import { Fingerprint } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { authClient, signIn, signUp } from "@/lib/core/auth-client";
@@ -296,7 +296,7 @@ function AuthPanel() {
         </Button>
         {!isSignup && supportsPasskey && (
           <Button type="button" variant="outline" disabled={busy} onClick={onPasskey}>
-            <Fingerprint className="size-4" />
+            <Fingerprint />
             {t("signInWithPasskey")}
           </Button>
         )}
@@ -318,7 +318,7 @@ function AuthPanel() {
               {t("passkeyPromptDismiss")}
             </Button>
             <Button onClick={onAddFromPrompt}>
-              <Fingerprint className="size-4" />
+              <Fingerprint />
               {t("passkeyPromptAdd")}
             </Button>
           </div>

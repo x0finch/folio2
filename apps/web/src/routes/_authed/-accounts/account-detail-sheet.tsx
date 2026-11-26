@@ -12,7 +12,6 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
@@ -21,7 +20,8 @@ import {
   RefreshCw,
   Tag as TagIcon,
   Trash2,
-} from "lucide-react";
+} from "@folio/ui/icons";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountTagsModal } from "@/components/account-tags-modal";
@@ -248,7 +248,7 @@ function DetailBody({
             </div>
             {account.needsCredentials && (
               <div className="flex items-center gap-1.5 text-warn text-xs">
-                <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+                <AlertTriangle className="shrink-0" aria-hidden />
                 <button
                   type="button"
                   onClick={onComplete}
@@ -402,7 +402,7 @@ function SheetOverflowMenu({
       >
         <PopoverTrigger>
           <IconButton ref={menuPop.measureRef} aria-label={t("moreActions")}>
-            <MoreVertical className="size-4" />
+            <MoreVertical />
           </IconButton>
         </PopoverTrigger>
         <PopoverContent>
@@ -414,7 +414,7 @@ function SheetOverflowMenu({
                 disabled={archived || syncPending}
                 onClick={onSync}
               >
-                <RefreshCw className="size-4 shrink-0" />
+                <RefreshCw className="shrink-0" />
                 {t("syncThis")}
               </button>
             )}
@@ -424,15 +424,15 @@ function SheetOverflowMenu({
               disabled={archivePending}
               onClick={onArchive}
             >
-              <Archive className="size-4 shrink-0" />
+              <Archive className="shrink-0" />
               {archived ? t("unarchive") : t("archive")}
             </button>
             <button type="button" className={menuItemClass} onClick={onTags}>
-              <TagIcon className="size-4 shrink-0" />
+              <TagIcon className="shrink-0" />
               {tt("menuAction")}
             </button>
             <button type="button" className={menuItemClass} onClick={onMove}>
-              <FolderInput className="size-4 shrink-0" />
+              <FolderInput className="shrink-0" />
               {tp("moveTo")}
             </button>
             <button
@@ -440,7 +440,7 @@ function SheetOverflowMenu({
               className={cn(menuItemClass, "text-destructive hover:text-destructive")}
               onClick={onDelete}
             >
-              <Trash2 className="size-4 shrink-0" />
+              <Trash2 className="shrink-0" />
               {tc("delete")}
             </button>
           </div>

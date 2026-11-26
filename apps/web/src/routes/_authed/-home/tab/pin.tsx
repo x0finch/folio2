@@ -1,6 +1,6 @@
 import { cn, Skeleton, TabsTrigger, toast } from "@folio/ui";
+import { Plus } from "@folio/ui/icons";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
 import { MAX_PINS_PER_PORTFOLIO } from "@/lib/core/accounts-in-view";
@@ -148,7 +148,7 @@ export function AddPinButton() {
   return (
     <PinPanel
       disabled={addMut.isPending}
-      ghost={<Plus className="size-4 text-muted-foreground" />}
+      ghost={<Plus className="text-muted-foreground" />}
       panel={(close) => (
         <div className="w-56">
           <LazyPinPicker
@@ -166,7 +166,7 @@ export function AddPinButton() {
         disabled={addMut.isPending}
         className="flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
       >
-        <Plus className="size-4" />
+        <Plus />
       </button>
     </PinPanel>
   );

@@ -62,7 +62,6 @@
     "better-auth": "catalog:",
     "effect": "catalog:",
     "idb-keyval": "^6.3.0",
-    "lucide-react": "catalog:",
     "motion": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",

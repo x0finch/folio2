@@ -9,8 +9,8 @@ import {
   SharedLayoutBg,
   toast,
 } from "@folio/ui";
+import { Plus, Trash2 } from "@folio/ui/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { EditableName } from "@/components/editable-name";
@@ -92,7 +92,7 @@ export function PasskeysCard() {
 
   const addButton = supported ? (
     <IconButton aria-label={t("addPasskey")} disabled={adding} onClick={onAdd}>
-      <Plus className="size-4" />
+      <Plus />
     </IconButton>
   ) : null;
 
@@ -213,7 +213,7 @@ function PasskeyItem({
       className="shrink-0 hover:bg-transparent hover:text-destructive"
       onClick={() => onRemove(pk)}
     >
-      <Trash2 className="size-4" />
+      <Trash2 />
     </IconButton>
   ) : null;
   return (

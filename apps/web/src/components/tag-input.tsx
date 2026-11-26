@@ -1,5 +1,5 @@
 import { cn, SharedLayoutBg } from "@folio/ui";
-import { Check, CornerDownLeft, ListChecks, Settings2, Trash2, X } from "lucide-react";
+import { Check, CornerDownLeft, ListChecks, Settings2, Trash2, X } from "@folio/ui/icons";
 import { type KeyboardEvent, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 
@@ -86,7 +86,7 @@ export function TagInput({
           }}
           className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground text-sm transition-colors hover:bg-muted hover:text-foreground"
         >
-          {manage ? <ListChecks className="size-3.5" /> : <Settings2 className="size-3.5" />}
+          {manage ? <ListChecks /> : <Settings2 />}
           {manage ? t("done") : t("manage")}
         </button>
       </div>
@@ -152,7 +152,7 @@ export function TagInput({
                 }}
                 className="flex shrink-0 text-muted-foreground transition-colors hover:text-foreground"
               >
-                <CornerDownLeft className="size-4" />
+                <CornerDownLeft />
               </button>
             )}
           </span>
@@ -205,7 +205,7 @@ function ManageList({
                 onClick={() => setConfirmingId(null)}
                 className="flex shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
-                <X className="size-4" />
+                <X />
               </button>
               <button
                 type="button"
@@ -216,7 +216,7 @@ function ManageList({
                 }}
                 className="flex shrink-0 rounded-md p-1.5 text-destructive transition-colors hover:bg-destructive/10"
               >
-                <Check className="size-4" />
+                <Check />
               </button>
             </div>
           ) : (
@@ -246,7 +246,7 @@ function ManageList({
                 onClick={() => setConfirmingId(item.id)}
                 className="flex shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:text-destructive"
               >
-                <Trash2 className="size-4" />
+                <Trash2 />
               </button>
             </div>
           )}

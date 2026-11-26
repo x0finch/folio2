@@ -12,7 +12,7 @@ import {
   Tooltip,
   useMediaQuery,
 } from "@folio/ui";
-import { Receipt, StickyNote, X } from "lucide-react";
+import { Receipt, StickyNote, X } from "@folio/ui/icons";
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
@@ -346,7 +346,7 @@ function ActivityForm({
           {editing ? t("editActivityTitle") : t("addActivityTitle")}
         </h2>
         <IconButton onClick={requestClose} aria-label={tc("close")}>
-          <X className="size-4" />
+          <X />
         </IconButton>
       </div>
 
@@ -467,7 +467,7 @@ function ActivityForm({
                         : "text-muted-foreground",
                   )}
                 >
-                  <Receipt className="size-3.5" />
+                  <Receipt />
                 </button>
               </Tooltip>
             )}
@@ -485,7 +485,7 @@ function ActivityForm({
                       : "text-muted-foreground",
                 )}
               >
-                <StickyNote className="size-3.5" />
+                <StickyNote />
               </button>
             </Tooltip>
           </div>

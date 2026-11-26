@@ -8,9 +8,9 @@ import {
   MorphingModal,
   toast,
 } from "@folio/ui";
+import { LogOut, RefreshCw } from "@folio/ui/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { LogOut, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { IconButton } from "@/components/icon-button";
@@ -83,7 +83,7 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
             </div>
           </div>
           <Button variant="outline" onClick={() => setConfirmOpen(true)}>
-            <LogOut className="size-4" />
+            <LogOut />
             {t("signOut")}
           </Button>
         </div>
@@ -98,7 +98,7 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
                 disabled={checking}
                 onClick={onCheckUpdate}
               >
-                <RefreshCw className={cn("size-4", checking && "animate-spin")} />
+                <RefreshCw className={cn("", checking && "animate-spin")} />
               </IconButton>
             </div>
           </SettingRow>

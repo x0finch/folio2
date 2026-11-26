@@ -11,8 +11,8 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
+import { Check, Pin, Plus, Trash2, X } from "@folio/ui/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Pin, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { type PortfolioSummary, usePortfolio } from "@/lib/hooks/use-portfolio";
@@ -100,7 +100,7 @@ function PickerHeader({ title, onClose }: { title: string; onClose: () => void }
         className="-mr-1 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         onClick={onClose}
       >
-        <X className="size-4" />
+        <X />
       </button>
     </div>
   );
@@ -143,14 +143,14 @@ function ManageList({
           {
             id: "default",
             label: t("setDefault"),
-            icon: <Pin className="size-4" />,
+            icon: <Pin />,
             tone: "primary",
             onClick: () => defaultMut.mutate(p.id),
           },
           {
             id: "delete",
             label: tc("delete"),
-            icon: <Trash2 className="size-4" />,
+            icon: <Trash2 />,
             tone: "danger",
             onClick: () => onDelete(p),
           },
@@ -241,7 +241,7 @@ function MoveList({
             >
               <span className="flex w-full min-w-0 items-center gap-2">
                 <span className="min-w-0 flex-1 truncate font-medium">{p.name}</span>
-                {current && <Check className="ml-auto size-4 shrink-0 text-pos" />}
+                {current && <Check className="ml-auto shrink-0 text-pos" />}
               </span>
             </button>
           );
@@ -258,7 +258,7 @@ function MoveList({
         onBlur={() => setCreateHover(false)}
         onClick={onCreate}
       >
-        <AnimatedBadge size="sm" icon={<Plus className="size-3" />}>
+        <AnimatedBadge size="sm" icon={<Plus />}>
           {createHover ? t("createBadgeHover") : t("createBadge")}
         </AnimatedBadge>
       </button>

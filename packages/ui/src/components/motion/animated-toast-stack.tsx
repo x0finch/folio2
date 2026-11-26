@@ -1,15 +1,7 @@
 "use client";
 // beui.dev/components/motion/animated-toast-stack — @/ 别名已改写为 @folio/ui/*。
 
-import {
-  AlertCircle,
-  Bell,
-  Check,
-  Info,
-  LoaderCircle,
-  type LucideIcon,
-  X,
-} from "lucide-react";
+import { AlertCircle, Bell, Check, Info, LoaderCircle, type Icon as LucideIcon, X } from "../../icons";
 import {
   AnimatePresence,
   motion,

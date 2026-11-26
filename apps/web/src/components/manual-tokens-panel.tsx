@@ -14,8 +14,8 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
+import { AlertTriangle, Pencil, Plus, Trash2 } from "@folio/ui/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import type { OverviewBalance } from "@/lib/core/account-view";
@@ -288,14 +288,14 @@ export function ManualTokensPanel({
       {
         id: "edit",
         label: t("addActivityTitle"),
-        icon: <Pencil className="size-4" />,
+        icon: <Pencil />,
         tone: "neutral",
         onClick: () => openTokenEdit(tk),
       },
       {
         id: "delete",
         label: tc("delete"),
-        icon: <Trash2 className="size-4" />,
+        icon: <Trash2 />,
         tone: "neutral",
         onClick: () =>
           setConfirm({
@@ -332,14 +332,14 @@ export function ManualTokensPanel({
         {
           id: "edit",
           label: t("editActivityTitle"),
-          icon: <Pencil className="size-4" />,
+          icon: <Pencil />,
           tone: "neutral",
           onClick: () => openActivityEdit(a),
         },
         {
           id: "delete",
           label: tc("delete"),
-          icon: <Trash2 className="size-4" />,
+          icon: <Trash2 />,
           tone: "neutral",
           onClick: () =>
             setConfirm({
@@ -368,10 +368,7 @@ export function ManualTokensPanel({
               >
                 <Sensitive>{formatNumber(a.amount)}</Sensitive> {a.symbol.toUpperCase()}
                 {oversold ? (
-                  <AlertTriangle
-                    className="ml-1 inline size-3 align-middle text-warn"
-                    aria-hidden
-                  />
+                  <AlertTriangle className="ml-1 inline align-middle text-warn" aria-hidden />
                 ) : null}
               </HoverDetail>
             </div>
@@ -413,7 +410,7 @@ export function ManualTokensPanel({
             aria-label={t("addActivityTitle")}
             className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            <Plus className="size-4" />
+            <Plus />
           </button>
         </div>
 

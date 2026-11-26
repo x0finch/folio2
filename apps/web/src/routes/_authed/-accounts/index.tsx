@@ -1,8 +1,8 @@
 import type { ConnectorId } from "@folio/connectors";
 import { cn, SharedLayoutBg, Skeleton } from "@folio/ui";
+import { AlertTriangle, Plus } from "@folio/ui/icons";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { AlertTriangle, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AvatarStack } from "@/components/avatar-stack";
@@ -307,7 +307,7 @@ function AccountStatusLine({
     >
       {warn && (
         <>
-          <AlertTriangle className="size-3 shrink-0" aria-hidden />
+          <AlertTriangle className="shrink-0" aria-hidden />
           <span className="sr-only">{t("syncWarning")}</span>
         </>
       )}
