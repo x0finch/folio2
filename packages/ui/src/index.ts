@@ -13,8 +13,9 @@ export {
   DonutChartPlot,
   type DonutSegment,
 } from "./components/charts/donut-chart";
-export { LineChart, LineChartPlot, LineChartTooltip } from "./components/charts/line-chart";
+export { LineChart } from "./components/charts/line-chart";
 export { Sparkline } from "./components/charts/sparkline";
+export { XYInspector } from "./components/charts/xy/inspector";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
 export { AnimatedBadge, AnimatedBadge as Badge } from "./components/motion/animated-badge";

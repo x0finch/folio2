@@ -48,10 +48,7 @@ vi.mock("@folio/ui", async (orig) => ({
   ...(await orig<object>()),
   toast: { error: toastError, success: toastSuccess, message: toastMessage },
 }));
-vi.mock("@/routes/_authed/-home/hero/trend-panel", () => ({
-  TrendPanel: () => null,
-  SHEET_TREND_HEIGHT: 128,
-}));
+vi.mock("@/routes/_authed/-home/hero/trend-panel", () => ({ TrendPanel: () => null }));
 vi.mock("@/components/holdings-cards", () => ({
   AccountHoldingsCards: () => <div data-testid="holdings-cards" />,
 }));

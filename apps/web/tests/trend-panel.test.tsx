@@ -19,15 +19,14 @@ const two: HistoryPoint[] = [
 function renderPanel(props: Partial<Parameters<typeof TrendPanel>[0]> = {}) {
   const { container } = render(
     <IntlProvider locale="en" messages={messages.en} timeZone="UTC" now={new Date(T0)}>
-      <TrendPanel series={[]} height={128} {...props} />
+      <TrendPanel series={[]} {...props} />
     </IntlProvider>,
   );
   return container;
 }
 
 const note = () => screen.queryByText(/once it's ready/i);
-const chartWrapper = (c: HTMLElement) =>
-  c.querySelector("[data-slot=line-chart]");
+const chartWrapper = (c: HTMLElement) => c.querySelector("[data-slot=sparkline]:not([aria-hidden])");
 const decoration = (c: HTMLElement) => c.querySelector("[class*='pointer-events-none']");
 
 describe("four states", () => {

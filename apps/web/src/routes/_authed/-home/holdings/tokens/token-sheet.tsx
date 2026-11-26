@@ -24,9 +24,10 @@ import { collapseToSlots } from "@/components/tag-badges";
 import { formatNumber, signedUsd } from "@/lib/core/format-number";
 import type { Holding } from "@/lib/core/portfolio";
 import { tokenValueHistoryFromRaw } from "@/lib/core/portfolio";
+import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { holdingHistoryQuery } from "@/lib/queries/accounts";
-import { SHEET_TREND_HEIGHT, TrendPanel } from "@/routes/_authed/-home/hero/trend-panel";
+import { TrendPanel } from "@/routes/_authed/-home/hero/trend-panel";
 import { deltaTone, NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
 import { ACCOUNT_SLOTS, groupByAccount, groupByPlatform, type SourceGroup } from "./source-groups";
 
@@ -180,6 +181,8 @@ function SourceView({
 function TokenSheetContent({ holding }: { holding: Holding }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
+  // Chart scrub reading.
+  const scrub = useChartScrub();
   const { token, totalValue, totalAmount, sources } = holding;
   // 24h PnL computed server-side, the same number as the home row.
   const dayValue = holding.gain24h?.amount ?? null;
@@ -202,8 +205,16 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <div className="flex flex-col gap-3">
+      {/* Header: value-history chart backdrop (hover shows the tooltip); content is pointer-events-none
+          so hover passes through. Window switch sits bottom-right clear of the price badge. Fixed
+          min-h-44 so the async chart doesn't resize the list. */}
+      <div className="relative min-h-44 overflow-hidden">
+        <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
+        {/* Window switch (interactive, outside the pointer-events-none layer). */}
+        <div className="absolute right-0 bottom-0 z-10">
+          <RangeTabs value={range} onChange={setRange} />
+        </div>
+        <div className="pointer-events-none relative flex flex-col gap-3">
           <div className="flex items-center gap-3">
             <LogoAvatar src={token.logo} fallback={token.symbol} size="lg" />
             <div className="min-w-0">
@@ -231,14 +242,19 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
           </div>
 
           <div>
-            {/* Rolling and integer/decimal split use AmountTicker (shared with hero and account drawer). */}
+            {/* While scrubbing the value replaces the live one and the 24h row shows that moment's time.
+                Rolling and integer/decimal split use AmountTicker (shared with hero and account drawer). */}
             <AmountTicker
-              value={totalValue}
+              value={scrub.point ? scrub.point.total : totalValue}
+              scrubbing={scrub.point != null}
               className="font-bold text-3xl"
               fractionClassName="font-bold text-muted-foreground text-xl tabular-nums"
             />
+            {scrub.label ? (
+              <div className="mt-1 text-muted-foreground text-sm tabular-nums">{scrub.label}</div>
+            ) : null}
             {/* 24h PnL + %: one shared prefix and color, like token rows / hero. Not computable -> `—`. */}
-            {holding.gain24h == null ? (
+            {scrub.point ? null : holding.gain24h == null ? (
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(null))}>{NO_VALUE}</div>
             ) : (
               <div className={cn("mt-1 text-sm tabular-nums", deltaTone(dayValue))}>
@@ -248,17 +264,6 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
               </div>
             )}
           </div>
-        </div>
-        {/* Fixed height so the async chart doesn't resize the list. */}
-        <div className="relative mt-6 min-h-40">
-          <TrendPanel
-            series={series}
-            height={SHEET_TREND_HEIGHT}
-            loading={historyQuery.isPending}
-          />
-        </div>
-        <div className="mt-2 flex justify-end">
-          <RangeTabs value={range} onChange={setRange} />
         </div>
       </div>
 

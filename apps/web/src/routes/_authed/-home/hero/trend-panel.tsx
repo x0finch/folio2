@@ -1,19 +1,88 @@
-import { Sparkline } from "@folio/ui";
-import { useTranslations } from "use-intl";
+import { Sparkline, useHoverCapable, XYInspector } from "@folio/ui";
+import { useEffect, useState } from "react";
+import { useFormatter, useTranslations } from "use-intl";
 import type { HistoryPoint } from "@/lib/core/history";
-import { PortfolioChart } from "@/routes/_authed/-insights/portfolio-chart";
+import { useDisplayValue } from "@/lib/hooks/use-display-value";
 
-// Plot height in both drawers.
-export const SHEET_TREND_HEIGHT = 128;
+// The band the curve occupies at the bottom of its backdrop container, in px.
+const TREND_HEIGHT = 128;
+// Sparkline insets its line by this much on each side; the scrub cursor has to match it.
+const SPARKLINE_PAD_PX = 3;
 
 // Empty state when the curve can't be drawn. A flat line would claim "unchanged" when there is
 // only one observation (same rule as 24h PnL showing `—`, not 0); blank space reads as broken. A
 // new account's first sync lands here.
 function TrendEmpty() {
   const t = useTranslations("Overview");
+  // Bottom-left, not centered: the container is shared with the number overlay, whose big amount
+  // sits in the center; the bottom-right is taken by RangeTabs.
   return (
     <div className="absolute inset-0 flex items-end pb-2">
       <p className="text-muted-foreground text-xs">{t("trendNeedsSecondSync")}</p>
+    </div>
+  );
+}
+
+// The curve is beUI's Sparkline; beUI's XYInspector on top turns hover, drag and arrow keys into a
+// sample index. No readout bubble: the caller swaps its big number for the reported point.
+function ValueTrend({
+  series,
+  onActive,
+}: {
+  series: readonly HistoryPoint[];
+  onActive?: (point: HistoryPoint | null) => void;
+}) {
+  const t = useTranslations("Overview");
+  const format = useFormatter();
+  const usd = useDisplayValue();
+  const canHover = useHoverCapable();
+  const [index, setIndex] = useState<number | null>(null);
+  const [open, setOpen] = useState(false);
+  // A sample inspected before the window changed may no longer exist.
+  const active = open && index !== null && index < series.length ? index : null;
+  const point = active === null ? null : series[active];
+  useEffect(() => {
+    onActive?.(point);
+  }, [point, onActive]);
+  // Clear on unmount, else the caller's big number sticks on a historical value (switching the
+  // window mid-scrub can unmount the chart with too few points, so "leave" never fires).
+  useEffect(() => () => onActive?.(null), [onActive]);
+  const label = t("portfolioValue");
+  const when = (p: HistoryPoint) =>
+    format.dateTime(new Date(p.t), { month: "short", day: "numeric" });
+  return (
+    // touch-pan-y: vertical swipes still scroll the page, horizontal ones go to the chart.
+    <div className="absolute inset-x-0 bottom-0 touch-pan-y" style={{ height: TREND_HEIGHT }}>
+      <Sparkline
+        label={label}
+        data={series.map((p) => p.total)}
+        variant="area"
+        color="var(--chart-1)"
+        height={TREND_HEIGHT}
+      />
+      {active !== null && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 w-px bg-border-2"
+          style={{
+            left: `calc(${SPARKLINE_PAD_PX}px + (100% - ${2 * SPARKLINE_PAD_PX}px) * ${active / (series.length - 1)})`,
+          }}
+        />
+      )}
+      {onActive && (
+        <XYInspector
+          count={series.length}
+          activeIndex={active ?? -1}
+          onActive={setIndex}
+          label={label}
+          valueText={(i) => `${when(series[i])}: ${usd(series[i].total)}`}
+          mode="point"
+          open={open}
+          setOpen={setOpen}
+          canHover={canHover}
+          className="inset-0 size-full"
+        />
+      )}
     </div>
   );
 }
@@ -26,35 +95,36 @@ const DEMO_TREND = [
   0.55, 0.51, 0.6, 0.67, 0.63, 0.72, 0.82, 0.92,
 ];
 
-// Value trend shared by the hero and both drawers, with every state decided here so each surface
-// applies the same thresholds. `height` is the plot's, without its axis labels.
+// Value trend shared by the hero and both drawers as the backdrop of a relative parent, with every
+// state decided here so each surface applies the same thresholds.
 export function TrendPanel({
   series,
-  height,
   loading = false,
   decorate = false,
+  onActive,
 }: {
   series: readonly HistoryPoint[];
-  height: number;
   /** Still loading: render nothing, else the empty copy would flash before the chart covers it. */
   loading?: boolean;
   /** "Nothing yet": draw the decorative pattern instead of explaining. Only allowed when no real
    * number on screen could contradict it (hero: no holdings and zero total); the caller decides. */
   decorate?: boolean;
+  /** Scrub/hover readout: reports the current point so the caller can replace the big number. */
+  onActive?: (point: HistoryPoint | null) => void;
 }) {
   const t = useTranslations("Overview");
   if (loading) return null;
   // One point can't make a line; the threshold lives only here.
-  if (series.length >= 2) return <PortfolioChart series={series} height={height} />;
+  if (series.length >= 2) return <ValueTrend series={series} onActive={onActive} />;
   if (decorate) {
     return (
       <Sparkline
-        className="pointer-events-none absolute inset-0 text-muted-foreground"
+        className="pointer-events-none absolute inset-x-0 bottom-0 text-muted-foreground"
         aria-hidden
         label={t("portfolioValue")}
         data={DEMO_TREND}
         variant="area"
-        height={height}
+        height={TREND_HEIGHT}
       />
     );
   }

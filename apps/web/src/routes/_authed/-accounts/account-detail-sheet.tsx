@@ -37,9 +37,10 @@ import { type Range, RangeTabs, rangeSince } from "@/components/range-tabs";
 import { Sensitive } from "@/components/sensitive";
 import { TagBadges } from "@/components/tag-badges";
 import { signedUsd } from "@/lib/core/format-number";
-import { buildAccountValueHistory } from "@/lib/core/history";
+import { buildAccountValueHistory, type HistoryPoint } from "@/lib/core/history";
 import { isManual } from "@/lib/core/manual";
 import type { Gain } from "@/lib/core/portfolio";
+import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
 import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
@@ -47,7 +48,7 @@ import { syncAccountAndWait } from "@/lib/queries/account-sync";
 import { accountHistoryQuery } from "@/lib/queries/accounts";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { archiveAccount, removeAccount, renameAccount } from "@/lib/server/accounts";
-import { SHEET_TREND_HEIGHT, TrendPanel } from "@/routes/_authed/-home/hero/trend-panel";
+import { TrendPanel } from "@/routes/_authed/-home/hero/trend-panel";
 import { deltaTone, GainSkeleton, NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
 import { type AccountRow, accountShare, shareLabel } from "./list-rows";
 
@@ -136,6 +137,8 @@ function DetailBody({
   const format = useFormatter();
   // The drawer mounts late, so it is exposed to the clock's one-tick settle delay.
   const syncedAt = useRelativeSyncedAt();
+  // Chart scrub reading.
+  const scrub = useChartScrub();
   const writes = useAccountSheetWrites(account, onClose);
 
   const sealedAt = account.archivedAt;
@@ -201,10 +204,13 @@ function DetailBody({
 
   return (
     <>
-      {/* Header text first, then the chart in its own band (the line never runs behind the figure),
-          then one row: share / last sync on the left, the window switch on the right. The band has a
-          fixed height so the async chart doesn't resize the list. */}
-      <div className="relative">
+      {/* Header: chart backdrop, window switch bottom-right, ⋯ menu top-right, text over it. Fixed
+          min-h-44 so the async chart doesn't resize the list. */}
+      <div className="relative min-h-44">
+        <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
+        <div className="absolute right-0 bottom-0 z-10">
+          <RangeTabs value={range} onChange={setRange} />
+        </div>
         <div className="relative flex flex-col gap-2">
           {/* Inline rename via EditableName; pr-10 leaves room for the ⋯ button. */}
           <EditableName
@@ -233,6 +239,8 @@ function DetailBody({
               hasDayChange={hasDayChange}
               gainPending={gainPending}
               dayChange={dayChange}
+              scrubbed={scrub.point}
+              scrubLabel={scrub.label}
             />
           </div>
           {account.needsCredentials && (
@@ -261,27 +269,20 @@ function DetailBody({
         />
       </div>
 
-      <div className="relative mt-6 min-h-40">
-        <TrendPanel series={series} height={SHEET_TREND_HEIGHT} loading={historyQuery.isPending} />
-      </div>
-
-      <div className="mt-2 flex items-center justify-between gap-4">
-        <p className="min-w-0 truncate text-muted-foreground text-xs">
-          {account.valuesReady &&
-            !archived &&
-            sharePct > 0 &&
-            `${t("shareOfTotal", { pct: shareLabel(sharePct) })} · `}
-          {account.valuesReady ||
-          account.needsCredentials ||
-          archived ||
-          isManual(account.connectorId) ? (
-            lastSynced
-          ) : (
-            <Skeleton className="inline-block h-3 w-24" />
-          )}
-        </p>
-        <RangeTabs value={range} onChange={setRange} />
-      </div>
+      <p className="mt-2 min-w-0 truncate text-muted-foreground text-xs">
+        {account.valuesReady &&
+          !archived &&
+          sharePct > 0 &&
+          `${t("shareOfTotal", { pct: shareLabel(sharePct) })} · `}
+        {account.valuesReady ||
+        account.needsCredentials ||
+        archived ||
+        isManual(account.connectorId) ? (
+          lastSynced
+        ) : (
+          <Skeleton className="inline-block h-3 w-24" />
+        )}
+      </p>
 
       <ConfirmDeleteModal
         open={confirmDelete}
@@ -488,12 +489,17 @@ function SheetHeaderValue({
   hasDayChange,
   gainPending,
   dayChange,
+  scrubbed,
+  scrubLabel,
 }: {
   valuesReady: boolean;
   totalUsd: number;
   hasDayChange: boolean;
   gainPending: boolean;
   dayChange: Gain | null | undefined;
+  /** The point being scrubbed on the chart; `null` = not scrubbing, show the live value. */
+  scrubbed: HistoryPoint | null;
+  scrubLabel: string | null;
 }) {
   const usd = useDisplayValue();
   if (!valuesReady) {
@@ -504,15 +510,20 @@ function SheetHeaderValue({
       </div>
     );
   }
+  // While scrubbing, the point's value replaces the live one and the 24h row shows that moment's time.
   return (
     <>
       {/* Rolling and integer/decimal split use AmountTicker (shared with hero and token drawer). */}
       <AmountTicker
-        value={totalUsd}
+        value={scrubbed ? scrubbed.total : totalUsd}
+        scrubbing={!!scrubbed}
         className="font-bold text-3xl"
         fractionClassName="font-bold text-muted-foreground text-xl tabular-nums"
       />
-      {hasDayChange && (
+      {scrubLabel ? (
+        <div className="mt-1 text-muted-foreground text-sm tabular-nums">{scrubLabel}</div>
+      ) : null}
+      {!scrubbed && hasDayChange && (
         <SheetHeaderGain gainPending={gainPending} dayChange={dayChange} usd={usd} />
       )}
     </>
