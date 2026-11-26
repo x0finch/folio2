@@ -95,8 +95,6 @@ const en = {
     passkeyPromptAdd: "Add passkey",
     passkeyPromptDismiss: "Don't ask again",
     authFailed: "Authentication failed",
-    tagline: "Your self-hosted portfolio, one dashboard.",
-    readOnlyHint: "Read-only, Folio never holds your keys or signs transactions.",
   },
   Lock: {
     title: "Locked",
@@ -525,8 +523,6 @@ const zh: Messages = {
     passkeyPromptAdd: "添加 passkey",
     passkeyPromptDismiss: "不再提示",
     authFailed: "认证失败",
-    tagline: "自托管的组合追踪,一个面板看全。",
-    readOnlyHint: "只读,Folio 从不持有私钥、不签名交易。",
   },
   Lock: {
     title: "已锁定",

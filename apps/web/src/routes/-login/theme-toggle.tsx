@@ -13,9 +13,9 @@ export function ThemeToggle() {
       type="button"
       aria-label={`theme: ${theme}`}
       onClick={() => setTheme(next)}
-      className="text-muted-foreground transition-colors hover:text-foreground"
+      className="flex text-muted-foreground transition-colors hover:text-foreground"
     >
-      <Icon className="size-4" />
+      <Icon />
     </button>
   );
 }

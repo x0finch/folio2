@@ -162,7 +162,7 @@ export function AppShell({
                     here. Scale the span, not the 44px Link hit area. motion-reduce keeps the
                     state change, only drops the transition. */}
                 <span className="flex transition-[transform,opacity] duration-100 ease-out group-active:scale-[0.82] group-active:opacity-60 motion-reduce:transition-none">
-                  <Icon className="size-5" />
+                  <Icon />
                 </span>
               </Link>
             </DockItem>
@@ -189,7 +189,7 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
         <nav className="mt-4 flex flex-col gap-1">
           {NAVS.map(({ key, icon: Icon }) => (
             <div key={key} className="flex items-center gap-3 rounded-lg px-3 py-2">
-              <Icon className="size-4 shrink-0 text-muted-foreground/40" />
+              <Icon className="text-muted-foreground/40" />
               <Skeleton className="h-5 w-20" />
             </div>
           ))}
@@ -241,7 +241,7 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
           {NAVS.map(({ key, icon: Icon }) => (
             <DockItem key={key}>
               <span className="flex size-full items-center justify-center">
-                <Icon className="size-5 text-muted-foreground/40" />
+                <Icon className="text-muted-foreground/40" />
               </span>
             </DockItem>
           ))}
