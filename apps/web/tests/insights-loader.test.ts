@@ -25,9 +25,9 @@ describe("the two insights charts load independently", () => {
     expect(page).toContain("retry: true");
   });
 
-  it("chart frame skeleton has the same height as the real chart", () => {
-    expect(readSrc("routes/_authed/-insights/portfolio-chart.tsx")).toContain("CHART_FRAME");
+  it("both skeletons share one chart frame", () => {
     expect(readSrc("routes/_authed/-insights/index.tsx")).toContain("CHART_FRAME");
+    expect(readSrc("routes/_authed/-page-skeletons.tsx")).toContain("CHART_FRAME");
   });
 
   it("dimension tabs sit outside the pie boundary, clickable even without data", () => {

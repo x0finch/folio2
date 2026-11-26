@@ -1,76 +1,50 @@
-import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@folio/ui";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { LineChart } from "@folio/ui";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
-import { Sensitive } from "@/components/sensitive";
 import { formatMoney } from "@/lib/core/format-number";
 import type { HistoryPoint } from "@/lib/core/history";
+import { useBalancePrivacy } from "@/lib/hooks/use-balance-privacy";
 import { usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
-import { CHART_FRAME } from "./chart-frame";
 
 const DAY_MS = 86_400_000;
+const YEAR_MS = 365 * DAY_MS;
+const HIDDEN_VALUE = "•••";
 
 export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
   const t = useTranslations("Overview");
   const format = useFormatter();
   const { currency, rate } = usePreferCurrency();
   const locale = useLocale();
-
-  const chartConfig = {
-    total: { label: t("portfolioValue"), color: "var(--chart-1)" },
-  } satisfies ChartConfig;
+  const { hidden } = useBalancePrivacy();
 
   const axisUsd = (n: number) => formatMoney(n, { rate, locale, currency, compact: true });
   const fullUsd = (n: number) => formatMoney(n, { rate, locale, currency });
-  const fullDateTime = (ms: number) =>
+
+  // The chart keys points by their label, so labels must be unique: add the time under two days
+  // and the year past one.
+  const spanMs = series.length > 1 ? series[series.length - 1].t - series[0].t : 0;
+  const labelOf = (ms: number) =>
     format.dateTime(new Date(ms), {
       month: "short",
       day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+      ...(spanMs < 2 * DAY_MS ? { hour: "2-digit", minute: "2-digit" } : {}),
+      ...(spanMs > YEAR_MS ? { year: "2-digit" } : {}),
     });
 
-  const spanMs = series.length > 1 ? series[series.length - 1].t - series[0].t : 0;
-  const axisX = (ms: number) =>
-    spanMs < 2 * DAY_MS
-      ? format.dateTime(new Date(ms), { hour: "2-digit", minute: "2-digit" })
-      : format.dateTime(new Date(ms), { month: "short", day: "numeric" });
-
   return (
-    <ChartContainer config={chartConfig} className={CHART_FRAME}>
-      <AreaChart data={series} margin={{ left: 12, right: 16, top: 8, bottom: 4 }}>
-        <CartesianGrid vertical={false} />
-        <XAxis
-          dataKey="t"
-          tickLine={false}
-          axisLine={false}
-          tickMargin={8}
-          minTickGap={32}
-          tickFormatter={axisX}
-        />
-        <YAxis
-          tickLine={false}
-          axisLine={false}
-          width={56}
-          tickMargin={4}
-          tickFormatter={axisUsd}
-        />
-        <ChartTooltip
-          content={
-            <ChartTooltipContent
-              labelFormatter={(_, payload) => fullDateTime(Number(payload?.[0]?.payload?.t))}
-              // Y-axis ticks are scale, not amounts, so only the tooltip value is hidden.
-              formatter={(value) => <Sensitive>{fullUsd(Number(value))}</Sensitive>}
-            />
-          }
-        />
-        <Area
-          dataKey="total"
-          type="monotone"
-          stroke="var(--color-total)"
-          fill="var(--color-total)"
-          fillOpacity={0.2}
-        />
-      </AreaChart>
-    </ChartContainer>
+    <LineChart
+      label={t("portfolioValue")}
+      categories={series.map((p) => labelOf(p.t))}
+      series={[
+        {
+          id: "total",
+          name: t("portfolioValue"),
+          color: "var(--chart-1)",
+          values: series.map((p) => p.total),
+        },
+      ]}
+      // Axis ticks are scale, not amounts, so only the readout is hidden.
+      formatValue={hidden ? () => HIDDEN_VALUE : fullUsd}
+      formatTick={axisUsd}
+    />
   );
 }

@@ -24,6 +24,14 @@ export {
   ChartTooltip,
   ChartTooltipContent,
 } from "./components/chart";
+export {
+  DonutChart,
+  DonutChartCenter,
+  DonutChartLegend,
+  DonutChartPlot,
+  type DonutSegment,
+} from "./components/charts/donut-chart";
+export { LineChart } from "./components/charts/line-chart";
 export { Fab, fabVariants } from "./components/fab";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";

@@ -1,7 +1,14 @@
-import { Cell, Pie, PieChart } from "recharts";
+import {
+  DonutChart,
+  DonutChartCenter,
+  DonutChartLegend,
+  DonutChartPlot,
+  type DonutSegment,
+} from "@folio/ui";
 import { useLocale, useTranslations } from "use-intl";
 import { Sensitive } from "@/components/sensitive";
 import { formatMoney } from "@/lib/core/format-number";
+import { useBalancePrivacy } from "@/lib/hooks/use-balance-privacy";
 import { usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
 import { type AllocSlice, OTHERS_KEY } from "./allocation";
 
@@ -12,56 +19,47 @@ const COLORS = [
   "var(--chart-4)",
   "var(--chart-5)",
 ];
+const HIDDEN_VALUE = "•••";
 
 export function AllocationPie({ slices }: { slices: AllocSlice[] }) {
   const t = useTranslations("Insights");
   const { currency, rate } = usePreferCurrency();
   const locale = useLocale();
+  const { hidden } = useBalancePrivacy();
   const usd = (n: number) => formatMoney(n, { rate, locale, currency });
 
-  if (slices.length === 0) {
+  // The ring leaves out empty slices, so an all-zero set has nothing to draw either.
+  if (slices.every((s) => s.value <= 0)) {
     return <p className="text-muted-foreground text-sm">{t("noData")}</p>;
   }
 
-  const total = slices.reduce((s, x) => s + x.value, 0);
-  const data = slices.map((s, i) => ({ ...s, color: COLORS[i % COLORS.length] }));
-  const labelOf = (s: AllocSlice) => (s.key === OTHERS_KEY ? t("others") : s.label);
+  const segments: DonutSegment[] = slices.map((s, i) => ({
+    id: s.key,
+    name: s.key === OTHERS_KEY ? t("others") : s.label,
+    color: COLORS[i % COLORS.length],
+    value: s.value,
+  }));
 
   return (
-    <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
-      <div className="mx-auto shrink-0">
-        <PieChart width={220} height={220}>
-          <Pie
-            data={data}
-            dataKey="value"
-            nameKey="label"
-            cx={110}
-            cy={110}
-            innerRadius={55}
-            outerRadius={95}
-            isAnimationActive={false}
-          >
-            {data.map((d) => (
-              <Cell key={d.key} fill={d.color} stroke="var(--background)" strokeWidth={2} />
-            ))}
-          </Pie>
-        </PieChart>
+    // Amounts are hidden under balance privacy; shares stay.
+    <DonutChart segments={segments} formatValue={hidden ? () => HIDDEN_VALUE : usd}>
+      <div className="grid items-center gap-12 sm:grid-cols-[minmax(0,16rem)_1fr]">
+        <DonutChartPlot>
+          <DonutChartCenter />
+        </DonutChartPlot>
+        <DonutChartLegend
+          renderValue={(segment) => (
+            <span className="flex items-baseline gap-4">
+              <span className="text-muted-foreground text-xs">
+                {Math.round(segment.share * 100)}%
+              </span>
+              <span className="w-24 text-right font-medium text-sm">
+                <Sensitive>{usd(segment.value)}</Sensitive>
+              </span>
+            </span>
+          )}
+        />
       </div>
-      <ul className="flex flex-1 flex-col gap-2">
-        {data.map((d) => (
-          <li key={d.key} className="flex items-center gap-2 text-sm">
-            <span className="size-2.5 shrink-0 rounded-full" style={{ background: d.color }} />
-            <span className="min-w-0 flex-1 truncate">{labelOf(d)}</span>
-            <span className="text-muted-foreground text-xs">
-              {total > 0 ? Math.round((d.value / total) * 100) : 0}%
-            </span>
-            {/* Hide amounts, keep percentages. */}
-            <span className="w-24 text-right font-medium">
-              <Sensitive>{usd(d.value)}</Sensitive>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+    </DonutChart>
   );
 }
