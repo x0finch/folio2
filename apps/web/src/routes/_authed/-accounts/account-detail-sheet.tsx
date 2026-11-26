@@ -204,63 +204,55 @@ function DetailBody({
 
   return (
     <>
-      {/* Header: chart backdrop, window switch bottom-right, ⋯ menu top-right, text over it. Fixed
-          min-h-44 so the async chart doesn't resize the list. */}
+      {/* Header text first, then the chart in its own band (the line never runs behind the figure),
+          then one row: share / last sync on the left, the window switch on the right. The band has a
+          fixed height so the async chart doesn't resize the list. */}
       <div className="relative">
-        <div className="relative min-h-44">
-          <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
-
-          <div className="absolute right-0 bottom-0 z-10">
-            <RangeTabs value={range} onChange={setRange} />
-          </div>
-
-          <div className="relative flex flex-col gap-2">
-            {/* Inline rename via EditableName; pr-10 leaves room for the ⋯ button. */}
-            <EditableName
-              value={account.label}
-              editing={renaming}
-              onEditingChange={setRenaming}
-              onSave={async (name) => {
-                await writes.renameMut.mutateAsync(name);
-              }}
-              displayClassName="font-semibold text-lg"
-              className="pr-10"
-            >
-              <ConnectorBadge connectorId={account.connectorId} />
-              {archived && (
-                <span className="rounded-sm bg-muted px-2 py-1 text-muted-foreground text-xs">
-                  {t("archivedBadge")}
-                </span>
-              )}
-              {/* Tags sit beside the connector badge, display-only; editing is in the ⋯ menu. */}
-              <TagBadges tags={account.tags} />
-            </EditableName>
-            <div>
-              <SheetHeaderValue
-                valuesReady={account.valuesReady}
-                totalUsd={account.totalUsd}
-                hasDayChange={hasDayChange}
-                gainPending={gainPending}
-                dayChange={dayChange}
-                scrubbed={scrub.point}
-                scrubLabel={scrub.label}
-              />
-            </div>
-            {account.needsCredentials && (
-              <div className="flex items-center gap-2 text-warn text-xs">
-                <AlertTriangle className="shrink-0" aria-hidden />
-                <button
-                  type="button"
-                  onClick={onComplete}
-                  className="rounded-sm underline-offset-2 outline-none transition-colors hover:underline focus-visible:ring-1 focus-visible:ring-warn"
-                >
-                  {t("completePrompt")}
-                </button>
-              </div>
+        <div className="relative flex flex-col gap-2">
+          {/* Inline rename via EditableName; pr-10 leaves room for the ⋯ button. */}
+          <EditableName
+            value={account.label}
+            editing={renaming}
+            onEditingChange={setRenaming}
+            onSave={async (name) => {
+              await writes.renameMut.mutateAsync(name);
+            }}
+            displayClassName="font-semibold text-lg"
+            className="pr-10"
+          >
+            <ConnectorBadge connectorId={account.connectorId} />
+            {archived && (
+              <span className="rounded-sm bg-muted px-2 py-1 text-muted-foreground text-xs">
+                {t("archivedBadge")}
+              </span>
             )}
+            {/* Tags sit beside the connector badge, display-only; editing is in the ⋯ menu. */}
+            <TagBadges tags={account.tags} />
+          </EditableName>
+          <div>
+            <SheetHeaderValue
+              valuesReady={account.valuesReady}
+              totalUsd={account.totalUsd}
+              hasDayChange={hasDayChange}
+              gainPending={gainPending}
+              dayChange={dayChange}
+              scrubbed={scrub.point}
+              scrubLabel={scrub.label}
+            />
           </div>
+          {account.needsCredentials && (
+            <div className="flex items-center gap-2 text-warn text-xs">
+              <AlertTriangle className="shrink-0" aria-hidden />
+              <button
+                type="button"
+                onClick={onComplete}
+                className="rounded-sm underline-offset-2 outline-none transition-colors hover:underline focus-visible:ring-1 focus-visible:ring-warn"
+              >
+                {t("completePrompt")}
+              </button>
+            </div>
+          )}
         </div>
-
         <SheetOverflowMenu
           connectorId={account.connectorId}
           archived={archived}
@@ -274,20 +266,27 @@ function DetailBody({
         />
       </div>
 
-      <p className="mt-2 text-muted-foreground/30 text-xs">
-        {account.valuesReady &&
-          !archived &&
-          sharePct > 0 &&
-          `${t("shareOfTotal", { pct: shareLabel(sharePct) })} · `}
-        {account.valuesReady ||
-        account.needsCredentials ||
-        archived ||
-        isManual(account.connectorId) ? (
-          lastSynced
-        ) : (
-          <Skeleton className="inline-block h-3 w-24" />
-        )}
-      </p>
+      <div className="relative mt-6 h-32 overflow-hidden">
+        <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
+      </div>
+
+      <div className="mt-2 flex items-center justify-between gap-4">
+        <p className="min-w-0 truncate text-muted-foreground text-xs">
+          {account.valuesReady &&
+            !archived &&
+            sharePct > 0 &&
+            `${t("shareOfTotal", { pct: shareLabel(sharePct) })} · `}
+          {account.valuesReady ||
+          account.needsCredentials ||
+          archived ||
+          isManual(account.connectorId) ? (
+            lastSynced
+          ) : (
+            <Skeleton className="inline-block h-3 w-24" />
+          )}
+        </p>
+        <RangeTabs value={range} onChange={setRange} />
+      </div>
 
       <ConfirmDeleteModal
         open={confirmDelete}

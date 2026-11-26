@@ -124,8 +124,7 @@ describe("type grid ↔ form", () => {
   it("opens on the grid; clicking a type shows its form with its field specs", async () => {
     mountSelfOwned();
     openModal();
-    await screen.findByText("Pick a type, then fill in its details.");
-    expect(screen.getByRole("heading", { name: "Add account" })).toBeTruthy();
+    await screen.findByRole("heading", { name: "Add account" });
 
     await pick("Binance");
 
@@ -260,8 +259,7 @@ describe("add credentials", () => {
     const { ui } = wrap(<AddAccountModal completeFor={target} onCompleteClose={vi.fn()} />);
     render(ui);
 
-    await screen.findByText("Add your read-only API credentials to resume syncing.");
-    expect(screen.getByRole("heading", { name: "Binance" })).toBeTruthy();
+    await screen.findByRole("heading", { name: "Binance" });
     await waitFor(() =>
       expect(screen.getByTestId("cred-form").textContent).toContain(
         'cred:acc_9 specs:apiKey,apiSecret hint:{"apiKey":"ab…yz"}',

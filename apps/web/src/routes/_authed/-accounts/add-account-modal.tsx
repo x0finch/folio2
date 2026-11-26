@@ -27,36 +27,26 @@ type Step = "grid" | "form";
 // Lives inside the keyed children so it morphs with the view.
 function ModalHeader({
   title,
-  subtitle,
   onBack,
   onClose,
 }: {
   title: string;
-  subtitle: string;
   onBack?: () => void;
   onClose: () => void;
 }) {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
   return (
-    <div className="mb-4 flex flex-col gap-1">
-      <div className="flex items-center gap-2">
-        {onBack && (
-          <IconButton
-            size="sm"
-            onClick={onBack}
-            aria-label={t("backToConnectors")}
-            className="-ml-1"
-          >
-            <ArrowLeft />
-          </IconButton>
-        )}
-        <h2 className="flex-1 font-semibold text-lg">{title}</h2>
-        <IconButton size="sm" onClick={onClose} aria-label={tc("close")}>
-          <X />
+    <div className="mb-6 flex items-center gap-2">
+      {onBack && (
+        <IconButton size="sm" onClick={onBack} aria-label={t("backToConnectors")} className="-ml-1">
+          <ArrowLeft />
         </IconButton>
-      </div>
-      <p className="text-muted-foreground text-sm">{subtitle}</p>
+      )}
+      <h2 className="flex-1 font-semibold text-lg">{title}</h2>
+      <IconButton size="sm" onClick={onClose} aria-label={tc("close")}>
+        <X />
+      </IconButton>
     </div>
   );
 }
@@ -157,7 +147,6 @@ export function AddAccountModal({
                 catalog?.[completeFor.connectorId]?.label ??
                 connectorLabelFallback(completeFor.connectorId)
               }
-              subtitle={t("completeAccountHint")}
               onClose={() => onCompleteClose?.()}
             />
             {/* key remounts to clear field state per account; non-public specs are filtered inside. */}
@@ -174,7 +163,6 @@ export function AddAccountModal({
           <ViewShell>
             <ModalHeader
               title={catalog?.[connectorId]?.label ?? connectorLabelFallback(connectorId)}
-              subtitle={t("addAccountHint")}
               onBack={back}
               onClose={close}
             />
@@ -188,7 +176,7 @@ export function AddAccountModal({
           </ViewShell>
         ) : (
           <ViewShell>
-            <ModalHeader title={t("addAccount")} subtitle={t("addAccountHint")} onClose={close} />
+            <ModalHeader title={t("addAccount")} onClose={close} />
             <ConnectorGrid onSelect={pick} />
           </ViewShell>
         )}

@@ -145,9 +145,7 @@ const en = {
     title: "Accounts",
     tokensTab: "Tokens",
     addAccount: "Add account",
-    addAccountHint: "Pick a type, then fill in its details.",
     backToConnectors: "Back to connectors",
-    accountCount: "{count, plural, one {# account} other {# accounts}}",
     lastSyncedAt: "Synced {when}",
     neverSynced: "Never synced",
     liveValue: "Live",
@@ -226,7 +224,6 @@ const en = {
     credMismatch:
       "These credentials differ from what was exported. If you rotated your key, that's fine — otherwise check the account label.",
     completePrompt: "Click to add credentials",
-    completeAccountHint: "Add your read-only API credentials to resume syncing.",
     credSavedSyncing: "Saved, syncing…",
   },
   Activity: {
@@ -565,9 +562,7 @@ const zh: Messages = {
     title: "账户",
     tokensTab: "代币",
     addAccount: "添加账户",
-    addAccountHint: "先选类型,再填写对应信息。",
     backToConnectors: "返回连接器",
-    accountCount: "{count} 个账户",
     lastSyncedAt: "同步于 {when}",
     neverSynced: "从未同步",
     liveValue: "实时",
@@ -639,7 +634,6 @@ const zh: Messages = {
     credHint: "记录的 {field}:{hint}",
     credMismatch: "凭据与导出时记录的不一致。若你刚轮换过 key 属正常,否则请核对账户 label。",
     completePrompt: "点击补填凭据",
-    completeAccountHint: "补填只读 API 凭据以恢复同步。",
     credSavedSyncing: "已保存,正在同步…",
   },
   Activity: {

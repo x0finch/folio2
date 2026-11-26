@@ -227,8 +227,6 @@ function AccountsListBody({
 
   return (
     <>
-      <h1 className="font-semibold text-lg">{t("accountCount", { count: active.length })}</h1>
-
       {rows.length === 0 ? (
         <p className="text-muted-foreground">{tc("noAccountsYet")}</p>
       ) : (
@@ -377,17 +375,14 @@ function AccountRowContent({
   return (
     <div
       className={cn(
-        "relative flex w-full items-center justify-between gap-4 overflow-hidden rounded-xl px-3 py-3",
+        "relative flex w-full items-center justify-between gap-4 overflow-hidden rounded-xl px-4 py-6",
         muted && "opacity-60",
       )}
     >
       <span className="relative flex min-w-0 flex-col gap-2">
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium">{row.label}</span>
-          <ConnectorBadge
-            connectorId={row.connectorId}
-            className="shrink-0 transition-colors group-hover:bg-background group-focus-visible:bg-background"
-          />
+          <ConnectorBadge connectorId={row.connectorId} className="shrink-0" />
           {row.tags.length > 0 && <TagBadges tags={row.tags} max={3} />}
         </span>
         {statusKnown ? (
