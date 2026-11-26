@@ -9,8 +9,8 @@ import { PortfolioHero } from "@/routes/_authed/-home/hero/portfolio-hero";
 afterEach(cleanup);
 
 // Hero trend area has three states; the fake demo curve must never show next to a real figure.
-// jsdom has zero container size so recharts renders nothing; the states are told apart by the
-// `{spanDays}D` span badge (only with real history) and the empty-state sentence.
+// The states are told apart by the interactive chart (only with real history) and the empty-state
+// sentence.
 const DAY = 86_400_000;
 const T0 = 1_700_000_000_000;
 
@@ -27,8 +27,8 @@ function renderHero(series: HistoryPoint[], totalUsd: number, held = holdings) {
 }
 
 const emptyText = () => screen.queryByText(/once it's ready/i);
-// Span badge like `11D`: only when hasHistory and the span is >= 1 day.
-const spanBadge = () => screen.queryByText(/^\d+D$/);
+// The decorative pattern is the same component marked aria-hidden.
+const realChart = () => document.querySelector("[data-slot=sparkline]:not([aria-hidden])");
 
 describe("Hero trend area's three states", () => {
   it("(1) has history (>= 2 points) -> real curve, no empty-state sentence", () => {
@@ -40,7 +40,7 @@ describe("Hero trend area's three states", () => {
       110,
     );
 
-    expect(spanBadge()).toBeTruthy(); // 3D
+    expect(realChart()).toBeTruthy();
     expect(emptyText()).toBeNull();
   });
 
@@ -48,7 +48,7 @@ describe("Hero trend area's three states", () => {
     renderHero([{ t: T0, total: 110 }], 110);
 
     expect(emptyText()).toBeTruthy();
-    expect(spanBadge()).toBeNull();
+    expect(realChart()).toBeNull();
   });
 
   it("(3) nothing yet (no holdings + total 0) -> keeps the decorative curve, no 'not enough data'", () => {
@@ -56,7 +56,7 @@ describe("Hero trend area's three states", () => {
     renderHero([], 0, []);
 
     expect(emptyText()).toBeNull();
-    expect(spanBadge()).toBeNull();
+    expect(realChart()).toBeNull();
   });
 
   it("no points but has holdings -> still explains, no decoration", () => {
@@ -90,7 +90,7 @@ describe("Hero trend area's three states", () => {
 
     expect(screen.getByText(/top today/i)).toBeTruthy();
     expect(emptyText()).toBeNull();
-    expect(spanBadge()).toBeNull();
+    expect(realChart()).toBeNull();
   });
 
   it("two points in the same clock hour -> downsampled into one, so still the empty state", () => {

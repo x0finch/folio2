@@ -23,7 +23,6 @@ catalog:
   motion: ^12.42.2
   react: ^19.2.0
   react-dom: ^19.2.7
-  recharts: 3.8.0
   typescript: ^7.0.2
   vitest: ^4.1.9
   wrangler: ^4.105.0

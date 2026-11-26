@@ -7,15 +7,6 @@ export {
   AvatarImage,
 } from "./components/avatar";
 export {
-  type ChartConfig,
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartStyle,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "./components/chart";
-export {
   DonutChart,
   DonutChartCenter,
   DonutChartLegend,
@@ -23,6 +14,7 @@ export {
   type DonutSegment,
 } from "./components/charts/donut-chart";
 export { LineChart } from "./components/charts/line-chart";
+export { Sparkline } from "./components/charts/sparkline";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
 export { AnimatedBadge, AnimatedBadge as Badge } from "./components/motion/animated-badge";

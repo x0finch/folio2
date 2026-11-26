@@ -6,7 +6,6 @@ import { Sensitive } from "@/components/sensitive";
 import { signedUsd } from "@/lib/core/format-number";
 import { downsampleSeries, type HistoryPoint } from "@/lib/core/history";
 import type { Gain } from "@/lib/core/portfolio";
-import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
 import { deriveHeroMetrics, type HoldingLike } from "./hero-stats";
@@ -15,6 +14,8 @@ import { TrendPanel } from "./trend-panel";
 
 const DAY_MS = 86_400_000;
 const HERO_WINDOW_DAYS = 30;
+// Matches the `h-40` band below the figures.
+const HERO_TREND_HEIGHT = 160;
 const HERO_COMPACT_MIN = 1_000_000;
 const GAIN_BADGE =
   "inline-flex shrink-0 items-center whitespace-nowrap py-1 font-mono font-semibold text-sm tabular-nums";
@@ -82,8 +83,6 @@ export function PortfolioHero({
 }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
-  // Scrub readout: which point and how it's labelled live in this hook.
-  const scrub = useChartScrub();
 
   // Clip to the last 30 days (relative to the latest snapshot, not the client clock) and
   // downsample adaptively; same-day manual syncs collapse to the bucket's last point.
@@ -91,34 +90,26 @@ export function PortfolioHero({
   const chartSeries = downsampleSeries(
     series.filter((p) => p.t >= lastT - HERO_WINDOW_DAYS * DAY_MS),
   );
-  const hasHistory = chartSeries.length >= 2;
   // "Nothing yet" is the only case that keeps the decorative line. Keyed on holdings, not on
   // `totalUsd > 0`: a negative net worth (perp blown through) would otherwise show a rising green line.
   const nothingYet = holdings.length === 0 && totalUsd === 0;
 
   // best/worst pick by PnL amount, hence these metrics.
   const metrics = deriveHeroMetrics(holdings, totalUsd);
-  const spanDays = hasHistory
-    ? Math.round((chartSeries[chartSeries.length - 1].t - chartSeries[0].t) / DAY_MS)
-    : 0;
-
-  // The big number shows the scrubbed point or the live value.
-  const shownUsd = scrub.point ? scrub.point.total : totalUsd;
 
   // Compact: default on for narrow, off for desktop; a click overrides. Only abbreviates at
   // >= HERO_COMPACT_MIN. Shared by the total and the badge.
   const isNarrow = useIsNarrow();
   const [compactOverride, setCompactOverride] = useState<boolean | null>(null);
-  const showCompact = (compactOverride ?? isNarrow) && shownUsd >= HERO_COMPACT_MIN;
+  const showCompact = (compactOverride ?? isNarrow) && totalUsd >= HERO_COMPACT_MIN;
 
   return (
     <div className="min-h-60 pt-1">
       <div className={contentClassName}>
-        {/* While scrubbing the title shows that moment, since the big number is the scrubbed value. */}
-        {/* No caption at rest: the figure under the page title needs none. The line keeps its height
-            so the number doesn't jump when a scrub label appears. */}
-        <p className="h-4 font-medium text-muted-foreground text-xs tabular-nums">
-          {scrub.label ?? (syncing ? t("firstSyncing") : null)}
+        {/* No caption: the figure under the page title needs none. The line keeps its height so the
+            number doesn't jump when the first sync ends. */}
+        <p className="h-4 font-medium text-muted-foreground text-xs">
+          {syncing ? t("firstSyncing") : null}
         </p>
         {/* select-text: the total is the number most worth copying. inline-flex + items-start puts the 24h delta at the top right. */}
         <div className="mt-2 inline-flex flex-wrap items-start gap-3">
@@ -137,16 +128,14 @@ export function PortfolioHero({
             ) : (
               // With privacy on, AmountTicker renders a static blurred value itself; no wrapper needed.
               <AmountTicker
-                value={shownUsd}
-                scrubbing={scrub.point != null}
+                value={totalUsd}
                 compact={showCompact}
                 className="font-mono font-semibold text-4xl tracking-tight sm:text-5xl"
                 fractionClassName="font-mono font-semibold text-2xl text-muted-foreground sm:text-3xl"
               />
             )}
           </button>
-          {/* Hide the 24h pill while scrubbing: it's "today's change" beside a historical value. */}
-          {scrub.point ? null : <GainBadge gain={gain24h} compact={showCompact} />}
+          <GainBadge gain={gain24h} compact={showCompact} />
         </div>
 
         <div className="mt-8 flex flex-wrap gap-12">
@@ -186,21 +175,14 @@ export function PortfolioHero({
         </div>
       </div>
 
-      {/* The chart has its own band under the figures, so the line never runs behind text.
-          overflow-hidden clips the active dot at the edges. TrendPanel decides all four states. */}
-      <div className="relative mt-8 h-40 overflow-hidden">
+      {/* The chart has its own band under the figures, so the line never runs behind text. */}
+      <div className="relative mt-8 h-40">
         <TrendPanel
           series={chartSeries}
+          height={HERO_TREND_HEIGHT}
           loading={loading}
-          fillOpacity={0.16}
           decorate={nothingYet}
-          onActive={scrub.onActive}
         />
-        {spanDays >= 1 && (
-          <span className="absolute right-0 bottom-2 z-10 font-mono text-muted-foreground text-xs tracking-wide">
-            {spanDays}D
-          </span>
-        )}
       </div>
     </div>
   );

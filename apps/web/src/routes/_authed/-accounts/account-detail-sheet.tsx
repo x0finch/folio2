@@ -37,10 +37,9 @@ import { type Range, RangeTabs, rangeSince } from "@/components/range-tabs";
 import { Sensitive } from "@/components/sensitive";
 import { TagBadges } from "@/components/tag-badges";
 import { signedUsd } from "@/lib/core/format-number";
-import { buildAccountValueHistory, type HistoryPoint } from "@/lib/core/history";
+import { buildAccountValueHistory } from "@/lib/core/history";
 import { isManual } from "@/lib/core/manual";
 import type { Gain } from "@/lib/core/portfolio";
-import { useChartScrub } from "@/lib/hooks/use-chart-scrub";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
 import { useRelativeSyncedAt } from "@/lib/hooks/use-relative-synced-at";
@@ -48,7 +47,7 @@ import { syncAccountAndWait } from "@/lib/queries/account-sync";
 import { accountHistoryQuery } from "@/lib/queries/accounts";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { archiveAccount, removeAccount, renameAccount } from "@/lib/server/accounts";
-import { TrendPanel } from "@/routes/_authed/-home/hero/trend-panel";
+import { SHEET_TREND_HEIGHT, TrendPanel } from "@/routes/_authed/-home/hero/trend-panel";
 import { deltaTone, GainSkeleton, NO_VALUE } from "@/routes/_authed/-home/holdings/value-delta";
 import { type AccountRow, accountShare, shareLabel } from "./list-rows";
 
@@ -137,8 +136,6 @@ function DetailBody({
   const format = useFormatter();
   // The drawer mounts late, so it is exposed to the clock's one-tick settle delay.
   const syncedAt = useRelativeSyncedAt();
-  // Chart scrub reading.
-  const scrub = useChartScrub();
   const writes = useAccountSheetWrites(account, onClose);
 
   const sealedAt = account.archivedAt;
@@ -236,8 +233,6 @@ function DetailBody({
               hasDayChange={hasDayChange}
               gainPending={gainPending}
               dayChange={dayChange}
-              scrubbed={scrub.point}
-              scrubLabel={scrub.label}
             />
           </div>
           {account.needsCredentials && (
@@ -266,8 +261,8 @@ function DetailBody({
         />
       </div>
 
-      <div className="relative mt-6 h-32 overflow-hidden">
-        <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
+      <div className="relative mt-6 h-32">
+        <TrendPanel series={series} height={SHEET_TREND_HEIGHT} loading={historyQuery.isPending} />
       </div>
 
       <div className="mt-2 flex items-center justify-between gap-4">
@@ -493,17 +488,12 @@ function SheetHeaderValue({
   hasDayChange,
   gainPending,
   dayChange,
-  scrubbed,
-  scrubLabel,
 }: {
   valuesReady: boolean;
   totalUsd: number;
   hasDayChange: boolean;
   gainPending: boolean;
   dayChange: Gain | null | undefined;
-  /** The point being scrubbed on the chart; `null` = not scrubbing, show the live value. */
-  scrubbed: HistoryPoint | null;
-  scrubLabel: string | null;
 }) {
   const usd = useDisplayValue();
   if (!valuesReady) {
@@ -514,20 +504,15 @@ function SheetHeaderValue({
       </div>
     );
   }
-  // While scrubbing, the point's value replaces the live one and the 24h row shows that moment's time.
   return (
     <>
       {/* Rolling and integer/decimal split use AmountTicker (shared with hero and token drawer). */}
       <AmountTicker
-        value={scrubbed ? scrubbed.total : totalUsd}
-        scrubbing={!!scrubbed}
+        value={totalUsd}
         className="font-bold text-3xl"
         fractionClassName="font-bold text-muted-foreground text-xl tabular-nums"
       />
-      {scrubLabel ? (
-        <div className="mt-1 text-muted-foreground text-sm tabular-nums">{scrubLabel}</div>
-      ) : null}
-      {!scrubbed && hasDayChange && (
+      {hasDayChange && (
         <SheetHeaderGain gainPending={gainPending} dayChange={dayChange} usd={usd} />
       )}
     </>

@@ -4,19 +4,15 @@ import { useDisplayValue } from "@/lib/hooks/use-display-value";
 import { Sensitive } from "./sensitive";
 
 // The ticker rounds internally, so only the integer part rolls and the fraction is rendered
-// separately. Scrubbing swaps the value on the same instance: a plain <span> has different
-// metrics than the ticker's 1.1em×1ch columns and would make the layout jump.
-const SCRUB_ROLL_SECONDS = 0.15;
+// separately.
 
 export function AmountTicker({
   value,
-  scrubbing = false,
   compact = false,
   className,
   fractionClassName,
 }: {
   value: number;
-  scrubbing?: boolean;
   /** The whole compact string rolls; compact notation already rounds, so no fraction split. */
   compact?: boolean;
   className?: string;
@@ -33,8 +29,6 @@ export function AmountTicker({
       <NumberTicker
         value={value}
         startOnView={false}
-        duration={scrubbing ? SCRUB_ROLL_SECONDS : undefined}
-        stagger={scrubbing ? 0 : undefined}
         format={(n) => usd(n, { compact: true })}
         className={className}
       />
@@ -47,12 +41,10 @@ export function AmountTicker({
     <span className="flex items-baseline">
       {/* Truncate, don't pass the raw value: the ticker rounds, so $999.60 would become
           "$1,000" + ".60". startOnView={false} because streamed / hydrated numbers are already
-          on screen. Scrubbing shortens the roll and drops the per-digit stagger. */}
+          on screen. */}
       <NumberTicker
         value={Math.trunc(value)}
         startOnView={false}
-        duration={scrubbing ? SCRUB_ROLL_SECONDS : undefined}
-        stagger={scrubbing ? 0 : undefined}
         format={(n) => usd(n).split(".")[0]}
         className={className}
       />
