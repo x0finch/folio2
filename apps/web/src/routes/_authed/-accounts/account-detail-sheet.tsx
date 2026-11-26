@@ -114,7 +114,7 @@ export function AccountDetailSheet({
 const SEALED_DATE = { year: "2-digit", month: "short", day: "numeric" } as const;
 
 const menuItemClass =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted disabled:opacity-50";
+  "flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted disabled:opacity-50";
 
 function DetailBody({
   account,
@@ -214,7 +214,7 @@ function DetailBody({
             <RangeTabs value={range} onChange={setRange} />
           </div>
 
-          <div className="relative flex flex-col gap-1.5">
+          <div className="relative flex flex-col gap-2">
             {/* Inline rename via EditableName; pr-10 leaves room for the ⋯ button. */}
             <EditableName
               value={account.label}
@@ -228,7 +228,7 @@ function DetailBody({
             >
               <ConnectorBadge connectorId={account.connectorId} />
               {archived && (
-                <span className="rounded-sm bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
+                <span className="rounded-sm bg-muted px-2 py-1 text-muted-foreground text-xs">
                   {t("archivedBadge")}
                 </span>
               )}
@@ -247,7 +247,7 @@ function DetailBody({
               />
             </div>
             {account.needsCredentials && (
-              <div className="flex items-center gap-1.5 text-warn text-xs">
+              <div className="flex items-center gap-2 text-warn text-xs">
                 <AlertTriangle className="shrink-0" aria-hidden />
                 <button
                   type="button"
@@ -406,7 +406,7 @@ function SheetOverflowMenu({
           </IconButton>
         </PopoverTrigger>
         <PopoverContent>
-          <div className="flex w-40 flex-col gap-0.5">
+          <div className="flex w-40 flex-col gap-1">
             {!isManual(connectorId) && (
               <button
                 type="button"

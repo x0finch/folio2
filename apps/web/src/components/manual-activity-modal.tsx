@@ -93,7 +93,7 @@ const KINDS: Kind[] = ["add", "reduce", "set"];
 
 // No beUI Textarea, so a token-only local one mirroring Input; field-sizing grows with content.
 const NOTES_CLASS =
-  "w-full resize-none rounded-2xl border border-border bg-transparent px-3.5 py-2.5 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring/40 [field-sizing:content] min-h-24 max-h-32";
+  "w-full resize-none rounded-2xl border border-border bg-transparent px-4 py-3 text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring/40 [field-sizing:content] min-h-24 max-h-32";
 
 const GHOST_ICON =
   "flex size-7 items-center justify-center rounded-full outline-none transition-colors hover:bg-background/60";
@@ -342,7 +342,7 @@ function ActivityForm({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="font-semibold text-base">
+        <h2 className="font-semibold text-lg">
           {editing ? t("editActivityTitle") : t("addActivityTitle")}
         </h2>
         <IconButton onClick={requestClose} aria-label={tc("close")}>
@@ -376,7 +376,7 @@ function ActivityForm({
       </Tabs>
 
       {locked ? (
-        <div className="flex h-11 items-center gap-2 rounded-full border border-border bg-muted px-3.5 text-sm">
+        <div className="flex h-11 items-center gap-2 rounded-full border border-border bg-muted px-4 text-sm">
           <LogoAvatar src={lockedToken?.logo} fallback={lockedToken?.symbol ?? "?"} size="sm" />
           <span className="font-medium">{lockedToken?.symbol}</span>
           {lockedToken?.name ? (
@@ -419,7 +419,7 @@ function ActivityForm({
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <Label htmlFor="ma-amount" className="px-1">
             {t("amountLabel")}
           </Label>
@@ -431,7 +431,7 @@ function ActivityForm({
             placeholder={t("amountPlaceholder")}
           />
         </div>
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <Label htmlFor="ma-price" className="px-1">
             {t("priceLabel")}
           </Label>
@@ -451,7 +451,7 @@ function ActivityForm({
 
       <div ref={previewRef} className="flex flex-col">
         <div className="relative rounded-2xl bg-muted px-4 py-3">
-          <div className="absolute top-2 right-2 flex gap-0.5">
+          <div className="absolute top-2 right-2 flex gap-1">
             {draft.kind !== "set" && (
               <Tooltip content={t("feeLabel")} side="top">
                 <button
@@ -505,7 +505,7 @@ function ActivityForm({
             )}
           </div>
 
-          <div className="mt-2 flex items-center justify-end gap-1.5 text-xs">
+          <div className="mt-2 flex items-center justify-end gap-2 text-xs">
             <button
               type="button"
               onClick={() => toggleEditor("date")}
@@ -535,7 +535,7 @@ function ActivityForm({
         </div>
 
         <Expandable show={openEditor !== null}>
-          <div className="px-0.5 pt-3">
+          <div className="px-1 pt-3">
             {(openEditor === "date" || openEditor === "time") && (
               <DateTimeWheel
                 part={openEditor}

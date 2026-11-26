@@ -89,10 +89,10 @@ function TokenListRow({
   change24h?: number;
 }) {
   return (
-    <div className="flex w-full items-center gap-2.5">
+    <div className="flex w-full items-center gap-3">
       <LogoAvatar src={token.logo} fallback={token.symbol} size="sm" />
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium">
             {query ? <Highlighted text={token.name} query={query} /> : token.name}
           </span>
@@ -294,7 +294,7 @@ export function TokenCombobox({
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: keydown is delegated from the inner input/buttons; combobox role lives on the field
-    <div ref={rootRef} onKeyDown={onKeyDown} className="flex flex-col gap-1.5">
+    <div ref={rootRef} onKeyDown={onKeyDown} className="flex flex-col gap-2">
       {open ? (
         <Input
           autoFocus
@@ -309,7 +309,7 @@ export function TokenCombobox({
             setQuery("");
             setOpen(true);
           }}
-          className="flex h-11 w-full items-center gap-2 rounded-full border border-border bg-background px-3.5 text-sm outline-none transition-colors hover:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring/40"
+          className="flex h-11 w-full items-center gap-2 rounded-full border border-border bg-background px-4 text-sm outline-none transition-colors hover:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring/40"
         >
           {value ? (
             <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -356,7 +356,7 @@ export function TokenCombobox({
                 // data-index is the flat index so keyboard highlight spans sections.
                 rendered.map((section) => (
                   <div key={section.uid}>
-                    <div className="px-2.5 pt-2 pb-1 font-medium text-muted-foreground text-xs">
+                    <div className="px-3 pt-2 pb-1 font-medium text-muted-foreground text-xs">
                       {t(SECTION_LABEL[section.key])}
                     </div>
                     {section.rows.map(({ token, index }) => {
@@ -370,7 +370,7 @@ export function TokenCombobox({
                           onPointerMove={() => setActive(index)}
                           onClick={() => pick(token)}
                           className={cn(
-                            "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
+                            "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
                             index === active && "bg-muted",
                           )}
                         >

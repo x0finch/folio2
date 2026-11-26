@@ -81,7 +81,7 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
       ghost={
         <span
           className={cn(
-            "inline-flex h-full w-full items-center justify-center whitespace-nowrap rounded-full px-3.5 font-medium text-sm",
+            "inline-flex h-full w-full items-center justify-center whitespace-nowrap rounded-full px-4 font-medium text-sm",
             isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground",
           )}
         >
@@ -102,13 +102,13 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
               close();
             }}
           />
-          {/* Divider separating unpin from the picker above (standalone line, not on a rounded button). */}
+          {/* Divider separating unpin from the picker above (standalone line, not on a rounded-md button). */}
           <div className="border-border border-t" />
           <button
             type="button"
             onClick={onUnpin}
             disabled={unpinMut.isPending}
-            className="rounded-md px-2 py-1.5 text-left text-destructive text-sm transition-colors hover:bg-destructive/10 disabled:opacity-50"
+            className="rounded-md px-2 py-2 text-left text-destructive text-sm transition-colors hover:bg-destructive/10 disabled:opacity-50"
           >
             {tct("unpin")}
           </button>

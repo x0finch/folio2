@@ -281,7 +281,7 @@ function BitcoinFields({
       )}
       {/* ypub/zpub: type fixed by prefix, read-only. */}
       {isExtendedPubkey(id) && !isBareXpub(id) && (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <Label>{ti("Address type")}</Label>
           <p className="text-muted-foreground text-sm">{detectedLabel}</p>
         </div>

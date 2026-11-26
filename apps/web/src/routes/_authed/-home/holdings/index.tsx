@@ -23,7 +23,7 @@ function ListSkeleton() {
       {ROWS_3.map((k) => (
         <div key={k} className="flex items-center gap-3 px-3 py-3">
           <Skeleton className="size-8 shrink-0 rounded-full" />
-          <div className="flex flex-1 flex-col gap-1.5">
+          <div className="flex flex-1 flex-col gap-2">
             <Skeleton className="h-4 w-24" />
             <Skeleton className="h-3 w-16" />
           </div>

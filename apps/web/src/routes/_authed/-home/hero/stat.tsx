@@ -13,7 +13,7 @@ export function Stat({
 }) {
   return (
     <div>
-      <div className="mb-0.5 text-muted-foreground text-xs">{label}</div>
+      <div className="mb-1 text-muted-foreground text-xs">{label}</div>
       <div className={cn("font-mono font-semibold text-sm tabular-nums", className)}>{value}</div>
     </div>
   );

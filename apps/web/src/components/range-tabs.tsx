@@ -17,7 +17,7 @@ export function RangeTabs({
   const t = useTranslations("Overview");
   return (
     <Tabs value={value} onValueChange={(v) => onChange(v as HistoryRange)} variant="pill">
-      <TabsList className="gap-0.5 bg-transparent p-0 leading-none">
+      <TabsList className="gap-1 bg-transparent p-0 leading-none">
         {RANGES.map((r) => (
           <TabsTrigger key={r} value={r} className="px-2 py-1 font-mono text-xs leading-none">
             {r === "all" ? t("rangeAll") : r.toUpperCase()}

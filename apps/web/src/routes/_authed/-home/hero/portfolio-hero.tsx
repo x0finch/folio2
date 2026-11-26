@@ -17,7 +17,7 @@ const DAY_MS = 86_400_000;
 const HERO_WINDOW_DAYS = 30;
 const HERO_COMPACT_MIN = 1_000_000;
 const GAIN_BADGE =
-  "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 font-mono font-semibold text-xs tabular-nums";
+  "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-1 font-mono font-semibold text-xs tabular-nums";
 const GAIN_TONE = {
   flat: "bg-muted text-muted-foreground",
   pos: "bg-pos-bg text-pos",

@@ -38,7 +38,7 @@ export function TagBadges({
       // Only the unfolded list may wrap (a single line would ellipsize every name); the folded
       // one must stay one line so row height doesn't vary with tag count.
       className={cn(
-        "flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs",
+        "flex min-w-0 items-center gap-2 text-muted-foreground text-xs",
         max == null && "flex-wrap",
         className,
       )}

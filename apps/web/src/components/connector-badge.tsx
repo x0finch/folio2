@@ -17,7 +17,7 @@ export function ConnectorBadge({
   return (
     <span
       className={cn(
-        "rounded-sm bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground",
+        "rounded-sm bg-muted px-2 py-1 text-xs font-medium text-muted-foreground",
         className,
       )}
     >

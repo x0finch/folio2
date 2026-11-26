@@ -25,7 +25,7 @@ export function OverviewSkeleton() {
           {STAT_SLOTS.map((k) => (
             <div key={k}>
               <Skeleton className="h-4 w-16" />
-              <Skeleton className="mt-0.5 h-5 w-20" />
+              <Skeleton className="mt-1 h-5 w-20" />
             </div>
           ))}
         </div>
@@ -41,11 +41,11 @@ export function OverviewSkeleton() {
           {HOLDING_ROWS.map((k) => (
             <div key={k} className="flex h-18 items-center gap-3 px-3 py-3">
               <Skeleton className="size-10 shrink-0 rounded-full" />
-              <div className="flex flex-1 flex-col gap-1.5">
+              <div className="flex flex-1 flex-col gap-2">
                 <Skeleton className="h-4 w-28" />
                 <Skeleton className="h-3 w-20" />
               </div>
-              <div className="flex shrink-0 flex-col items-end gap-1.5">
+              <div className="flex shrink-0 flex-col items-end gap-2">
                 <Skeleton className="h-4 w-24" />
                 <Skeleton className="h-3 w-16" />
               </div>
@@ -64,12 +64,12 @@ export function AccountsSkeleton() {
       <div className="flex flex-col">
         {ACCOUNT_ROWS.map((k) => (
           <div key={k} className="flex items-center justify-between gap-4 px-3 py-3">
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <Skeleton className="h-4 w-32" />
               <Skeleton className="h-3 w-20" />
               <span className="min-h-6" />
             </div>
-            <div className="flex flex-col items-end gap-1.5">
+            <div className="flex flex-col items-end gap-2">
               <Skeleton className="h-4 w-20" />
               <Skeleton className="h-3 w-14" />
             </div>
@@ -100,7 +100,7 @@ export function InsightsSkeleton() {
           <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
             {/* 220 = the real pie canvas size (allocation-pie). */}
             <Skeleton className="mx-auto size-55 shrink-0 rounded-full" />
-            <ul className="flex flex-1 flex-col gap-1.5">
+            <ul className="flex flex-1 flex-col gap-2">
               {ALLOC_LEGEND.map((k) => (
                 <li key={k} className="flex items-center gap-2">
                   <Skeleton className="size-3 rounded-sm" />

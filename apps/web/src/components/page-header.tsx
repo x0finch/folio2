@@ -18,7 +18,7 @@ export function PageHeader({
       <div className="min-w-0 select-none">
         {eyebrow ? <div className="mb-2">{eyebrow}</div> : null}
         <h1 className="font-semibold text-lg leading-tight">{title}</h1>
-        {subtitle ? <p className="mt-1.5 text-muted-foreground text-sm">{subtitle}</p> : null}
+        {subtitle ? <p className="mt-2 text-muted-foreground text-sm">{subtitle}</p> : null}
       </div>
       {actions ? <div className="shrink-0">{actions}</div> : null}
     </div>

@@ -61,7 +61,7 @@ const kindTone: Record<string, string> = {
 const flatSwipe: SwipeableListClassNames = {
   item: "rounded-xl bg-background",
   surface:
-    "flex min-h-[68px] items-center rounded-xl border-0 bg-background px-3 py-2.5 shadow-none transition-colors hover:bg-muted",
+    "flex min-h-[68px] items-center rounded-xl border-0 bg-background px-3 py-3 shadow-none transition-colors hover:bg-muted",
   action: "[&>span]:group-hover:bg-muted!",
 };
 
@@ -372,7 +372,7 @@ export function ManualTokensPanel({
                 ) : null}
               </HoverDetail>
             </div>
-            <div className="mt-1.5 truncate text-xs">
+            <div className="mt-2 truncate text-xs">
               <span className={kindTone[a.kind]}>{t(a.kind)}</span>
               {a.memo ? <span className="text-muted-foreground"> · {a.memo}</span> : null}
             </div>
@@ -468,13 +468,13 @@ function DetailSkeleton() {
   return (
     <div className="flex flex-col gap-1">
       {[0, 1, 2].map((i) => (
-        <div key={i} className="flex min-h-[68px] items-center gap-3 rounded-xl px-3 py-2.5">
+        <div key={i} className="flex min-h-[68px] items-center gap-3 rounded-xl px-3 py-3">
           <div className="size-9 shrink-0 animate-pulse rounded-full bg-muted" />
           <div className="flex flex-1 flex-col gap-2">
-            <div className="h-3.5 w-24 animate-pulse rounded bg-muted" />
-            <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+            <div className="h-3.5 w-24 animate-pulse rounded-md bg-muted" />
+            <div className="h-3 w-16 animate-pulse rounded-md bg-muted" />
           </div>
-          <div className="h-3.5 w-16 animate-pulse rounded bg-muted" />
+          <div className="h-3.5 w-16 animate-pulse rounded-md bg-muted" />
         </div>
       ))}
     </div>
@@ -510,7 +510,7 @@ function ConfirmModal({
         {open && (
           <div className="flex flex-col gap-4">
             <div>
-              <h2 className="font-semibold text-base">{title}</h2>
+              <h2 className="font-semibold text-lg">{title}</h2>
               <p className="mt-1 text-muted-foreground text-sm">{body}</p>
             </div>
             <div className="flex gap-2">
@@ -576,7 +576,7 @@ function ActivityDetail({
       )}
       <DetailRow label={t("dateLabel")}>{dateTimeFmt.format(row.occurredAt)}</DetailRow>
 
-      <div className="flex flex-col gap-1.5 border-border border-t pt-2">
+      <div className="flex flex-col gap-2 border-border border-t pt-2">
         <DetailRow label={t("accountTotalThen")}>
           <Sensitive>{usd(totalThen)}</Sensitive>
         </DetailRow>
@@ -586,7 +586,7 @@ function ActivityDetail({
       </div>
 
       {row.memo ? (
-        <div className="flex flex-col gap-0.5 border-border border-t pt-2">
+        <div className="flex flex-col gap-1 border-border border-t pt-2">
           <span className="text-muted-foreground text-xs">{t("memoLabel")}</span>
           <p className="whitespace-pre-wrap break-words">{row.memo}</p>
         </div>

@@ -47,7 +47,7 @@ export function AllocationPie({ slices }: { slices: AllocSlice[] }) {
           </Pie>
         </PieChart>
       </div>
-      <ul className="flex flex-1 flex-col gap-1.5">
+      <ul className="flex flex-1 flex-col gap-2">
         {data.map((d) => (
           <li key={d.key} className="flex items-center gap-2 text-sm">
             <span className="size-2.5 shrink-0 rounded-full" style={{ background: d.color }} />

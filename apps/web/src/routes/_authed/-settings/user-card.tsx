@@ -90,7 +90,7 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
 
         <div className="border-border border-t pt-4">
           <SettingRow label={t("version")}>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-2">
               <span className="font-mono text-muted-foreground text-sm">{APP_VERSION}</span>
               <IconButton
                 aria-label={t("checkUpdate")}
@@ -108,7 +108,7 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
       <MorphingModal viewId={confirmOpen ? "signout" : null} onClose={() => setConfirmOpen(false)}>
         <div className="text-left">
           <p className="font-semibold text-base">{t("signOutConfirmTitle")}</p>
-          <p className="mt-1.5 text-muted-foreground text-sm">{t("signOutConfirmBody")}</p>
+          <p className="mt-2 text-muted-foreground text-sm">{t("signOutConfirmBody")}</p>
           <div className="mt-5 flex justify-end gap-2">
             <Button variant="outline" onClick={() => setConfirmOpen(false)}>
               {tc("cancel")}

@@ -312,7 +312,7 @@ function AuthPanel() {
       >
         <div className="text-left">
           <p className="font-semibold text-base">{t("passkeyPromptTitle")}</p>
-          <p className="mt-1.5 text-muted-foreground text-sm">{t("passkeyPromptBody")}</p>
+          <p className="mt-2 text-muted-foreground text-sm">{t("passkeyPromptBody")}</p>
           <div className="mt-5 flex justify-end gap-2">
             <Button variant="ghost" onClick={onDismissPrompt}>
               {t("passkeyPromptDismiss")}

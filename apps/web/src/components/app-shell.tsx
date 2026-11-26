@@ -22,12 +22,12 @@ const NAVS = [
 // Layout boxes shared with AppShellSkeleton so the page doesn't jump when data arrives.
 const SHELL_ROOT = "min-h-svh lg:flex";
 const SHELL_ASIDE =
-  "hidden w-59 shrink-0 flex-col border-border border-r bg-card px-3.5 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto";
-const SHELL_BRAND_ROW = "flex items-center gap-2.5 px-2 pt-1.5 pb-5";
+  "hidden w-59 shrink-0 flex-col border-border border-r bg-card px-4 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto";
+const SHELL_BRAND_ROW = "flex items-center gap-3 px-2 pt-2 pb-5";
 const SHELL_INNER_COL = "flex min-w-0 flex-1 flex-col";
-const SHELL_SIDEBAR_FOOTER = "mt-auto flex items-center gap-2.5 px-1 pt-4";
+const SHELL_SIDEBAR_FOOTER = "mt-auto flex items-center gap-3 px-1 pt-4";
 const SHELL_TOPBAR =
-  "sticky top-0 z-30 flex items-center gap-2.5 border-border border-b bg-background/80 px-4 pt-[calc(0.75rem_+_env(safe-area-inset-top))] pb-3 backdrop-blur-xl lg:hidden";
+  "sticky top-0 z-30 flex items-center gap-3 border-border border-b bg-background/80 px-4 pt-[calc(0.75rem_+_env(safe-area-inset-top))] pb-3 backdrop-blur-xl lg:hidden";
 // Mobile content is always taller than the screen: iOS sizes the bottom inset by scrollability,
 // so a short loading state then a long page would make the Dock jump ~60px.
 const SHELL_MAIN =
@@ -197,7 +197,7 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
 
         <div className={SHELL_SIDEBAR_FOOTER}>
           <Skeleton className="size-7 shrink-0 rounded-full" />
-          <div className="min-w-0 flex-1 space-y-1.5">
+          <div className="min-w-0 flex-1 space-y-2">
             <Skeleton className="h-3 w-24" />
             <Skeleton className="h-3 w-16" />
           </div>

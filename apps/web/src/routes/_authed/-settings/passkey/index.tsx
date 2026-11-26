@@ -217,7 +217,7 @@ function PasskeyItem({
     </IconButton>
   ) : null;
   return (
-    <div className="rounded-lg px-2 py-1.5">
+    <div className="rounded-lg px-2 py-2">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 flex-1 leading-tight">
           <div className="flex min-w-0 items-center gap-2">
@@ -261,7 +261,7 @@ function RemovePasskeyModal({
     <MorphingModal viewId={removing ? "passkey-remove" : null} onClose={onCancel}>
       <div className="text-left">
         <p className="font-semibold text-base">{t("passkeyRemoveTitle")}</p>
-        <p className="mt-1.5 text-muted-foreground text-sm">
+        <p className="mt-2 text-muted-foreground text-sm">
           {t("passkeyRemoveBody", { name: removing?.name || t("passkeyUnnamed") })}
         </p>
         <div className="mt-5 flex justify-end gap-2">

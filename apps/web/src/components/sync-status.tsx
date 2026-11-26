@@ -48,7 +48,7 @@ const StatusSegment = forwardRef<HTMLButtonElement, StatusSegmentProps>(function
       ref={ref}
       type="button"
       className={cn(
-        "flex h-9 items-center gap-2 rounded-full border border-border bg-card px-3.5 font-mono text-foreground text-xs transition-colors hover:bg-muted",
+        "flex h-9 items-center gap-2 rounded-full border border-border bg-card px-4 font-mono text-foreground text-xs transition-colors hover:bg-muted",
         className,
       )}
       {...rest}
@@ -94,7 +94,7 @@ interface PanelProps {
 
 function PanelRow({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-2.5 py-1 text-muted-foreground text-xs">
+    <div className="flex items-center justify-between gap-3 py-1 text-muted-foreground text-xs">
       <span className="shrink-0">{label}</span>
       <span className={cn("min-w-0 truncate text-foreground", mono && "font-mono")}>{value}</span>
     </div>
@@ -125,7 +125,7 @@ function AttentionRow({
     <button
       type="button"
       onClick={() => onPick(source.id)}
-      className="flex w-full items-baseline justify-between gap-2.5 rounded-sm py-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="flex w-full items-baseline justify-between gap-3 rounded-sm py-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       <span className="min-w-0 truncate text-xs">
         <span className="font-medium">{connectorLabel}</span>
@@ -148,7 +148,7 @@ function FailureRow({
     <button
       type="button"
       onClick={() => onPick(failure.accountId)}
-      className="flex w-full items-baseline justify-between gap-2.5 rounded-sm py-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="flex w-full items-baseline justify-between gap-3 rounded-sm py-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       <span className="min-w-0 truncate font-medium text-xs">{failure.label}</span>
       <span className="min-w-0 truncate text-neg text-xs">{failure.error}</span>
@@ -218,7 +218,7 @@ export function SyncPanel({
     failures.length > 0 || fatal || interrupted ? (
       <>
         <div className="my-2 border-border border-t" />
-        <div className="pb-0.5 font-medium text-muted-foreground text-xs">{t("roundFailed")}</div>
+        <div className="pb-1 font-medium text-muted-foreground text-xs">{t("roundFailed")}</div>
         <div className="flex flex-col">
           {failures.map((f) => (
             <FailureRow key={f.accountId} failure={f} onPick={onPick} />
@@ -248,9 +248,9 @@ export function SyncPanel({
 
   return (
     <div className="w-72 text-left">
-      <div className="mb-2.5 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between">
         <span className="font-semibold text-sm">{t("status")}</span>
-        <span className={cn("rounded-full px-2 py-0.5 font-semibold text-xs", badge)}>
+        <span className={cn("rounded-full px-2 py-1 font-semibold text-xs", badge)}>
           {statusLabel}
         </span>
       </div>

@@ -15,7 +15,7 @@ import { ValueDelta } from "@/routes/_authed/-home/holdings/value-delta";
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <div className="flex items-center gap-2.5 px-3">
+    <div className="flex items-center gap-3 px-3">
       <span className="text-muted-foreground text-xs uppercase tracking-widest">{title}</span>
     </div>
   );
@@ -151,13 +151,13 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
         {/* Role names sit above the bar but stay DOM children of the Popover root (beUI's mouseenter
             fires per DOM subtree), and take no in-flow space so the panel and goo pill anchor to the
             bar. Hidden via fit when they don't fit. */}
-        <div ref={labelsRef} className="absolute bottom-full left-0 mb-0.5 flex w-full gap-0.5">
+        <div ref={labelsRef} className="absolute bottom-full left-0 mb-1 flex w-full gap-1">
           {segs.map((s, i) => (
             <div
               key={s.role ?? `_${i}`}
               data-lab
               style={{ flexGrow: weights[i], flexBasis: 0 }}
-              className="min-w-0 overflow-hidden whitespace-nowrap font-medium text-[10px] text-muted-foreground capitalize"
+              className="min-w-0 overflow-hidden whitespace-nowrap font-medium text-xs text-muted-foreground capitalize"
             >
               {s.role}
             </div>
@@ -172,7 +172,7 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
             className="block w-full cursor-default outline-none"
           >
             {/* The 4px bar: segmented by role; debt gets neutral stripes, others chart colors. */}
-            <div className="flex h-1 gap-0.5 overflow-hidden rounded-full bg-muted">
+            <div className="flex h-1 gap-1 overflow-hidden rounded-full bg-muted">
               {segs.map((s, i) => (
                 <div
                   key={s.role ?? `_${i}`}
@@ -189,13 +189,13 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
         </PopoverTrigger>
         <PopoverContent>
           {/* Full detail per role (colored swatch matches the bar), all valued legs with USD values;
-              debt in neutral "−". Spacing: gap-2.5 between groups, gap-1 within; the panel has its own p-4. */}
-          <div className="flex min-w-52 flex-col gap-2.5">
+              debt in neutral "−". Spacing: gap-3 between groups, gap-1 within; the panel has its own p-4. */}
+          <div className="flex min-w-52 flex-col gap-3">
             <div className="font-medium text-sm">{label}</div>
             {segs.map((s, i) => (
               <div key={s.role ?? `_${i}`} className="flex flex-col gap-1">
                 {s.role && (
-                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wider">
                     <span
                       style={s.debt ? DEBT_SEG_STYLE : undefined}
                       className={cn(
@@ -292,10 +292,7 @@ export function DefiPositions({
       <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
         {groups.map((g) => (
           // Lift the row above siblings while its inline popover is open (same as perp rows).
-          <div
-            key={g.protocol}
-            className="group rounded-xl px-3 py-1.5 has-[[data-state=open]]:z-20"
-          >
+          <div key={g.protocol} className="group rounded-xl px-3 py-2 has-[[data-state=open]]:z-20">
             <DefiProtocolRowContent group={g} gainPending={gainPending} />
           </div>
         ))}

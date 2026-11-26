@@ -98,7 +98,7 @@ export function NoteView({ note, formatNumber, hideHeader, className }: NoteView
     // cards/buttons that the base layer makes non-selectable.
     <div className={cn("flex select-text flex-col gap-2", className)}>
       {!hideHeader && (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <NoteIconGlyph icon={note.icon} />
           <span className="text-base font-medium text-foreground">{note.title}</span>
         </div>

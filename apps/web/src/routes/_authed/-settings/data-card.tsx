@@ -120,7 +120,7 @@ export function DataCard() {
       <MorphingModal viewId={pendingFile ? "import-merge" : null} onClose={cancelImport}>
         <div className="text-left">
           <p className="font-semibold text-base">{t("importMergeTitle")}</p>
-          <p className="mt-1.5 text-muted-foreground text-sm">{t("importMergeBody")}</p>
+          <p className="mt-2 text-muted-foreground text-sm">{t("importMergeBody")}</p>
           <div className="mt-5 flex justify-end gap-2">
             <Button variant="outline" onClick={cancelImport}>
               {tc("cancel")}

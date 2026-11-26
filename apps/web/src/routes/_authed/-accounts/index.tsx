@@ -97,7 +97,7 @@ function ListSkeleton() {
       <div className="flex flex-col">
         {ROWS_4.map((k) => (
           <div key={k} className="flex items-center justify-between gap-4 px-3 py-3">
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <Skeleton className="h-4 w-32" />
               <Skeleton className="h-3 w-20" />
               <span className="min-h-6" />
@@ -227,7 +227,7 @@ function AccountsListBody({
 
   return (
     <>
-      <h1 className="font-bold text-2xl">{t("accountCount", { count: active.length })}</h1>
+      <h1 className="font-semibold text-lg">{t("accountCount", { count: active.length })}</h1>
 
       {rows.length === 0 ? (
         <p className="text-muted-foreground">{tc("noAccountsYet")}</p>
@@ -381,7 +381,7 @@ function AccountRowContent({
         muted && "opacity-60",
       )}
     >
-      <span className="relative flex min-w-0 flex-col gap-1.5">
+      <span className="relative flex min-w-0 flex-col gap-2">
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium">{row.label}</span>
           <ConnectorBadge

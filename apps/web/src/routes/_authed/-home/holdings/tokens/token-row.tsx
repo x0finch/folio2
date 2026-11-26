@@ -41,7 +41,7 @@ export function TokenRowContent({
       <LogoAvatar src={item.logo} fallback={item.symbol} size="md" />
       <div className="min-w-0 flex-1">
         {/* min-w-0 lets the name shrink and truncate so stacked logos/aside (shrink-0) aren't pushed out under the value column. */}
-        <div className="flex min-w-0 items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-2">
           {/* select-text: the name is content and must stay copyable (the row is a non-selectable button). */}
           <span className="min-w-0 select-text truncate font-medium">{item.name}</span>
           {sources && sources.length > 1 ? <AvatarStack items={sources} /> : null}

@@ -61,10 +61,10 @@ function ModalHeader({
   );
 }
 
-// The panel is overflow-hidden, so content scrolls in its own max-h container. px-1.5 / -mx-1.5:
+// The panel is overflow-hidden, so content scrolls in its own max-h container. px-2 / -mx-2:
 // overflow-y-auto also clips x, so leave room for edge decorations (hover bg, focus rings).
 function ViewShell({ children }: { children: ReactNode }) {
-  return <div className="-mx-1.5 max-h-[78vh] overflow-y-auto px-1.5">{children}</div>;
+  return <div className="-mx-2 max-h-[78vh] overflow-y-auto px-2">{children}</div>;
 }
 
 // Self-managed open (pass triggerRender) or controlled (pass open/onOpenChange).

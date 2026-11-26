@@ -93,7 +93,7 @@ function PickerHeader({ title, onClose }: { title: string; onClose: () => void }
   const tc = useTranslations("Common");
   return (
     <div className="flex items-center justify-between gap-2">
-      <h2 className="font-semibold text-base">{title}</h2>
+      <h2 className="font-semibold text-lg">{title}</h2>
       <button
         type="button"
         aria-label={tc("close")}
@@ -220,7 +220,7 @@ function MoveList({
 
       {/* SharedLayoutBg hosts the hover pill; each button's content must be a single flex container
           (it wraps children in a non-flex z-10 div). */}
-      <SharedLayoutBg className="gap-0.5" inset={0} pillClassName="rounded-xl bg-muted">
+      <SharedLayoutBg className="gap-1" inset={0} pillClassName="rounded-xl bg-muted">
         {portfolios.map((p) => {
           const current = p.id === currentPortfolioId;
           // Not `disabled` for the current item: a disabled button doesn't dispatch mouseenter, so the
@@ -284,7 +284,7 @@ function CreatePage({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="font-semibold text-base">{t("createTitle")}</h2>
+      <h2 className="font-semibold text-lg">{t("createTitle")}</h2>
       <Input
         value={newName}
         onChange={(v) => setNewName(v)}
@@ -332,7 +332,7 @@ function DeletePage({ portfolio, onDone }: { portfolio: PortfolioSummary; onDone
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="font-semibold text-base">{t("deleteTitle")}</h2>
+        <h2 className="font-semibold text-lg">{t("deleteTitle")}</h2>
         <p className="mt-1 text-muted-foreground text-sm">
           {t("deleteConfirm", { name: portfolio.name })}
         </p>
