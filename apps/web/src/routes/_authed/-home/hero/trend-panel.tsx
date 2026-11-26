@@ -1,5 +1,5 @@
 import { type ChartConfig, ChartContainer, ChartTooltip } from "@folio/ui";
-import { useEffect, useId } from "react";
+import { useEffect } from "react";
 import {
   Area,
   AreaChart,
@@ -33,15 +33,17 @@ function TrendEmpty({ loading }: { loading: boolean }) {
   );
 }
 
-// Value trend area chart shared by the hero and both drawers: line follows --pos/--neg, gradient
-// fill, axes hidden; absolutely positioned (inset-0) in a relative + overflow-hidden parent.
+// Value trend area chart shared by the hero and both drawers: neutral line over a flat tint (no
+// gradient, no gain colour: DESIGN.md), axes hidden; absolutely positioned (inset-0) in a relative + overflow-hidden parent.
 // Readouts are not a tooltip bubble: scrubbing reports the point via `onActive` and the caller
 // swaps the big number. `<ChartTooltip>` stays with empty content because the vertical cursor line
 // and `useIsTooltipActive` / `useActiveTooltipDataPoints` need it. Margins leave room for the
-// active dot (the container's overflow clip is deliberate), top is caller-adjustable. Gradient ids
-// use useId since hero and drawer can coexist in the DOM.
+// active dot (the container's overflow clip is deliberate), top is caller-adjustable.
 
 // Reports the scrubbed point. Must live inside <AreaChart>: the hooks read the chart's store.
+// A flat tint reads heavier than the gradient it replaces, which faded to nothing.
+const FLAT_FILL_RATIO = 0.25;
+
 function ActivePointReporter({ onActive }: { onActive: (point: HistoryPoint | null) => void }) {
   const active = useIsTooltipActive();
   const points = useActiveTooltipDataPoints<HistoryPoint>();
@@ -72,22 +74,14 @@ function ValueTrendChart({
   /** Called when scrubbing/hovering a point; `null` on release or leave. Omitted = chart only. */
   onActive?: (point: HistoryPoint | null) => void;
 }) {
-  const gradientId = `value-trend-${useId().replace(/:/g, "")}`;
   if (series.length < 2) return null;
-  const up = (series.at(-1)?.total ?? 0) >= (series[0]?.total ?? 0);
   const config = {
-    total: { label: "", color: up ? "var(--pos)" : "var(--neg)" },
+    total: { label: "", color: "var(--foreground)" },
   } satisfies ChartConfig;
   return (
     // touch-pan-y: vertical swipes still scroll the page, horizontal ones go to the chart.
     <ChartContainer config={config} className="absolute inset-0 h-full w-full touch-pan-y">
       <AreaChart data={series} margin={{ top: topMargin, right: 8, bottom: 8, left: 8 }}>
-        <defs>
-          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-total)" stopOpacity={fillOpacity} />
-            <stop offset="100%" stopColor="var(--color-total)" stopOpacity={0} />
-          </linearGradient>
-        </defs>
         <XAxis dataKey="t" hide />
         <YAxis hide domain={["dataMin", "dataMax"]} />
         {/* content returns null: no bubble, only the cursor line and active dot. */}
@@ -103,9 +97,10 @@ function ValueTrendChart({
           // the domain spans 0 (negative history points) and flips the fill above the line.
           baseValue="dataMin"
           stroke="var(--color-total)"
-          strokeWidth={2}
+          strokeWidth={1.5}
           strokeOpacity={0.5}
-          fill={`url(#${gradientId})`}
+          fill="var(--color-total)"
+          fillOpacity={fillOpacity * FLAT_FILL_RATIO}
           dot={false}
         />
       </AreaChart>
@@ -124,25 +119,20 @@ const DEMO_TREND = [
 function DecorativeTrend({ topMargin }: { topMargin: number }) {
   const t = useTranslations("Overview");
   const config = {
-    total: { label: t("portfolioValue"), color: "var(--pos)" },
+    total: { label: t("portfolioValue"), color: "var(--foreground)" },
   } satisfies ChartConfig;
   return (
     <ChartContainer config={config} className="pointer-events-none absolute inset-0 h-full w-full">
       <AreaChart data={DEMO_TREND} margin={{ top: topMargin, right: 8, bottom: 8, left: 8 }}>
-        <defs>
-          <linearGradient id="hero-fill-demo" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-total)" stopOpacity={0.12} />
-            <stop offset="100%" stopColor="var(--color-total)" stopOpacity={0} />
-          </linearGradient>
-        </defs>
         <YAxis hide domain={["dataMin", "dataMax"]} />
         <Area
           dataKey="total"
           type="natural"
           stroke="var(--color-total)"
-          strokeWidth={2}
+          strokeWidth={1.5}
           strokeOpacity={0.45}
-          fill="url(#hero-fill-demo)"
+          fill="var(--color-total)"
+          fillOpacity={0.12 * FLAT_FILL_RATIO}
           dot={false}
           isAnimationActive={false}
         />

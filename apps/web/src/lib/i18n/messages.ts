@@ -48,12 +48,6 @@ const en = {
     upToDate: "This is the latest version",
     update: "Update",
   },
-  PageHeader: {
-    overviewSub: "Live portfolio across {count, plural, one {# source} other {# sources}}",
-    accountsSub: "Manage your data sources",
-    insightsSub: "Trends & allocation",
-    settingsSub: "Currency, language & theme",
-  },
   Sync: {
     status: "Sync status",
     allSynced: "All synced",
@@ -106,7 +100,6 @@ const en = {
   },
   Overview: {
     totalValue: "Total value",
-    totalNetWorth: "Total net worth",
     firstSyncing: "Syncing…",
     trendNeedsSecondSync: "The trend will appear once it's ready",
     bestToday: "Top today",
@@ -476,12 +469,6 @@ const zh: Messages = {
     upToDate: "已是最新",
     update: "更新",
   },
-  PageHeader: {
-    overviewSub: "跨 {count} 个来源的实时组合",
-    accountsSub: "管理你的数据来源",
-    insightsSub: "趋势与资产分布",
-    settingsSub: "计价、语言与主题",
-  },
   Sync: {
     status: "同步状态",
     allSynced: "全部同步",
@@ -533,7 +520,6 @@ const zh: Messages = {
   },
   Overview: {
     totalValue: "总价值",
-    totalNetWorth: "总净值",
     firstSyncing: "同步中…",
     trendNeedsSecondSync: "还需要更多数据才能画出趋势图",
     bestToday: "今日最佳",

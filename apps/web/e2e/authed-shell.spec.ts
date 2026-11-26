@@ -17,7 +17,7 @@ test.describe("signed out: gets the zero-data shell, then the browser routes to 
       const html = await res.text();
       expect(html).toContain('data-slot="skeleton"');
       // The shell is path-independent: no page's content is baked in.
-      expect(html).not.toContain("Total net worth");
+      expect(html).not.toContain("Top today");
     });
 
     test(`${path} → browser lands on /login without hydration errors`, async ({ page }) => {

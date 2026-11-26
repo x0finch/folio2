@@ -3,7 +3,6 @@ import { BarChart3, Home, Settings, Wallet } from "@folio/ui/icons";
 import { Link, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
-import type { SyncStatusSummary } from "@/lib/core/sync-status";
 import { DEFAULT_PAGE, isPageSlug, type PageKey } from "@/routes/_authed/-page-keys";
 import { OverviewSkeleton } from "@/routes/_authed/-page-skeletons";
 import { Logo } from "./logo";
@@ -57,13 +56,11 @@ function Brand() {
 
 export function AppShell({
   userName,
-  syncStatus,
   selector,
   onNavIntent,
   children,
 }: {
   userName: string;
-  syncStatus: SyncStatusSummary;
   // Renders nothing with fewer than two portfolios.
   selector?: ReactNode;
   // The shell only reports nav intent; the route layer does the prefetching, keeping
@@ -72,17 +69,12 @@ export function AppShell({
   children: ReactNode;
 }) {
   const t = useTranslations("Nav");
-  const th = useTranslations("PageHeader");
   const ts = useTranslations("Sidebar");
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const seg = pathname.split("/")[1] ?? "";
   const activeKey: PageKey = isPageSlug(seg) ? seg : DEFAULT_PAGE;
   const activeNav = NAVS.find((n) => n.key === activeKey) ?? NAVS[0];
   const pageTitle = t(activeNav.key);
-  const pageSub =
-    activeNav.key === DEFAULT_PAGE
-      ? th("overviewSub", { count: syncStatus.total })
-      : th(`${activeNav.key}Sub` as "accountsSub" | "insightsSub" | "settingsSub");
   const initial = userName.trim().charAt(0).toUpperCase() || "?";
 
   return (
@@ -136,11 +128,7 @@ export function AppShell({
         </header>
 
         <main className={SHELL_MAIN}>
-          <PageHeader
-            title={pageTitle}
-            subtitle={pageSub}
-            eyebrow={activeNav.key !== "settings" ? selector : null}
-          />
+          <PageHeader title={pageTitle} eyebrow={activeNav.key !== "settings" ? selector : null} />
           {children}
         </main>
       </div>
@@ -222,7 +210,6 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
           <PageHeader
             eyebrow={<SkeletonText className="h-6 w-20 rounded-full" />}
             title={<SkeletonText className="h-8 w-44" />}
-            subtitle={<SkeletonText className="h-4 w-60" />}
           />
           {/* The same skeleton the Overview page uses, so the swap is pixel-stable. */}
           <OverviewSkeleton />

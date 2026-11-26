@@ -26,7 +26,7 @@ export function Overview() {
       {/* HeaderSync stays outside the entrance container: it is absolute against `<main>` and a
           transformed wrapper would shift it (see StaggerReveal). Opt-in auto-sync when data is stale. */}
       <HeaderSync autoSyncWhenStale />
-      <StaggerReveal className="flex flex-col gap-6">
+      <StaggerReveal className="flex flex-col gap-12">
         <QueryBoundary
           resetKey={`hero:${snapshotsKey}`}
           pending={<HeroSkeleton />}
@@ -34,7 +34,7 @@ export function Overview() {
         >
           <HeroIsland />
         </QueryBoundary>
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-6">
           <QueryBoundary
             resetKey={`tabs:${tabsKey}`}
             pending={<TabStripSkeleton />}

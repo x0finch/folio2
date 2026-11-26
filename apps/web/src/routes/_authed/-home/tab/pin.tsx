@@ -124,6 +124,11 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
 }
 
 // + button: opens the picker via PinPanel.
+// A secondary action: hidden until the pointer is over the tab strip or focus is inside it. Touch
+// has no hover, so it stays visible there.
+const REVEAL_ON_INTENT =
+  "pointer-fine:opacity-0 pointer-fine:group-focus-within/tabs:opacity-100 pointer-fine:group-hover/tabs:opacity-100";
+
 export function AddPinButton() {
   const { selectedId } = usePortfolio();
   const queryClient = useQueryClient();
@@ -164,7 +169,10 @@ export function AddPinButton() {
         type="button"
         aria-label={tct("add")}
         disabled={addMut.isPending}
-        className="flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+        className={cn(
+          "flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-[color,background-color,opacity] hover:bg-muted hover:text-foreground disabled:opacity-50",
+          REVEAL_ON_INTENT,
+        )}
       >
         <Plus />
       </button>

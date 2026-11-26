@@ -88,7 +88,7 @@ describe("Hero trend area's three states", () => {
       </IntlProvider>,
     );
 
-    expect(screen.getByText(/total net worth/i)).toBeTruthy();
+    expect(screen.getByText(/top today/i)).toBeTruthy();
     expect(emptyText()).toBeNull();
     expect(spanBadge()).toBeNull();
   });

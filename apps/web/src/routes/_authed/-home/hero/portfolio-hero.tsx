@@ -17,11 +17,12 @@ const DAY_MS = 86_400_000;
 const HERO_WINDOW_DAYS = 30;
 const HERO_COMPACT_MIN = 1_000_000;
 const GAIN_BADGE =
-  "inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-1 font-mono font-semibold text-xs tabular-nums";
+  "inline-flex shrink-0 items-center whitespace-nowrap py-1 font-mono font-semibold text-sm tabular-nums";
+// Text only: functional colours never fill an area (DESIGN.md).
 const GAIN_TONE = {
-  flat: "bg-muted text-muted-foreground",
-  pos: "bg-pos-bg text-pos",
-  neg: "bg-neg-bg text-neg",
+  flat: "text-muted-foreground",
+  pos: "text-pos",
+  neg: "text-neg",
 } as const;
 
 function gainTone(amount: number) {
@@ -111,26 +112,13 @@ export function PortfolioHero({
   const showCompact = (compactOverride ?? isNarrow) && shownUsd >= HERO_COMPACT_MIN;
 
   return (
-    // overflow-hidden wraps only the chart, not the root: on the root it would clip the floating
-    // net worth (the privacy blur overflows the left edge).
-    <div className="relative min-h-60 pt-1">
-      {/* TrendPanel decides all four states. The hero's larger top margin (92) and heavier fill override the defaults. */}
-      <div className="absolute inset-0 overflow-hidden">
-        <TrendPanel
-          series={chartSeries}
-          loading={loading}
-          topMargin={92}
-          fillOpacity={0.16}
-          decorate={nothingYet}
-          onActive={scrub.onActive}
-        />
-      </div>
-
-      {/* Number layer floats over the chart and ignores pointers (hover passes to the chart). */}
-      <div className={cn("pointer-events-none relative z-10", contentClassName)}>
+    <div className="min-h-60 pt-1">
+      <div className={contentClassName}>
         {/* While scrubbing the title shows that moment, since the big number is the scrubbed value. */}
-        <p className="font-medium text-muted-foreground text-xs tabular-nums">
-          {scrub.label ?? (syncing ? t("firstSyncing") : t("totalNetWorth"))}
+        {/* No caption at rest: the figure under the page title needs none. The line keeps its height
+            so the number doesn't jump when a scrub label appears. */}
+        <p className="h-4 font-medium text-muted-foreground text-xs tabular-nums">
+          {scrub.label ?? (syncing ? t("firstSyncing") : null)}
         </p>
         {/* select-text: the total is the number most worth copying. inline-flex + items-start puts the 24h delta at the top right. */}
         <div className="mt-2 inline-flex flex-wrap items-start gap-3">
@@ -141,7 +129,7 @@ export function PortfolioHero({
             type="button"
             onClick={() => setCompactOverride((v) => !(v ?? isNarrow))}
             aria-label={showCompact ? "显示完整金额" : "显示缩写金额"}
-            className="pointer-events-auto flex w-fit cursor-pointer select-text items-baseline text-left"
+            className="flex w-fit cursor-pointer select-text items-baseline text-left"
           >
             {syncing ? (
               // First sync: skeleton instead of drawing "unknown" as $0 (see index.tsx's pending check).
@@ -161,7 +149,7 @@ export function PortfolioHero({
           {scrub.point ? null : <GainBadge gain={gain24h} compact={showCompact} />}
         </div>
 
-        <div className="mt-6 flex flex-wrap gap-8">
+        <div className="mt-8 flex flex-wrap gap-12">
           {/* Best / worst position by PnL amount (not percent). Amounts go through usd() to follow the
               display currency. Masks the PnL amount, keeps the symbol; the percentage stays unmasked. */}
           <Stat
@@ -198,11 +186,22 @@ export function PortfolioHero({
         </div>
       </div>
 
-      {spanDays >= 1 && (
-        <span className="absolute right-0 bottom-2 z-10 font-mono text-muted-foreground text-xs tracking-wide">
-          {spanDays}D
-        </span>
-      )}
+      {/* The chart has its own band under the figures, so the line never runs behind text.
+          overflow-hidden clips the active dot at the edges. TrendPanel decides all four states. */}
+      <div className="relative mt-8 h-40 overflow-hidden">
+        <TrendPanel
+          series={chartSeries}
+          loading={loading}
+          fillOpacity={0.16}
+          decorate={nothingYet}
+          onActive={scrub.onActive}
+        />
+        {spanDays >= 1 && (
+          <span className="absolute right-0 bottom-2 z-10 font-mono text-muted-foreground text-xs tracking-wide">
+            {spanDays}D
+          </span>
+        )}
+      </div>
     </div>
   );
 }

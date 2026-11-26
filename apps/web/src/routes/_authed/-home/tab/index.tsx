@@ -50,7 +50,7 @@ export function TabStripIsland() {
   }, [activeValue]);
 
   return (
-    <div className="flex items-center gap-4">
+    <div className="group/tabs flex items-center gap-4">
       {/* Perspective and pin tabs share one beUI Tabs (transparent track, shared sliding pill); the +
           button sits beside it. The strip scrolls horizontally with the scrollbar hidden; the total
           stays fixed outside it. Pin panels aren't clipped: they render through a Portal (see PinPanel). */}
