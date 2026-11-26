@@ -14,14 +14,14 @@ const SETTINGS_SECTIONS = ["c1", "c2", "c3", "c4", "c5", "c6", "c7"];
 // the real overview at 390px; changing them changes the cold-start first frame.
 export function OverviewSkeleton() {
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-12">
       <div className="min-h-60 pt-1">
         <Skeleton className="h-4 w-28" />
         <div className="mt-2 flex h-13 items-start gap-3">
           <Skeleton className="h-10 w-56" />
           <Skeleton className="h-9 w-24 rounded-full" />
         </div>
-        <div className="mt-6 flex flex-wrap gap-8">
+        <div className="mt-8 flex flex-wrap gap-12">
           {STAT_SLOTS.map((k) => (
             <div key={k}>
               <Skeleton className="h-4 w-16" />
@@ -31,7 +31,7 @@ export function OverviewSkeleton() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-6">
         <div className="flex items-center gap-4">
           <Skeleton className="h-8 w-56 rounded-full" />
           <Skeleton className="ml-auto h-4 w-24" />
@@ -60,10 +60,9 @@ export function OverviewSkeleton() {
 export function AccountsSkeleton() {
   return (
     <div className="flex flex-col gap-6">
-      <Skeleton className="h-8 w-40" />
       <div className="flex flex-col">
         {ACCOUNT_ROWS.map((k) => (
-          <div key={k} className="flex items-center justify-between gap-4 px-3 py-3">
+          <div key={k} className="flex items-center justify-between gap-4 px-4 py-6">
             <div className="flex flex-col gap-2">
               <Skeleton className="h-4 w-32" />
               <Skeleton className="h-3 w-20" />

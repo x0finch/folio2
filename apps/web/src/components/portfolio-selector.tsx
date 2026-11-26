@@ -60,7 +60,7 @@ export function PortfolioSelector() {
                 <button key={p.id} type="button" className={rowClass} onClick={() => select(p.id)}>
                   <span className="flex min-w-0 items-center gap-2">
                     <Check
-                      className={cn(" shrink-0", p.id === selectedId ? "opacity-100" : "opacity-0")}
+                      className={cn("shrink-0", p.id === selectedId ? "opacity-100" : "opacity-0")}
                     />
                     <span className="min-w-0 flex-1 truncate">{p.name}</span>
                   </span>

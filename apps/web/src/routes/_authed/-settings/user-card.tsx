@@ -85,7 +85,7 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
             disabled={checking}
             onClick={onCheckUpdate}
           >
-            <RefreshCw className={cn("", checking && "animate-spin")} />
+            <RefreshCw className={cn(checking && "animate-spin")} />
           </IconButton>
         </div>
       </SettingRow>

@@ -55,9 +55,7 @@ const StatusSegment = forwardRef<HTMLButtonElement, StatusSegmentProps>(function
     >
       <span className={cn("size-2 shrink-0 rounded-full", dotClass)} />
       <span className="text-muted-foreground">{label}</span>
-      {showRefresh && (
-        <RefreshCw className={cn(" text-muted-foreground", busy && "animate-spin")} />
-      )}
+      {showRefresh && <RefreshCw className={cn("text-muted-foreground", busy && "animate-spin")} />}
     </button>
   );
 });

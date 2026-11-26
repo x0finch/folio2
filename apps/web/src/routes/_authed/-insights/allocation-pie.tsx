@@ -23,6 +23,7 @@ const HIDDEN_VALUE = "•••";
 
 export function AllocationPie({ slices }: { slices: AllocSlice[] }) {
   const t = useTranslations("Insights");
+  const to = useTranslations("Overview");
   const { currency, rate } = usePreferCurrency();
   const locale = useLocale();
   const { hidden } = useBalancePrivacy();
@@ -45,7 +46,8 @@ export function AllocationPie({ slices }: { slices: AllocSlice[] }) {
     <DonutChart segments={segments} formatValue={hidden ? () => HIDDEN_VALUE : usd}>
       <div className="grid items-center gap-12 sm:grid-cols-[minmax(0,16rem)_1fr]">
         <DonutChartPlot>
-          <DonutChartCenter />
+          {/* beUI's own caption is English only. */}
+          <DonutChartCenter totalLabel={to("totalValue")} />
         </DonutChartPlot>
         <DonutChartLegend
           renderValue={(segment) => (

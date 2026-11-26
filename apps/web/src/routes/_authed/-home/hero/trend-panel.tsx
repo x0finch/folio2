@@ -1,13 +1,15 @@
 import { Sparkline, useHoverCapable, XYInspector } from "@folio/ui";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import type { HistoryPoint } from "@/lib/core/history";
+import { useBalancePrivacy } from "@/lib/hooks/use-balance-privacy";
 import { useDisplayValue } from "@/lib/hooks/use-display-value";
 
 // The band the curve occupies at the bottom of its backdrop container, in px.
 const TREND_HEIGHT = 128;
 // Sparkline insets its line by this much on each side; the scrub cursor has to match it.
 const SPARKLINE_PAD_PX = 3;
+const HIDDEN_VALUE = "•••";
 
 // Empty state when the curve can't be drawn. A flat line would claim "unchanged" when there is
 // only one observation (same rule as 24h PnL showing `—`, not 0); blank space reads as broken. A
@@ -35,9 +37,18 @@ function ValueTrend({
   const t = useTranslations("Overview");
   const format = useFormatter();
   const usd = useDisplayValue();
+  const { hidden } = useBalancePrivacy();
+  // The accessible name and the slider's value text carry amounts too.
+  const readout = (value: number) => (hidden ? HIDDEN_VALUE : usd(value));
   const canHover = useHoverCapable();
   const [index, setIndex] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
+  // The inspector opens on focus, and a sheet moves focus to its first control when it opens:
+  // without a pointer or key on the chart itself that would open the sheet mid-scrub.
+  const engaged = useRef(false);
+  const engage = () => {
+    engaged.current = true;
+  };
   // A sample inspected before the window changed may no longer exist.
   const active = open && index !== null && index < series.length ? index : null;
   const point = active === null ? null : series[active];
@@ -52,13 +63,21 @@ function ValueTrend({
     format.dateTime(new Date(p.t), { month: "short", day: "numeric" });
   return (
     // touch-pan-y: vertical swipes still scroll the page, horizontal ones go to the chart.
-    <div className="absolute inset-x-0 bottom-0 touch-pan-y" style={{ height: TREND_HEIGHT }}>
+    <div
+      className="absolute inset-x-0 bottom-0 touch-pan-y"
+      style={{ height: TREND_HEIGHT }}
+      onPointerEnter={engage}
+      onPointerMoveCapture={engage}
+      onPointerDownCapture={engage}
+      onKeyDownCapture={engage}
+    >
       <Sparkline
         label={label}
         data={series.map((p) => p.total)}
         variant="area"
         color="var(--chart-1)"
         height={TREND_HEIGHT}
+        formatValue={readout}
       />
       {active !== null && (
         <span
@@ -75,10 +94,10 @@ function ValueTrend({
           activeIndex={active ?? -1}
           onActive={setIndex}
           label={label}
-          valueText={(i) => `${when(series[i])}: ${usd(series[i].total)}`}
+          valueText={(i) => `${when(series[i])}: ${readout(series[i].total)}`}
           mode="point"
           open={open}
-          setOpen={setOpen}
+          setOpen={(next) => setOpen(next && engaged.current)}
           canHover={canHover}
           className="inset-0 size-full"
         />

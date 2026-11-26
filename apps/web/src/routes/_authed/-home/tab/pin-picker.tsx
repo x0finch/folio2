@@ -76,7 +76,7 @@ function PickerSection({
                 name={o.label}
                 className="min-w-0 flex-1"
               />
-              <Check className={cn(" shrink-0", activeId === o.id ? "opacity-100" : "opacity-0")} />
+              <Check className={cn("shrink-0", activeId === o.id ? "opacity-100" : "opacity-0")} />
             </span>
           </button>
         ))}

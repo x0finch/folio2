@@ -54,9 +54,12 @@ export type Icon = (props: IconProps) => React.JSX.Element;
 
 const boxed = (Glyph: Glyph): Icon =>
   function BoxedIcon({ className, size: _size, strokeWidth: _strokeWidth, ...rest }: IconProps) {
+    // Decorative unless the caller names it: a hidden element's label is never announced.
+    const labelled = rest["aria-label"] != null;
     return (
       <span
-        aria-hidden="true"
+        role={labelled ? "img" : undefined}
+        aria-hidden={labelled ? undefined : true}
         className={cn("inline-flex size-6 shrink-0 items-center justify-center", className)}
         {...rest}
       >

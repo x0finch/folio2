@@ -92,24 +92,21 @@ const ROWS_4 = ["r1", "r2", "r3", "r4"];
 
 function ListSkeleton() {
   return (
-    <>
-      <Skeleton className="h-8 w-40" />
-      <div className="flex flex-col">
-        {ROWS_4.map((k) => (
-          <div key={k} className="flex items-center justify-between gap-4 px-3 py-3">
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-3 w-20" />
-              <span className="min-h-6" />
-            </div>
-            <div className="flex flex-col items-end gap-1">
-              <Skeleton className="h-4 w-20" />
-              <GainSkeleton />
-            </div>
+    <div className="flex flex-col">
+      {ROWS_4.map((k) => (
+        <div key={k} className="flex items-center justify-between gap-4 px-4 py-6">
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-20" />
+            <span className="min-h-6" />
           </div>
-        ))}
-      </div>
-    </>
+          <div className="flex flex-col items-end gap-1">
+            <Skeleton className="h-4 w-20" />
+            <GainSkeleton />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

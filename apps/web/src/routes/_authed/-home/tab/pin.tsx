@@ -102,7 +102,7 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
               close();
             }}
           />
-          {/* Divider separating unpin from the picker above (standalone line, not on a rounded-md button). */}
+          {/* Divider separating unpin from the picker above (standalone line, not on a rounded button). */}
           <div className="border-border border-t" />
           <button
             type="button"
