@@ -1,13 +1,4 @@
-import {
-  Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  cn,
-  MorphingModal,
-  toast,
-} from "@folio/ui";
+import { Button, cn, MorphingModal, toast } from "@folio/ui";
 import { LogOut, RefreshCw } from "@folio/ui/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -20,6 +11,7 @@ import { checkForUpdate, showUpdateToast, UPDATE_TOAST_ID } from "@/lib/pwa/serv
 import { RUNNING_VERSION, stripBuildHash } from "@/lib/pwa/version";
 import { forgetQueryCache } from "@/lib/queries/persist";
 import { SettingRow } from "./setting-row";
+import { SettingsSection } from "./settings-section";
 
 // Spin at least one turn so a fast check doesn't just flicker.
 const MIN_SPIN_MS = 700;
@@ -67,43 +59,36 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
   });
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("user")}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-foreground text-sm">
-              {id.initial}
-            </div>
-            <div className="min-w-0 leading-tight">
-              <div className="truncate font-medium text-sm">{id.primary}</div>
-              <div className="truncate text-muted-foreground text-sm">{secondary}</div>
-            </div>
+    <SettingsSection title={t("user")}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted font-semibold text-foreground text-sm">
+            {id.initial}
           </div>
-          <Button variant="outline" onClick={() => setConfirmOpen(true)}>
-            <LogOut />
-            {t("signOut")}
-          </Button>
+          <div className="min-w-0 leading-tight">
+            <div className="truncate font-medium text-sm">{id.primary}</div>
+            <div className="truncate text-muted-foreground text-sm">{secondary}</div>
+          </div>
         </div>
+        <Button variant="outline" onClick={() => setConfirmOpen(true)}>
+          <LogOut />
+          {t("signOut")}
+        </Button>
+      </div>
 
-        <div className="border-border border-t pt-4">
-          <SettingRow label={t("version")}>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-muted-foreground text-sm">{APP_VERSION}</span>
-              <IconButton
-                aria-label={t("checkUpdate")}
-                size="sm"
-                disabled={checking}
-                onClick={onCheckUpdate}
-              >
-                <RefreshCw className={cn("", checking && "animate-spin")} />
-              </IconButton>
-            </div>
-          </SettingRow>
+      <SettingRow label={t("version")}>
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-muted-foreground text-sm">{APP_VERSION}</span>
+          <IconButton
+            aria-label={t("checkUpdate")}
+            size="sm"
+            disabled={checking}
+            onClick={onCheckUpdate}
+          >
+            <RefreshCw className={cn("", checking && "animate-spin")} />
+          </IconButton>
         </div>
-      </CardContent>
+      </SettingRow>
 
       <MorphingModal viewId={confirmOpen ? "signout" : null} onClose={() => setConfirmOpen(false)}>
         <div className="text-left">
@@ -123,7 +108,7 @@ export function UserCard({ user }: { user: { name?: string | null; email?: strin
           </div>
         </div>
       </MorphingModal>
-    </Card>
+    </SettingsSection>
   );
 }
 

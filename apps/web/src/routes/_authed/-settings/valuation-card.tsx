@@ -1,9 +1,10 @@
-import { Card, CardContent, CardHeader, CardTitle, Checkbox, Label, Skeleton } from "@folio/ui";
+import { Checkbox, Label, Skeleton } from "@folio/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { valuationSettingsQuery } from "@/lib/queries/settings";
 import { updateValuationSettings } from "@/lib/server/settings";
+import { SettingsSection } from "./settings-section";
 
 const KEEP_TRYING = { retry: true as const };
 
@@ -22,25 +23,15 @@ export function ValuationCard() {
     mode == null ? (
       <Skeleton className="h-5 w-64" />
     ) : (
-      <>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            id="valuation-source-first"
-            checked={toggle.isPending ? toggle.variables : mode === "source-first"}
-            disabled={toggle.isPending}
-            onCheckedChange={(checked) => toggle.mutate(checked)}
-          />
-          <Label htmlFor="valuation-source-first">{t("useSourcePrice")}</Label>
-        </div>
-        <p className="text-sm text-muted-foreground">{t("valuationHint")}</p>
-      </>
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id="valuation-source-first"
+          checked={toggle.isPending ? toggle.variables : mode === "source-first"}
+          disabled={toggle.isPending}
+          onCheckedChange={(checked) => toggle.mutate(checked)}
+        />
+        <Label htmlFor="valuation-source-first">{t("useSourcePrice")}</Label>
+      </div>
     );
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("valuation")}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">{body}</CardContent>
-    </Card>
-  );
+  return <SettingsSection title={t("valuation")}>{body}</SettingsSection>;
 }

@@ -1,14 +1,4 @@
-import {
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  MorphingModal,
-  SharedLayoutBg,
-  toast,
-} from "@folio/ui";
+import { Badge, Button, MorphingModal, SharedLayoutBg, toast } from "@folio/ui";
 import { Plus, Trash2 } from "@folio/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -17,6 +7,7 @@ import { EditableName } from "@/components/editable-name";
 import { IconButton } from "@/components/icon-button";
 import { authClient, signIn } from "@/lib/core/auth-client";
 import { useLockDevice } from "@/lib/hooks/use-lock-device";
+import { SettingsSection } from "@/routes/_authed/-settings/settings-section";
 import { errorCode, type PasskeyRow, SESSION_NOT_FRESH } from "./passkey";
 import { getAuthenticatorName, type PasskeyKind, passkeyKind } from "./passkey-authenticators";
 import { registerPasskey } from "./register-passkey";
@@ -111,20 +102,14 @@ export function PasskeysCard() {
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle>{t("passkeys")}</CardTitle>
-          {addButton}
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">{body}</CardContent>
+    <SettingsSection title={t("passkeys")} action={addButton}>
+      {body}
       <RemovePasskeyModal
         removing={removing}
         onCancel={() => setRemoving(null)}
         onConfirm={onRemove}
       />
-    </Card>
+    </SettingsSection>
   );
 }
 
@@ -169,7 +154,6 @@ function PasskeysSupported({
     ) : null;
   return (
     <>
-      <p className="text-muted-foreground text-sm">{t("passkeysHint")}</p>
       {list}
       {empty}
     </>

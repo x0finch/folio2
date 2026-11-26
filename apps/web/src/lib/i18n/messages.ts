@@ -216,8 +216,6 @@ const en = {
     perpLabelPlaceholder: "e.g. HL main",
     addPerpBtn: "Add perp account",
     importTitle: "Import data",
-    importHint:
-      "Restore from a folio-export.ndjson file. Accounts that need API keys will ask you to re-enter them.",
     importBtn: "Import file",
     imported: "Imported {accounts} account(s), {snapshots} snapshot(s).",
     credHint: "Recorded {field}: {hint}",
@@ -279,9 +277,6 @@ const en = {
       "Your library already has data. Importing merges the file in — re-importing the same file won't create duplicates, and different files are combined. Continue?",
     importMergeConfirm: "Import",
     autoLock: "Auto-lock",
-    autoLockDesc:
-      "Blur your holdings after you step away — pick how many minutes of inactivity before it locks.",
-    autoLockUnlock: "Unlock in a tap with your passkey.",
     autoLockAfter: "Idle",
     autoLockEnabled: "Auto-lock is on for this device.",
     autoLockEnableFailed: "Couldn't set up a passkey on this device.",
@@ -302,7 +297,6 @@ const en = {
     configured: "Configured",
     notConfigured: "Not configured",
     passkeys: "Passkeys",
-    passkeysHint: "Sign in with Face ID, Touch ID, or a security key.",
     passkeyUnsupported: "This browser doesn't support passkeys.",
     passkeysEmpty: "No passkeys yet.",
     addPasskey: "Add passkey",
@@ -324,12 +318,8 @@ const en = {
     passkeyKindCrossDevice: "Cross-device",
     data: "Data",
     export: "Export",
-    exportHint:
-      "Download all your data (accounts, snapshots) as a file. API keys/secrets are never included.",
     exportData: "Export data",
     valuation: "Valuation",
-    valuationHint:
-      "By default each holding keeps its provider's own value; turn this on to consistently use the market source price and recompute the current view. History stays frozen and no re-sync is needed.",
     useSourcePrice: "Use market source price for all holdings",
   },
   Portfolio: {
@@ -628,7 +618,6 @@ const zh: Messages = {
     perpLabelPlaceholder: "如:HL 主账户",
     addPerpBtn: "添加永续账户",
     importTitle: "导入数据",
-    importHint: "从 folio-export.ndjson 文件恢复。需要 API key 的账户会提示你重新填写。",
     importBtn: "导入文件",
     imported: "已导入 {accounts} 个账户、{snapshots} 条快照。",
     credHint: "记录的 {field}:{hint}",
@@ -689,8 +678,6 @@ const zh: Messages = {
       "你的库里已有数据。导入会把文件合并进来——同一文件再导一遍不会产生重复,不同文件会合并。继续?",
     importMergeConfirm: "导入",
     autoLock: "自动锁定",
-    autoLockDesc: "离开一会儿就遮住持仓 —— 选择闲置多少分钟后锁定。",
-    autoLockUnlock: "用 passkey 一刷即解锁。",
     autoLockAfter: "闲置",
     autoLockEnabled: "这台设备的自动锁定已开启。",
     autoLockEnableFailed: "没能在这台设备上建立 passkey。",
@@ -710,7 +697,6 @@ const zh: Messages = {
     configured: "已配置",
     notConfigured: "未配置",
     passkeys: "通行密钥 (Passkey)",
-    passkeysHint: "用 Face ID、Touch ID 或安全钥匙登录。",
     passkeyUnsupported: "当前浏览器不支持 passkey。",
     passkeysEmpty: "还没有 passkey。",
     addPasskey: "添加 passkey",
@@ -732,11 +718,8 @@ const zh: Messages = {
     passkeyKindCrossDevice: "跨设备",
     data: "数据",
     export: "导出",
-    exportHint: "把你的全部数据(账户、快照)导出为文件。API key/secret 绝不包含在内。",
     exportData: "导出数据",
     valuation: "估值",
-    valuationHint:
-      "默认每笔持仓沿用其 provider 自带的价值;打开后统一采用市场源价、重算当前视图。历史保持冻结,无需重新同步。",
     useSourcePrice: "所有持仓统一采用市场源价",
   },
   Portfolio: {
