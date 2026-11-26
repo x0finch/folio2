@@ -30,12 +30,12 @@ export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
       ...(spanMs > YEAR_MS ? { year: "2-digit" } : {}),
     });
   // Two points can still share a local day (a sampled min/max pair, or the live point just after
-  // a UTC-day close): those get their time too, or the later one would vanish from the chart.
+  // a UTC-day close), and the later one would vanish from the chart. The last point of a day keeps
+  // the plain label, so the axis ticks stay short; the earlier ones get their time.
   const dayLabels = series.map((p) => labelOf(p.t, spanMs < 2 * DAY_MS));
-  const labelCounts = new Map<string, number>();
-  for (const label of dayLabels) labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+  const lastOfDay = new Map(dayLabels.map((label, i) => [label, i]));
   const categories = series.map((p, i) =>
-    (labelCounts.get(dayLabels[i]) ?? 0) > 1 ? labelOf(p.t, true) : dayLabels[i],
+    lastOfDay.get(dayLabels[i]) === i ? dayLabels[i] : labelOf(p.t, true),
   );
 
   return (

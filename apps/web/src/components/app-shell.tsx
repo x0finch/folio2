@@ -198,10 +198,8 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
         </header>
 
         <main className={SHELL_MAIN}>
-          {/* Every box below is measured against the real Overview at 390px (the landing
-              page): eyebrow row 25, title 38, subtitle 20, content starts at 198, hero
-              240, tab row 32, list rows 72 each. Keep them in step — a box that drifts
-              here is a jump the moment the browser takes over. */}
+          {/* Every box below stands in for the real Overview at 390px (the landing page). Keep
+              them in step: a box that drifts here is a jump the moment the browser takes over. */}
           <Skeleton className="absolute top-6 right-4 h-9 w-40 rounded-full lg:right-8" />
           {/* Render the REAL <PageHeader> (hook-free, provider-free — the shell's
               zero-provider constraint holds) with skeleton bars in its slots: the real
@@ -209,7 +207,7 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
               inline-block matters: a block bar would collapse the h1's text line box. */}
           <PageHeader
             eyebrow={<SkeletonText className="h-6 w-20 rounded-full" />}
-            title={<SkeletonText className="h-8 w-44" />}
+            title={<SkeletonText className="h-5 w-44" />}
           />
           {/* The same skeleton the Overview page uses, so the swap is pixel-stable. */}
           <OverviewSkeleton />

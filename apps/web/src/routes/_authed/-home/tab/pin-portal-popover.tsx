@@ -216,6 +216,7 @@ export function PinPanel({
     <span
       ref={p.anchorRef as RefObject<HTMLSpanElement>}
       className="inline-flex"
+      data-open={p.open || undefined}
       onClick={p.onClick}
       {...p.hoverProps}
     >

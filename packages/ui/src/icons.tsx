@@ -48,7 +48,8 @@ const GLYPH_PX = 18;
 const STROKE_ON_GRID = 2;
 
 type Glyph = typeof CheckGlyph;
-// `size` / `strokeWidth` are accepted and ignored: vendored beUI parts pass them, the box is fixed.
+// `size` / `strokeWidth` are accepted and ignored: vendored beUI parts pass them; they size the box
+// through `className` instead.
 export type IconProps = ComponentProps<"span"> & { size?: number; strokeWidth?: number };
 export type Icon = (props: IconProps) => React.JSX.Element;
 
@@ -60,7 +61,11 @@ const boxed = (Glyph: Glyph): Icon =>
       <span
         role={labelled ? "img" : undefined}
         aria-hidden={labelled ? undefined : true}
-        className={cn("inline-flex size-6 shrink-0 items-center justify-center", className)}
+        // The glyph is 3/4 of the box, so a part that sizes the box smaller shrinks the glyph with it.
+        className={cn(
+          "inline-flex size-6 shrink-0 items-center justify-center [&>svg]:size-3/4",
+          className,
+        )}
         {...rest}
       >
         <Glyph size={GLYPH_PX} strokeWidth={STROKE_ON_GRID} />

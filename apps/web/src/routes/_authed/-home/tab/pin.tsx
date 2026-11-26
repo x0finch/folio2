@@ -125,9 +125,10 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
 
 // + button: opens the picker via PinPanel.
 // A secondary action: hidden until the pointer is over the tab strip or focus is inside it. Touch
-// has no hover, so it stays visible there.
+// has no hover, so it stays visible there. It also stays while its own panel is open: the panel
+// is portaled, so the pointer leaves the strip to reach it.
 const REVEAL_ON_INTENT =
-  "pointer-fine:opacity-0 pointer-fine:group-focus-within/tabs:opacity-100 pointer-fine:group-hover/tabs:opacity-100";
+  "pointer-fine:opacity-0 pointer-fine:group-focus-within/tabs:opacity-100 pointer-fine:group-hover/tabs:opacity-100 pointer-fine:group-has-[[data-open]]/tabs:opacity-100";
 
 export function AddPinButton() {
   const { selectedId } = usePortfolio();
