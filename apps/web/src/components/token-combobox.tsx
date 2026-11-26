@@ -1,7 +1,13 @@
 import { TOP_TOKENS_LIMIT } from "@folio/oracle-basic";
 import { cn, Input, LogoAvatar } from "@folio/ui";
+import {
+  ChevronDown as ChevronDownIcon,
+  CircleAlert as CircleAlertIcon,
+  Loader2 as Loader2Icon,
+  SearchX as SearchXIcon,
+  X as XIcon,
+} from "@folio/ui/icons";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDownIcon, CircleAlertIcon, Loader2Icon, SearchXIcon, XIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
@@ -44,7 +50,7 @@ function Highlighted({ text, query }: { text: string; query: string }) {
       {matchSegments(text, query).map((seg, i) =>
         seg.match ? (
           // biome-ignore lint/suspicious/noArrayIndexKey: positional segments, static per render
-          <span key={i} className="rounded-sm bg-accent text-accent-foreground">
+          <span key={i} className="rounded-md bg-accent text-accent-foreground">
             {seg.text}
           </span>
         ) : (
@@ -83,10 +89,10 @@ function TokenListRow({
   change24h?: number;
 }) {
   return (
-    <div className="flex w-full items-center gap-2.5">
+    <div className="flex w-full items-center gap-3">
       <LogoAvatar src={token.logo} fallback={token.symbol} size="sm" />
       <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium">
             {query ? <Highlighted text={token.name} query={query} /> : token.name}
           </span>
@@ -288,7 +294,7 @@ export function TokenCombobox({
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: keydown is delegated from the inner input/buttons; combobox role lives on the field
-    <div ref={rootRef} onKeyDown={onKeyDown} className="flex flex-col gap-1.5">
+    <div ref={rootRef} onKeyDown={onKeyDown} className="flex flex-col gap-2">
       {open ? (
         <Input
           autoFocus
@@ -303,7 +309,7 @@ export function TokenCombobox({
             setQuery("");
             setOpen(true);
           }}
-          className="flex h-11 w-full items-center gap-2 rounded-full border border-border bg-background px-3.5 text-sm outline-none transition-colors hover:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring/40"
+          className="flex h-11 w-full items-center gap-2 rounded-full border border-border bg-background px-4 text-sm outline-none transition-colors hover:border-foreground/40 focus-visible:ring-2 focus-visible:ring-ring/40"
         >
           {value ? (
             <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -316,14 +322,14 @@ export function TokenCombobox({
           )}
           {value ? (
             <XIcon
-              className="size-4 shrink-0 text-muted-foreground hover:text-foreground"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
               onClick={(e) => {
                 e.stopPropagation();
                 onChange(null);
               }}
             />
           ) : (
-            <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" />
+            <ChevronDownIcon className="shrink-0 text-muted-foreground" />
           )}
         </button>
       )}
@@ -343,14 +349,14 @@ export function TokenCombobox({
             >
               {isError ? (
                 <div className="flex flex-col items-center gap-2 px-3 py-6 text-center text-destructive text-sm">
-                  <CircleAlertIcon className="size-5" />
+                  <CircleAlertIcon />
                   {t("searchFailed")}
                 </div>
               ) : flatItems.length > 0 ? (
                 // data-index is the flat index so keyboard highlight spans sections.
                 rendered.map((section) => (
                   <div key={section.uid}>
-                    <div className="px-2.5 pt-2 pb-1 font-medium text-muted-foreground text-xs">
+                    <div className="px-3 pt-2 pb-1 font-medium text-muted-foreground text-xs">
                       {t(SECTION_LABEL[section.key])}
                     </div>
                     {section.rows.map(({ token, index }) => {
@@ -364,7 +370,7 @@ export function TokenCombobox({
                           onPointerMove={() => setActive(index)}
                           onClick={() => pick(token)}
                           className={cn(
-                            "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors",
+                            "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
                             index === active && "bg-muted",
                           )}
                         >
@@ -381,11 +387,11 @@ export function TokenCombobox({
                 ))
               ) : isLoading ? (
                 <div className="flex items-center justify-center px-3 py-6 text-muted-foreground">
-                  <Loader2Icon className="size-5 animate-spin" aria-label={t("searching")} />
+                  <Loader2Icon className="animate-spin" aria-label={t("searching")} />
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-2 px-3 py-6 text-center text-muted-foreground text-sm">
-                  <SearchXIcon className="size-5" />
+                  <SearchXIcon />
                   {t("noResults")}
                   {search && (
                     <button

@@ -20,7 +20,7 @@ interface PlatformBadge {
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <div className="flex items-center gap-2.5 px-3">
+    <div className="flex items-center gap-3 px-3">
       <span className="text-muted-foreground text-xs uppercase tracking-widest">{title}</span>
     </div>
   );
@@ -29,7 +29,7 @@ function SectionHeader({ title }: { title: string }) {
 // Neutral gray chip (e.g. `3x Long`); on row hover it switches to --background so it doesn't blend into the slider.
 function NeutralChip({ children }: { children: React.ReactNode }) {
   return (
-    <span className="shrink-0 rounded-full bg-muted px-1.5 py-px font-medium text-muted-foreground text-xs tabular-nums transition-colors group-hover:bg-background">
+    <span className="shrink-0 rounded-full bg-muted px-2 py-px font-medium text-muted-foreground text-xs tabular-nums transition-colors group-hover:bg-background">
       {children}
     </span>
   );
@@ -152,7 +152,7 @@ export function PerpPositionsList({ items }: { items: PerpSectionItem[] }) {
           {i > 0 && (
             <Separator className="mt-2 mb-5 h-0 border-border border-t border-dashed bg-transparent" />
           )}
-          <div className="flex items-center gap-2.5 px-3">
+          <div className="flex items-center gap-3 px-3">
             {it.platform && (
               <LogoAvatar size="sm" src={it.platform.logo} fallback={it.platform.name} />
             )}

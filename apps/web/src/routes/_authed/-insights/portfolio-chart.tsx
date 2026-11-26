@@ -1,76 +1,79 @@
-import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@folio/ui";
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { LineChart, LineChartPlot, LineChartTooltip } from "@folio/ui";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
 import { Sensitive } from "@/components/sensitive";
 import { formatMoney } from "@/lib/core/format-number";
 import type { HistoryPoint } from "@/lib/core/history";
+import { useBalancePrivacy } from "@/lib/hooks/use-balance-privacy";
 import { usePreferCurrency } from "@/lib/hooks/use-prefer-currency";
-import { CHART_FRAME } from "./chart-frame";
 
 const DAY_MS = 86_400_000;
+const YEAR_MS = 365 * DAY_MS;
+const HIDDEN_VALUE = "•••";
 
 export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
   const t = useTranslations("Overview");
   const format = useFormatter();
   const { currency, rate } = usePreferCurrency();
   const locale = useLocale();
-
-  const chartConfig = {
-    total: { label: t("portfolioValue"), color: "var(--chart-1)" },
-  } satisfies ChartConfig;
+  const { hidden } = useBalancePrivacy();
 
   const axisUsd = (n: number) => formatMoney(n, { rate, locale, currency, compact: true });
   const fullUsd = (n: number) => formatMoney(n, { rate, locale, currency });
-  const fullDateTime = (ms: number) =>
+
+  // The chart keys points by their label and drops a repeated one, so labels must be unique: add
+  // the time under two days and the year past one.
+  const spanMs = series.length > 1 ? series[series.length - 1].t - series[0].t : 0;
+  const labelOf = (ms: number, withTime: boolean) =>
     format.dateTime(new Date(ms), {
       month: "short",
       day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+      ...(withTime ? { hour: "2-digit", minute: "2-digit" } : {}),
+      ...(spanMs > YEAR_MS ? { year: "2-digit" } : {}),
     });
-
-  const spanMs = series.length > 1 ? series[series.length - 1].t - series[0].t : 0;
-  const axisX = (ms: number) =>
-    spanMs < 2 * DAY_MS
-      ? format.dateTime(new Date(ms), { hour: "2-digit", minute: "2-digit" })
-      : format.dateTime(new Date(ms), { month: "short", day: "numeric" });
+  // Two points can still share a local day (a sampled min/max pair, or the live point just after
+  // a UTC-day close), and the later one would vanish from the chart. The last point of a day keeps
+  // the plain label, so the axis ticks stay short; the earlier ones get their time.
+  const dayLabels = series.map((p) => labelOf(p.t, spanMs < 2 * DAY_MS));
+  const lastOfDay = new Map(dayLabels.map((label, i) => [label, i]));
+  const categories = series.map((p, i) =>
+    lastOfDay.get(dayLabels[i]) === i ? dayLabels[i] : labelOf(p.t, true),
+  );
 
   return (
-    <ChartContainer config={chartConfig} className={CHART_FRAME}>
-      <AreaChart data={series} margin={{ left: 12, right: 16, top: 8, bottom: 4 }}>
-        <CartesianGrid vertical={false} />
-        <XAxis
-          dataKey="t"
-          tickLine={false}
-          axisLine={false}
-          tickMargin={8}
-          minTickGap={32}
-          tickFormatter={axisX}
-        />
-        <YAxis
-          tickLine={false}
-          axisLine={false}
-          width={56}
-          tickMargin={4}
-          tickFormatter={axisUsd}
-        />
-        <ChartTooltip
-          content={
-            <ChartTooltipContent
-              labelFormatter={(_, payload) => fullDateTime(Number(payload?.[0]?.payload?.t))}
-              // Y-axis ticks are scale, not amounts, so only the tooltip value is hidden.
-              formatter={(value) => <Sensitive>{fullUsd(Number(value))}</Sensitive>}
-            />
-          }
-        />
-        <Area
-          dataKey="total"
-          type="monotone"
-          stroke="var(--color-total)"
-          fill="var(--color-total)"
-          fillOpacity={0.2}
-        />
-      </AreaChart>
-    </ChartContainer>
+    <LineChart
+      label={t("portfolioValue")}
+      variant="area"
+      categories={categories}
+      series={[
+        {
+          id: "total",
+          name: t("portfolioValue"),
+          color: "var(--chart-1)",
+          values: series.map((p) => p.total),
+        },
+      ]}
+      // Axis ticks are scale, not amounts, so only the readout is hidden.
+      formatValue={hidden ? () => HIDDEN_VALUE : fullUsd}
+      formatTick={axisUsd}
+    >
+      <LineChartPlot />
+      {/* `formatValue` covers what a screen reader hears; on screen the amount goes through
+          <Sensitive> like every other one. */}
+      <LineChartTooltip>
+        {hidden
+          ? ({ category, rows }) => (
+              <span className="block min-w-36">
+                <span className="mb-2 block font-medium text-xs">{category}</span>
+                {rows.map((row) => (
+                  <span key={row.id} className="flex items-center justify-between gap-4 text-xs">
+                    <span className="text-muted-foreground">{row.name}</span>
+                    {row.value !== null && <Sensitive>{fullUsd(row.value)}</Sensitive>}
+                  </span>
+                ))}
+              </span>
+            )
+          : undefined}
+      </LineChartTooltip>
+    </LineChart>
   );
 }

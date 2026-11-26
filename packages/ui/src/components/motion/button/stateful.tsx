@@ -1,7 +1,7 @@
 "use client";
 // beui.dev/components/motion/button — @/ 别名已改写为 @folio/ui/*。
 
-import { Check, Loader2, X } from "lucide-react";
+import { Check, Loader2, X } from "../../../icons";
 import {
   AnimatePresence,
   motion,

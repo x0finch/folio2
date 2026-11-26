@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 function SectionHeader({ title }: { title: string }) {
   return (
-    <div className="flex items-center gap-2.5 px-3">
+    <div className="flex items-center gap-3 px-3">
       <span className="text-muted-foreground text-xs uppercase tracking-widest">{title}</span>
     </div>
   );

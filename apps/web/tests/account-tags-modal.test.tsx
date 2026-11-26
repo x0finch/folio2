@@ -42,7 +42,6 @@ function mount(attachedTagIds: string[] = []) {
       <IntlProvider locale="en" messages={messages.en} timeZone="UTC" now={new Date(0)}>
         <AccountTagsModal
           accountId="a1"
-          accountLabel="my wallet"
           portfolioId="p1"
           portfolioTags={TAGS}
           attachedTagIds={attachedTagIds}

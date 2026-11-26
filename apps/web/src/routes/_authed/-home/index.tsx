@@ -26,7 +26,7 @@ export function Overview() {
       {/* HeaderSync stays outside the entrance container: it is absolute against `<main>` and a
           transformed wrapper would shift it (see StaggerReveal). Opt-in auto-sync when data is stale. */}
       <HeaderSync autoSyncWhenStale />
-      <StaggerReveal className="flex flex-col gap-6">
+      <StaggerReveal className="flex flex-col gap-12">
         <QueryBoundary
           resetKey={`hero:${snapshotsKey}`}
           pending={<HeroSkeleton />}
@@ -34,7 +34,7 @@ export function Overview() {
         >
           <HeroIsland />
         </QueryBoundary>
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-6">
           <QueryBoundary
             resetKey={`tabs:${tabsKey}`}
             pending={<TabStripSkeleton />}
@@ -101,7 +101,7 @@ function HoldingsSkeleton() {
       {ROWS_5.map((k) => (
         <div key={k} className="flex items-center gap-3 px-3 py-3">
           <Skeleton className="size-8 shrink-0 rounded-full" />
-          <div className="flex flex-1 flex-col gap-1.5">
+          <div className="flex flex-1 flex-col gap-2">
             <Skeleton className="h-4 w-24" />
             <Skeleton className="h-3 w-16" />
           </div>

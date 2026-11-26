@@ -1,5 +1,5 @@
 import { cn, SharedLayoutBg } from "@folio/ui";
-import { Check, CornerDownLeft, ListChecks, Settings2, Trash2, X } from "lucide-react";
+import { Check, CornerDownLeft, ListChecks, Settings2, Trash2, X } from "@folio/ui/icons";
 import { type KeyboardEvent, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 
@@ -16,7 +16,6 @@ interface TagInputItem {
 const stripHash = (raw: string) => raw.trim().replace(/^#+/, "").trim();
 
 export interface TagInputProps {
-  subtitle?: string;
   items: TagInputItem[];
   onToggle: (tagId: string, next: boolean) => void;
   onCreate: (name: string) => void;
@@ -24,14 +23,7 @@ export interface TagInputProps {
   onDelete: (tagId: string) => void;
 }
 
-export function TagInput({
-  subtitle,
-  items,
-  onToggle,
-  onCreate,
-  onRename,
-  onDelete,
-}: TagInputProps) {
+export function TagInput({ items, onToggle, onCreate, onRename, onDelete }: TagInputProps) {
   const t = useTranslations("Tags");
   const tc = useTranslations("Common");
   const [draft, setDraft] = useState("");
@@ -73,10 +65,7 @@ export function TagInput({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="font-medium text-base text-foreground">{t("title")}</div>
-          {subtitle && <div className="mt-0.5 text-muted-foreground text-sm">{subtitle}</div>}
-        </div>
+        <div className="font-semibold text-foreground text-lg">{t("title")}</div>
         <button
           type="button"
           onClick={() => {
@@ -84,9 +73,9 @@ export function TagInput({
             setConfirmingId(null);
             setDraft("");
           }}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-muted-foreground text-sm transition-colors hover:bg-muted hover:text-foreground"
+          className="flex items-center gap-2 rounded-md px-2 py-1 text-muted-foreground text-sm transition-colors hover:bg-muted hover:text-foreground"
         >
-          {manage ? <ListChecks className="size-3.5" /> : <Settings2 className="size-3.5" />}
+          {manage ? <ListChecks /> : <Settings2 />}
           {manage ? t("done") : t("manage")}
         </button>
       </div>
@@ -113,7 +102,7 @@ export function TagInput({
               // max-w-full + inner truncate: long names must ellipsize instead of breaking the flex-wrap
               // container (truncate has no effect on this flex wrapper).
               className={cn(
-                "flex max-w-full items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors",
+                "flex max-w-full items-center gap-2 rounded-full px-3 py-2 text-sm transition-colors",
                 item.attached
                   ? "border border-foreground text-foreground"
                   : "border border-border text-muted-foreground hover:text-foreground",
@@ -125,7 +114,7 @@ export function TagInput({
 
           <span
             className={cn(
-              "inline-flex flex-1 items-center gap-1.5 rounded-full px-3 py-1.5",
+              "inline-flex flex-1 items-center gap-2 rounded-full px-3 py-2",
               typing ? "border border-muted-foreground/40 border-dashed" : "",
             )}
             style={{ minWidth: "7rem" }}
@@ -152,14 +141,12 @@ export function TagInput({
                 }}
                 className="flex shrink-0 text-muted-foreground transition-colors hover:text-foreground"
               >
-                <CornerDownLeft className="size-4" />
+                <CornerDownLeft />
               </button>
             )}
           </span>
         </div>
       )}
-
-      <p className="text-muted-foreground text-xs">{manage ? t("manageHint") : t("hint")}</p>
     </div>
   );
 }
@@ -184,7 +171,7 @@ function ManageList({
   // SharedLayoutBg wraps each child in a block <div z-10>, so the flex row lives in the inner element,
   // otherwise the input and delete button split onto two lines.
   return (
-    <SharedLayoutBg className="min-h-24 gap-0.5" inset={8}>
+    <SharedLayoutBg className="min-h-24 gap-1" inset={8}>
       {items.map((item) => (
         <div key={item.id}>
           {confirmingId === item.id ? (
@@ -203,9 +190,9 @@ function ManageList({
                 type="button"
                 aria-label={tc("cancel")}
                 onClick={() => setConfirmingId(null)}
-                className="flex shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="flex shrink-0 rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
-                <X className="size-4" />
+                <X />
               </button>
               <button
                 type="button"
@@ -214,13 +201,13 @@ function ManageList({
                   onDelete(item.id);
                   setConfirmingId(null);
                 }}
-                className="flex shrink-0 rounded-md p-1.5 text-destructive transition-colors hover:bg-destructive/10"
+                className="flex shrink-0 rounded-md p-2 text-destructive transition-colors hover:bg-destructive/10"
               >
-                <Check className="size-4" />
+                <Check />
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2.5 px-2 py-1">
+            <div className="flex items-center gap-3 px-2 py-1">
               {/* Same fixed `#` lead-in as the input. */}
               <span aria-hidden className="pl-2 text-muted-foreground text-sm">
                 #
@@ -237,16 +224,16 @@ function ManageList({
                   if (e.nativeEvent.isComposing) return;
                   if (e.key === "Enter") e.currentTarget.blur();
                 }}
-                className="-ml-1.5 h-8 flex-1 rounded-md bg-transparent px-1 text-foreground text-sm outline-none focus:bg-muted"
+                className="-ml-2 h-8 flex-1 rounded-md bg-transparent px-1 text-foreground text-sm outline-none focus:bg-muted"
               />
               <button
                 type="button"
                 aria-label={`${tc("delete")} ${item.name}`}
                 disabled={item.pending}
                 onClick={() => setConfirmingId(item.id)}
-                className="flex shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:text-destructive"
+                className="flex shrink-0 rounded-md p-2 text-muted-foreground transition-colors hover:text-destructive"
               >
-                <Trash2 className="size-4" />
+                <Trash2 />
               </button>
             </div>
           )}

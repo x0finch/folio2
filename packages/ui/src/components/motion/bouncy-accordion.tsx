@@ -1,7 +1,7 @@
 "use client";
 // beui.dev/components/motion/bouncy-accordion — @/ 别名已改写为 @folio/ui/*。
 
-import { ChevronDown } from "lucide-react";
+import { ChevronDown } from "../../icons";
 import {
   motion,
   type Transition,

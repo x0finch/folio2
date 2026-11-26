@@ -4,16 +4,16 @@ import {
   CircleAlert,
   CircleCheck,
   CircleHelp,
+  type Icon,
   Info,
-  type LucideIcon,
   TriangleAlert,
-} from "lucide-react";
+} from "@folio/ui/icons";
 
 // Renders one Note (status icon + title + content). content: string is plain text, NoteRow[] a row
 // list (a row with href links out). Numbers go through the injected formatNumber; row keys are indexes (read-only list).
 
-// Neutral status names -> lucide icons (lucide renamed AlertTriangle/AlertCircle to TriangleAlert/CircleAlert).
-const NOTE_ICON_MAP: Record<string, LucideIcon> = {
+// Neutral status names -> icons.
+const NOTE_ICON_MAP: Record<string, Icon> = {
   info: Info,
   success: CircleCheck,
   warning: TriangleAlert,
@@ -23,7 +23,7 @@ const NOTE_ICON_MAP: Record<string, LucideIcon> = {
 
 // warning amber, error destructive token; others inherit muted-foreground.
 const NOTE_ICON_CLASS: Record<string, string> = {
-  warning: "text-amber-500",
+  warning: "text-warn",
   error: "text-destructive",
 };
 
@@ -39,8 +39,8 @@ export interface NoteViewProps {
 // Status icon with color; `className` overrides the size (default h-4; the inline indicator uses h-3).
 export function NoteIconGlyph({ icon, className }: { icon?: Note["icon"]; className?: string }) {
   const key = icon ?? "info";
-  const Icon = NOTE_ICON_MAP[key] ?? NOTE_ICON_MAP.info;
-  return <Icon className={cn("h-4 w-4 shrink-0", NOTE_ICON_CLASS[key], className)} />;
+  const Glyph = NOTE_ICON_MAP[key] ?? NOTE_ICON_MAP.info;
+  return <Glyph className={cn("h-4 w-4 shrink-0", NOTE_ICON_CLASS[key], className)} />;
 }
 
 function RowLine({ row, formatNumber }: { row: NoteRow; formatNumber: (n: number) => string }) {
@@ -98,7 +98,7 @@ export function NoteView({ note, formatNumber, hideHeader, className }: NoteView
     // cards/buttons that the base layer makes non-selectable.
     <div className={cn("flex select-text flex-col gap-2", className)}>
       {!hideHeader && (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <NoteIconGlyph icon={note.icon} />
           <span className="text-base font-medium text-foreground">{note.title}</span>
         </div>

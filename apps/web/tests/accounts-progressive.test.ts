@@ -18,8 +18,8 @@ function stripComments(source: string): string {
 describe("skeleton matches real content", () => {
   it("list skeleton matches the real row padding", () => {
     const page = src("routes/_authed/-accounts/index.tsx");
-    expect(page).toContain("px-3 py-3");
-    expect(page).toMatch(/function ListSkeleton[\s\S]*px-3 py-3/);
+    expect(page).toMatch(/function ListSkeleton[\s\S]*px-4 py-6/);
+    expect(page).toMatch(/function AccountRowContent[\s\S]*px-4 py-6/);
   });
 
   it("values not loaded → skeleton, not 0 and not a dash", () => {

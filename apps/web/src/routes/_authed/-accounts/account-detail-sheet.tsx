@@ -12,7 +12,6 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
@@ -21,7 +20,8 @@ import {
   RefreshCw,
   Tag as TagIcon,
   Trash2,
-} from "lucide-react";
+} from "@folio/ui/icons";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AccountTagsModal } from "@/components/account-tags-modal";
@@ -114,7 +114,7 @@ export function AccountDetailSheet({
 const SEALED_DATE = { year: "2-digit", month: "short", day: "numeric" } as const;
 
 const menuItemClass =
-  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted disabled:opacity-50";
+  "flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted disabled:opacity-50";
 
 function DetailBody({
   account,
@@ -206,61 +206,56 @@ function DetailBody({
     <>
       {/* Header: chart backdrop, window switch bottom-right, ⋯ menu top-right, text over it. Fixed
           min-h-44 so the async chart doesn't resize the list. */}
-      <div className="relative">
-        <div className="relative min-h-44">
-          <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
-
-          <div className="absolute right-0 bottom-0 z-10">
-            <RangeTabs value={range} onChange={setRange} />
-          </div>
-
-          <div className="relative flex flex-col gap-1.5">
-            {/* Inline rename via EditableName; pr-10 leaves room for the ⋯ button. */}
-            <EditableName
-              value={account.label}
-              editing={renaming}
-              onEditingChange={setRenaming}
-              onSave={async (name) => {
-                await writes.renameMut.mutateAsync(name);
-              }}
-              displayClassName="font-semibold text-lg"
-              className="pr-10"
-            >
-              <ConnectorBadge connectorId={account.connectorId} />
-              {archived && (
-                <span className="rounded-sm bg-muted px-1.5 py-0.5 text-muted-foreground text-xs">
-                  {t("archivedBadge")}
-                </span>
-              )}
-              {/* Tags sit beside the connector badge, display-only; editing is in the ⋯ menu. */}
-              <TagBadges tags={account.tags} />
-            </EditableName>
-            <div>
-              <SheetHeaderValue
-                valuesReady={account.valuesReady}
-                totalUsd={account.totalUsd}
-                hasDayChange={hasDayChange}
-                gainPending={gainPending}
-                dayChange={dayChange}
-                scrubbed={scrub.point}
-                scrubLabel={scrub.label}
-              />
-            </div>
-            {account.needsCredentials && (
-              <div className="flex items-center gap-1.5 text-warn text-xs">
-                <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
-                <button
-                  type="button"
-                  onClick={onComplete}
-                  className="rounded-sm underline-offset-2 outline-none transition-colors hover:underline focus-visible:ring-1 focus-visible:ring-warn"
-                >
-                  {t("completePrompt")}
-                </button>
-              </div>
-            )}
-          </div>
+      <div className="relative min-h-44">
+        <TrendPanel series={series} loading={historyQuery.isPending} onActive={scrub.onActive} />
+        <div className="absolute right-0 bottom-0 z-10">
+          <RangeTabs value={range} onChange={setRange} />
         </div>
-
+        <div className="relative flex flex-col gap-2">
+          {/* Inline rename via EditableName; pr-10 leaves room for the ⋯ button. */}
+          <EditableName
+            value={account.label}
+            editing={renaming}
+            onEditingChange={setRenaming}
+            onSave={async (name) => {
+              await writes.renameMut.mutateAsync(name);
+            }}
+            displayClassName="font-semibold text-lg"
+            className="pr-10"
+          >
+            <ConnectorBadge connectorId={account.connectorId} />
+            {archived && (
+              <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground text-xs">
+                {t("archivedBadge")}
+              </span>
+            )}
+            {/* Tags sit beside the connector badge, display-only; editing is in the ⋯ menu. */}
+            <TagBadges tags={account.tags} />
+          </EditableName>
+          <div>
+            <SheetHeaderValue
+              valuesReady={account.valuesReady}
+              totalUsd={account.totalUsd}
+              hasDayChange={hasDayChange}
+              gainPending={gainPending}
+              dayChange={dayChange}
+              scrubbed={scrub.point}
+              scrubLabel={scrub.label}
+            />
+          </div>
+          {account.needsCredentials && (
+            <div className="flex items-center gap-2 text-warn text-xs">
+              <AlertTriangle className="shrink-0" aria-hidden />
+              <button
+                type="button"
+                onClick={onComplete}
+                className="rounded-md underline-offset-2 outline-none transition-colors hover:underline focus-visible:ring-1 focus-visible:ring-warn"
+              >
+                {t("completePrompt")}
+              </button>
+            </div>
+          )}
+        </div>
         <SheetOverflowMenu
           connectorId={account.connectorId}
           archived={archived}
@@ -274,7 +269,7 @@ function DetailBody({
         />
       </div>
 
-      <p className="mt-2 text-muted-foreground/30 text-xs">
+      <p className="mt-2 min-w-0 truncate text-muted-foreground text-xs">
         {account.valuesReady &&
           !archived &&
           sharePct > 0 &&
@@ -306,7 +301,6 @@ function DetailBody({
 
       <AccountTagsModal
         accountId={account.id}
-        accountLabel={account.label}
         portfolioId={account.portfolioId}
         portfolioTags={portfolioTags}
         attachedTagIds={attachedTagIds}
@@ -402,11 +396,11 @@ function SheetOverflowMenu({
       >
         <PopoverTrigger>
           <IconButton ref={menuPop.measureRef} aria-label={t("moreActions")}>
-            <MoreVertical className="size-4" />
+            <MoreVertical />
           </IconButton>
         </PopoverTrigger>
         <PopoverContent>
-          <div className="flex w-40 flex-col gap-0.5">
+          <div className="flex w-40 flex-col gap-1">
             {!isManual(connectorId) && (
               <button
                 type="button"
@@ -414,7 +408,7 @@ function SheetOverflowMenu({
                 disabled={archived || syncPending}
                 onClick={onSync}
               >
-                <RefreshCw className="size-4 shrink-0" />
+                <RefreshCw className="shrink-0" />
                 {t("syncThis")}
               </button>
             )}
@@ -424,15 +418,15 @@ function SheetOverflowMenu({
               disabled={archivePending}
               onClick={onArchive}
             >
-              <Archive className="size-4 shrink-0" />
+              <Archive className="shrink-0" />
               {archived ? t("unarchive") : t("archive")}
             </button>
             <button type="button" className={menuItemClass} onClick={onTags}>
-              <TagIcon className="size-4 shrink-0" />
+              <TagIcon className="shrink-0" />
               {tt("menuAction")}
             </button>
             <button type="button" className={menuItemClass} onClick={onMove}>
-              <FolderInput className="size-4 shrink-0" />
+              <FolderInput className="shrink-0" />
               {tp("moveTo")}
             </button>
             <button
@@ -440,7 +434,7 @@ function SheetOverflowMenu({
               className={cn(menuItemClass, "text-destructive hover:text-destructive")}
               onClick={onDelete}
             >
-              <Trash2 className="size-4 shrink-0" />
+              <Trash2 className="shrink-0" />
               {tc("delete")}
             </button>
           </div>

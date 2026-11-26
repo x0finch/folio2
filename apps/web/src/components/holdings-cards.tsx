@@ -32,7 +32,7 @@ function SpotCards({ rows, gainPending }: { rows: SpotRow[]; gainPending: boolea
     <SharedLayoutBg inset={0} pillClassName="rounded-xl bg-muted">
       {sorted.map((b) => (
         // Lift the row above siblings while its note popover is open (else the next row's z-10 content covers it).
-        <div key={b.id} className="rounded-xl px-3 py-2.5 has-[[data-state=open]]:z-20">
+        <div key={b.id} className="rounded-xl px-3 py-3 has-[[data-state=open]]:z-20">
           <TokenRowContent
             item={{
               logo: b.logo,

@@ -1,6 +1,6 @@
 import type { Currency } from "@folio/oracle-basic";
 import { SUPPORTED_CURRENCIES } from "@folio/oracle-basic";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { IntlProvider } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -55,19 +55,12 @@ function wrap(
   return render(tree);
 }
 
-function openTooltip(container: HTMLElement) {
-  const surface = container.querySelector(".recharts-surface") as SVGElement;
-  act(() => {
-    surface.focus();
-  });
-  fireEvent.keyDown(surface, { key: "ArrowRight" });
-}
-
 const series = (points: [number, number][]): HistoryPoint[] =>
   points.map(([t, total]) => ({ t, total }));
 
+// The chart's values are also rendered as a table for screen readers; it shows what the readout shows.
 describe("PortfolioChart: currency and privacy", () => {
-  it("amounts convert to the preferred currency (axis and tooltip alike)", () => {
+  it("amounts convert to the preferred currency", () => {
     const { container } = wrap(
       <PortfolioChart
         series={series([
@@ -77,13 +70,12 @@ describe("PortfolioChart: currency and privacy", () => {
       />,
       { currency: { currency: EUR, rate: 0.5 } },
     );
-    openTooltip(container);
-    const text = container.textContent ?? "";
+    const text = container.querySelector("table")?.textContent ?? "";
     expect(text).toContain("€26,200.00");
     expect(text).not.toContain("$");
   });
 
-  it("privacy on: net value in the tooltip masked, axis ticks unchanged (that is the chart scale)", () => {
+  it("privacy on: values are withheld, not just blurred", () => {
     const { container } = wrap(
       <PortfolioChart
         series={series([
@@ -93,11 +85,9 @@ describe("PortfolioChart: currency and privacy", () => {
       />,
       { hide: true },
     );
-    openTooltip(container);
-    const masked = screen.getByRole("button", { name: /balance hidden/i });
-    expect(masked.textContent).toContain("$13,100.00");
-    expect(container.textContent).toContain("$14.00K");
-    expect(screen.getAllByRole("button", { name: /balance hidden/i })).toHaveLength(1);
+    const text = container.textContent ?? "";
+    expect(text).not.toContain("13,100");
+    expect(container.querySelector("table")?.textContent).toContain("•••");
   });
 });
 
@@ -124,9 +114,10 @@ describe("AllocationPie: legend", () => {
     expect(legendRows(container)).toEqual(["BTC67%$666.00", "ETH23%$234.00", "Others10%$100.00"]);
   });
 
-  it("total 0: share reads 0%, no NaN", () => {
+  it("total 0: the no-data hint, no NaN", () => {
     const { container } = wrap(<AllocationPie slices={[{ key: "x", label: "X", value: 0 }]} />);
-    expect(legendRows(container)).toEqual(["X0%$0.00"]);
+    expect(screen.getByText("No data yet.")).toBeTruthy();
+    expect(container.textContent).not.toContain("NaN");
   });
 
   it("amounts convert to the preferred currency", () => {
@@ -139,7 +130,7 @@ describe("AllocationPie: legend", () => {
     expect(legendRows(container)).toEqual(["BTC100%€100.00"]);
   });
 
-  it("privacy on: each slice amount masked, share kept", () => {
+  it("privacy on: the centre total and each slice amount masked, share kept", () => {
     wrap(
       <AllocationPie
         slices={[
@@ -150,7 +141,7 @@ describe("AllocationPie: legend", () => {
       { hide: true },
     );
     const masked = screen.getAllByRole("button", { name: /balance hidden/i });
-    expect(masked.map((m) => m.textContent)).toEqual(["$75.00", "$25.00"]);
+    expect(masked.map((m) => m.textContent)).toEqual(["$100.00", "$75.00", "$25.00"]);
     expect(screen.getByText("75%")).toBeTruthy();
   });
 });

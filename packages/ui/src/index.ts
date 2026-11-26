@@ -7,24 +7,15 @@ export {
   AvatarImage,
 } from "./components/avatar";
 export {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "./components/card";
-export {
-  type ChartConfig,
-  ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
-  ChartStyle,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "./components/chart";
-export { Fab, fabVariants } from "./components/fab";
+  DonutChart,
+  DonutChartCenter,
+  DonutChartLegend,
+  DonutChartPlot,
+  type DonutSegment,
+} from "./components/charts/donut-chart";
+export { LineChart, LineChartPlot, LineChartTooltip } from "./components/charts/line-chart";
+export { Sparkline } from "./components/charts/sparkline";
+export { XYInspector } from "./components/charts/xy/inspector";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
 export { AnimatedBadge, AnimatedBadge as Badge } from "./components/motion/animated-badge";
@@ -76,16 +67,6 @@ export {
 } from "./components/motion/wheel-picker";
 export { Separator } from "./components/separator";
 export { Skeleton } from "./components/skeleton";
-export {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "./components/table";
 export { useHoverCapable } from "./lib/hooks/use-hover-capable";
 export { useMediaQuery } from "./lib/hooks/use-media-query";
 export { cn } from "./lib/utils";

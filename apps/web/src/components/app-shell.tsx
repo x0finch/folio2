@@ -1,9 +1,8 @@
 import { cn, Dock, DockItem, SharedLayoutBg, Skeleton } from "@folio/ui";
+import { BarChart3, Home, Settings, Wallet } from "@folio/ui/icons";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { BarChart3, Home, Settings, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslations } from "use-intl";
-import type { SyncStatusSummary } from "@/lib/core/sync-status";
 import { DEFAULT_PAGE, isPageSlug, type PageKey } from "@/routes/_authed/-page-keys";
 import { OverviewSkeleton } from "@/routes/_authed/-page-skeletons";
 import { Logo } from "./logo";
@@ -22,12 +21,12 @@ const NAVS = [
 // Layout boxes shared with AppShellSkeleton so the page doesn't jump when data arrives.
 const SHELL_ROOT = "min-h-svh lg:flex";
 const SHELL_ASIDE =
-  "hidden w-59 shrink-0 flex-col border-border border-r bg-card px-3.5 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto";
-const SHELL_BRAND_ROW = "flex items-center gap-2.5 px-2 pt-1.5 pb-5";
+  "hidden w-59 shrink-0 flex-col border-border border-r bg-card px-4 py-4 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto";
+const SHELL_BRAND_ROW = "flex items-center gap-3 px-2 pt-2 pb-5";
 const SHELL_INNER_COL = "flex min-w-0 flex-1 flex-col";
-const SHELL_SIDEBAR_FOOTER = "mt-auto flex items-center gap-2.5 px-1 pt-4";
+const SHELL_SIDEBAR_FOOTER = "mt-auto flex items-center gap-3 px-1 pt-4";
 const SHELL_TOPBAR =
-  "sticky top-0 z-30 flex items-center gap-2.5 border-border border-b bg-background/80 px-4 pt-[calc(0.75rem_+_env(safe-area-inset-top))] pb-3 backdrop-blur-xl lg:hidden";
+  "sticky top-0 z-30 flex items-center gap-3 border-border border-b bg-background/80 px-4 pt-[calc(0.75rem_+_env(safe-area-inset-top))] pb-3 backdrop-blur-xl lg:hidden";
 // Mobile content is always taller than the screen: iOS sizes the bottom inset by scrollability,
 // so a short loading state then a long page would make the Dock jump ~60px.
 const SHELL_MAIN =
@@ -57,13 +56,11 @@ function Brand() {
 
 export function AppShell({
   userName,
-  syncStatus,
   selector,
   onNavIntent,
   children,
 }: {
   userName: string;
-  syncStatus: SyncStatusSummary;
   // Renders nothing with fewer than two portfolios.
   selector?: ReactNode;
   // The shell only reports nav intent; the route layer does the prefetching, keeping
@@ -72,17 +69,12 @@ export function AppShell({
   children: ReactNode;
 }) {
   const t = useTranslations("Nav");
-  const th = useTranslations("PageHeader");
   const ts = useTranslations("Sidebar");
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const seg = pathname.split("/")[1] ?? "";
   const activeKey: PageKey = isPageSlug(seg) ? seg : DEFAULT_PAGE;
   const activeNav = NAVS.find((n) => n.key === activeKey) ?? NAVS[0];
   const pageTitle = t(activeNav.key);
-  const pageSub =
-    activeNav.key === DEFAULT_PAGE
-      ? th("overviewSub", { count: syncStatus.total })
-      : th(`${activeNav.key}Sub` as "accountsSub" | "insightsSub" | "settingsSub");
   const initial = userName.trim().charAt(0).toUpperCase() || "?";
 
   return (
@@ -136,11 +128,7 @@ export function AppShell({
         </header>
 
         <main className={SHELL_MAIN}>
-          <PageHeader
-            title={pageTitle}
-            subtitle={pageSub}
-            eyebrow={activeNav.key !== "settings" ? selector : null}
-          />
+          <PageHeader title={pageTitle} eyebrow={activeNav.key !== "settings" ? selector : null} />
           {children}
         </main>
       </div>
@@ -162,7 +150,7 @@ export function AppShell({
                     here. Scale the span, not the 44px Link hit area. motion-reduce keeps the
                     state change, only drops the transition. */}
                 <span className="flex transition-[transform,opacity] duration-100 ease-out group-active:scale-[0.82] group-active:opacity-60 motion-reduce:transition-none">
-                  <Icon className="size-5" />
+                  <Icon />
                 </span>
               </Link>
             </DockItem>
@@ -189,7 +177,7 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
         <nav className="mt-4 flex flex-col gap-1">
           {NAVS.map(({ key, icon: Icon }) => (
             <div key={key} className="flex items-center gap-3 rounded-lg px-3 py-2">
-              <Icon className="size-4 shrink-0 text-muted-foreground/40" />
+              <Icon className="text-muted-foreground/40" />
               <Skeleton className="h-5 w-20" />
             </div>
           ))}
@@ -197,7 +185,7 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
 
         <div className={SHELL_SIDEBAR_FOOTER}>
           <Skeleton className="size-7 shrink-0 rounded-full" />
-          <div className="min-w-0 flex-1 space-y-1.5">
+          <div className="min-w-0 flex-1 space-y-2">
             <Skeleton className="h-3 w-24" />
             <Skeleton className="h-3 w-16" />
           </div>
@@ -210,10 +198,8 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
         </header>
 
         <main className={SHELL_MAIN}>
-          {/* Every box below is measured against the real Overview at 390px (the landing
-              page): eyebrow row 25, title 38, subtitle 20, content starts at 198, hero
-              240, tab row 32, list rows 72 each. Keep them in step — a box that drifts
-              here is a jump the moment the browser takes over. */}
+          {/* Every box below stands in for the real Overview at 390px (the landing page). Keep
+              them in step: a box that drifts here is a jump the moment the browser takes over. */}
           <Skeleton className="absolute top-6 right-4 h-9 w-40 rounded-full lg:right-8" />
           {/* Render the REAL <PageHeader> (hook-free, provider-free — the shell's
               zero-provider constraint holds) with skeleton bars in its slots: the real
@@ -221,8 +207,7 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
               inline-block matters: a block bar would collapse the h1's text line box. */}
           <PageHeader
             eyebrow={<SkeletonText className="h-6 w-20 rounded-full" />}
-            title={<SkeletonText className="h-8 w-44" />}
-            subtitle={<SkeletonText className="h-4 w-60" />}
+            title={<SkeletonText className="h-5 w-44" />}
           />
           {/* The same skeleton the Overview page uses, so the swap is pixel-stable. */}
           <OverviewSkeleton />
@@ -241,7 +226,7 @@ export function AppShellSkeleton({ note }: { note?: ReactNode }) {
           {NAVS.map(({ key, icon: Icon }) => (
             <DockItem key={key}>
               <span className="flex size-full items-center justify-center">
-                <Icon className="size-5 text-muted-foreground/40" />
+                <Icon className="text-muted-foreground/40" />
               </span>
             </DockItem>
           ))}

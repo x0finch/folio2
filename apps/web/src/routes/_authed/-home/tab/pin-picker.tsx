@@ -1,6 +1,6 @@
 import { cn, SharedLayoutBg } from "@folio/ui";
+import { Check } from "@folio/ui/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Check } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { connectorLabelFallback } from "@/lib/core/logo";
 import { connectorCatalogQuery } from "@/lib/queries/connectors";
@@ -17,7 +17,7 @@ export interface PinTargetChoice {
 }
 
 const headerClass = "px-2 py-1 text-muted-foreground text-xs uppercase tracking-widest";
-const rowClass = "rounded-md px-2 py-1.5 text-left text-sm";
+const rowClass = "rounded-md px-2 py-2 text-left text-sm";
 
 // Uses the connector catalog (fetched on open). The tab strip must not use this: it would fetch the catalog on mount.
 function PinTargetLabel({
@@ -64,9 +64,9 @@ function PickerSection({
 }) {
   if (options.length === 0) return null;
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-1">
       <div className={headerClass}>{header}</div>
-      <SharedLayoutBg className="gap-0.5" inset={0} pillClassName="rounded-md bg-muted">
+      <SharedLayoutBg className="gap-1" inset={0} pillClassName="rounded-md bg-muted">
         {options.map((o) => (
           <button key={o.id} type="button" onClick={() => onPick(o.id)} className={rowClass}>
             <span className="flex items-center gap-2">
@@ -76,9 +76,7 @@ function PickerSection({
                 name={o.label}
                 className="min-w-0 flex-1"
               />
-              <Check
-                className={cn("size-4 shrink-0", activeId === o.id ? "opacity-100" : "opacity-0")}
-              />
+              <Check className={cn("shrink-0", activeId === o.id ? "opacity-100" : "opacity-0")} />
             </span>
           </button>
         ))}

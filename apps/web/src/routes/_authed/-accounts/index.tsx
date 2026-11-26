@@ -1,8 +1,8 @@
 import type { ConnectorId } from "@folio/connectors";
 import { cn, SharedLayoutBg, Skeleton } from "@folio/ui";
+import { AlertTriangle, Plus } from "@folio/ui/icons";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { AlertTriangle, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import { AvatarStack } from "@/components/avatar-stack";
@@ -92,24 +92,21 @@ const ROWS_4 = ["r1", "r2", "r3", "r4"];
 
 function ListSkeleton() {
   return (
-    <>
-      <Skeleton className="h-8 w-40" />
-      <div className="flex flex-col">
-        {ROWS_4.map((k) => (
-          <div key={k} className="flex items-center justify-between gap-4 px-3 py-3">
-            <div className="flex flex-col gap-1.5">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-3 w-20" />
-              <span className="min-h-6" />
-            </div>
-            <div className="flex flex-col items-end gap-1">
-              <Skeleton className="h-4 w-20" />
-              <GainSkeleton />
-            </div>
+    <div className="flex flex-col">
+      {ROWS_4.map((k) => (
+        <div key={k} className="flex items-center justify-between gap-4 px-4 py-6">
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-20" />
+            <span className="min-h-6" />
           </div>
-        ))}
-      </div>
-    </>
+          <div className="flex flex-col items-end gap-1">
+            <Skeleton className="h-4 w-20" />
+            <GainSkeleton />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -227,8 +224,6 @@ function AccountsListBody({
 
   return (
     <>
-      <h1 className="font-bold text-2xl">{t("accountCount", { count: active.length })}</h1>
-
       {rows.length === 0 ? (
         <p className="text-muted-foreground">{tc("noAccountsYet")}</p>
       ) : (
@@ -307,7 +302,7 @@ function AccountStatusLine({
     >
       {warn && (
         <>
-          <AlertTriangle className="size-3 shrink-0" aria-hidden />
+          <AlertTriangle className="shrink-0" aria-hidden />
           <span className="sr-only">{t("syncWarning")}</span>
         </>
       )}
@@ -329,7 +324,7 @@ function AccountStatusLine({
               onComplete();
             }
           }}
-          className="rounded-sm underline-offset-2 outline-none hover:underline focus-visible:ring-1 focus-visible:ring-warn"
+          className="rounded-md underline-offset-2 outline-none hover:underline focus-visible:ring-1 focus-visible:ring-warn"
         >
           {t("completePrompt")}
         </span>
@@ -377,17 +372,14 @@ function AccountRowContent({
   return (
     <div
       className={cn(
-        "relative flex w-full items-center justify-between gap-4 overflow-hidden rounded-xl px-3 py-3",
+        "relative flex w-full items-center justify-between gap-4 overflow-hidden rounded-xl px-4 py-6",
         muted && "opacity-60",
       )}
     >
-      <span className="relative flex min-w-0 flex-col gap-1.5">
+      <span className="relative flex min-w-0 flex-col gap-2">
         <span className="flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate font-medium">{row.label}</span>
-          <ConnectorBadge
-            connectorId={row.connectorId}
-            className="shrink-0 transition-colors group-hover:bg-background group-focus-visible:bg-background"
-          />
+          <ConnectorBadge connectorId={row.connectorId} className="shrink-0" />
           {row.tags.length > 0 && <TagBadges tags={row.tags} max={3} />}
         </span>
         {statusKnown ? (

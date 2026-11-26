@@ -1,7 +1,7 @@
 import type { ConnectorId } from "@folio/connectors";
 import { MorphingModal, toast, useMediaQuery } from "@folio/ui";
+import { ArrowLeft, X } from "@folio/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, X } from "lucide-react";
 import { cloneElement, type ReactElement, type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 import { AccountForm } from "@/components/account-fields";
@@ -27,44 +27,34 @@ type Step = "grid" | "form";
 // Lives inside the keyed children so it morphs with the view.
 function ModalHeader({
   title,
-  subtitle,
   onBack,
   onClose,
 }: {
   title: string;
-  subtitle: string;
   onBack?: () => void;
   onClose: () => void;
 }) {
   const t = useTranslations("Accounts");
   const tc = useTranslations("Common");
   return (
-    <div className="mb-4 flex flex-col gap-1">
-      <div className="flex items-center gap-2">
-        {onBack && (
-          <IconButton
-            size="sm"
-            onClick={onBack}
-            aria-label={t("backToConnectors")}
-            className="-ml-1"
-          >
-            <ArrowLeft className="size-4" />
-          </IconButton>
-        )}
-        <h2 className="flex-1 font-semibold text-lg">{title}</h2>
-        <IconButton size="sm" onClick={onClose} aria-label={tc("close")}>
-          <X className="size-4" />
+    <div className="mb-6 flex items-center gap-2">
+      {onBack && (
+        <IconButton size="sm" onClick={onBack} aria-label={t("backToConnectors")} className="-ml-1">
+          <ArrowLeft />
         </IconButton>
-      </div>
-      <p className="text-muted-foreground text-sm">{subtitle}</p>
+      )}
+      <h2 className="flex-1 font-semibold text-lg">{title}</h2>
+      <IconButton size="sm" onClick={onClose} aria-label={tc("close")}>
+        <X />
+      </IconButton>
     </div>
   );
 }
 
-// The panel is overflow-hidden, so content scrolls in its own max-h container. px-1.5 / -mx-1.5:
+// The panel is overflow-hidden, so content scrolls in its own max-h container. px-2 / -mx-2:
 // overflow-y-auto also clips x, so leave room for edge decorations (hover bg, focus rings).
 function ViewShell({ children }: { children: ReactNode }) {
-  return <div className="-mx-1.5 max-h-[78vh] overflow-y-auto px-1.5">{children}</div>;
+  return <div className="-mx-2 max-h-[78vh] overflow-y-auto px-2">{children}</div>;
 }
 
 // Self-managed open (pass triggerRender) or controlled (pass open/onOpenChange).
@@ -157,7 +147,6 @@ export function AddAccountModal({
                 catalog?.[completeFor.connectorId]?.label ??
                 connectorLabelFallback(completeFor.connectorId)
               }
-              subtitle={t("completeAccountHint")}
               onClose={() => onCompleteClose?.()}
             />
             {/* key remounts to clear field state per account; non-public specs are filtered inside. */}
@@ -174,7 +163,6 @@ export function AddAccountModal({
           <ViewShell>
             <ModalHeader
               title={catalog?.[connectorId]?.label ?? connectorLabelFallback(connectorId)}
-              subtitle={t("addAccountHint")}
               onBack={back}
               onClose={close}
             />
@@ -188,7 +176,7 @@ export function AddAccountModal({
           </ViewShell>
         ) : (
           <ViewShell>
-            <ModalHeader title={t("addAccount")} subtitle={t("addAccountHint")} onClose={close} />
+            <ModalHeader title={t("addAccount")} onClose={close} />
             <ConnectorGrid onSelect={pick} />
           </ViewShell>
         )}

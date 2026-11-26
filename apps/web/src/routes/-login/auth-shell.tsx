@@ -20,7 +20,7 @@ export function AuthShell({
 
       {/* Offset by safe-area-inset-top so the iOS status bar doesn't cover it; 0.5rem (tighter
           than app-shell's 0.75rem) since there's no frosted top bar behind it. */}
-      <div className="absolute top-[calc(0.5rem_+_env(safe-area-inset-top))] left-4 z-20 flex items-center gap-2.5">
+      <div className="absolute top-[calc(0.5rem_+_env(safe-area-inset-top))] left-4 z-20 flex items-center gap-3">
         <Logo className="size-6 shrink-0" />
         <span className="font-semibold text-lg tracking-tight">folio</span>
       </div>

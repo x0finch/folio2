@@ -138,7 +138,7 @@ beforeEach(() => {
 });
 
 describe("list", () => {
-  it("active accounts sorted by value descending; heading counts active accounts", async () => {
+  it("active accounts sorted by value descending", async () => {
     holdingsView.current = () => ({
       rows: [holdingRow("a", 100), holdingRow("b", 5_000), holdingRow("c", 900)],
     });
@@ -148,7 +148,7 @@ describe("list", () => {
       acct({ id: "c", label: "Mid" }),
     ]);
 
-    await screen.findByText("3 accounts");
+    await screen.findByText("Big");
     const order = ["Small", "Big", "Mid"]
       .map((l) => ({ l, top: [...document.querySelectorAll("button")].indexOf(rowButton(l)) }))
       .sort((x, y) => x.top - y.top)
@@ -156,13 +156,13 @@ describe("list", () => {
     expect(order).toEqual(["Big", "Mid", "Small"]);
   });
 
-  it("archived accounts excluded from the heading count, collapsed into the archived section", async () => {
+  it("archived accounts collapse into the archived section", async () => {
     mount([
       acct({ id: "a", label: "Live one" }),
       acct({ id: "z", label: "Old one", archivedAt: Date.UTC(2025, 0, 2) }),
     ]);
 
-    await screen.findByText("1 account");
+    await screen.findByText("Live one");
     const archived = screen.getByText("Archived (1)").closest("details") as HTMLElement;
     expect(within(archived).getByText("Old one")).toBeTruthy();
     expect(within(archived).queryByText("Live one")).toBeNull();
@@ -173,7 +173,6 @@ describe("list", () => {
   it("no accounts → empty state", async () => {
     mount([]);
     await screen.findByText("No accounts yet.");
-    expect(screen.getByText("0 accounts")).toBeTruthy();
   });
 
   it("values not loaded → list renders in original order, value slot not 0", async () => {
@@ -182,8 +181,7 @@ describe("list", () => {
     };
     mount([acct({ id: "a", label: "First" }), acct({ id: "b", label: "Second" })]);
 
-    await screen.findByText("2 accounts");
-    expect(screen.getByText("First")).toBeTruthy();
+    await screen.findByText("First");
     expect(screen.getByText("Second")).toBeTruthy();
     expect(screen.queryByText(/\$0/)).toBeNull();
   });
@@ -198,7 +196,7 @@ describe("list", () => {
       acct({ id: "z", label: "Old one", archivedAt: Date.UTC(2025, 0, 2) }),
     ]);
 
-    await screen.findByText("2 accounts");
+    await screen.findByText("My CEX");
     expect(within(rowButton("My CEX")).getByText("Click to add credentials")).toBeTruthy();
     expect(within(rowButton("Cash")).getByText("Live")).toBeTruthy();
     expect(within(rowButton("Old one")).getByText("Sealed Jan 2, 25")).toBeTruthy();
@@ -215,7 +213,7 @@ describe("row status line", () => {
       acct({ id: "n", label: "Fresh wallet" }),
     ]);
 
-    await screen.findByText("2 accounts");
+    await screen.findByText("Fresh wallet");
     expect(within(rowButton("Cash")).getByText("Live")).toBeTruthy();
     expect(within(rowButton("Fresh wallet")).getByText("Never synced")).toBeTruthy();
   });

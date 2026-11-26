@@ -13,11 +13,14 @@ export interface AllocSlice {
   value: number;
 }
 export const OTHERS_KEY = "__others__";
+// One slice per palette colour: four named slices and the tail, so no colour repeats and slivers
+// too thin for the ring don't pile up.
+const NAMED_SLICES = 4;
 
 export function buildAllocation(
   holdings: readonly Holding[],
   dim: AllocDimension,
-  topN = 8,
+  topN = NAMED_SLICES,
 ): AllocSlice[] {
   const map = new Map<string, { label: string; value: number }>();
   const add = (key: string, label: string, value: number) => {

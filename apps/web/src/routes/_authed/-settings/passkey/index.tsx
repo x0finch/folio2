@@ -1,22 +1,13 @@
-import {
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  MorphingModal,
-  SharedLayoutBg,
-  toast,
-} from "@folio/ui";
+import { Badge, Button, MorphingModal, SharedLayoutBg, toast } from "@folio/ui";
+import { Plus, Trash2 } from "@folio/ui/icons";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { EditableName } from "@/components/editable-name";
 import { IconButton } from "@/components/icon-button";
 import { authClient, signIn } from "@/lib/core/auth-client";
 import { useLockDevice } from "@/lib/hooks/use-lock-device";
+import { SettingsSection } from "@/routes/_authed/-settings/settings-section";
 import { errorCode, type PasskeyRow, SESSION_NOT_FRESH } from "./passkey";
 import { getAuthenticatorName, type PasskeyKind, passkeyKind } from "./passkey-authenticators";
 import { registerPasskey } from "./register-passkey";
@@ -92,7 +83,7 @@ export function PasskeysCard() {
 
   const addButton = supported ? (
     <IconButton aria-label={t("addPasskey")} disabled={adding} onClick={onAdd}>
-      <Plus className="size-4" />
+      <Plus />
     </IconButton>
   ) : null;
 
@@ -111,20 +102,14 @@ export function PasskeysCard() {
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle>{t("passkeys")}</CardTitle>
-          {addButton}
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">{body}</CardContent>
+    <SettingsSection title={t("passkeys")} action={addButton}>
+      {body}
       <RemovePasskeyModal
         removing={removing}
         onCancel={() => setRemoving(null)}
         onConfirm={onRemove}
       />
-    </Card>
+    </SettingsSection>
   );
 }
 
@@ -169,7 +154,6 @@ function PasskeysSupported({
     ) : null;
   return (
     <>
-      <p className="text-muted-foreground text-sm">{t("passkeysHint")}</p>
       {list}
       {empty}
     </>
@@ -213,11 +197,11 @@ function PasskeyItem({
       className="shrink-0 hover:bg-transparent hover:text-destructive"
       onClick={() => onRemove(pk)}
     >
-      <Trash2 className="size-4" />
+      <Trash2 />
     </IconButton>
   ) : null;
   return (
-    <div className="rounded-lg px-2 py-1.5">
+    <div className="rounded-lg px-2 py-2">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0 flex-1 leading-tight">
           <div className="flex min-w-0 items-center gap-2">
@@ -261,7 +245,7 @@ function RemovePasskeyModal({
     <MorphingModal viewId={removing ? "passkey-remove" : null} onClose={onCancel}>
       <div className="text-left">
         <p className="font-semibold text-base">{t("passkeyRemoveTitle")}</p>
-        <p className="mt-1.5 text-muted-foreground text-sm">
+        <p className="mt-2 text-muted-foreground text-sm">
           {t("passkeyRemoveBody", { name: removing?.name || t("passkeyUnnamed") })}
         </p>
         <div className="mt-5 flex justify-end gap-2">

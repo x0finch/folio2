@@ -73,8 +73,6 @@ function stampSwVersion(version: string): Plugin {
 const config = defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(build.version),
-    __COMMIT_HASH__: JSON.stringify(build.commit),
-    __BUILD_TIME__: JSON.stringify(build.builtAt),
   },
   resolve: { tsconfigPaths: true },
   server: { allowedHosts },

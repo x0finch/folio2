@@ -3,7 +3,7 @@ import { cn, LogoAvatar } from "@folio/ui";
 // Target label of a custom tab: tag `#name`, account `@name`, connector `logo + type name`, shared
 // by the pin pill and the picker so both match. `#`/`@` are display-only prefixes.
 // Pure display: name and logo are already resolved, so the home strip makes no catalog request.
-// The connector logo uses LogoAvatar (initials fallback), sized size-3.5 + mr-1 to match the `#`/`@` glyph height.
+// The connector logo uses LogoAvatar (initials fallback), sized to match the `#`/`@` glyph height.
 // onPrimary: an active pill has a light bg-primary fill and some logos are light themselves (OKX
 // white, manual transparent), so a hairline border separates them; recoloring the logo backing
 // can't fix a color baked into the image.

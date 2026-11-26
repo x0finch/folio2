@@ -17,7 +17,7 @@ test.describe("signed out: gets the zero-data shell, then the browser routes to 
       const html = await res.text();
       expect(html).toContain('data-slot="skeleton"');
       // The shell is path-independent: no page's content is baked in.
-      expect(html).not.toContain("Total net worth");
+      expect(html).not.toContain("Top today");
     });
 
     test(`${path} → browser lands on /login without hydration errors`, async ({ page }) => {
@@ -87,8 +87,9 @@ test.describe("signed in: the server only sends the skeleton shell", () => {
 
     await page.goto("/");
     await expect(page.getByRole("link", { name: "Overview", exact: true })).toBeVisible();
-    // The header subtitle needs syncStatus, so it proves data was fetched in the browser.
-    await expect(page.getByText(/sources?$/)).toBeVisible();
+    // The sync panel's "Sources" row needs syncStatus, so it proves data was fetched in the
+    // browser. Attached, not visible: the popover keeps its content in the DOM while collapsed.
+    await expect(page.getByText("Sources", { exact: true })).toBeAttached();
 
     expect(errors).toEqual([]);
   });

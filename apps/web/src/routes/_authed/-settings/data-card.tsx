@@ -1,19 +1,11 @@
-import {
-  Button,
-  buttonVariants,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  MorphingModal,
-  Separator,
-} from "@folio/ui";
+import { Button, buttonVariants, MorphingModal } from "@folio/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { invalidateFor } from "@/lib/queries/refresh";
 import { dataStatsQuery } from "@/lib/queries/settings";
 import type { ImportCounts } from "@/lib/server/io/import-data";
+import { SettingsSection } from "./settings-section";
 
 // Import copy reuses the Accounts namespace's import* keys.
 export function DataCard() {
@@ -61,66 +53,47 @@ export function DataCard() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("data")}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-4">
-          <p className="min-w-0 text-sm text-muted-foreground">{t("exportHint")}</p>
-          <a
-            href="/api/export"
-            download
-            className={buttonVariants({
-              variant: "outline",
-              className: "shrink-0 whitespace-nowrap",
-            })}
-          >
+    <SettingsSection
+      title={t("data")}
+      action={
+        <div className="flex items-center gap-2">
+          <a href="/api/export" download className={buttonVariants({ variant: "outline" })}>
             {t("exportData")}
           </a>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".ndjson,application/x-ndjson,application/json"
+            className="hidden"
+            disabled={importMutation.isPending}
+            onChange={onImportFile}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            disabled={importMutation.isPending}
+            onClick={() => inputRef.current?.click()}
+          >
+            {importMutation.isPending ? tc("verifying") : ta("importBtn")}
+          </Button>
         </div>
-
-        <Separator />
-
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-4">
-            <p className="min-w-0 text-sm text-muted-foreground">{ta("importHint")}</p>
-            <input
-              ref={inputRef}
-              type="file"
-              accept=".ndjson,application/x-ndjson,application/json"
-              className="hidden"
-              disabled={importMutation.isPending}
-              onChange={onImportFile}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              disabled={importMutation.isPending}
-              className="shrink-0 whitespace-nowrap"
-              onClick={() => inputRef.current?.click()}
-            >
-              {importMutation.isPending ? tc("verifying") : ta("importBtn")}
-            </Button>
-          </div>
-          {importMutation.isSuccess && (
-            <p className="text-sm text-muted-foreground">
-              {ta("imported", {
-                accounts: importMutation.data.imported.accounts,
-                snapshots: importMutation.data.imported.snapshots,
-              })}
-            </p>
-          )}
-          {importMutation.isError && (
-            <p className="text-sm text-destructive">{importMutation.error.message}</p>
-          )}
-        </div>
-      </CardContent>
-
+      }
+    >
+      {importMutation.isSuccess && (
+        <p className="text-sm text-muted-foreground">
+          {ta("imported", {
+            accounts: importMutation.data.imported.accounts,
+            snapshots: importMutation.data.imported.snapshots,
+          })}
+        </p>
+      )}
+      {importMutation.isError && (
+        <p className="text-sm text-destructive">{importMutation.error.message}</p>
+      )}
       <MorphingModal viewId={pendingFile ? "import-merge" : null} onClose={cancelImport}>
         <div className="text-left">
           <p className="font-semibold text-base">{t("importMergeTitle")}</p>
-          <p className="mt-1.5 text-muted-foreground text-sm">{t("importMergeBody")}</p>
+          <p className="mt-2 text-muted-foreground text-sm">{t("importMergeBody")}</p>
           <div className="mt-5 flex justify-end gap-2">
             <Button variant="outline" onClick={cancelImport}>
               {tc("cancel")}
@@ -129,7 +102,7 @@ export function DataCard() {
           </div>
         </div>
       </MorphingModal>
-    </Card>
+    </SettingsSection>
   );
 }
 

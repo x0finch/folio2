@@ -1,5 +1,5 @@
 import { Button, cn, Input, Tooltip } from "@folio/ui";
-import { Pencil } from "lucide-react";
+import { Pencil } from "@folio/ui/icons";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
 
@@ -90,14 +90,14 @@ export function EditableName({
       className={cn(
         "relative block max-w-full rounded-md text-left outline-none",
         // Reserve room for the pencil: always without a tooltip, otherwise only on touch.
-        tooltip ? "pointer-coarse:pr-5" : "pr-5",
+        tooltip ? "pointer-coarse:pr-6" : "pr-6",
       )}
     >
       <span className={cn("block truncate", displayClassName)}>{value || placeholder}</span>
       {/* The pencil sits inside the button (right-0) so it doesn't overlap a following badge. */}
       <Pencil
         className={cn(
-          "-translate-y-1/2 pointer-events-none absolute top-1/2 right-0 size-3 text-muted-foreground",
+          "-translate-y-1/2 pointer-events-none absolute top-1/2 right-0 text-muted-foreground",
           tooltip ? "opacity-0 pointer-coarse:opacity-50" : "opacity-50",
         )}
         aria-hidden

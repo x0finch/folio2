@@ -2,7 +2,7 @@ import { cn } from "@folio/ui/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar";
 
 const sizes = {
-  sm: { avatar: "size-6", fallback: "text-[10px]" },
+  sm: { avatar: "size-6", fallback: "text-xs" },
   md: { avatar: "size-8", fallback: "text-sm" },
   lg: { avatar: "size-12", fallback: "text-base" },
 } as const;

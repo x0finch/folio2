@@ -28,7 +28,7 @@ import { forgetQueryCache, queryPersistence } from "@/lib/queries/persist";
 import { portfolioListQuery } from "@/lib/queries/portfolio";
 import { currencyPreferenceQuery } from "@/lib/queries/preferences";
 import { dataVersionQuery, valuationSettingsQuery } from "@/lib/queries/settings";
-import { prefetchSyncStatusAtoms, useSyncStatus } from "@/lib/queries/sync";
+import { prefetchSyncStatusAtoms } from "@/lib/queries/sync";
 import { getSession } from "@/lib/server/session";
 import type { PageKey } from "./_authed/-page-keys";
 import { prefetchPage } from "./_authed/-pages";
@@ -121,10 +121,9 @@ function StalledShell({ reset }: { reset?: () => void }) {
   return <AppShellSkeleton note={t("stalled")} />;
 }
 
-// Must read the sync summary inside PortfolioProvider: it depends on the selected portfolio.
+// Inside PortfolioProvider: prefetching depends on the selected portfolio.
 function ShellWithSync({ userName, children }: { userName: string; children: ReactNode }) {
   const { selectedId } = usePortfolio();
-  const syncStatus = useSyncStatus(selectedId);
   const queryClient = useQueryClient();
   // Warm a page's chunk + data on nav-item press; with strict lazy loading this is the only head
   // start. Lives here because the shell file must keep AppShellSkeleton dependency-free.
@@ -132,12 +131,7 @@ function ShellWithSync({ userName, children }: { userName: string; children: Rea
   // Inside the lock screen on purpose: nothing to refresh while locked.
   useEffect(() => watchDataVersion(queryClient, dataVersionQuery()), [queryClient]);
   return (
-    <AppShell
-      userName={userName}
-      syncStatus={syncStatus}
-      selector={<PortfolioSelector />}
-      onNavIntent={warm}
-    >
+    <AppShell userName={userName} selector={<PortfolioSelector />} onNavIntent={warm}>
       {children}
     </AppShell>
   );

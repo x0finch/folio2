@@ -11,8 +11,8 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
+import { Check, Pin, Plus, Trash2, X } from "@folio/ui/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Pin, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { type PortfolioSummary, usePortfolio } from "@/lib/hooks/use-portfolio";
@@ -93,14 +93,14 @@ function PickerHeader({ title, onClose }: { title: string; onClose: () => void }
   const tc = useTranslations("Common");
   return (
     <div className="flex items-center justify-between gap-2">
-      <h2 className="font-semibold text-base">{title}</h2>
+      <h2 className="font-semibold text-lg">{title}</h2>
       <button
         type="button"
         aria-label={tc("close")}
         className="-mr-1 flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         onClick={onClose}
       >
-        <X className="size-4" />
+        <X />
       </button>
     </div>
   );
@@ -143,14 +143,14 @@ function ManageList({
           {
             id: "default",
             label: t("setDefault"),
-            icon: <Pin className="size-4" />,
+            icon: <Pin />,
             tone: "primary",
             onClick: () => defaultMut.mutate(p.id),
           },
           {
             id: "delete",
             label: tc("delete"),
-            icon: <Trash2 className="size-4" />,
+            icon: <Trash2 />,
             tone: "danger",
             onClick: () => onDelete(p),
           },
@@ -220,7 +220,7 @@ function MoveList({
 
       {/* SharedLayoutBg hosts the hover pill; each button's content must be a single flex container
           (it wraps children in a non-flex z-10 div). */}
-      <SharedLayoutBg className="gap-0.5" inset={0} pillClassName="rounded-xl bg-muted">
+      <SharedLayoutBg className="gap-1" inset={0} pillClassName="rounded-xl bg-muted">
         {portfolios.map((p) => {
           const current = p.id === currentPortfolioId;
           // Not `disabled` for the current item: a disabled button doesn't dispatch mouseenter, so the
@@ -241,7 +241,7 @@ function MoveList({
             >
               <span className="flex w-full min-w-0 items-center gap-2">
                 <span className="min-w-0 flex-1 truncate font-medium">{p.name}</span>
-                {current && <Check className="ml-auto size-4 shrink-0 text-pos" />}
+                {current && <Check className="ml-auto shrink-0 text-pos" />}
               </span>
             </button>
           );
@@ -258,7 +258,7 @@ function MoveList({
         onBlur={() => setCreateHover(false)}
         onClick={onCreate}
       >
-        <AnimatedBadge size="sm" icon={<Plus className="size-3" />}>
+        <AnimatedBadge size="sm" icon={<Plus />}>
           {createHover ? t("createBadgeHover") : t("createBadge")}
         </AnimatedBadge>
       </button>
@@ -284,7 +284,7 @@ function CreatePage({ onDone }: { onDone: () => void }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="font-semibold text-base">{t("createTitle")}</h2>
+      <h2 className="font-semibold text-lg">{t("createTitle")}</h2>
       <Input
         value={newName}
         onChange={(v) => setNewName(v)}
@@ -332,7 +332,7 @@ function DeletePage({ portfolio, onDone }: { portfolio: PortfolioSummary; onDone
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="font-semibold text-base">{t("deleteTitle")}</h2>
+        <h2 className="font-semibold text-lg">{t("deleteTitle")}</h2>
         <p className="mt-1 text-muted-foreground text-sm">
           {t("deleteConfirm", { name: portfolio.name })}
         </p>

@@ -1,6 +1,6 @@
 import { cn, Skeleton, TabsTrigger, toast } from "@folio/ui";
+import { Plus } from "@folio/ui/icons";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { QueryBoundary } from "@/components/query-boundary";
 import { MAX_PINS_PER_PORTFOLIO } from "@/lib/core/accounts-in-view";
@@ -81,7 +81,7 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
       ghost={
         <span
           className={cn(
-            "inline-flex h-full w-full items-center justify-center whitespace-nowrap rounded-full px-3.5 font-medium text-sm",
+            "inline-flex h-full w-full items-center justify-center whitespace-nowrap rounded-full px-4 font-medium text-sm",
             isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground",
           )}
         >
@@ -108,7 +108,7 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
             type="button"
             onClick={onUnpin}
             disabled={unpinMut.isPending}
-            className="rounded-md px-2 py-1.5 text-left text-destructive text-sm transition-colors hover:bg-destructive/10 disabled:opacity-50"
+            className="rounded-md px-2 py-2 text-left text-destructive text-sm transition-colors hover:bg-destructive/10 disabled:opacity-50"
           >
             {tct("unpin")}
           </button>
@@ -124,6 +124,12 @@ export function PinTab({ pin }: { pin: HomeTabStrip["pins"][number] }) {
 }
 
 // + button: opens the picker via PinPanel.
+// A secondary action: hidden until the pointer is over the tab strip or focus is inside it. Touch
+// has no hover, so it stays visible there. It also stays while its own panel is open: the panel
+// is portaled, so the pointer leaves the strip to reach it.
+const REVEAL_ON_INTENT =
+  "pointer-fine:opacity-0 pointer-fine:group-focus-within/tabs:opacity-100 pointer-fine:group-hover/tabs:opacity-100 pointer-fine:group-has-[[data-open]]/tabs:opacity-100";
+
 export function AddPinButton() {
   const { selectedId } = usePortfolio();
   const queryClient = useQueryClient();
@@ -148,7 +154,7 @@ export function AddPinButton() {
   return (
     <PinPanel
       disabled={addMut.isPending}
-      ghost={<Plus className="size-4 text-muted-foreground" />}
+      ghost={<Plus className="text-muted-foreground" />}
       panel={(close) => (
         <div className="w-56">
           <LazyPinPicker
@@ -164,9 +170,12 @@ export function AddPinButton() {
         type="button"
         aria-label={tct("add")}
         disabled={addMut.isPending}
-        className="flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+        className={cn(
+          "flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-[color,background-color,opacity] hover:bg-muted hover:text-foreground disabled:opacity-50",
+          REVEAL_ON_INTENT,
+        )}
       >
-        <Plus className="size-4" />
+        <Plus />
       </button>
     </PinPanel>
   );

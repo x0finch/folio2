@@ -76,7 +76,7 @@ function AccountNames({
 }) {
   const { shown, overflow } = collapseToSlots(accounts, ACCOUNT_SLOTS, total);
   return (
-    <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs">
+    <span className="flex min-w-0 items-center gap-2 text-muted-foreground text-xs">
       {shown.map((a) => (
         <AccountName key={a.id} name={a.label} className="min-w-0" />
       ))}
@@ -104,7 +104,7 @@ function GroupRow({
   const pct = totalValue > 0 ? (group.value / totalValue) * 100 : 0;
   const share = pct >= 10 ? pct.toFixed(0) : pct.toFixed(1);
   return (
-    <div className="flex items-center gap-3 rounded-xl px-3 py-2.5">
+    <div className="flex items-center gap-3 rounded-xl px-3 py-3">
       <GroupAvatar group={group} />
       <span className="flex min-w-0 flex-1 flex-col">
         <NameLine

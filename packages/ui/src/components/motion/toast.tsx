@@ -2,7 +2,7 @@
 // 全局 toast 出口:命令式 `toast`(逻辑在 toast-store)+ 挂载一次的 <Toaster>。
 // 消费端 `import { toast, Toaster } from "@folio/ui"`,调用点与 sonner 时代零改。
 
-import { AlertCircle, Bell, Check, Info, LoaderCircle, type LucideIcon, X } from "lucide-react";
+import { AlertCircle, Bell, Check, Info, LoaderCircle, type Icon as LucideIcon, X } from "../../icons";
 import { useSyncExternalStore } from "react";
 import { cn } from "@folio/ui/lib/utils";
 import {

@@ -26,7 +26,8 @@ function renderPanel(props: Partial<Parameters<typeof TrendPanel>[0]> = {}) {
 }
 
 const note = () => screen.queryByText(/once it's ready/i);
-const chartWrapper = (c: HTMLElement) => c.querySelector(".absolute.inset-0.overflow-hidden");
+const chartWrapper = (c: HTMLElement) =>
+  c.querySelector("[data-slot=sparkline]:not([aria-hidden])");
 const decoration = (c: HTMLElement) => c.querySelector("[class*='pointer-events-none']");
 
 describe("four states", () => {

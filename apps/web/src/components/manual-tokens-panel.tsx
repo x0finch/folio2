@@ -14,8 +14,8 @@ import {
   toast,
   useMediaQuery,
 } from "@folio/ui";
+import { AlertTriangle, Pencil, Plus, Trash2 } from "@folio/ui/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Pencil, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useFormatter, useTranslations } from "use-intl";
 import type { OverviewBalance } from "@/lib/core/account-view";
@@ -61,7 +61,7 @@ const kindTone: Record<string, string> = {
 const flatSwipe: SwipeableListClassNames = {
   item: "rounded-xl bg-background",
   surface:
-    "flex min-h-[68px] items-center rounded-xl border-0 bg-background px-3 py-2.5 shadow-none transition-colors hover:bg-muted",
+    "flex min-h-[68px] items-center rounded-xl border-0 bg-background px-3 py-3 shadow-none transition-colors hover:bg-muted",
   action: "[&>span]:group-hover:bg-muted!",
 };
 
@@ -288,14 +288,14 @@ export function ManualTokensPanel({
       {
         id: "edit",
         label: t("addActivityTitle"),
-        icon: <Pencil className="size-4" />,
+        icon: <Pencil />,
         tone: "neutral",
         onClick: () => openTokenEdit(tk),
       },
       {
         id: "delete",
         label: tc("delete"),
-        icon: <Trash2 className="size-4" />,
+        icon: <Trash2 />,
         tone: "neutral",
         onClick: () =>
           setConfirm({
@@ -332,14 +332,14 @@ export function ManualTokensPanel({
         {
           id: "edit",
           label: t("editActivityTitle"),
-          icon: <Pencil className="size-4" />,
+          icon: <Pencil />,
           tone: "neutral",
           onClick: () => openActivityEdit(a),
         },
         {
           id: "delete",
           label: tc("delete"),
-          icon: <Trash2 className="size-4" />,
+          icon: <Trash2 />,
           tone: "neutral",
           onClick: () =>
             setConfirm({
@@ -368,14 +368,11 @@ export function ManualTokensPanel({
               >
                 <Sensitive>{formatNumber(a.amount)}</Sensitive> {a.symbol.toUpperCase()}
                 {oversold ? (
-                  <AlertTriangle
-                    className="ml-1 inline size-3 align-middle text-warn"
-                    aria-hidden
-                  />
+                  <AlertTriangle className="ml-1 inline align-middle text-warn" aria-hidden />
                 ) : null}
               </HoverDetail>
             </div>
-            <div className="mt-1.5 truncate text-xs">
+            <div className="mt-2 truncate text-xs">
               <span className={kindTone[a.kind]}>{t(a.kind)}</span>
               {a.memo ? <span className="text-muted-foreground"> · {a.memo}</span> : null}
             </div>
@@ -413,7 +410,7 @@ export function ManualTokensPanel({
             aria-label={t("addActivityTitle")}
             className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            <Plus className="size-4" />
+            <Plus />
           </button>
         </div>
 
@@ -423,7 +420,7 @@ export function ManualTokensPanel({
           ) : tokenItems.length > 0 ? (
             <SwipeableList items={tokenItems} classNames={flatSwipe} />
           ) : (
-            <EmptyState title={t("tokensEmpty")} hint={t("tokensEmptyHint")} />
+            <EmptyState title={t("tokensEmpty")} />
           )}
         </TabsContent>
 
@@ -433,7 +430,7 @@ export function ManualTokensPanel({
           ) : activityItems.length > 0 ? (
             <SwipeableList items={activityItems} classNames={flatSwipe} />
           ) : (
-            <EmptyState title={t("empty")} hint={t("emptyHint")} />
+            <EmptyState title={t("empty")} />
           )}
         </TabsContent>
       </Tabs>
@@ -471,13 +468,13 @@ function DetailSkeleton() {
   return (
     <div className="flex flex-col gap-1">
       {[0, 1, 2].map((i) => (
-        <div key={i} className="flex min-h-[68px] items-center gap-3 rounded-xl px-3 py-2.5">
+        <div key={i} className="flex min-h-[68px] items-center gap-3 rounded-xl px-3 py-3">
           <div className="size-9 shrink-0 animate-pulse rounded-full bg-muted" />
           <div className="flex flex-1 flex-col gap-2">
-            <div className="h-3.5 w-24 animate-pulse rounded bg-muted" />
-            <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+            <div className="h-4 w-24 animate-pulse rounded-md bg-muted" />
+            <div className="h-3 w-16 animate-pulse rounded-md bg-muted" />
           </div>
-          <div className="h-3.5 w-16 animate-pulse rounded bg-muted" />
+          <div className="h-4 w-16 animate-pulse rounded-md bg-muted" />
         </div>
       ))}
     </div>
@@ -513,7 +510,7 @@ function ConfirmModal({
         {open && (
           <div className="flex flex-col gap-4">
             <div>
-              <h2 className="font-semibold text-base">{title}</h2>
+              <h2 className="font-semibold text-lg">{title}</h2>
               <p className="mt-1 text-muted-foreground text-sm">{body}</p>
             </div>
             <div className="flex gap-2">
@@ -579,7 +576,7 @@ function ActivityDetail({
       )}
       <DetailRow label={t("dateLabel")}>{dateTimeFmt.format(row.occurredAt)}</DetailRow>
 
-      <div className="flex flex-col gap-1.5 border-border border-t pt-2">
+      <div className="flex flex-col gap-2 border-border border-t pt-2">
         <DetailRow label={t("accountTotalThen")}>
           <Sensitive>{usd(totalThen)}</Sensitive>
         </DetailRow>
@@ -589,7 +586,7 @@ function ActivityDetail({
       </div>
 
       {row.memo ? (
-        <div className="flex flex-col gap-0.5 border-border border-t pt-2">
+        <div className="flex flex-col gap-1 border-border border-t pt-2">
           <span className="text-muted-foreground text-xs">{t("memoLabel")}</span>
           <p className="whitespace-pre-wrap break-words">{row.memo}</p>
         </div>
@@ -598,11 +595,6 @@ function ActivityDetail({
   );
 }
 
-function EmptyState({ title, hint }: { title: string; hint: string }) {
-  return (
-    <div className="flex flex-col items-center gap-1 px-6 py-12 text-center">
-      <p className="font-medium text-sm">{title}</p>
-      <p className="text-muted-foreground text-sm">{hint}</p>
-    </div>
-  );
+function EmptyState({ title }: { title: string }) {
+  return <p className="px-6 py-12 text-center text-muted-foreground text-sm">{title}</p>;
 }

@@ -1,4 +1,4 @@
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Monitor, Moon, Sun } from "@folio/ui/icons";
 import { type Theme, useMountedTheme } from "@/lib/hooks/use-theme";
 
 const THEME_ORDER: Theme[] = ["light", "dark", "system"];
@@ -13,9 +13,9 @@ export function ThemeToggle() {
       type="button"
       aria-label={`theme: ${theme}`}
       onClick={() => setTheme(next)}
-      className="text-muted-foreground transition-colors hover:text-foreground"
+      className="flex text-muted-foreground transition-colors hover:text-foreground"
     >
-      <Icon className="size-4" />
+      <Icon />
     </button>
   );
 }

@@ -4,8 +4,8 @@ import { ZERO_DISPLAY_USD } from "@/lib/core/account-view";
 // Overlapping platform/chain logos (beUI AvatarGroup): missing logos fall back to initials, `max` overflows
 // as +N. AvatarImage sits on a solid bg-logo-bg so transparent logos don't show the fallback letter.
 const SIZES = {
-  sm: { avatar: "size-4", text: "text-[8px]" },
-  md: { avatar: "size-6", text: "text-[9px]" },
+  sm: { avatar: "size-4", text: "text-xs" },
+  md: { avatar: "size-6", text: "text-xs" },
 } as const;
 
 export function AvatarStack({

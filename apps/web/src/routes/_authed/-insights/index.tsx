@@ -1,13 +1,4 @@
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  Skeleton,
-  Tabs,
-  TabsList,
-  TabsTrigger,
-} from "@folio/ui";
+import { Skeleton, Tabs, TabsList, TabsTrigger } from "@folio/ui";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslations } from "use-intl";
@@ -39,15 +30,15 @@ export function Insights() {
     <>
       {/* Outside the transform container, or its absolute positioning jumps (see StaggerReveal). */}
       <HeaderSync />
-      <StaggerReveal className="flex flex-col gap-6">
-        <TrendCard />
-        <AllocationCard />
+      <StaggerReveal className="flex flex-col gap-16">
+        <TrendSection />
+        <AllocationSection />
       </StaggerReveal>
     </>
   );
 }
 
-function TrendCard() {
+function TrendSection() {
   const t = useTranslations("Insights");
   const { selectedId } = usePortfolio();
   // Suspense + own boundary rather than `data == null` checks: SSR may already have the data while
@@ -62,12 +53,10 @@ function TrendCard() {
     </QueryBoundary>
   );
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("trend")}</CardTitle>
-      </CardHeader>
-      <CardContent>{body}</CardContent>
-    </Card>
+    <section className="flex flex-col gap-6">
+      <h2 className="font-semibold text-lg">{t("trend")}</h2>
+      {body}
+    </section>
   );
 }
 
@@ -94,7 +83,7 @@ function AllocationReady({ portfolioId, dim }: { portfolioId: string; dim: Alloc
   return <AllocationPie slices={buildAllocation(overview.holdings, dim)} />;
 }
 
-function AllocationCard() {
+function AllocationSection() {
   const t = useTranslations("Insights");
   const { selectedId } = usePortfolio();
   const now = floorToHour(Date.now());
@@ -109,22 +98,18 @@ function AllocationCard() {
     </QueryBoundary>
   );
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("allocation")}</CardTitle>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <Tabs value={dim} onValueChange={(v) => setDim(v as AllocDimension)} variant="underline">
-          <TabsList>
-            {ALLOC_DIMENSIONS.map((d) => (
-              <TabsTrigger key={d} value={d}>
-                {t(DIM_LABEL[d])}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-        {pie}
-      </CardContent>
-    </Card>
+    <section className="flex flex-col gap-6">
+      <h2 className="font-semibold text-lg">{t("allocation")}</h2>
+      <Tabs value={dim} onValueChange={(v) => setDim(v as AllocDimension)} variant="underline">
+        <TabsList>
+          {ALLOC_DIMENSIONS.map((d) => (
+            <TabsTrigger key={d} value={d}>
+              {t(DIM_LABEL[d])}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+      {pie}
+    </section>
   );
 }

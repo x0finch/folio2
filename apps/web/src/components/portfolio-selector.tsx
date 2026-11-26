@@ -6,7 +6,7 @@ import {
   PopoverTrigger,
   SharedLayoutBg,
 } from "@folio/ui";
-import { Check, Settings2 } from "lucide-react";
+import { Check, Settings2 } from "@folio/ui/icons";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { useHoverPopover } from "@/lib/hooks/use-hover-popover";
@@ -14,7 +14,7 @@ import { usePortfolio } from "@/lib/hooks/use-portfolio";
 import { PortfolioPickerModal } from "./portfolio-picker-modal";
 
 const rowClass =
-  "flex w-full items-center rounded-md px-2.5 py-2 text-left text-sm transition-colors";
+  "flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors";
 
 // Shown only with 2+ portfolios; selection is in memory (usePortfolio), not persisted.
 export function PortfolioSelector() {
@@ -55,15 +55,12 @@ export function PortfolioSelector() {
           <div className="w-52">
             {/* SharedLayoutBg carries the hover pill; each button's content must be one flex container
                 (it wraps children in a non-flex z-10 div). */}
-            <SharedLayoutBg className="gap-0.5" inset={0} pillClassName="rounded-md bg-muted">
+            <SharedLayoutBg className="gap-1" inset={0} pillClassName="rounded-md bg-muted">
               {portfolios.map((p) => (
                 <button key={p.id} type="button" className={rowClass} onClick={() => select(p.id)}>
                   <span className="flex min-w-0 items-center gap-2">
                     <Check
-                      className={cn(
-                        "size-4 shrink-0",
-                        p.id === selectedId ? "opacity-100" : "opacity-0",
-                      )}
+                      className={cn("shrink-0", p.id === selectedId ? "opacity-100" : "opacity-0")}
                     />
                     <span className="min-w-0 flex-1 truncate">{p.name}</span>
                   </span>
@@ -81,7 +78,7 @@ export function PortfolioSelector() {
                 onClick={() => setManageOpen(true)}
               >
                 <span className="flex min-w-0 items-center gap-2">
-                  <Settings2 className="size-4 shrink-0" />
+                  <Settings2 className="shrink-0" />
                   <span className="min-w-0 flex-1 truncate">{t("manage")}</span>
                 </span>
               </button>

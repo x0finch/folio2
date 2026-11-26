@@ -9,7 +9,7 @@ import { PortfolioHero } from "@/routes/_authed/-home/hero/portfolio-hero";
 afterEach(cleanup);
 
 // Hero trend area has three states; the fake demo curve must never show next to a real figure.
-// jsdom has zero container size so recharts renders nothing; the states are told apart by the
+// jsdom has zero container size so the chart renders nothing; the states are told apart by the
 // `{spanDays}D` span badge (only with real history) and the empty-state sentence.
 const DAY = 86_400_000;
 const T0 = 1_700_000_000_000;
@@ -88,7 +88,7 @@ describe("Hero trend area's three states", () => {
       </IntlProvider>,
     );
 
-    expect(screen.getByText(/total net worth/i)).toBeTruthy();
+    expect(screen.getByText(/top today/i)).toBeTruthy();
     expect(emptyText()).toBeNull();
     expect(spanBadge()).toBeNull();
   });

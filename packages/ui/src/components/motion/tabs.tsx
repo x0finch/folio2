@@ -1,7 +1,7 @@
 "use client";
 // beui.dev/components/motion/tabs — @/ 别名已改写为 @folio/ui/*。
 
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "../../icons";
 import { cancelFrame, frame, motion, MotionConfig, useReducedMotion, useSpring, type MotionValue, type Transition } from "motion/react";
 import {
   createContext,

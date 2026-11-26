@@ -1,15 +1,4 @@
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  cn,
-  Switch,
-  Tabs,
-  TabsList,
-  TabsTrigger,
-  toast,
-} from "@folio/ui";
+import { cn, Switch, Tabs, TabsList, TabsTrigger, toast } from "@folio/ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useTranslations } from "use-intl";
@@ -18,6 +7,7 @@ import { IDLE_TIMEOUT_MINUTES } from "@/lib/hooks/idle-lock";
 import { useIdleTimeout } from "@/lib/hooks/use-idle-timeout";
 import { useLockDevice } from "@/lib/hooks/use-lock-device";
 import { SettingRow } from "@/routes/_authed/-settings/setting-row";
+import { SettingsSection } from "@/routes/_authed/-settings/settings-section";
 import { errorCode, type PasskeyRow, SESSION_NOT_FRESH } from "./passkey";
 import { registerPasskey } from "./register-passkey";
 
@@ -108,52 +98,45 @@ export function AutoLockCard() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-3">
-          <CardTitle>{t("autoLock")}</CardTitle>
-          <Switch
-            checked={enabled}
-            onCheckedChange={onToggle}
-            // Without biometrics a click opens the system "use another device" flow and then hangs
-            // silently. null = still checking; don't disable yet to avoid a flash.
-            disabled={busy || platformAuthenticator === false}
-            ariaLabel={t("autoLock")}
-          />
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <p className="text-muted-foreground text-sm">{t("autoLockDesc")}</p>
-          <p className="text-muted-foreground text-sm">{t("autoLockUnlock")}</p>
-          {platformAuthenticator === false && (
-            <p className="text-muted-foreground text-sm">{t("autoLockNoBiometrics")}</p>
-          )}
-          {/* Lock still applies; this device just has no registered credential. Toggling again
+    <SettingsSection
+      title={t("autoLock")}
+      action={
+        <Switch
+          checked={enabled}
+          onCheckedChange={onToggle}
+          // Without biometrics a click opens the system "use another device" flow and then hangs
+          // silently. null = still checking; don't disable yet to avoid a flash.
+          disabled={busy || platformAuthenticator === false}
+          ariaLabel={t("autoLock")}
+        />
+      }
+    >
+      {platformAuthenticator === false && (
+        <p className="text-muted-foreground text-sm">{t("autoLockNoBiometrics")}</p>
+      )}
+      {/* Lock still applies; this device just has no registered credential. Toggling again
               re-verifies and binds one. */}
-          {enabled && credentialId == null && platformAuthenticator !== false && (
-            <p className="text-muted-foreground text-sm">{t("autoLockNoDeviceCredential")}</p>
-          )}
-        </div>
-        {/* Greyed on the wrapper so the beUI Tabs internals stay untouched. */}
-        <div
-          className={cn(!enabled && "pointer-events-none opacity-50")}
-          aria-disabled={!enabled || undefined}
-        >
-          <SettingRow label={t("autoLockAfter")}>
-            <Tabs value={raw} onValueChange={setRaw} variant="pill">
-              <TabsList className="bg-muted dark:bg-background">
-                {IDLE_TIMEOUT_MINUTES.map((m) => (
-                  <TabsTrigger key={m} value={String(m)}>
-                    {m}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-          </SettingRow>
-        </div>
-      </CardContent>
-    </Card>
+      {enabled && credentialId == null && platformAuthenticator !== false && (
+        <p className="text-muted-foreground text-sm">{t("autoLockNoDeviceCredential")}</p>
+      )}
+      {/* Greyed on the wrapper so the beUI Tabs internals stay untouched. */}
+      <div
+        className={cn(!enabled && "pointer-events-none opacity-50")}
+        aria-disabled={!enabled || undefined}
+      >
+        <SettingRow label={t("autoLockAfter")}>
+          <Tabs value={raw} onValueChange={setRaw} variant="pill">
+            <TabsList>
+              {IDLE_TIMEOUT_MINUTES.map((m) => (
+                <TabsTrigger key={m} value={String(m)}>
+                  {m}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </SettingRow>
+      </div>
+    </SettingsSection>
   );
 }
 
