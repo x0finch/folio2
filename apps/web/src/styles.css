@@ -3,7 +3,6 @@
 
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
-@import "@fontsource-variable/newsreader";
 
 /* Tailwind doesn't scan node_modules, so declare this app's own class sources. */
 @source "./**/*.{ts,tsx}";
