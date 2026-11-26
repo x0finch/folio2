@@ -17,9 +17,21 @@ import {
 
 export function LoginPage() {
   return (
-    <AuthShell>
+    <AuthShell background={<Backdrop />}>
       <AuthPanel />
     </AuthShell>
+  );
+}
+
+// A pre-rendered, already blurred picture of the dashboard: decoration only, so nothing is computed
+// or animated for it. One file per theme because the page background is baked in.
+function Backdrop() {
+  const image = "pointer-events-none absolute inset-0 size-full object-cover object-left";
+  return (
+    <>
+      <img src="/login-backdrop-light.jpg" alt="" className={cn(image, "dark:hidden")} />
+      <img src="/login-backdrop-dark.jpg" alt="" className={cn(image, "hidden dark:block")} />
+    </>
   );
 }
 
