@@ -48,8 +48,10 @@ TanStack Start + Vite on Cloudflare Workers; D1 + Drizzle; better-auth; Effect 4
 - Keep a page's pieces together; shared dirs only for genuinely generic parts.
 
 ### UI
-- `@folio/ui` = beUI (Framer Motion) + few hand-rolled primitives. Never Radix / Base UI / their dependents (e.g. `vaul`).
-- beUI via `pnpm dlx shadcn@latest add @beui/<name>`; never edit its internals. Sourcing: beUI → non-Radix shadcn (tell the maintainer) → propose a hand-rolled token-only primitive and wait for approval.
+- Visual and interaction rules: [DESIGN.md](DESIGN.md). Check the rendered page in a browser, not computed values.
+- `@folio/ui` = beUI (Framer Motion). Never Radix / Base UI / their dependents (e.g. `vaul`).
+- beUI via `pnpm dlx shadcn@latest add @beui/<name>`; never edit its internals. Read the component's page on beui.dev before using it; don't guess. beUI lacks it → compose from beUI components, no other source.
+- Icons: `reicon-react` only.
 - Design tokens only, no arbitrary values; motion via `lib/ease.ts`. Data-viz SVG uses `--chart-*` tokens.
 - Money and quantities render through `<Sensitive>`.
 - Page entrance animations move only `opacity` and `y`.
