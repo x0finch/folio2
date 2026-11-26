@@ -14,7 +14,7 @@ import { TrendPanel } from "./trend-panel";
 
 const DAY_MS = 86_400_000;
 const HERO_WINDOW_DAYS = 30;
-// Matches the `h-40` band below the figures.
+// Plot height; the band below the figures also holds the date labels.
 const HERO_TREND_HEIGHT = 160;
 const HERO_COMPACT_MIN = 1_000_000;
 const GAIN_BADGE =
@@ -176,7 +176,7 @@ export function PortfolioHero({
       </div>
 
       {/* The chart has its own band under the figures, so the line never runs behind text. */}
-      <div className="relative mt-8 h-40">
+      <div className="relative mt-8 min-h-48">
         <TrendPanel
           series={chartSeries}
           height={HERO_TREND_HEIGHT}

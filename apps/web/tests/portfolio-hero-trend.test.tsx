@@ -28,7 +28,7 @@ function renderHero(series: HistoryPoint[], totalUsd: number, held = holdings) {
 
 const emptyText = () => screen.queryByText(/once it's ready/i);
 // The decorative pattern is the same component marked aria-hidden.
-const realChart = () => document.querySelector("[data-slot=sparkline]:not([aria-hidden])");
+const realChart = () => document.querySelector("[data-slot=line-chart]");
 
 describe("Hero trend area's three states", () => {
   it("(1) has history (>= 2 points) -> real curve, no empty-state sentence", () => {

@@ -1,12 +1,9 @@
 import { Sparkline } from "@folio/ui";
-import { useFormatter, useTranslations } from "use-intl";
+import { useTranslations } from "use-intl";
 import type { HistoryPoint } from "@/lib/core/history";
-import { useBalancePrivacy } from "@/lib/hooks/use-balance-privacy";
-import { useDisplayValue } from "@/lib/hooks/use-display-value";
+import { PortfolioChart } from "@/routes/_authed/-insights/portfolio-chart";
 
-const HIDDEN_VALUE = "•••";
-
-// Matches the `h-32` band both drawers give the chart.
+// Plot height in both drawers.
 export const SHEET_TREND_HEIGHT = 128;
 
 // Empty state when the curve can't be drawn. A flat line would claim "unchanged" when there is
@@ -30,7 +27,7 @@ const DEMO_TREND = [
 ];
 
 // Value trend shared by the hero and both drawers, with every state decided here so each surface
-// applies the same thresholds. Sits at the bottom of a relative parent `height` px tall.
+// applies the same thresholds. `height` is the plot's, without its axis labels.
 export function TrendPanel({
   series,
   height,
@@ -46,33 +43,9 @@ export function TrendPanel({
   decorate?: boolean;
 }) {
   const t = useTranslations("Overview");
-  const format = useFormatter();
-  const usd = useDisplayValue();
-  const { hidden } = useBalancePrivacy();
   if (loading) return null;
   // One point can't make a line; the threshold lives only here.
-  if (series.length >= 2) {
-    return (
-      <Sparkline
-        className="absolute inset-0"
-        label={t("portfolioValue")}
-        data={series.map((p) => p.total)}
-        labels={series.map((p) =>
-          format.dateTime(new Date(p.t), {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-        )}
-        variant="area"
-        color="var(--chart-1)"
-        height={height}
-        interactive
-        formatValue={hidden ? () => HIDDEN_VALUE : (v) => usd(v)}
-      />
-    );
-  }
+  if (series.length >= 2) return <PortfolioChart series={series} height={height} />;
   if (decorate) {
     return (
       <Sparkline

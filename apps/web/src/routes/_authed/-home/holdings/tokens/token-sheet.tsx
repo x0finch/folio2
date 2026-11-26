@@ -250,7 +250,7 @@ function TokenSheetContent({ holding }: { holding: Holding }) {
           </div>
         </div>
         {/* Fixed height so the async chart doesn't resize the list. */}
-        <div className="relative mt-6 h-32">
+        <div className="relative mt-6 min-h-40">
           <TrendPanel
             series={series}
             height={SHEET_TREND_HEIGHT}

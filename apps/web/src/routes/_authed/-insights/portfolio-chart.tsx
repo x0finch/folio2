@@ -1,4 +1,4 @@
-import { LineChart } from "@folio/ui";
+import { LineChart, LineChartPlot, LineChartTooltip } from "@folio/ui";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
 import { formatMoney } from "@/lib/core/format-number";
 import type { HistoryPoint } from "@/lib/core/history";
@@ -9,7 +9,14 @@ const DAY_MS = 86_400_000;
 const YEAR_MS = 365 * DAY_MS;
 const HIDDEN_VALUE = "•••";
 
-export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
+export function PortfolioChart({
+  series,
+  height,
+}: {
+  series: readonly HistoryPoint[];
+  /** Plot height in px; omitted = the chart's own default. */
+  height?: number;
+}) {
   const t = useTranslations("Overview");
   const format = useFormatter();
   const { currency, rate } = usePreferCurrency();
@@ -46,6 +53,9 @@ export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
       // Axis ticks are scale, not amounts, so only the readout is hidden.
       formatValue={hidden ? () => HIDDEN_VALUE : fullUsd}
       formatTick={axisUsd}
-    />
+    >
+      <LineChartPlot height={height} />
+      <LineChartTooltip />
+    </LineChart>
   );
 }

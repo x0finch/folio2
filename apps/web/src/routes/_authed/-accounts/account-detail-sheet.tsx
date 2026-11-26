@@ -261,7 +261,7 @@ function DetailBody({
         />
       </div>
 
-      <div className="relative mt-6 h-32">
+      <div className="relative mt-6 min-h-40">
         <TrendPanel series={series} height={SHEET_TREND_HEIGHT} loading={historyQuery.isPending} />
       </div>
 

@@ -13,7 +13,7 @@ export {
   DonutChartPlot,
   type DonutSegment,
 } from "./components/charts/donut-chart";
-export { LineChart } from "./components/charts/line-chart";
+export { LineChart, LineChartPlot, LineChartTooltip } from "./components/charts/line-chart";
 export { Sparkline } from "./components/charts/sparkline";
 export { Label } from "./components/label";
 export { LogoAvatar } from "./components/logo-avatar";
