@@ -362,13 +362,7 @@ function ActivityForm({
         {/* beUI doesn't expose the trigger wrapper's className, so size it via [&>div]. */}
         <TabsList className="w-full [&>div]:flex-1">
           {KINDS.map((k) => (
-            <TabsTrigger
-              key={k}
-              value={k}
-              // The default active text is unreadable on the dark muted pill; override it.
-              className="w-full aria-selected:text-foreground"
-              indicatorClassName="bg-muted"
-            >
+            <TabsTrigger key={k} value={k} className="w-full">
               {t(k)}
             </TabsTrigger>
           ))}
