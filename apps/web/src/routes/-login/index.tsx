@@ -17,24 +17,9 @@ import {
 
 export function LoginPage() {
   return (
-    <AuthShell background={<Backdrop />}>
+    <AuthShell>
       <AuthPanel />
     </AuthShell>
-  );
-}
-
-// A pre-rendered, already blurred picture of the dashboard: decoration only, so nothing is computed
-// or animated for it. One file per theme because the page background is baked in.
-function Backdrop() {
-  // Phones show only the right-hand part, lower on the screen: the faint trend line, without the
-  // blurred figures that would sit right behind the form.
-  const image =
-    "pointer-events-none absolute inset-x-0 bottom-0 h-3/5 w-full object-cover object-right sm:inset-0 sm:size-full sm:object-left";
-  return (
-    <>
-      <img src="/login-backdrop-light.jpg" alt="" className={cn(image, "dark:hidden")} />
-      <img src="/login-backdrop-dark.jpg" alt="" className={cn(image, "hidden dark:block")} />
-    </>
   );
 }
 
