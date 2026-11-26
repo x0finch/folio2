@@ -53,9 +53,10 @@ export function DataCard() {
   }
 
   return (
-    <SettingsSection title={t("data")}>
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-center gap-4">
+    <SettingsSection
+      title={t("data")}
+      action={
+        <div className="flex items-center gap-2">
           <a href="/api/export" download className={buttonVariants({ variant: "outline" })}>
             {t("exportData")}
           </a>
@@ -76,19 +77,19 @@ export function DataCard() {
             {importMutation.isPending ? tc("verifying") : ta("importBtn")}
           </Button>
         </div>
-        {importMutation.isSuccess && (
-          <p className="text-sm text-muted-foreground">
-            {ta("imported", {
-              accounts: importMutation.data.imported.accounts,
-              snapshots: importMutation.data.imported.snapshots,
-            })}
-          </p>
-        )}
-        {importMutation.isError && (
-          <p className="text-sm text-destructive">{importMutation.error.message}</p>
-        )}
-      </div>
-
+      }
+    >
+      {importMutation.isSuccess && (
+        <p className="text-sm text-muted-foreground">
+          {ta("imported", {
+            accounts: importMutation.data.imported.accounts,
+            snapshots: importMutation.data.imported.snapshots,
+          })}
+        </p>
+      )}
+      {importMutation.isError && (
+        <p className="text-sm text-destructive">{importMutation.error.message}</p>
+      )}
       <MorphingModal viewId={pendingFile ? "import-merge" : null} onClose={cancelImport}>
         <div className="text-left">
           <p className="font-semibold text-base">{t("importMergeTitle")}</p>

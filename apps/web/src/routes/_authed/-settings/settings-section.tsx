@@ -10,7 +10,7 @@ export function SettingsSection({
   title: string;
   action?: ReactNode;
   className?: string;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   return (
     <section className="flex flex-col gap-6">
@@ -18,7 +18,7 @@ export function SettingsSection({
         <h2 className="font-semibold text-lg">{title}</h2>
         {action}
       </div>
-      <div className={cn("flex flex-col gap-6", className)}>{children}</div>
+      <div className={cn("flex flex-col gap-6 empty:hidden", className)}>{children}</div>
     </section>
   );
 }

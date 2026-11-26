@@ -15,7 +15,7 @@ export function Settings() {
   return (
     <StaggerReveal
       className="flex flex-col divide-y divide-border"
-      itemClassName="py-12 first:pt-0 last:pb-0"
+      itemClassName="py-8 first:pt-0 last:pb-0 sm:py-12"
     >
       <UserCard user={user} />
       <AppearanceCard />
