@@ -90,7 +90,7 @@ export function EditableName({
       className={cn(
         "relative block max-w-full rounded-md text-left outline-none",
         // Reserve room for the pencil: always without a tooltip, otherwise only on touch.
-        tooltip ? "pointer-coarse:pr-5" : "pr-5",
+        tooltip ? "pointer-coarse:pr-6" : "pr-6",
       )}
     >
       <span className={cn("block truncate", displayClassName)}>{value || placeholder}</span>

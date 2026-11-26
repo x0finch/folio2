@@ -4,16 +4,16 @@ import {
   CircleAlert,
   CircleCheck,
   CircleHelp,
+  type Icon,
   Info,
-  type Icon as LucideIcon,
   TriangleAlert,
 } from "@folio/ui/icons";
 
 // Renders one Note (status icon + title + content). content: string is plain text, NoteRow[] a row
 // list (a row with href links out). Numbers go through the injected formatNumber; row keys are indexes (read-only list).
 
-// Neutral status names -> icons (lucide, where these names come from, renamed AlertTriangle/AlertCircle to TriangleAlert/CircleAlert).
-const NOTE_ICON_MAP: Record<string, LucideIcon> = {
+// Neutral status names -> icons.
+const NOTE_ICON_MAP: Record<string, Icon> = {
   info: Info,
   success: CircleCheck,
   warning: TriangleAlert,
@@ -39,8 +39,8 @@ export interface NoteViewProps {
 // Status icon with color; `className` overrides the size (default h-4; the inline indicator uses h-3).
 export function NoteIconGlyph({ icon, className }: { icon?: Note["icon"]; className?: string }) {
   const key = icon ?? "info";
-  const Icon = NOTE_ICON_MAP[key] ?? NOTE_ICON_MAP.info;
-  return <Icon className={cn("h-4 w-4 shrink-0", NOTE_ICON_CLASS[key], className)} />;
+  const Glyph = NOTE_ICON_MAP[key] ?? NOTE_ICON_MAP.info;
+  return <Glyph className={cn("h-4 w-4 shrink-0", NOTE_ICON_CLASS[key], className)} />;
 }
 
 function RowLine({ row, formatNumber }: { row: NoteRow; formatNumber: (n: number) => string }) {

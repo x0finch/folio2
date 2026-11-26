@@ -65,7 +65,6 @@ export function PortfolioHero({
   holdings,
   loading = false,
   syncing = false,
-  contentClassName,
 }: {
   series: HistoryPoint[];
   totalUsd: number;
@@ -77,8 +76,6 @@ export function PortfolioHero({
   loading?: boolean;
   /** First sync (accounts but no snapshot): skeleton number and "syncing" title instead of $0. */
   syncing?: boolean;
-  // Class for the text layer only; doesn't affect the chart.
-  contentClassName?: string;
 }) {
   const t = useTranslations("Overview");
   const usd = useDisplayValue();
@@ -126,7 +123,7 @@ export function PortfolioHero({
       </div>
 
       {/* Number layer floats over the chart and ignores pointers (hover passes to the chart). */}
-      <div className={cn("pointer-events-none relative z-10", contentClassName)}>
+      <div className="pointer-events-none relative z-10">
         {/* While scrubbing the title shows that moment, since the big number is the scrubbed value. */}
         {/* No caption at rest: the figure under the page title needs none. The line keeps its height
             so the number doesn't jump when a scrub label appears. */}
