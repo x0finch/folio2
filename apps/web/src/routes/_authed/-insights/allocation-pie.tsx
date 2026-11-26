@@ -46,8 +46,27 @@ export function AllocationPie({ slices }: { slices: AllocSlice[] }) {
     <DonutChart segments={segments} formatValue={hidden ? () => HIDDEN_VALUE : usd}>
       <div className="grid items-center gap-12 sm:grid-cols-[minmax(0,16rem)_1fr]">
         <DonutChartPlot>
-          {/* beUI's own caption is English only. */}
-          <DonutChartCenter totalLabel={to("totalValue")} />
+          {/* `formatValue` covers what a screen reader hears; on screen the amount goes through
+              <Sensitive> like every other one. */}
+          <DonutChartCenter
+            totalLabel={to("totalValue")}
+            className={hidden ? "pointer-events-auto" : undefined}
+          >
+            {hidden
+              ? (segment, total) => (
+                  <>
+                    <p className="font-medium text-2xl tracking-tight">
+                      <Sensitive>{usd(segment?.value ?? total)}</Sensitive>
+                    </p>
+                    <p className="mt-1 truncate text-muted-foreground text-xs">
+                      {segment
+                        ? `${segment.name} · ${Math.round(segment.share * 100)}%`
+                        : to("totalValue")}
+                    </p>
+                  </>
+                )
+              : undefined}
+          </DonutChartCenter>
         </DonutChartPlot>
         <DonutChartLegend
           renderValue={(segment) => (

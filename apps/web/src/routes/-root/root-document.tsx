@@ -1,4 +1,5 @@
 import { Toaster, useMediaQuery } from "@folio/ui";
+import { LocaleProvider } from "@folio/ui/lib/i18n";
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import { ClientOnly, HeadContent, Scripts } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
@@ -6,6 +7,7 @@ import { useEffect, useState } from "react";
 import { IntlProvider } from "use-intl";
 import { AppShellSkeleton } from "@/components/app-shell";
 import { applyStoredTheme, THEME_INIT_SCRIPT } from "@/lib/hooks/use-theme";
+import { BEUI_MESSAGES } from "@/lib/i18n/beui-messages";
 import { LOCALE_INIT_SCRIPT, useLocalePreference } from "@/lib/i18n/locale-preference";
 import { messages } from "@/lib/i18n/messages";
 import { registerServiceWorker, useUpdateToast } from "@/lib/pwa/service-worker";
@@ -75,15 +77,17 @@ export function RootDocument({ children }: { children: React.ReactNode }) {
           // Missing translation → the key itself, which for Inputs is the English source label.
           getMessageFallback={({ key }) => key}
         >
-          {/* Hides children with visibility:hidden until release (still rendered and hydrated), so
+          <LocaleProvider locale={locale} messages={BEUI_MESSAGES[locale]}>
+            {/* Hides children with visibility:hidden until release (still rendered and hydrated), so
               nothing can flash ahead of the splash. */}
-          <SplashScreen>
-            {/* The single static shell serves every URL, so this frame renders a route-agnostic
+            <SplashScreen>
+              {/* The single static shell serves every URL, so this frame renders a route-agnostic
                 skeleton; rendering the route here would bake `/` in and mismatch elsewhere. */}
-            <ClientOnly fallback={<AppShellSkeleton />}>{children}</ClientOnly>
-          </SplashScreen>
-          <AppToaster />
-          <UpdateWatcher />
+              <ClientOnly fallback={<AppShellSkeleton />}>{children}</ClientOnly>
+            </SplashScreen>
+            <AppToaster />
+            <UpdateWatcher />
+          </LocaleProvider>
         </IntlProvider>
         <TanStackDevtools
           config={{

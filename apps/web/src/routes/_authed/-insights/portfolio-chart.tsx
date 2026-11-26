@@ -1,5 +1,6 @@
-import { LineChart } from "@folio/ui";
+import { LineChart, LineChartPlot, LineChartTooltip } from "@folio/ui";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
+import { Sensitive } from "@/components/sensitive";
 import { formatMoney } from "@/lib/core/format-number";
 import type { HistoryPoint } from "@/lib/core/history";
 import { useBalancePrivacy } from "@/lib/hooks/use-balance-privacy";
@@ -54,6 +55,25 @@ export function PortfolioChart({ series }: { series: HistoryPoint[] }) {
       // Axis ticks are scale, not amounts, so only the readout is hidden.
       formatValue={hidden ? () => HIDDEN_VALUE : fullUsd}
       formatTick={axisUsd}
-    />
+    >
+      <LineChartPlot />
+      {/* `formatValue` covers what a screen reader hears; on screen the amount goes through
+          <Sensitive> like every other one. */}
+      <LineChartTooltip>
+        {hidden
+          ? ({ category, rows }) => (
+              <span className="block min-w-36">
+                <span className="mb-2 block font-medium text-xs">{category}</span>
+                {rows.map((row) => (
+                  <span key={row.id} className="flex items-center justify-between gap-4 text-xs">
+                    <span className="text-muted-foreground">{row.name}</span>
+                    {row.value !== null && <Sensitive>{fullUsd(row.value)}</Sensitive>}
+                  </span>
+                ))}
+              </span>
+            )
+          : undefined}
+      </LineChartTooltip>
+    </LineChart>
   );
 }
