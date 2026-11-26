@@ -87,8 +87,9 @@ test.describe("signed in: the server only sends the skeleton shell", () => {
 
     await page.goto("/");
     await expect(page.getByRole("link", { name: "Overview", exact: true })).toBeVisible();
-    // The header subtitle needs syncStatus, so it proves data was fetched in the browser.
-    await expect(page.getByText(/sources?$/)).toBeVisible();
+    // The sync panel's "Sources" row needs syncStatus, so it proves data was fetched in the
+    // browser. Attached, not visible: the popover keeps its content in the DOM while collapsed.
+    await expect(page.getByText("Sources", { exact: true })).toBeAttached();
 
     expect(errors).toEqual([]);
   });
