@@ -23,7 +23,7 @@ const NOTE_ICON_MAP: Record<string, LucideIcon> = {
 
 // warning amber, error destructive token; others inherit muted-foreground.
 const NOTE_ICON_CLASS: Record<string, string> = {
-  warning: "text-amber-500",
+  warning: "text-warn",
   error: "text-destructive",
 };
 

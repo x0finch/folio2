@@ -125,7 +125,7 @@ function AttentionRow({
     <button
       type="button"
       onClick={() => onPick(source.id)}
-      className="flex w-full items-baseline justify-between gap-3 rounded-sm py-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="flex w-full items-baseline justify-between gap-3 rounded-md py-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       <span className="min-w-0 truncate text-xs">
         <span className="font-medium">{connectorLabel}</span>
@@ -148,7 +148,7 @@ function FailureRow({
     <button
       type="button"
       onClick={() => onPick(failure.accountId)}
-      className="flex w-full items-baseline justify-between gap-3 rounded-sm py-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="flex w-full items-baseline justify-between gap-3 rounded-md py-1 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       <span className="min-w-0 truncate font-medium text-xs">{failure.label}</span>
       <span className="min-w-0 truncate text-neg text-xs">{failure.error}</span>

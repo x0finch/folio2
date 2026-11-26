@@ -50,7 +50,7 @@ function Highlighted({ text, query }: { text: string; query: string }) {
       {matchSegments(text, query).map((seg, i) =>
         seg.match ? (
           // biome-ignore lint/suspicious/noArrayIndexKey: positional segments, static per render
-          <span key={i} className="rounded-sm bg-accent text-accent-foreground">
+          <span key={i} className="rounded-md bg-accent text-accent-foreground">
             {seg.text}
           </span>
         ) : (

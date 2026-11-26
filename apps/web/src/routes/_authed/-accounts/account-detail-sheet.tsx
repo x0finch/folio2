@@ -225,7 +225,7 @@ function DetailBody({
           >
             <ConnectorBadge connectorId={account.connectorId} />
             {archived && (
-              <span className="rounded-sm bg-muted px-2 py-1 text-muted-foreground text-xs">
+              <span className="rounded-md bg-muted px-2 py-1 text-muted-foreground text-xs">
                 {t("archivedBadge")}
               </span>
             )}
@@ -249,7 +249,7 @@ function DetailBody({
               <button
                 type="button"
                 onClick={onComplete}
-                className="rounded-sm underline-offset-2 outline-none transition-colors hover:underline focus-visible:ring-1 focus-visible:ring-warn"
+                className="rounded-md underline-offset-2 outline-none transition-colors hover:underline focus-visible:ring-1 focus-visible:ring-warn"
               >
                 {t("completePrompt")}
               </button>

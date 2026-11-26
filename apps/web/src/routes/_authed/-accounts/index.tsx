@@ -327,7 +327,7 @@ function AccountStatusLine({
               onComplete();
             }
           }}
-          className="rounded-sm underline-offset-2 outline-none hover:underline focus-visible:ring-1 focus-visible:ring-warn"
+          className="rounded-md underline-offset-2 outline-none hover:underline focus-visible:ring-1 focus-visible:ring-warn"
         >
           {t("completePrompt")}
         </span>
