@@ -450,8 +450,8 @@ function ActivityForm({
       </div>
 
       <div ref={previewRef} className="flex flex-col">
-        <div className="relative rounded-2xl bg-muted px-4 py-3">
-          <div className="absolute top-2 right-2 flex gap-1">
+        <div className="relative py-2">
+          <div className="absolute top-2 right-0 flex gap-1">
             {draft.kind !== "set" && (
               <Tooltip content={t("feeLabel")} side="top">
                 <button
@@ -461,7 +461,7 @@ function ActivityForm({
                   className={cn(
                     GHOST_ICON,
                     openEditor === "fee"
-                      ? "bg-background text-primary"
+                      ? "bg-muted text-primary"
                       : feeSet
                         ? "text-primary"
                         : "text-muted-foreground",
@@ -479,7 +479,7 @@ function ActivityForm({
                 className={cn(
                   GHOST_ICON,
                   openEditor === "memo"
-                    ? "bg-background text-primary"
+                    ? "bg-muted text-primary"
                     : memoSet
                       ? "text-primary"
                       : "text-muted-foreground",

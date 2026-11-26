@@ -21,7 +21,7 @@ const NAVS = [
 // Layout boxes shared with AppShellSkeleton so the page doesn't jump when data arrives.
 const SHELL_ROOT = "min-h-svh lg:flex";
 const SHELL_ASIDE =
-  "hidden w-59 shrink-0 flex-col border-border border-r bg-card px-4 py-4.5 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto";
+  "hidden w-59 shrink-0 flex-col border-border border-r bg-card px-4 py-4 lg:sticky lg:top-0 lg:flex lg:h-svh lg:overflow-y-auto";
 const SHELL_BRAND_ROW = "flex items-center gap-3 px-2 pt-2 pb-5";
 const SHELL_INNER_COL = "flex min-w-0 flex-1 flex-col";
 const SHELL_SIDEBAR_FOOTER = "mt-auto flex items-center gap-3 px-1 pt-4";

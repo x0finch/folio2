@@ -68,7 +68,7 @@ function ActionShell({ children, action }: { children: ReactNode; action: SyncAc
   return (
     <div className="relative inline-flex pr-9">
       {children}
-      <span className="absolute inset-y-1.5 right-9 z-10 w-px bg-border" />
+      <span className="absolute inset-y-2 right-9 z-10 w-px bg-border" />
       <button
         type="button"
         onClick={action.onClick}
@@ -279,7 +279,7 @@ export function SyncPanel({
           onClick={onSync}
           disabled={syncDisabled ?? (busy || summary.accounts.length === 0)}
           aria-label={t("status")}
-          className="shrink-0 text-foreground [&_svg]:size-3.5"
+          className="shrink-0 text-foreground [&_svg]:size-4"
         >
           <RefreshCw className={busy ? "animate-spin" : ""} />
         </IconButton>

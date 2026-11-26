@@ -97,8 +97,7 @@ function LockOverlay({ onUnlock }: { onUnlock: () => void }) {
       background={<div className="absolute inset-0 bg-background/50 backdrop-blur-md" />}
     >
       <div className="flex w-full max-w-sm flex-col gap-4">
-        <p className="font-medium text-lg">{t("title")}</p>
-        <p className="-mt-2 text-muted-foreground text-sm">{t("subtitle")}</p>
+        <p className="font-semibold text-lg">{t("title")}</p>
         {!ready && <p className="-mt-2 text-muted-foreground text-sm">{t("noDeviceCredential")}</p>}
 
         <Button type="button" className="w-full" disabled={busy} onClick={onPasskey}>

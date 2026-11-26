@@ -23,7 +23,6 @@ class AttachAfterCreateError extends Error {
 // optimistic overlay (click takes effect immediately); create/rename/delete round-trip.
 export function AccountTagsModal({
   accountId,
-  accountLabel,
   portfolioId,
   portfolioTags,
   attachedTagIds,
@@ -32,7 +31,6 @@ export function AccountTagsModal({
   onClose,
 }: {
   accountId: string;
-  accountLabel: string;
   portfolioId: string;
   portfolioTags: Tag[];
   attachedTagIds: string[];
@@ -218,7 +216,6 @@ export function AccountTagsModal({
         className="w-[min(100%,26rem)]"
       >
         <TagInput
-          subtitle={accountLabel}
           items={items}
           onToggle={(tagId, next) => toggleMut.mutate({ tagId, next })}
           onCreate={(name) => createMut.mutate(name)}

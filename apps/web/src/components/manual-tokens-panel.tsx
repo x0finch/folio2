@@ -420,7 +420,7 @@ export function ManualTokensPanel({
           ) : tokenItems.length > 0 ? (
             <SwipeableList items={tokenItems} classNames={flatSwipe} />
           ) : (
-            <EmptyState title={t("tokensEmpty")} hint={t("tokensEmptyHint")} />
+            <EmptyState title={t("tokensEmpty")} />
           )}
         </TabsContent>
 
@@ -430,7 +430,7 @@ export function ManualTokensPanel({
           ) : activityItems.length > 0 ? (
             <SwipeableList items={activityItems} classNames={flatSwipe} />
           ) : (
-            <EmptyState title={t("empty")} hint={t("emptyHint")} />
+            <EmptyState title={t("empty")} />
           )}
         </TabsContent>
       </Tabs>
@@ -471,10 +471,10 @@ function DetailSkeleton() {
         <div key={i} className="flex min-h-[68px] items-center gap-3 rounded-xl px-3 py-3">
           <div className="size-9 shrink-0 animate-pulse rounded-full bg-muted" />
           <div className="flex flex-1 flex-col gap-2">
-            <div className="h-3.5 w-24 animate-pulse rounded-md bg-muted" />
+            <div className="h-4 w-24 animate-pulse rounded-md bg-muted" />
             <div className="h-3 w-16 animate-pulse rounded-md bg-muted" />
           </div>
-          <div className="h-3.5 w-16 animate-pulse rounded-md bg-muted" />
+          <div className="h-4 w-16 animate-pulse rounded-md bg-muted" />
         </div>
       ))}
     </div>
@@ -595,11 +595,6 @@ function ActivityDetail({
   );
 }
 
-function EmptyState({ title, hint }: { title: string; hint: string }) {
-  return (
-    <div className="flex flex-col items-center gap-1 px-6 py-12 text-center">
-      <p className="font-medium text-sm">{title}</p>
-      <p className="text-muted-foreground text-sm">{hint}</p>
-    </div>
-  );
+function EmptyState({ title }: { title: string }) {
+  return <p className="px-6 py-12 text-center text-muted-foreground text-sm">{title}</p>;
 }

@@ -147,7 +147,7 @@ function CompositionBar({ segs, label }: { segs: RoleSeg[]; label: string }) {
         {/* Transparent hover catcher joining role names, bar and a strip below into one hover area
             (the root's in-flow box is only the 4px bar). Absolute, so the anchor stays the bar. No
             aria-hidden: useHoverPopover's closed state would hide it and it couldn't catch hover. */}
-        <div className="absolute inset-x-0 -top-4 -bottom-3.5" />
+        <div className="absolute inset-x-0 -top-4 -bottom-4" />
         {/* Role names sit above the bar but stay DOM children of the Popover root (beUI's mouseenter
             fires per DOM subtree), and take no in-flow space so the panel and goo pill anchor to the
             bar. Hidden via fit when they don't fit. */}

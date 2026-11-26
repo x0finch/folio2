@@ -36,7 +36,7 @@ describe("long press: shell not selectable, content selectable", () => {
   });
 
   it("page header title is shell: not selectable", () => {
-    const { container } = render(<PageHeader title="Overview" subtitle="4 个账户" />);
+    const { container } = render(<PageHeader title="Overview" />);
     expect(container.querySelector("h1")?.closest(".select-none")).not.toBeNull();
   });
 });

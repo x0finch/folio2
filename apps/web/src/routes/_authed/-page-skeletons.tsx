@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, Skeleton } from "@folio/ui";
+import { Skeleton } from "@folio/ui";
 import { CHART_FRAME } from "@/routes/_authed/-insights/chart-frame";
 
 // First-visit skeletons shown while a page's chunk downloads. Built only from @folio/ui primitives:
@@ -7,8 +7,8 @@ import { CHART_FRAME } from "@/routes/_authed/-insights/chart-frame";
 const STAT_SLOTS = ["s1", "s2", "s3"];
 const HOLDING_ROWS = ["r1", "r2", "r3", "r4", "r5", "r6"];
 const ACCOUNT_ROWS = ["r1", "r2", "r3", "r4"];
-const ALLOC_LEGEND = ["l1", "l2", "l3", "l4"];
-const SETTINGS_CARDS = ["c1", "c2", "c3", "c4", "c5", "c6", "c7"];
+const ALLOC_LEGEND = ["l1", "l2", "l3", "l4", "l5"];
+const SETTINGS_SECTIONS = ["c1", "c2", "c3", "c4", "c5", "c6", "c7"];
 
 // Also rendered inside AppShellSkeleton, so it must stay hook- and provider-free. Box sizes match
 // the real overview at 390px; changing them changes the cold-start first frame.
@@ -82,53 +82,40 @@ export function AccountsSkeleton() {
 
 export function InsightsSkeleton() {
   return (
-    <div className="flex flex-col gap-6">
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-20" />
-        </CardHeader>
-        <CardContent>
-          <Skeleton className={CHART_FRAME} />
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <Skeleton className="h-5 w-24" />
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <Skeleton className="h-8 w-56" />
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
-            {/* 220 = the real pie canvas size (allocation-pie). */}
-            <Skeleton className="mx-auto size-55 shrink-0 rounded-full" />
-            <ul className="flex flex-1 flex-col gap-2">
-              {ALLOC_LEGEND.map((k) => (
-                <li key={k} className="flex items-center gap-2">
-                  <Skeleton className="size-3 rounded-sm" />
-                  <Skeleton className="h-4 w-28" />
-                  <Skeleton className="ml-auto h-4 w-12" />
-                </li>
-              ))}
-            </ul>
-          </div>
-        </CardContent>
-      </Card>
+    <div className="flex flex-col gap-16">
+      <div className="flex flex-col gap-6">
+        <Skeleton className="h-7 w-32" />
+        <Skeleton className={CHART_FRAME} />
+      </div>
+      <div className="flex flex-col gap-6">
+        <Skeleton className="h-7 w-24" />
+        <Skeleton className="h-8 w-56" />
+        <div className="grid items-center gap-12 sm:grid-cols-[minmax(0,16rem)_1fr]">
+          <Skeleton className="mx-auto aspect-square w-full max-w-64 rounded-full" />
+          <ul className="flex flex-col gap-6">
+            {ALLOC_LEGEND.map((k) => (
+              <li key={k} className="flex items-center gap-2">
+                <Skeleton className="size-3 rounded-full" />
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="ml-auto h-4 w-12" />
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
     </div>
   );
 }
 
 export function SettingsSkeleton() {
   return (
-    <div className="flex flex-col gap-6">
-      {SETTINGS_CARDS.map((k) => (
-        <Card key={k}>
-          <CardHeader>
-            <Skeleton className="h-5 w-28" />
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-2/3" />
-          </CardContent>
-        </Card>
+    <div className="flex flex-col divide-y divide-border">
+      {SETTINGS_SECTIONS.map((k) => (
+        <div key={k} className="flex flex-col gap-6 py-8 first:pt-0 last:pb-0 sm:py-12">
+          <Skeleton className="h-7 w-28" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
       ))}
     </div>
   );

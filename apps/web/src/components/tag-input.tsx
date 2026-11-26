@@ -16,7 +16,6 @@ interface TagInputItem {
 const stripHash = (raw: string) => raw.trim().replace(/^#+/, "").trim();
 
 export interface TagInputProps {
-  subtitle?: string;
   items: TagInputItem[];
   onToggle: (tagId: string, next: boolean) => void;
   onCreate: (name: string) => void;
@@ -24,14 +23,7 @@ export interface TagInputProps {
   onDelete: (tagId: string) => void;
 }
 
-export function TagInput({
-  subtitle,
-  items,
-  onToggle,
-  onCreate,
-  onRename,
-  onDelete,
-}: TagInputProps) {
+export function TagInput({ items, onToggle, onCreate, onRename, onDelete }: TagInputProps) {
   const t = useTranslations("Tags");
   const tc = useTranslations("Common");
   const [draft, setDraft] = useState("");
@@ -73,10 +65,7 @@ export function TagInput({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="font-medium text-base text-foreground">{t("title")}</div>
-          {subtitle && <div className="mt-1 text-muted-foreground text-sm">{subtitle}</div>}
-        </div>
+        <div className="font-semibold text-foreground text-lg">{t("title")}</div>
         <button
           type="button"
           onClick={() => {
@@ -158,8 +147,6 @@ export function TagInput({
           </span>
         </div>
       )}
-
-      <p className="text-muted-foreground text-xs">{manage ? t("manageHint") : t("hint")}</p>
     </div>
   );
 }

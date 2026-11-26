@@ -164,9 +164,7 @@ function ManualFields({
           onChange={(v) => patch({ unitPrice: v })}
           placeholder="0.0"
         />
-        <p className="text-muted-foreground text-xs">
-          {priceBusy ? t("fetchingPrice") : t("unitPriceHint")}
-        </p>
+        {priceBusy && <p className="text-muted-foreground text-xs">{t("fetchingPrice")}</p>}
       </div>
     </>
   );

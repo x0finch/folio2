@@ -92,7 +92,6 @@ const en = {
   },
   Lock: {
     title: "Locked",
-    subtitle: "Idle for a while — verify to continue.",
     unlockWithPasskey: "Unlock with passkey",
     failed: "Couldn't verify — try again.",
     noDeviceCredential:
@@ -170,8 +169,6 @@ const en = {
     syncNow: "Sync now",
     synced: "Synced {count, plural, one {# account} other {# accounts}}.",
     unitPrice: "Unit price (USD)",
-    unitPriceHint:
-      "Recognized tokens auto-value at market price; this is only a fallback for unlisted assets.",
     addManual: "Add manual account",
     label: "Label",
     symbol: "Symbol",
@@ -259,9 +256,7 @@ const en = {
     confirmDeleteActivity: "Delete this activity?",
     confirmDeleteBody: "This can't be undone.",
     empty: "No activity yet",
-    emptyHint: "Record buys, sells, or balance adjustments.",
     tokensEmpty: "No tokens yet",
-    tokensEmptyHint: "Add your first token to start tracking.",
   },
   Settings: {
     title: "Settings",
@@ -349,8 +344,6 @@ const en = {
     done: "Done",
     addPlaceholder: "new tag",
     addFirstPlaceholder: "Add your first tag…",
-    hint: "Tap a tag to toggle · type at the end, enter to create",
-    manageHint: "Edit to rename · deleting removes it from all accounts",
     removeTitle: 'Delete "{name}"?',
     removeSubtitle: "Removed from {count, plural, one {# account} other {# accounts}}",
     actionFailed: "Something went wrong.",
@@ -500,7 +493,6 @@ const zh: Messages = {
   },
   Lock: {
     title: "已锁定",
-    subtitle: "闲置了一会儿 —— 验证一下继续。",
     unlockWithPasskey: "用 passkey 解锁",
     failed: "验证失败 —— 请重试。",
     noDeviceCredential: "这台设备没有登记在册的 passkey。解不开就登出,重新登录即可。",
@@ -575,7 +567,6 @@ const zh: Messages = {
     syncNow: "立即同步",
     synced: "已同步 {count} 个账户。",
     unitPrice: "单价(美元)",
-    unitPriceHint: "可识别的代币会自动用市场价估值;此价仅在无市场价(未上线资产)时作回退。",
     addManual: "添加手动账户",
     label: "标签",
     symbol: "币种",
@@ -660,9 +651,7 @@ const zh: Messages = {
     confirmDeleteActivity: "删除这笔活动?",
     confirmDeleteBody: "此操作不可撤销。",
     empty: "还没有活动",
-    emptyHint: "记录买入、卖出或余额校准。",
     tokensEmpty: "还没有代币",
-    tokensEmptyHint: "添加第一个代币开始追踪。",
   },
   Settings: {
     title: "设置",
@@ -749,8 +738,6 @@ const zh: Messages = {
     done: "完成",
     addPlaceholder: "新标签",
     addFirstPlaceholder: "输入第一个标签…",
-    hint: "点标签打上或取消 · 末尾直接输入,回车即建",
-    manageHint: "改名直接编辑 · 删除会从所有账户移除",
     removeTitle: "删除「{name}」?",
     removeSubtitle: "将从 {count} 个账户移除",
     actionFailed: "操作失败。",

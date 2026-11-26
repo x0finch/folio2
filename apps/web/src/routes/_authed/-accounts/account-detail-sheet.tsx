@@ -305,7 +305,6 @@ function DetailBody({
 
       <AccountTagsModal
         accountId={account.id}
-        accountLabel={account.label}
         portfolioId={account.portfolioId}
         portfolioTags={portfolioTags}
         attachedTagIds={attachedTagIds}
